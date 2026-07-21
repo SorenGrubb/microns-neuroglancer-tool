@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grubb Lab — Brain ultrastructure &amp; the neurovascular unit</title>
+<meta name="description" content="Volume electron microscopy of the brain microvasculature and neurovascular unit. Tools and resources for cell identification in the MICrONS dataset.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='none' stroke='%234a7c9e' stroke-width='9'/><circle cx='50' cy='50' r='13' fill='%234a7c9e'/></svg>">
+<style>
+  :root{
+    --bg:#fbfaf8;
+    --ink:#1c1f23;
+    --muted:#5f6873;
+    --line:#e0ddd6;
+    --accent:#3d6f92;
+    --accent-soft:#eef3f7;
+    --card:#ffffff;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif;
+  }
+  .wrap{max-width:820px;margin:0 auto;padding:0 24px}
+
+  header{
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#fff 0%,var(--bg) 100%);
+    padding:64px 0 48px;
+  }
+  .brand{display:flex;align-items:center;gap:14px;margin-bottom:28px}
+  .brand svg{flex:0 0 auto}
+  .brand-name{font-size:19px;font-weight:600;letter-spacing:-.01em}
+  h1{
+    font-size:clamp(28px,5vw,40px);
+    line-height:1.2;
+    letter-spacing:-.022em;
+    margin:0 0 16px;
+    font-weight:650;
+  }
+  .lede{font-size:clamp(16px,2.2vw,18.5px);color:var(--muted);margin:0;max-width:62ch}
+
+  section{padding:52px 0;border-bottom:1px solid var(--line)}
+  section:last-of-type{border-bottom:none}
+  h2{
+    font-size:13px;
+    text-transform:uppercase;
+    letter-spacing:.09em;
+    color:var(--muted);
+    font-weight:600;
+    margin:0 0 24px;
+  }
+  h3{font-size:19px;margin:0 0 8px;letter-spacing:-.01em;font-weight:620}
+  p{margin:0 0 16px}
+  p:last-child{margin-bottom:0}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  .tool{
+    display:block;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:28px;
+    color:inherit;
+    transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+  }
+  .tool:hover{
+    text-decoration:none;
+    border-color:var(--accent);
+    box-shadow:0 6px 22px rgba(30,50,70,.08);
+    transform:translateY(-1px);
+  }
+  .tool h3{color:var(--accent)}
+  .tool p{color:var(--muted);font-size:15.5px}
+  .tag{
+    display:inline-block;
+    background:var(--accent-soft);
+    color:var(--accent);
+    font-size:11.5px;
+    font-weight:600;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    padding:3px 9px;
+    border-radius:20px;
+    margin-bottom:12px;
+  }
+  .arrow{font-weight:600;font-size:15px;color:var(--accent);display:inline-block;margin-top:6px}
+
+  ul.pubs{list-style:none;padding:0;margin:0}
+  ul.pubs li{
+    padding:0 0 18px 0;
+    margin-bottom:18px;
+    border-bottom:1px solid var(--line);
+    font-size:15px;
+    color:var(--muted);
+  }
+  ul.pubs li:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+  ul.pubs .t{color:var(--ink);display:block;margin-bottom:3px}
+  .note{font-size:13.5px;color:var(--muted);font-style:italic}
+
+  footer{
+    padding:36px 0 56px;
+    font-size:14px;
+    color:var(--muted);
+    border-top:1px solid var(--line);
+  }
+  footer a{color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+  footer a:hover{color:var(--accent)}
+
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#15181c;--ink:#e8e6e3;--muted:#9aa3ad;--line:#2b3038;
+      --accent:#7db3d6;--accent-soft:#1e2a34;--card:#1a1e24;
+    }
+    header{background:linear-gradient(180deg,#1a1e24 0%,var(--bg) 100%)}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 100 100" aria-hidden="true">
+        <circle cx="50" cy="50" r="38" fill="none" stroke="var(--accent)" stroke-width="9"/>
+        <circle cx="50" cy="50" r="13" fill="var(--accent)"/>
+      </svg>
+      <span class="brand-name">Grubb Lab</span>
+    </div>
+    <h1>Brain ultrastructure and the neurovascular unit</h1>
+    <p class="lede">
+      Volume electron microscopy of the cerebral microvasculature — precapillary sphincters,
+      pericytes, astrocyte endfeet and the brain's waste-clearance pathway. Open tools and
+      open data for identifying cells in large EM volumes.
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Tools</h2>
+    <a class="tool" href="microns/">
+      <span class="tag">Interactive</span>
+      <h3>MICrONS Cell Identification Tool</h3>
+      <p>
+        Explore the MICrONS minnie65 mouse visual cortex dataset. Jump to any coordinate,
+        identify the nearest cell and its predicted type, work through a guided ultrastructural
+        decision tree, and open the result directly in Neuroglancer with the segmentation and
+        nucleus pre-selected. Includes cortical layer estimation, traced vasculature, bulk
+        filtering and Excel export.
+      </p>
+      <span class="arrow">Open the tool &rarr;</span>
+    </a>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>About</h2>
+    <p>
+      Søren Grubb is a neuroscientist and Educational Manager at
+      <a href="https://www.neuroscienceacademydenmark.dk" rel="noopener">Neuroscience Academy Denmark</a>,
+      with a background in neurovascular research and cardiac electrophysiology.
+    </p>
+    <p>
+      This site hosts research tools built on open, publicly licensed electron microscopy
+      datasets. The work here is carried out independently of, and in addition to, that role.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Selected publications</h2>
+    <ul class="pubs">
+      <li>
+        <span class="t">Ultrastructure of precapillary sphincters and the neurovascular unit</span>
+        <em>Vascular Biology</em> 5, VB-23-0011 (2023).
+        <a href="https://doi.org/10.1530/vb-23-0011" rel="noopener">doi:10.1530/vb-23-0011</a>
+      </li>
+      <li>
+        <span class="t">Microglia contact cerebral vasculature through gaps between astrocyte endfeet</span>
+        Morris, Foster, Sutherland &amp; Grubb. <em>J Cereb Blood Flow Metab</em> 44(12), 1472–1486 (2024).
+        <a href="https://doi.org/10.1177/0271678X241280775" rel="noopener">doi:10.1177/0271678X241280775</a>
+      </li>
+      <li>
+        <span class="t">Public volume electron microscopy data: an essential resource to study the brain microvasculature</span>
+        <em>Frontiers in Cell and Developmental Biology</em> (2022).
+        <a href="https://doi.org/10.3389/fcell.2022.849469" rel="noopener">doi:10.3389/fcell.2022.849469</a>
+      </li>
+      <li>
+        <span class="t">Pericyte and endothelial primary cilia and centrioles have disparate organization across the brain microvasculature</span>
+        Grubb, Chaddha, Lippincott-Schwartz, Ott &amp; Mughal. bioRxiv (2025).
+        <a href="https://doi.org/10.1101/2025.11.19.689283" rel="noopener">doi:10.1101/2025.11.19.689283</a>
+        <span class="note">— preprint, not yet peer-reviewed</span>
+      </li>
+      <li>
+        <span class="t">Ultrastructure of the brain waste-clearance pathway</span>
+        bioRxiv (2023).
+        <a href="https://doi.org/10.1101/2023.04.14.536712" rel="noopener">doi:10.1101/2023.04.14.536712</a>
+        <span class="note">— preprint, not yet peer-reviewed</span>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Data &amp; attribution</h2>
+    <p>
+      Cell positions, segmentation and type predictions come from the
+      <a href="https://www.microns-explorer.org/" rel="noopener">MICrONS</a> minnie65 mouse visual
+      cortex dataset, released under CC-BY by the MICrONS Consortium
+      (<a href="https://doi.org/10.1038/s41586-025-08790-w" rel="noopener">Nature 640, 435–447, 2025</a>).
+      Hand-verified identifications, traced vessel outlines and traced pia/white-matter surfaces
+      are original work from this lab.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Søren Grubb ·
+    <a href="mailto:soren@grubb.dk">soren@grubb.dk</a> ·
+    <a href="https://github.com/" rel="noopener">Source on GitHub</a>
+    <br><br>
+    Tools and code released under the MIT License. Content © Søren Grubb.
+  </div>
+</footer>
+
+</body>
+</html>
