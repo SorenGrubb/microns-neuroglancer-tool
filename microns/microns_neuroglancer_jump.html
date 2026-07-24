@@ -5381,14 +5381,24 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(includeCentVec||includeCilVec){
       var centAnns=[],cilAnns=[],ORG=window.ORG_MAP||{};
       for(var mi=0;mi<matches.length;mi++){
-        var mr=matches[mi].row; if(!mr||mr.space!=="N")continue;
-        var nvox=[NX[mr.i],NY[mr.i],NZ[mr.i]],own=ownOverride(mr.i);
-        if(own&&includeCentVec&&own.centriole)centAnns=centAnns.concat(vecArrowAnns(nvox,own.centriole,"#ffd21a","cv"+mr.i));
-        if(own&&includeCilVec&&own.cilium)cilAnns=cilAnns.concat(vecArrowAnns(own.cilium[0],own.cilium[1],"#ff5bd0","clv"+mr.i));
-        var reps=ORG[String(NID[mr.i])];
-        if(reps)for(var ri=0;ri<reps.length;ri++){var o=reps[ri];
-          if(includeCentVec&&o.kind==="centriole"&&o.a)centAnns=centAnns.concat(vecArrowAnns(nvox,o.a,"#ffd21a","cvc"+mr.i+"_"+ri));
-          if(includeCilVec&&o.kind==="cilium"&&o.a&&o.b)cilAnns=cilAnns.concat(vecArrowAnns(o.a,o.b,"#ff5bd0","clvc"+mr.i+"_"+ri));
+        var mr=matches[mi].row; if(!mr)continue;
+        if(mr.space==="N"){
+          var nvox=[NX[mr.i],NY[mr.i],NZ[mr.i]],own=ownOverride(mr.i);
+          if(own&&includeCentVec&&own.centriole)centAnns=centAnns.concat(vecArrowAnns(nvox,own.centriole,"#ffd21a","cv"+mr.i));
+          if(own&&includeCilVec&&own.cilium)cilAnns=cilAnns.concat(vecArrowAnns(own.cilium[0],own.cilium[1],"#ff5bd0","clv"+mr.i));
+          var reps=ORG[String(NID[mr.i])];
+          if(reps)for(var ri=0;ri<reps.length;ri++){var o=reps[ri];
+            if(includeCentVec&&o.kind==="centriole"&&o.a)centAnns=centAnns.concat(vecArrowAnns(nvox,o.a,"#ffd21a","cvc"+mr.i+"_"+ri));
+            if(includeCilVec&&o.kind==="cilium"&&o.a&&o.b)cilAnns=cilAnns.concat(vecArrowAnns(o.a,o.b,"#ff5bd0","clvc"+mr.i+"_"+ri));
+          }
+        } else if(mr.space==="ST"){
+          /* Standalone (out-of-region / Img35) verified points carry their own centriole (ST_CENT*)
+             and primary-cilium (ST_CIL*) coordinates -- these were being skipped entirely, so the
+             vectors never appeared in Img35 territory. Draw them the same way as the N-space nuclei,
+             just sourced from the ST_* arrays and anchored on the standalone point's own coordinate. */
+          var svox=[ST_X[mr.i],ST_Y[mr.i],ST_Z[mr.i]];
+          if(includeCentVec&&ST_HASCENT[mr.i])centAnns=centAnns.concat(vecArrowAnns(svox,[ST_CENTX[mr.i],ST_CENTY[mr.i],ST_CENTZ[mr.i]],"#ffd21a","stcv"+mr.i));
+          if(includeCilVec&&ST_HASCIL[mr.i])cilAnns=cilAnns.concat(vecArrowAnns([ST_CILSX[mr.i],ST_CILSY[mr.i],ST_CILSZ[mr.i]],[ST_CILEX[mr.i],ST_CILEY[mr.i],ST_CILEZ[mr.i]],"#ff5bd0","stclv"+mr.i));
         }
       }
       if(centAnns.length)layers.push({type:"annotation",source:"local://annotations",annotations:centAnns,annotationProperties:[{id:"color",type:"rgb",default:"#ffd21a"}],shader:"void main() { setColor(prop_color()); }",name:"Nucleus→centriole vectors"});
