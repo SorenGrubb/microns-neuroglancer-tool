@@ -5306,7 +5306,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     let nxmin=Infinity,nxmax=-Infinity,nymin=Infinity,nymax=-Infinity,nzmin=Infinity,nzmax=-Infinity;
     let sx=0,sy=0,sz=0,n=0,anyIn65=false,anyIn35=false;
     const byCat={}; // category -> {segIds:Set, nucIds:Set}
-    function catBucket(cat){return byCat[cat]||(byCat[cat]={segIds:new Set(),nucIds:new Set()});}
+    function catBucket(cat){return byCat[cat]||(byCat[cat]={segIds:new Set(),nucIds:new Set(),points:[]});}
     for(const m of matches){
       const p=rowPos(m.row); // voxel coords
       const nx=p[0]*4,ny=p[1]*4,nz=p[2]*40; // physical nm, for the bounding-box span only
@@ -5318,6 +5318,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const bucket=catBucket(categoryForRowType(m.row.type));
       const rid=rowRootId(m.row);if(rid)bucket.segIds.add(String(rid));
       const nid=rowNucId(m.row);if(nid)bucket.nucIds.add(String(nid));
+      bucket.points.push([p[0],p[1],p[2]]);
     }
     if(!n)return null;
     const center=[sx/n,sy/n,sz/n]; // voxel coords -- matches the "position" convention used elsewhere
@@ -5351,6 +5352,16 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         const nucArr=Array.from(bucket.nucIds),colors={};
         for(const id of nucArr)colors[id]=NUCLEUS_COLOR;
         layers.push({type:"segmentation",source:SRC.nuc,tab:"source",name:cat+" nuclei",segments:nucArr,segmentColors:colors,objectAlpha:0.4});
+      }
+      /* A point at every matched cell of this category -- crucially INCLUDING cells with no
+         segmented nucleus (own-verified coordinates, standalone Img35 points, merged-nucleus
+         breakdowns), which the segmentation/nuclei layers above can never show because they have
+         no root/nucleus ID to select. This is why e.g. 275 pia mater fibroblasts now all appear
+         as points even though only ~7 have a nucleus segment. Coords are voxel units, matching
+         the top-level DIM/position convention. */
+      if(bucket.points&&bucket.points.length){
+        const ptAnns=bucket.points.map((pp,idx)=>({type:"point",id:cat.replace(/[^A-Za-z0-9]/g,"_")+"_pt_"+idx,point:[pp[0],pp[1],pp[2]]}));
+        layers.push({type:"annotation",source:"local://annotations",annotations:ptAnns,annotationColor:CATEGORY_COLORS[cat]||CATEGORY_COLORS.Other,name:cat+" (all cells)"});
       }
     }
     if(includeVasc){
