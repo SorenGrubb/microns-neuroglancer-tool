@@ -1233,13 +1233,14 @@ function renderStandalone(st,panel,outOfRegion){
   oh+=renderLocationDiagram(st.pos);
   if(st.centriole)oh+='<div class="meta">Centriole at voxel ('+coordSpan(st.centriole[0],st.centriole[1],st.centriole[2])+') <button class="jumpview" data-x="'+st.centriole[0]+'" data-y="'+st.centriole[1]+'" data-z="'+st.centriole[2]+'" style="margin-left:6px;padding:2px 8px;font-size:11px">Jump to centriole</button></div>';
   oh+=cilHtml(st.cilium);
+  oh+='<div id="stCommReports"></div>';
   oh+='<div class="idcta"><div class="idcta-top"><span>Already verified &mdash; a good case to practise the guided identification on.</span><button class="idbtn" id="idfgo">Guided identification &rarr;</button></div>'
     +'<div class="idcta-search">'+leafSearchHtml("mainLeaf","Already know it? Jump straight there")+'</div></div>';
   /* This verified point has no MICrONS nucleus detection, so there is no nucleus/root ID to key a
      normal Root-ID proposal on. Offer the coordinate-keyed location-only report (renderResult's
      noNucleus form: root ID + nucleus root ID fields), so users can still contribute the
      segmentation IDs for it. */
-  oh+='<div class="hint" style="margin-top:8px">Found this cell\'s MICrONS segmentation? <span class="idf-back" id="idfLocOnlyGo" style="margin:0">Report a nucleus ID / root ID for this point &rarr;</span></div>';
+  oh+='<div class="hint" style="margin-top:8px">Found this cell\'s MICrONS segmentation? <span class="idf-back" id="idfLocOnlyGo" style="margin:0">Report a nucleus ID / root ID for this point &rarr;</span><br><span style="font-size:11px">(records the segmentation only &mdash; the verified identity above is unchanged)</span></div>';
   panel.innerHTML=oh;
   panel.querySelectorAll(".jump").forEach(b=>b.addEventListener("click",()=>{
     unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
@@ -1252,6 +1253,23 @@ function renderStandalone(st,panel,outOfRegion){
   wireLeafSearch("mainLeaf",slug=>openIdentifyToLeaf(idfCtx,slug));
   const locOnlyBtnSt=panel.querySelector("#idfLocOnlyGo");
   if(locOnlyBtnSt)locOnlyBtnSt.addEventListener("click",()=>openLocationOnlyReport(st.pos));
+  /* Verified own-coordinate points aren't keyed to a MICrONS nucleus, so any community-reported
+     root/nucleus ID for them lives in the coordinate-keyed "New cells (no nucleus)" store. Pull it
+     back and show it here (click-to-copy), so a segmentation ID someone reports for this point
+     actually surfaces on the cell instead of vanishing into the sheet. Tight 600nm match. */
+  if(typeof fetchNewCellReports==="function"){
+    fetchNewCellReports().then(function(){
+      var host=panel.querySelector("#stCommReports");if(!host)return;
+      var ur=nearestUserReportedCell(st.pos[0],st.pos[1],st.pos[2],600);
+      if(!ur||(!ur.rootId&&!ur.nucRootId))return;
+      var hh='<div class="ids" style="margin-top:6px"><div class="meta" style="color:var(--accent);margin-bottom:2px">Community-reported segmentation for this point'+(ur.reporterName?' (by '+escHtml(ur.reporterName)+')':'')+':</div>';
+      if(ur.rootId)hh+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.rootId)+'">'+escHtml(ur.rootId)+'</span></div>';
+      if(ur.nucRootId)hh+='<div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.nucRootId)+'">'+escHtml(ur.nucRootId)+'</span></div>';
+      hh+='</div>';
+      host.innerHTML=hh;
+      host.querySelectorAll(".idval").forEach(function(el){el.addEventListener("click",function(){navigator.clipboard&&navigator.clipboard.writeText(el.dataset.c);var o=el.textContent;el.textContent="copied";setTimeout(function(){el.textContent=o;},900);});});
+    }).catch(function(){});
+  }
 }
 let LAST_OOB_QUERY=0; // bumped on every showNucleus() call; see the race-guard in the out-of-region branch below
 function showNucleus(pos){
