@@ -1235,6 +1235,11 @@ function renderStandalone(st,panel,outOfRegion){
   oh+=cilHtml(st.cilium);
   oh+='<div class="idcta"><div class="idcta-top"><span>Already verified &mdash; a good case to practise the guided identification on.</span><button class="idbtn" id="idfgo">Guided identification &rarr;</button></div>'
     +'<div class="idcta-search">'+leafSearchHtml("mainLeaf","Already know it? Jump straight there")+'</div></div>';
+  /* This verified point has no MICrONS nucleus detection, so there is no nucleus/root ID to key a
+     normal Root-ID proposal on. Offer the coordinate-keyed location-only report (renderResult's
+     noNucleus form: root ID + nucleus root ID fields), so users can still contribute the
+     segmentation IDs for it. */
+  oh+='<div class="hint" style="margin-top:8px">Found this cell\'s MICrONS segmentation? <span class="idf-back" id="idfLocOnlyGo" style="margin:0">Report a nucleus ID / root ID for this point &rarr;</span></div>';
   panel.innerHTML=oh;
   panel.querySelectorAll(".jump").forEach(b=>b.addEventListener("click",()=>{
     unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
@@ -1245,6 +1250,8 @@ function renderStandalone(st,panel,outOfRegion){
   const idfBtn=panel.querySelector("#idfgo");
   if(idfBtn)idfBtn.addEventListener("click",()=>openIdentify(idfCtx));
   wireLeafSearch("mainLeaf",slug=>openIdentifyToLeaf(idfCtx,slug));
+  const locOnlyBtnSt=panel.querySelector("#idfLocOnlyGo");
+  if(locOnlyBtnSt)locOnlyBtnSt.addEventListener("click",()=>openLocationOnlyReport(st.pos));
 }
 let LAST_OOB_QUERY=0; // bumped on every showNucleus() call; see the race-guard in the out-of-region branch below
 function showNucleus(pos){
@@ -1375,7 +1382,8 @@ function showNucleus(pos){
      ID_CTX.noNucleus handling in renderResult() and the "new_cell_no_nucleus" report type. */
   if(r.dist>FAR_NUCLEUS_THRESH_NM){
     h+='<div class="idcta warn" style="margin-top:10px"><div class="idcta-top"><span>&#9888; No MICrONS nucleus detected within 3&micro;m of this point (nearest is '+(r.dist/1000).toFixed(1)+'&micro;m away, likely a different, unrelated cell). Found a real cell here that MICrONS missed?</span><button class="idbtn" id="idfNewCellGo">Report a new cell &rarr;</button></div>'
-      +'<div class="idcta-search">'+leafSearchHtml("newCellLeaf","Already know the type? Jump straight there")+'</div></div>';
+      +'<div class="idcta-search">'+leafSearchHtml("newCellLeaf","Already know the type? Jump straight there")+'</div>'
+      +'<div class="hint" style="margin-top:8px">Just want to record the segmentation? <span class="idf-back" id="idfLocOnlyGo" style="margin:0">Log its location and the nucleus ID / root ID, skip classification &rarr;</span></div></div>';
   }
   h+='<div class="ids">';
   h+='<div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+nid+'">'+nid+'</span></div>';
@@ -1413,6 +1421,8 @@ function showNucleus(pos){
     const newCellBtn=panel.querySelector("#idfNewCellGo");
     if(newCellBtn)newCellBtn.addEventListener("click",()=>openIdentify(newCellCtx));
     wireLeafSearch("newCellLeaf",slug=>openIdentifyToLeaf(newCellCtx,slug));
+    const locOnlyBtnFar=panel.querySelector("#idfLocOnlyGo");
+    if(locOnlyBtnFar)locOnlyBtnFar.addEventListener("click",()=>openLocationOnlyReport(pos));
   }
   window.CUR_POS=pos;loadCommunityReports(nid,pos);loadRootIdPanel(nid);loadIdentityVotesPanel(nid,[ti&&ti.name,(own&&own.fine)]);
 }
