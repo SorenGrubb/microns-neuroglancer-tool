@@ -922,11 +922,24 @@ unitsEl.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)re
    example of a chosen broad cell type to see how it varies in appearance. */
 const UNASSIGNED_IDX=[];const IDX_BY_TYPE={};
 for(const n of CT_NAMES)IDX_BY_TYPE[n]=[];
-for(let i=0;i<N;i++){const t=NT[i];if(t===0){if(OWN_TYPE[i]===255&&!mergedInfo(i)&&inRegion(NX[i],NY[i],NZ[i]))UNASSIGNED_IDX.push(i);}else{
-  const name=CT_NAMES[t-1],ot=OWN_TYPE[i];
-  if(ot!==255){if(OWN_TYPE_NAMES[ot]===name)IDX_BY_TYPE[name].push(i);}
-  else{const mg=mergedInfo(i);if(mg){if(mg.some(m=>m.type===name))IDX_BY_TYPE[name].push(i);}else IDX_BY_TYPE[name].push(i);}
-}}
+/* Builds/rebuilds the MICrONS-native random-example pools (IDX_BY_TYPE, UNASSIGNED_IDX) from the
+   CURRENT state of OWN_TYPE. Originally run once at load time, before vascdata8/vascdata9's mural
+   reclassification patches had been applied -- so a nucleus MICrONS predicted as "pericyte" that
+   later got a verified own override (e.g. actually a smooth muscle cell) stayed in
+   IDX_BY_TYPE["pericyte"] forever, since nothing ever rebuilt this pool afterwards. "Random
+   pericyte (MICrONS)" could then land on and display a verified smooth muscle cell. Now exposed
+   as a function so it can be re-run after every own-override patch (see the vascdata9 IIFE below),
+   the same way OWN_POS_BY_TYPE is already rebuilt there. */
+function rebuildTypePools(){
+  UNASSIGNED_IDX.length=0;
+  for(const n of CT_NAMES)IDX_BY_TYPE[n].length=0;
+  for(let i=0;i<N;i++){const t=NT[i];if(t===0){if(OWN_TYPE[i]===255&&!mergedInfo(i)&&inRegion(NX[i],NY[i],NZ[i]))UNASSIGNED_IDX.push(i);}else{
+    const name=CT_NAMES[t-1],ot=OWN_TYPE[i];
+    if(ot!==255){if(OWN_TYPE_NAMES[ot]===name)IDX_BY_TYPE[name].push(i);}
+    else{const mg=mergedInfo(i);if(mg){if(mg.some(m=>m.type===name))IDX_BY_TYPE[name].push(i);}else IDX_BY_TYPE[name].push(i);}
+  }}
+}
+rebuildTypePools();
 function pickRandom(arr){return arr&&arr.length?arr[Math.floor(Math.random()*arr.length)]:-1;}
 function jumpToVoxel(x,y,z){
   unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
@@ -1222,7 +1235,7 @@ function renderStandalone(st,panel,outOfRegion){
   panel.classList.add("show");
   CUR_IS_NEURON=looksLikeNeuron(st.type);
   let oh='<span class="tag" style="background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)" title="From S\u00f8ren\u2019s own verified cell-type coordinates \u2014 there is no automated MICrONS prediction or segmentation to compare against here.">verified identification</span>';
-  oh+='<div class="celltype">'+celltypeLink(st.pos,longName(st.type))+favStarHtml('','',st.pos[0],st.pos[1],st.pos[2])+(st.vloc?' <small style="color:var(--mut)">('+st.vloc+')</small>':'')+'</div>';
+  oh+='<div class="celltype" id="ctHeadline">'+celltypeLink(st.pos,longName(st.type))+favStarHtml('','',st.pos[0],st.pos[1],st.pos[2])+(st.vloc?' <small style="color:var(--mut)">('+st.vloc+')</small>':'')+'</div>';
   if(st.fine)oh+='<div class="meta" style="margin-top:-6px">'+st.fine+'</div>';
   if(st.gl)oh+='<div class="meta" style="margin-top:-6px">'+st.gl+'</div>';
   oh+='<div class="meta">'+linkifyAuthors(st.authors)+'</div>';
@@ -1233,14 +1246,20 @@ function renderStandalone(st,panel,outOfRegion){
   oh+=renderLocationDiagram(st.pos);
   if(st.centriole)oh+='<div class="meta">Centriole at voxel ('+coordSpan(st.centriole[0],st.centriole[1],st.centriole[2])+') <button class="jumpview" data-x="'+st.centriole[0]+'" data-y="'+st.centriole[1]+'" data-z="'+st.centriole[2]+'" style="margin-left:6px;padding:2px 8px;font-size:11px">Jump to centriole</button></div>';
   oh+=cilHtml(st.cilium);
-  oh+='<div id="stCommReports"></div>';
+  /* Verified own-coordinate points have no MICrONS nucleus, so there is no real nucleusId to key
+     a normal Root-ID proposal on. Reuse the exact same proposal/voting system (Root ID
+     proposals sheet, propose_root_id/vote_root_id/loadRootIdPanel) as every other cell, but with
+     the point's own voxel coordinate string as the key instead of a nucleusId -- the backend
+     never validates that this looks like a real MICrONS ID, it's just a string it groups and
+     tallies by. This means: (a) the SAME "+ additional root / nucleus IDs" panel other cells get
+     appears here (loadRootIdPanel always renders its add-new form, "None proposed yet." when
+     empty), so there's no separate one-shot "report a segmentation ID" link that needs to
+     disappear afterwards, and (b) whatever gets proposed here is picked up by CUR_EXTRA_ROOTS the
+     same way, so it's included in this cell's Neuroglancer link exactly like a cell with native
+     MICrONS segmentation -- see loadRootIdPanel's render()/buildState()'s ex65/ex35/exNuc65/exNuc35. */
+  oh+='<div id="rootIdPanel" style="margin:6px 0"></div>';
   oh+='<div class="idcta"><div class="idcta-top"><span>Already verified &mdash; a good case to practise the guided identification on.</span><button class="idbtn" id="idfgo">Guided identification &rarr;</button></div>'
     +'<div class="idcta-search">'+leafSearchHtml("mainLeaf","Already know it? Jump straight there")+'</div></div>';
-  /* This verified point has no MICrONS nucleus detection, so there is no nucleus/root ID to key a
-     normal Root-ID proposal on. Offer the coordinate-keyed location-only report (renderResult's
-     noNucleus form: root ID + nucleus root ID fields), so users can still contribute the
-     segmentation IDs for it. */
-  oh+='<div class="hint" style="margin-top:8px">Found this cell\'s MICrONS segmentation? <span class="idf-back" id="idfLocOnlyGo" style="margin:0">Report a nucleus ID / root ID for this point &rarr;</span><br><span style="font-size:11px">(records the segmentation only &mdash; the verified identity above is unchanged)</span></div>';
   panel.innerHTML=oh;
   panel.querySelectorAll(".jump").forEach(b=>b.addEventListener("click",()=>{
     unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
@@ -1251,26 +1270,10 @@ function renderStandalone(st,panel,outOfRegion){
   const idfBtn=panel.querySelector("#idfgo");
   if(idfBtn)idfBtn.addEventListener("click",()=>openIdentify(idfCtx));
   wireLeafSearch("mainLeaf",slug=>openIdentifyToLeaf(idfCtx,slug));
-  const locOnlyBtnSt=panel.querySelector("#idfLocOnlyGo");
-  if(locOnlyBtnSt)locOnlyBtnSt.addEventListener("click",()=>openLocationOnlyReport(st.pos));
-  /* Verified own-coordinate points aren't keyed to a MICrONS nucleus, so any community-reported
-     root/nucleus ID for them lives in the coordinate-keyed "New cells (no nucleus)" store. Pull it
-     back and show it here (click-to-copy), so a segmentation ID someone reports for this point
-     actually surfaces on the cell instead of vanishing into the sheet. Tight 600nm match. */
-  if(typeof fetchNewCellReports==="function"){
-    fetchNewCellReports().then(function(){
-      var host=panel.querySelector("#stCommReports");if(!host)return;
-      var ur=nearestUserReportedCell(st.pos[0],st.pos[1],st.pos[2],600);
-      if(!ur||(!ur.rootId&&!ur.nucRootId))return;
-      var hh='<div class="ids" style="margin-top:6px"><div class="meta" style="color:var(--accent);margin-bottom:2px">Community-reported segmentation for this point'+(ur.reporterName?' (by '+escHtml(ur.reporterName)+')':'')+':</div>';
-      if(ur.rootId)hh+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.rootId)+'">'+escHtml(ur.rootId)+'</span></div>';
-      if(ur.nucRootId)hh+='<div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.nucRootId)+'">'+escHtml(ur.nucRootId)+'</span></div>';
-      hh+='</div>';
-      host.innerHTML=hh;
-      host.querySelectorAll(".idval").forEach(function(el){el.addEventListener("click",function(){navigator.clipboard&&navigator.clipboard.writeText(el.dataset.c);var o=el.textContent;el.textContent="copied";setTimeout(function(){el.textContent=o;},900);});});
-    }).catch(function(){});
-  }
+  window.CUR_POS=st.pos;
+  loadRootIdPanel(st.pos.join(","));
 }
+
 let LAST_OOB_QUERY=0; // bumped on every showNucleus() call; see the race-guard in the out-of-region branch below
 function showNucleus(pos){
   const[vx,vy,vz]=pos,panel=document.getElementById("nucpanel");
@@ -1371,7 +1374,7 @@ function showNucleus(pos){
        unnamed cell, and quietly overwriting it would hide the disagreement. */
     const unclassified=ti.name==="Unclassified";
     h+='<span class="tag '+ti.ab+'" id="ctTag" title="'+BROAD_SOURCE_NOTE+'">'+(ti.cls?ti.cls.replace("_"," "):"nucleus &middot; no prediction")+'</span>';
-    h+='<div class="celltype" id="ctHeadline"'+(unclassified?' data-unclassified="1"':'')+' title="'+(ciBroad?ciBroad.full+" \u2014 "+ciBroad.role:"")+'">'+celltypeLink(pos,longName(ti.name))+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+' <small>'+(unclassified?"no MICrONS prediction":"MICrONS prediction")+'</small></div>';     h+='<div id="idVotePanel" style="margin:3px 0 2px"></div>';
+    h+='<div class="celltype" id="ctHeadline"'+(unclassified?' data-unclassified="1"':'')+' data-microns-name="'+escHtml(longName(ti.name))+'" title="'+(ciBroad?ciBroad.full+" \u2014 "+ciBroad.role:"")+'">'+celltypeLink(pos,longName(ti.name))+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+' <small>'+(unclassified?"no MICrONS prediction":"MICrONS prediction")+'</small></div>';     h+='<div id="idVotePanel" style="margin:3px 0 2px"></div>';
     h+='<div class="meta" id="commReports"></div>';
     if(ti.name==="astrocyte"){
       const af=fineName(window.OWN_FINE,i,window.OWN_FINE_DIST);if(af)h+='<div class="meta" style="margin-top:-6px">'+af+'</div>';
@@ -1612,6 +1615,24 @@ const TREE={
    {label:"Scant dark cytoplasm, elongated dense nucleus w/ peripheral heterochromatin band, large dense lysosomes, NO cilium",leaf:"microglia"},
    {label:"Dark round, clumped heterochromatin, MT-rich (no IF/glycogen), continuous w/ myelin, NO cilium, in rows",leaf:"oligodendrocyte"},
    {label:"Intermediate density, indented nucleus, centrioles + primary cilium, sparse organelles, receives synapses",leaf:"opc"}]}
+};
+/* Commonly-confused-with warnings for the guided identification result screen. Deliberately
+   conservative: only pairs with a real, checkable basis are included (a trusted source per
+   Søren\'s "never cite something not backed by a paper" rule), everything else is left out
+   rather than guessed. "note" is the specific ultrastructural overlap that causes the confusion;
+   "ref"/"refLabel" point to a source the user can actually check. */
+const CONFUSED_WITH={
+  pericyte:{withName:"Smooth muscle cell / Venular smooth muscle cell",note:"All three are mural cells distinguished mainly by vessel branch order and morphology (bump-on-a-log vs circumferential rings), not a single fixed ultrastructural marker \u2014 see the pericyte/endothelial organization study this tool\'s mural-cell split is based on.",ref:"https://doi.org/10.1101/2025.11.19.689283",refLabel:"Grubb et al., bioRxiv 2025"},
+  smooth_muscle_cell:{withName:"Pericyte / Venular smooth muscle cell",note:"Distinguished from pericytes mainly by vessel branch order (arteriole vs capillary) rather than a single fixed marker.",ref:"https://doi.org/10.1101/2025.11.19.689283",refLabel:"Grubb et al., bioRxiv 2025"},
+  venular_smooth_muscle_pericyte:{withName:"Pericyte",note:"Sits on the venous side at a branch order where pericyte- and smooth-muscle-like morphology overlap.",ref:"https://doi.org/10.1101/2025.11.19.689283",refLabel:"Grubb et al., bioRxiv 2025"},
+  endothelial_cell:{withName:"Pericyte",note:"A thin pericyte process running along the vessel wall can resemble endothelium in cross-section; check which side of the shared basement membrane the cell sits on.",ref:"https://doi.org/10.1101/2025.11.19.689283",refLabel:"Grubb et al., bioRxiv 2025"},
+  perivascular_macrophage:{withName:"Microglia / Perivascular fibroblast",note:"Both perivascular macrophages and microglia carry heterogeneous lysosomes/lipofuscin; location (perivascular space vs parenchyma) and phagolysosome pattern are the more reliable cues.",ref:"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/",refLabel:"PMC7930431"},
+  microglia:{withName:"Perivascular macrophage",note:"Shares dense lysosomes and a similarly dark, scant cytoplasm; parenchymal location (isolated by astrocyte endfeet) vs the perivascular space is the more reliable cue.",ref:"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/",refLabel:"PMC7930431"},
+  opc:{withName:"Oligodendrocyte",note:"Both have intermediate cytoplasmic density; OPCs keep a primary cilium/centrioles and receive bona fide synapses, which mature oligodendrocytes generally lack.",ref:"http://www.drjastrow.de/WAI/EM/EMAtlas.html",refLabel:"Dr. Jastrow\'s EM Atlas"},
+  oligodendrocyte:{withName:"OPC",note:"Both have intermediate cytoplasmic density; look for continuity with myelin internodes (oligodendrocyte) vs a primary cilium and thin radial processes (OPC).",ref:"http://www.drjastrow.de/WAI/EM/EMAtlas.html",refLabel:"Dr. Jastrow\'s EM Atlas"},
+  inh_basket:{withName:"Excitatory (layer 5) neuron",note:"The broad MICrONS classifier (soma/nucleus ultrastructure only) sometimes misclassifies layer 5 inhibitory neurons as excitatory; the fine m-type call is more reliable here.",ref:"https://doi.org/10.1038/s41586-024-07765-7",refLabel:"Elabbady et al., Nature 2025"},
+  inh_martinotti:{withName:"Excitatory (layer 5) neuron",note:"The broad MICrONS classifier can misclassify layer 5 inhibitory neurons as excitatory based on soma/nucleus shape alone; the fine m-type call is more reliable here.",ref:"https://doi.org/10.1038/s41586-024-07765-7",refLabel:"Elabbady et al., Nature 2025"},
+  dendritic_cell:{withName:"Perivascular macrophage",note:"Both are perivascular immune cells with overlapping ultrastructure; dendritic cells are far rarer, so a confident call benefits from a second opinion.",ref:"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/",refLabel:"PMC7930431"}
 };
 const LEAF_NAMES={erythrocyte:"Erythrocyte",platelet:"Platelet",neutrophil:"Neutrophil",lymphocyte:"Lymphocyte",monocyte:"Monocyte",endothelial_cell:"Endothelial cell",pericyte:"Pericyte",smooth_muscle_cell:"Smooth muscle cell",venular_smooth_muscle_pericyte:"Venular smooth muscle cell",perivascular_macrophage:"Perivascular macrophage",perivascular_fibroblast:"Perivascular fibroblast",dendritic_cell:"Dendritic cell",excitatory_neuron:"Excitatory neuron",inhibitory_neuron:"Inhibitory neuron",exc_l23_it:"L2/3 pyramidal neuron (23P)",exc_l4:"Layer 4 pyramidal / spiny-stellate neuron (4P)",exc_l5_it:"Layer 5 IT pyramidal neuron (5P-IT)",exc_l5_et:"Layer 5 ET thick-tufted pyramidal neuron (5P-ET)",exc_l5_np:"Layer 5 near-projecting neuron (5P-NP)",exc_l6_it:"Layer 6 IT pyramidal neuron (6P-IT)",exc_l6_ct:"Layer 6 CT pyramidal neuron (6P-CT)",inh_basket:"Basket cell — PV / perisomatic-targeting (BC)",inh_martinotti:"Martinotti cell — SST / distal-targeting (MC)",inh_bipolar:"Bipolar cell — VIP / inhibitory-targeting (BPC)",inh_neurogliaform:"Neurogliaform cell — sparsely-targeting (NGC)",astrocyte:"Astrocyte",microglia:"Microglia",oligodendrocyte:"Oligodendrocyte",opc:"OPC",pia_mater_fibroblast:"Pia mater fibroblast",pial_sheath_fibroblast:"Pial sheath fibroblast",arachnoid_barrier_cell:"Arachnoid barrier cell",fibroblast_reticular_cell:"Fibroblast reticular cell",inner_arachnoid_fibroblast:"Inner arachnoid fibroblast"};
 // Real files currently sitting in the image library folders (matches what's on disk today).
@@ -2198,7 +2219,17 @@ function showSubmitToast(ok,msg){
 }
 function postReport(payload,okMsg){
   if(!REPORT_ENDPOINT){alert("Reporting isn't wired up yet — set REPORT_ENDPOINT near the top of the script (see the comment above it) to a Google Apps Script web app URL.");return false;}
-  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){alert("Please sign in with Google before submitting.\n\nIdentifications now require a verified Google account so each contribution can be attributed.");return false;}
+  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){
+    /* Some forms that call postReport() (e.g. the Root ID / Nucleus ID proposal panel) have no
+       sign-in button of their own -- signing in only ever lived on the identify-result screen's
+       "want credit" block, a dead end for every other action on the site. The top-right account
+       chip (see gamifyInit()/renderChip()) is the one persistent sign-in surface everywhere now,
+       so fire the same Google One Tap prompt it uses here too, from wherever postReport() is
+       called, rather than leaving the user stuck with no way to act on the alert. */
+    if(window.google&&google.accounts&&google.accounts.id){try{google.accounts.id.prompt();}catch(_gp){}}
+    alert("Please sign in with Google before submitting \u2014 use the account button in the top-right corner, then try again.\n\nContributions require a verified Google account so they can be attributed.");
+    return false;
+  }
   if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90){GOOGLE_VERIFIED=false;GOOGLE_CREDENTIAL="";Array.prototype.forEach.call(document.querySelectorAll(".gate-note"),function(el){el.textContent="Your Google sign-in expired — sign in again to submit";el.style.color="var(--accent)";});alert("Your Google sign-in has expired. Please sign in with Google again, then resubmit.");return false;}
   payload.reporterName=REPORTER_NAME||"";payload.reporterEmail=REPORTER_EMAIL||"";
   payload.credential=GOOGLE_CREDENTIAL;
@@ -2399,18 +2430,33 @@ function loadCommunityReports(nid,cellPos){
              overwritten by community votes. The "no prediction" tag is rewritten at the same time,
              otherwise the cell would show a name and a tag denying one exists. */
           const headEl=document.getElementById("ctHeadline");
-          if(headEl&&win){var wasUncl=headEl.dataset.unclassified==="1";
-            headEl.innerHTML=celltypeLink(cellPos,escHtml(win.name))
-              +((typeof favStarHtml==="function"&&cellPos)?favStarHtml(nid,"",cellPos[0],cellPos[1],cellPos[2]):"")
-              +' <small>community identification</small>';
-            if(typeof refreshFavStars==="function")refreshFavStars();try{if(window.CUR_POS){var _k=window.CUR_POS.join(",");for(var _i=0;_i<SEARCH_HISTORY.length;_i++){if(SEARCH_HISTORY[_i].key===_k)SEARCH_HISTORY[_i].label=win.name;}renderSearchHistory();}}catch(_e2){}
-            headEl.title=win.n+(win.n>1?" users have":" user has")+" identified this cell"
-              +(win.firstBy?", first proposed by "+win.firstBy:"")
-              +(wasUncl?". MICrONS made no prediction here.":". Shown in place of the MICrONS prediction — user reports take precedence here.");
-            const tagEl=document.getElementById("ctTag");
-            if(tagEl){
-              tagEl.textContent="community identification";
-              tagEl.title=(wasUncl?"Named by users of this tool, not by MICrONS — MICrONS has no prediction for this nucleus.":"Named by users of this tool and shown in place of the MICrONS prediction — user reports take precedence.")+" The name shown is whichever identification has the most reports; see the breakdown below.";
+          if(headEl&&win){
+            var wasUncl=headEl.dataset.unclassified==="1";
+            var micronsName=headEl.dataset.micronsName||"";
+            /* A "confirm-only" cell -- MICrONS DID make a prediction, and the winning community
+               name is exactly that prediction (everyone who reported it just agreed with
+               MICrONS). This is not an override, so the headline keeps showing "MICrONS
+               prediction" rather than being relabelled "community identification", which would
+               wrongly imply the name came from users overriding MICrONS rather than confirming
+               it. Per Søren: confirming a prediction should still say what MICrONS predicted. */
+            var isConfirmOnly=!wasUncl&&micronsName&&micronsName.toLowerCase()===String(win.name).toLowerCase();
+            if(isConfirmOnly){
+              var smallEl=headEl.querySelector("small");
+              if(smallEl)smallEl.textContent="MICrONS prediction \u2014 confirmed by "+users(win.n);
+              headEl.title=(headEl.title?headEl.title+" \u2014 ":"")+users(win.n)+" confirmed this matches MICrONS\u2019s prediction"+(win.firstBy?", first confirmed by "+win.firstBy:"")+".";
+            } else {
+              headEl.innerHTML=celltypeLink(cellPos,escHtml(win.name))
+                +((typeof favStarHtml==="function"&&cellPos)?favStarHtml(nid,"",cellPos[0],cellPos[1],cellPos[2]):"")
+                +' <small>community identification</small>';
+              if(typeof refreshFavStars==="function")refreshFavStars();try{if(window.CUR_POS){var _k=window.CUR_POS.join(",");for(var _i=0;_i<SEARCH_HISTORY.length;_i++){if(SEARCH_HISTORY[_i].key===_k)SEARCH_HISTORY[_i].label=win.name;}renderSearchHistory();}}catch(_e2){}
+              headEl.title=win.n+(win.n>1?" users have":" user has")+" identified this cell"
+                +(win.firstBy?", first proposed by "+win.firstBy:"")
+                +(wasUncl?". MICrONS made no prediction here.":". Shown in place of the MICrONS prediction — user reports take precedence here.");
+              const tagEl=document.getElementById("ctTag");
+              if(tagEl){
+                tagEl.textContent="community identification";
+                tagEl.title=(wasUncl?"Named by users of this tool, not by MICrONS — MICrONS has no prediction for this nucleus.":"Named by users of this tool and shown in place of the MICrONS prediction — user reports take precedence.")+" The name shown is whichever identification has the most reports; see the breakdown below.";
+              }
             }
           }
           html+='<span style="color:var(--accent)">&#128172; Community name: <b>'+escHtml(win.name)+'</b> &mdash; '
@@ -3077,6 +3123,13 @@ function renderResult(slug){
   let h='<div class="idf-head"><div><div class="idf-title">Guided identification &mdash; result</div></div><button class="idf-close" id="idfclose" title="close">&times;</button></div>';
   if(!locationOnly)h+='<span class="idf-back" id="idfback">&larr; back one step</span>';
   h+='<div class="idf-result"><div class="celltype">'+celltypeLink(ID_CTX.pos,locationOnly?"Unclassified cell (location logged only)":name)+'</div>';
+  /* Small "commonly confused with" caution, only for leaves with a real, checkable basis (see
+     CONFUSED_WITH above) -- not shown for locationOnly (no cell type asserted) or a disagreement
+     result (the disagreement itself already IS the second opinion this warning exists to invite). */
+  if(!locationOnly&&slug&&CONFUSED_WITH[slug]){
+    var cw=CONFUSED_WITH[slug];
+    h+='<div class="idf-flag" style="border-color:var(--warn);color:var(--warn)">&#9888; Often confused with <b>'+escHtml(cw.withName)+'</b>. '+escHtml(cw.note)+' <a href="'+cw.ref+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">('+escHtml(cw.refLabel)+')</a></div>';
+  }
   // "Merged nucleus" doesn't apply to a brand-new, not-yet-recorded cell -- it's specifically
   // about MICrONS's automatic detector merging 2+ real nuclei into one detection, which
   // requires there to BE a MICrONS detection in the first place. Centriole/cilium reporting,
@@ -3124,9 +3177,13 @@ function renderResult(slug){
        unexplained ask disconnected from anything. Here it's shown only when there's actually
        something to submit, right next to the button it affects, and the wording states the
        payoff (credit / follow-up) instead of a vague "helps us follow up on interesting finds". */
+    if(!GOOGLE_VERIFIED){
     h+='<div class="idf-identity" style="margin-top:10px"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:4px">Want credit for this ID, or a heads-up if it&rsquo;s confirmed? <span class="gate-note" style="text-transform:none;letter-spacing:normal;color:var(--accent)">— Google sign-in required to submit</span></label>'
       +'<input type="text" id="reporterInput" placeholder="name or email" value="'+(REPORTER_EMAIL||REPORTER_NAME||'').replace(/"/g,'&quot;')+'" style="width:100%;margin-bottom:6px">'
       +'<div id="gsiButton"></div></div>';
+    } else {
+      h+='<div class="meta" style="margin-top:8px;color:var(--accent)">Submitting as '+escHtml(REPORTER_EMAIL||REPORTER_NAME)+' &mdash; signed in with Google.</div>';
+    }
   }
   h+='<div class="idf-actions"><button class="idbtn" id="idfcopy">Copy summary</button>'
     +(disagrees?'<button class="idbtn idbtn-submit" id="idfreport" disabled title="Select a certainty rating first">Submit</button>':'')
@@ -3366,9 +3423,13 @@ function renderMergedReport(returnFn){
   h+='<button type="button" class="idbtn" id="mergedAddRow" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another nucleus</button>';
   h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:14px">Comments (optional)</label>'
     +'<textarea id="mergedComment" placeholder="e.g. hard to tell exactly where the boundary between them is..."></textarea>';
+  if(!GOOGLE_VERIFIED){
   h+='<div class="idf-identity" style="margin-top:10px"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:4px">Want credit for this report, or a heads-up if it&rsquo;s confirmed? <span class="gate-note" style="text-transform:none;letter-spacing:normal;color:var(--accent)">— Google sign-in required to submit</span></label>'
     +'<input type="text" id="reporterInput" placeholder="name or email" value="'+(REPORTER_EMAIL||REPORTER_NAME||"").replace(/"/g,'&quot;')+'" style="width:100%;margin-bottom:6px">'
     +'<div id="gsiButton"></div></div>';
+  } else {
+    h+='<div class="meta" style="margin-top:8px;color:var(--accent)">Submitting as '+escHtml(REPORTER_EMAIL||REPORTER_NAME)+' &mdash; signed in with Google.</div>';
+  }
   h+='<div class="idf-actions"><button class="idbtn idbtn-submit" id="mergedSubmit">Submit merged-nucleus report</button>'
     +'<button class="idbtn" id="idfrestart">Start over</button></div>'
     +'<div id="idfThanks"></div>';
@@ -3527,9 +3588,13 @@ function organelleFormHtml(slug){
   h+='<button type="button" class="idbtn" id="organAddRow" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another structure</button>';
   h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:14px">Comments (optional)</label>'
     +'<textarea id="organComment" placeholder="e.g. cilium is short / hard to trace to a clear tip..."></textarea>';
+  if(!GOOGLE_VERIFIED){
   h+='<div class="idf-identity" style="margin-top:10px"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:4px">Want credit for this report, or a heads-up if it&rsquo;s confirmed? <span class="gate-note" style="text-transform:none;letter-spacing:normal;color:var(--accent)">— Google sign-in required to submit</span></label>'
     +'<input type="text" id="organReporterInput" placeholder="name or email" value="'+(REPORTER_EMAIL||REPORTER_NAME||"").replace(/"/g,'&quot;')+'" style="width:100%;margin-bottom:6px">'
     +'<div id="organGsiButton"></div></div>';
+  } else {
+    h+='<div class="meta" style="margin-top:8px;color:var(--accent)">Submitting as '+escHtml(REPORTER_EMAIL||REPORTER_NAME)+' &mdash; signed in with Google.</div>';
+  }
   h+='<div class="idf-actions"><button class="idbtn idbtn-submit" id="organSubmit">Submit organelle report</button></div>'
     +'<div id="organThanks"></div>';
   return h;
@@ -3703,9 +3768,13 @@ function renderNotNucleusReport(returnFn){
   h+='<div class="meta">Detection: '+(ID_CTX.nucId?"nucleus "+ID_CTX.nucId:"no nucleus ID on file")+(ID_CTX.root?" &middot; root "+ID_CTX.root:"")+(ID_CTX.pos?" &middot; voxel ("+coordSpan(ID_CTX.pos[0],ID_CTX.pos[1],ID_CTX.pos[2])+")":"")+'</div>';
   h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:12px">What does it actually look like? <span style="text-transform:none;letter-spacing:normal">(optional, but helpful)</span></label>'
     +'<textarea id="nnComment" placeholder="e.g. myelin swirl, vessel wall fragment, segmentation glitch..."></textarea>';
+  if(!GOOGLE_VERIFIED){
   h+='<div class="idf-identity" style="margin-top:10px"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:4px">Want credit for this report, or a heads-up if it&rsquo;s confirmed? <span class="gate-note" style="text-transform:none;letter-spacing:normal;color:var(--accent)">— Google sign-in required to submit</span></label>'
     +'<input type="text" id="reporterInput" placeholder="name or email" value="'+(REPORTER_EMAIL||REPORTER_NAME||"").replace(/"/g,'&quot;')+'" style="width:100%;margin-bottom:6px">'
     +'<div id="gsiButton"></div></div>';
+  } else {
+    h+='<div class="meta" style="margin-top:8px;color:var(--accent)">Submitting as '+escHtml(REPORTER_EMAIL||REPORTER_NAME)+' &mdash; signed in with Google.</div>';
+  }
   h+='<div class="idf-actions"><button class="idbtn idbtn-submit" id="nnSubmit">Submit flag</button>'
     +'<button class="idbtn" id="idfrestart">Start over</button></div>'
     +'<div id="idfThanks"></div>';
@@ -4128,6 +4197,11 @@ function fineName(arr,i,distArr){if(!arr||arr[i]===255)return null;const name=FI
   for(let ii=0;ii<N;ii++){const t=OWN_TYPE[ii];if(t!==255){const nm=OWN_TYPE_NAMES[t];if(OWN_POS_BY_TYPE[nm])OWN_POS_BY_TYPE[nm].push([NX[ii],NY[ii],NZ[ii]]);}}
   for(let ii=0;ii<ST_N;ii++){const nm=OWN_TYPE_NAMES[ST_TYPE[ii]];if(OWN_POS_BY_TYPE[nm])OWN_POS_BY_TYPE[nm].push([ST_X[ii],ST_Y[ii],ST_Z[ii]]);}
   for(const mk in MERGED){const ni=parseInt(mk,10);for(const mm of MERGED[mk]){const nm=(typeof mural3==="function")?mural3(mm.type):mm.type;if(OWN_POS_BY_TYPE[nm])OWN_POS_BY_TYPE[nm].push([NX[ni],NY[ni],NZ[ni]]);}}
+  // Re-run the MICrONS-native random-example pools too, now that vascdata9's own-override
+  // patches are applied -- see rebuildTypePools()'s doc comment above for why this matters
+  // (a MICrONS "pericyte" call that's since been verified as a different mural subtype must
+  // drop out of the pericyte pool, not linger there forever).
+  if(typeof rebuildTypePools==="function")rebuildTypePools();
   if(typeof populateRandomTypeSelect==="function")populateRandomTypeSelect();
 })();
 </script>
@@ -4917,6 +4991,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     "Fibroblast reticular cell":"Fibroblasts","Inner arachnoid fibroblast":"Fibroblasts",
     "Mural cell - Pericyte":"Mural cells","pericyte":"Mural cells","Mural cell - Smooth muscle cell":"Mural cells",
     "Mural cell - Venular smooth muscle cell/pericyte":"Mural cells","Mural cell - High order pericyte":"Mural cells",
+    "Pericyte":"Mural cells","Smooth muscle cell":"Mural cells","Venular smooth muscle cell":"Mural cells",
+    "Arachnoid barrier cell":"Leptomeninges","Dural border cell":"Leptomeninges",
     "Endothelial cell":"Endothelial cells",
     "Astrocyte":"Astrocytes","astrocyte":"Astrocytes",
     "Macrophage":"Macrophages",
@@ -4931,10 +5007,11 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     "Microglia":"#51cf66","Fibroblasts":"#f6c945","Mural cells":"#e03131","Endothelial cells":"#69db7c",
     "Astrocytes":"#9c36b5","Macrophages":"#66d9e8","Excitatory neurons":"#ffffff","Inhibitory neurons":"#adb5bd",
     "OPCs":"#f76707","Oligodendrocytes":"#b2f2bb","Lymphocytes":"#ffec99","Dendritic cells":"#2b8a3e",
-    "Other":"#495057" // erythrocyte/platelet/neutrophil/monocyte/arachnoid barrier cell/dural border cell — not otherwise specified
+    "Leptomeninges":"#748ffc",
+    "Other":"#495057" // erythrocyte/platelet/neutrophil/monocyte — not otherwise specified
   };
   const VIEWER_CATEGORY_ORDER=["Excitatory neurons","Inhibitory neurons","Astrocytes","Microglia","Oligodendrocytes","OPCs",
-    "Endothelial cells","Mural cells","Fibroblasts","Macrophages","Lymphocytes","Dendritic cells","Other"];
+    "Endothelial cells","Mural cells","Fibroblasts","Leptomeninges","Macrophages","Lymphocytes","Dendritic cells","Other"];
   const NUCLEUS_COLOR="#1c7ed6";
   const VASC_COLOR="#ced4da";
   /* Shared palette for user-defined region boxes -- same colours are used both in the SVG
@@ -5312,6 +5389,15 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     var L=function(a,b){return{type:"line",id:idp+"-"+(k++),pointA:a,pointB:b,props:[colorHex]};};
     return[L(Sv,Ev),L(Ev,p1),L(Ev,p2),L(p1,p2),L(Ev,p3),L(Ev,p4),L(p3,p4)];
   }
+  let ALL_ROOTID_PROPOSALS=null;
+  async function fetchAllRootIdProposals(){
+    if(ALL_ROOTID_PROPOSALS)return ALL_ROOTID_PROPOSALS;
+    try{
+      const r=await fetch(REPORT_ENDPOINT+"?allRootIds=1");const d=await r.json();
+      ALL_ROOTID_PROPOSALS=(d&&d.byNucleus)||{};
+    }catch(_e){ALL_ROOTID_PROPOSALS={};}
+    return ALL_ROOTID_PROPOSALS;
+  }
   async function fetchAllOrganelles(){
     if(!REPORT_ENDPOINT)return{};
     try{var r=await fetch(REPORT_ENDPOINT+"?allOrganelles=1");var d=await r.json();var map={};
@@ -5334,7 +5420,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     let nxmin=Infinity,nxmax=-Infinity,nymin=Infinity,nymax=-Infinity,nzmin=Infinity,nzmax=-Infinity;
     let sx=0,sy=0,sz=0,n=0,anyIn65=false,anyIn35=false;
     const byCat={}; // category -> {segIds:Set, nucIds:Set}
-    function catBucket(cat){return byCat[cat]||(byCat[cat]={segIds:new Set(),nucIds:new Set(),points:[]});}
+    function catBucket(cat){return byCat[cat]||(byCat[cat]={segIds:new Set(),nucIds:new Set(),seg35Ids:new Set(),points:[]});}
     for(const m of matches){
       const p=rowPos(m.row); // voxel coords
       const nx=p[0]*4,ny=p[1]*4,nz=p[2]*40; // physical nm, for the bounding-box span only
@@ -5347,6 +5433,26 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const rid=rowRootId(m.row);if(rid)bucket.segIds.add(String(rid));
       const nid=rowNucId(m.row);if(nid)bucket.nucIds.add(String(nid));
       bucket.points.push([p[0],p[1],p[2]]);
+      /* Community-proposed additional Root IDs / Nucleus IDs (see loadRootIdPanel's per-cell
+         panel) were never included here, so a newly-reported ID for e.g. an oligodendrocyte
+         never showed up in this bulk "Open all matches" view even though it appears correctly
+         on that cell's own page. Fold in every non-removed proposal for this nucleus, routed to
+         the matching layer by segType -- img65/blank into the same Img65 segmentation bucket as
+         the native root ID, img35 into a separate Img35 bucket (different segmentation volume),
+         and either nucleus flavour into the nuclei bucket (nucleus35 has no separate nuclei
+         source, so it's folded into the Img35 segment set instead, same as the single-cell
+         view's CUR_NUC_ROOT handling). */
+      if(m.row.space==="N"&&window.ALL_ROOTID_PROPOSALS){
+        const props=window.ALL_ROOTID_PROPOSALS[nid];
+        if(props)for(const pr of props){
+          if(!pr||!pr.rootId)continue;
+          const st=pr.segType||"img65";
+          if(st==="img35")bucket.seg35Ids.add(String(pr.rootId));
+          else if(st==="nucleus35")bucket.seg35Ids.add(String(pr.rootId));
+          else if(st==="nucleus"||st==="nucleus65")bucket.nucIds.add(String(pr.rootId));
+          else bucket.segIds.add(String(pr.rootId));
+        }
+      }
     }
     if(!n)return null;
     const center=[sx/n,sy/n,sz/n]; // voxel coords -- matches the "position" convention used elsewhere
@@ -5380,6 +5486,12 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         const nucArr=Array.from(bucket.nucIds),colors={};
         for(const id of nucArr)colors[id]=NUCLEUS_COLOR;
         layers.push({type:"segmentation",source:SRC.nuc,tab:"source",name:cat+" nuclei",segments:nucArr,segmentColors:colors,objectAlpha:0.4});
+      }
+      if(bucket.seg35Ids&&bucket.seg35Ids.size){
+        const seg35Arr=Array.from(bucket.seg35Ids),colors35={};
+        for(const id of seg35Arr)colors35[id]=CATEGORY_COLORS[cat]||CATEGORY_COLORS.Other;
+        layers.push({type:"segmentation",source:SRC.seg35,tab:"source",name:cat+" (Img35 proposed)",segments:seg35Arr,segmentColors:colors35,objectAlpha:0.85});
+        anyIn35=true;
       }
       /* A point at every matched cell of this category -- crucially INCLUDING cells with no
          segmented nucleus (own-verified coordinates, standalone Img35 points, merged-nucleus
@@ -5541,6 +5653,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(vascTraceSlugs.length)viewAllBtn.textContent="Fetching vasculature tracings…";
     const vascTraceLayers=await buildVascTraceLayers(vascTraceSlugs); // [] if none checked or all failed
     if((document.getElementById("filterCentVec")&&document.getElementById("filterCentVec").checked)||(document.getElementById("filterCilVec")&&document.getElementById("filterCilVec").checked)){viewAllBtn.textContent="Fetching organelle reports…";window.ORG_MAP=await fetchAllOrganelles();}else{window.ORG_MAP={};}
+    viewAllBtn.textContent="Fetching proposed segmentation IDs…";
+    window.ALL_ROOTID_PROPOSALS=await fetchAllRootIdProposals();
     viewAllBtn.textContent="Building view…";
     const state=buildFilterViewerState(lastResult.matches,vascChk&&vascChk.checked,emChk&&emChk.checked,v1ColChk&&v1ColChk.checked,vascTraceSlugs.length>0,document.getElementById("filterCentVec")&&document.getElementById("filterCentVec").checked,document.getElementById("filterCilVec")&&document.getElementById("filterCilVec").checked);
     viewAllBtn.disabled=false;viewAllBtn.textContent=orig;
