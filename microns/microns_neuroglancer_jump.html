@@ -11,7 +11,7 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
 label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:6px}
 .row{display:flex;gap:10px;flex-wrap:wrap}.coord{flex:1;min-width:90px}
-input[type=text],select,textarea{width:100%;background:#0b0f14;border:1px solid var(--line);border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:15px;padding:9px 10px}
+input[type=text],input[type=password],input[type=number],select,textarea{width:100%;background:#0b0f14;border:1px solid var(--line);border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:15px;padding:9px 10px}
 textarea{min-height:64px;font-size:12px;resize:vertical}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .units{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
@@ -2514,28 +2514,28 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
     let savedToken="";try{savedToken=localStorage.getItem("cave_token")||"";}catch(_lse){}
     let h='<div style="font-size:12px;color:var(--mut);margin-bottom:8px">Looks up this cell\'s synaptic partners directly from the CAVE materialization API and opens the cell plus its partners in Neuroglancer, coloured by direction (input '
       +'<span style="color:#00b7ff">&#9679;</span> / output <span style="color:#ff4fa3">&#9679;</span>).</div>';
-    h+='<div style="font-size:11.5px;color:var(--mut);background:var(--panel-2,rgba(255,255,255,.03));border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
-      +'<b style="color:var(--ink)">Need a CAVE token?</b> It\'s a one-time setup: install <code>caveclient</code> (<code>pip install caveclient</code>) in Python or a free '
-      +'<a href="https://colab.research.google.com/" target="_blank" rel="noopener">Google Colab</a> notebook, then run:<br>'
-      +'<code style="display:block;margin:4px 0;padding:4px 6px;background:#00000030;border-radius:4px;white-space:pre-wrap">from caveclient import CAVEclient\nclient = CAVEclient()\nclient.auth.setup_token(make_new=True)</code>'
-      +'This opens a browser page showing your token \u2014 paste just that string below (with or without quotes around it, both are fine, they\'re stripped automatically). '
-      +'Full instructions: <a href="'+CAVE_TOKEN_GUIDE_URL+'" target="_blank" rel="noopener">CAVEclient Setup guide</a>. '
+    h+='<div style="font-size:11.5px;color:var(--mut);background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
+      +'<b style="color:var(--ink)">Need a CAVE token?</b> Visit <a href="https://global.daf-apis.com/auth/api/v1/create_token" target="_blank" rel="noopener">global.daf-apis.com/auth/api/v1/create_token</a>, '
+      +'sign in with the Google account you use for MICrONS, and copy the token shown on the page. '
+      +'Paste just that string below \u2014 with or without quotes around it, both are fine, they\'re stripped automatically. '
+      +'(Prefer Python instead? The <a href="'+CAVE_TOKEN_GUIDE_URL+'" target="_blank" rel="noopener">CAVEclient setup guide</a> covers that route too.) '
       +'The token stays in your browser and is sent only to CAVE\'s own server \u2014 never to this site\'s backend.</div>';
-    h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">'
-      +'<div><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">CAVE token</label>'
-      +'<input type="password" id="connToken" placeholder=\'paste token, "quotes" ok\' value="'+escHtml(savedToken)+'" style="width:220px;font-family:ui-monospace,Menlo,Consolas,monospace"></div>'
-      +'<div><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">Version</label>'
-      +'<select id="connVersion">'+CAVE_VERSIONS.map(v=>'<option value="'+v+'"'+(v==="1300"?" selected":"")+'>'+v+(v==="1300"?" (matches this tool)":"")+'</option>').join("")+'</select></div>'
-      +'<div><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">Max partners/direction</label>'
-      +'<input type="number" id="connTopN" value="25" min="1" max="200" style="width:70px"></div>'
-      +'<div><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">Min synapses</label>'
-      +'<input type="number" id="connMinSyn" value="1" min="1" style="width:60px"></div></div>'
-      +'<div style="display:flex;gap:14px;font-size:12px;color:var(--mut);margin-bottom:8px">'
+    h+='<div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:flex-end;margin-bottom:8px;overflow-x:auto">'
+      +'<div style="flex:1 1 auto;min-width:90px"><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">CAVE token</label>'
+      +'<input type="password" id="connToken" placeholder=\'paste token\' value="'+escHtml(savedToken)+'" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;padding:6px 8px;font-size:13px"></div>'
+      +'<div style="flex:0 0 auto"><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px" title="1300 matches this tool\'s own segmentation snapshot">Version</label>'
+      +'<select id="connVersion" style="width:62px;padding:6px 4px;font-size:13px">'+CAVE_VERSIONS.map(v=>'<option value="'+v+'"'+(v==="1300"?" selected":"")+'>'+v+'</option>').join("")+'</select></div>'
+      +'<div style="flex:0 0 auto"><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px" title="Max partners per direction">Max/dir</label>'
+      +'<input type="number" id="connTopN" value="25" min="1" max="200" style="width:44px;padding:6px 4px;font-size:13px"></div>'
+      +'<div style="flex:0 0 auto"><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px" title="Minimum synapse count">Min syn</label>'
+      +'<input type="number" id="connMinSyn" value="1" min="1" style="width:38px;padding:6px 4px;font-size:13px"></div></div>'
+      +'<div style="font-size:10.5px;color:var(--mut);margin:-4px 0 8px">Version 1300 is recommended \u2014 it matches this tool\'s own segmentation snapshot.</div>'
+      +'<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin-bottom:8px">'
       +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connIn" checked> inputs</label>'
       +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connOut" checked> outputs</label>'
       +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connSyn" checked> show synapse points</label>'
       +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connRemember"'+(savedToken?" checked":"")+'> remember token in this browser</label></div>'
-      +'<button class="idbtn idbtn-submit" id="connGo">Query &amp; open in Neuroglancer</button>'
+      +'<button class="idbtn" id="connGo">Query &amp; open in Neuroglancer</button>'
       +'<span id="connStatus" style="margin-left:8px;font-size:12px"></span>'
       +'<div id="connResults" style="margin-top:8px"></div>';
     bod.innerHTML=h;
