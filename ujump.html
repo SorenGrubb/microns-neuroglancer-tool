@@ -118,7 +118,8 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 </head><body>
 <div class="wrap">
-<h1 class="logo"><span class="mu">µ</span><span class="jm">Jump</span></h1>
+<a href="#" id="logoHome" style="text-decoration:none;color:inherit;display:inline-block" title="Reload µJump"><h1 class="logo"><span class="mu">µ</span><span class="jm">Jump</span></h1></a>
+<script>document.getElementById("logoHome").href=location.pathname;</script>
 <div class="card">
 <label style="display:none">Input units</label>
 <div class="units" id="units" style="display:none"><button data-u="voxel" class="on">voxels (4&middot;4&middot;40 nm)</button><button data-u="nm">nanometres</button><button data-u="um">micrometres</button></div>
@@ -2465,6 +2466,7 @@ function caveAggregate(rows,rootId,direction){
   return{partners:[...map.values()].sort((a,b)=>b.syn_count-a.syn_count),points:pts};
 }
 const CAVE_MAX_SYN_POINTS=400;
+const SYN_POINT_COLOR="#ffe11a";
 /* centerPos is this cell's own nucleus voxel position ([NX[i],NY[i],NZ[i]]) -- this is the fix
    for bug (1) above: the state ALWAYS centres on the query cell, never on a synapse point. */
 function buildConnectivityState(centerPos,queryRootId,shown,points){
@@ -2480,13 +2482,15 @@ function buildConnectivityState(centerPos,queryRootId,shown,points){
     /* Same working pattern as vecArrowAnns/centAnns elsewhere in this file -- plain
        "local://annotations" (inherits the top-level DIM, no separate nested transform to get
        wrong), a "dir" property driving colour via a shader, instead of the fragile
-       linkedSegmentationLayer/filterBySegmentation approach that produced no visible points. */
+       linkedSegmentationLayer/filterBySegmentation approach that produced no visible points.
+       Yellow (not blue/pink like the meshes) so the points never blend into a same-coloured
+       partner mesh underneath them -- per Søren, they were hard to see as blue. */
     const shownPts=points.slice(0,CAVE_MAX_SYN_POINTS);
     const anns=shownPts.map((p,i)=>({type:"point",id:"syn"+i,point:p.pos.map(Number),
-      properties:{color:p.direction==="input"?"#00b7ff":"#ff4fa3"},
+      properties:{color:SYN_POINT_COLOR},
       description:p.direction+" synapse · partner "+p.partner}));
     layers.push({type:"annotation",source:"local://annotations",annotations:anns,
-      annotationProperties:[{id:"color",type:"rgb",default:"#00b7ff"}],
+      annotationProperties:[{id:"color",type:"rgb",default:SYN_POINT_COLOR}],
       shader:"void main() { setColor(prop_color()); }",name:"synapse points"});
   }
   return{dimensions:DIM,position:centerPos,crossSectionScale:3.0,
@@ -2523,7 +2527,6 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
   const label=()=>"Connectivity (synaptic partners)";
   el.innerHTML='<a href="#" id="connToggle" class="nsub" style="font-size:12px;cursor:pointer;text-decoration:underline">+ '+label()+'</a><div id="connBody" style="display:none;margin:6px 0 2px"></div>';
   const tog=el.querySelector("#connToggle"),bod=el.querySelector("#connBody");
-  let connCsvUrl=null;
   function buildForm(){
     if(built)return;built=true;
     let savedToken="";try{savedToken=localStorage.getItem("cave_token")||"";}catch(_lse){}
@@ -2619,15 +2622,15 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
         const rt=bod.querySelector("#connResults");
         if(rt){
           const rows2=[...allPartners].sort((a,b)=>b.syn_count-a.syn_count);
-          /* Semicolon-delimited so it opens correctly in a Danish-locale Excel (Søren's own
-             list separator) without any column-splitting step; matches the same CSV export
-             already used in the standalone microns_connectivity.html tool. Exports EVERY
-             partner found, not just the top-N per direction rendered in Neuroglancer. */
-          if(connCsvUrl){URL.revokeObjectURL(connCsvUrl);connCsvUrl=null;}
-          const csvHead="query_root_id;direction;partner_root_id;syn_count;syn_size;cell_type\n";
-          const csvBody=rows2.map(p=>[rootId,p.direction,p.partner,p.syn_count,p.syn_size,p.cell_type||""].join(";")).join("\n");
-          connCsvUrl=URL.createObjectURL(new Blob(["\uFEFF"+csvHead+csvBody],{type:"text/csv;charset=utf-8"}));
-          rt.innerHTML='<div style="margin-bottom:6px"><a class="idbtn" style="text-decoration:none;display:inline-block" href="'+connCsvUrl+'" download="partners_'+rootId+'.csv">Download all connections (Excel/CSV)</a></div>'
+          /* A real .xlsx (same SheetJS pattern as the bulk-filter export elsewhere in this file)
+             instead of a delimited text file -- a plain CSV depends on Excel guessing the right
+             list separator for the reader's regional settings before it splits into columns at
+             all, which is exactly what went wrong for Søren; writing true cells sidesteps
+             that entirely. Exports EVERY partner found, not just the top-N per direction
+             rendered in Neuroglancer. Root IDs stay as strings (not numbers) so SheetJS writes
+             them as text cells -- as plain numbers they'd exceed the 53-bit precision Excel's
+             floating-point numeric type can hold and get silently rounded/mangled. */
+          rt.innerHTML='<div style="margin-bottom:6px"><button class="idbtn" id="connXlsx" type="button">Download all connections (Excel)</button></div>'
             +'<div class="scroll" style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">dir</th>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">partner root id</th>'
@@ -2639,6 +2642,15 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+escHtml(p.cell_type||"—")+'</td></tr>').join("")
             +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the download and this table list every partner found.</div>'
             +(typeNote?'<div class="hint" style="margin-top:4px;color:#ffb74d">'+escHtml(typeNote)+'</div>':'');
+          const xlsxBtn=rt.querySelector("#connXlsx");
+          if(xlsxBtn)xlsxBtn.addEventListener("click",()=>{
+            const data=[["query_root_id","direction","partner_root_id","syn_count","syn_size","cell_type"]];
+            for(const p of rows2)data.push([String(rootId),p.direction,String(p.partner),p.syn_count,p.syn_size,p.cell_type||""]);
+            const ws=XLSX.utils.aoa_to_sheet(data);
+            const wb=XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb,ws,"Connections");
+            XLSX.writeFile(wb,"partners_"+rootId+".xlsx");
+          });
         }
       }catch(err){
         setStatus("Query failed: "+err.message+" \u2014 if this says \"Failed to fetch\", CAVE\'s server likely blocked the cross-origin request from this page (see the standalone microns_connectivity.html file\'s CORS note for a local-proxy workaround).","err");
