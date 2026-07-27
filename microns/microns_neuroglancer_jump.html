@@ -1411,7 +1411,9 @@ function showNucleus(pos){
   if(root)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span></div>';
   else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">unsegmented &mdash; no cell mesh</span></div>';
   h+='</div>';
-  h+='<div id="rootIdPanel" style="margin:6px 0"></div>';h+='<button class="jump" data-x="'+NX[i]+'" data-y="'+NY[i]+'" data-z="'+NZ[i]+'">Jump to this nucleus &#8599;</button>';
+  h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
+  h+='<div id="connPanel" style="margin:6px 0"></div>';
+  h+='<button class="jump" data-x="'+NX[i]+'" data-y="'+NY[i]+'" data-z="'+NZ[i]+'">Jump to this nucleus &#8599;</button>';
   const ne=kNearest(NX[i],NY[i],NZ[i],3,i);
   h+='<div class="neigh"><h4>3 nearest neighbouring cells</h4>';
   for(const nb of ne){const nt=typeInfo(nb.i),rr=rootId(nb.i),nciB=CELLTYPE_INFO[nt.name],nciF=nt.mtype?MTYPE_INFO[nt.mtype]:null;const nOwn=ownOverride(nb.i),nMerged=mergedInfo(nb.i);
@@ -1446,6 +1448,7 @@ function showNucleus(pos){
     if(locOnlyBtnFar)locOnlyBtnFar.addEventListener("click",()=>openLocationOnlyReport(pos));
   }
   window.CUR_POS=pos;loadCommunityReports(nid,pos);loadRootIdPanel(nid);loadIdentityVotesPanel(nid,[ti&&ti.name,(own&&own.fine)]);
+  if(typeof loadConnectivityPanel==="function")loadConnectivityPanel("connPanel",root,[NX[i],NY[i],NZ[i]]);
 }
 
 async function checkNucMesh(panel){
@@ -2370,6 +2373,239 @@ function loadRootIdPanel(nid){
     if(window.__ridOpen)setOpen(true);
   };
   fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(nid)).then(r=>r.json()).then(d=>render((d&&d.rootIds)||[])).catch(()=>{});
+}
+
+/* ---------- Connectivity: synaptic partners → Neuroglancer -----------------------------
+   Ported from a standalone tool (microns_connectivity.html) built in another session, folded in
+   here per Sören's request so it lives beneath a cell's root ID instead of as a separate page.
+   Two bugs from that standalone version are fixed in this port:
+   (1) The view used to centre on the first synapse point (or a hardcoded fallback) instead of the
+       cell being looked at. Here the centre is simply the CURRENT cell's own nucleus voxel
+       position, passed in directly — no separate lookup needed since ujump already has it.
+   (2) The synapse-point annotation layer used a nested {url,transform} source object plus
+       linkedSegmentationLayer/filterBySegmentation, which never rendered any points. Replaced
+       with the exact "local://annotations", no separate transform, plain point + colour-by-
+       property pattern already proven elsewhere in this file (see vecArrowAnns), which reliably
+       shows regardless of segmentation selection state.
+   This queries the CAVE materialization API directly from the browser with a user-supplied
+   token -- same architecture and same CORS caveat as the original standalone tool (see its
+   in-file CORS note); nothing here touches the Apps Script report backend, and the token never
+   leaves the browser except in requests straight to CAVE's own server. */
+const CAVE_SERVER="https://minnie.microns-daf.com";
+const CAVE_DATASTACK="minnie65_public";
+const CAVE_SYN_TABLE="synapses_pni_2";
+const CAVE_TYPE_TABLE="aibs_metamodel_mtypes_v661_v2";
+/* Deliberately the graphene (dynamic, proofreading-aware) segmentation, NOT this tool's own
+   SRC.seg -- SRC.seg is a frozen precomputed snapshot named after materialization version 1300
+   (seg_m1300), while a CAVE synapse query's partner root IDs are only guaranteed valid against
+   the SAME materialization version they were queried at. Mixing them silently would mean partner
+   meshes fail to load whenever a cell has been further proofread since v1300. Defaulting the
+   version picker to 1300 below keeps this tool's own root ID (also v1300-derived) consistent by
+   default; picking a newer version is fine too, it just means re-deriving the root ID for THIS
+   cell at that version may be needed if it's since been edited (zero synapses back is the tell). */
+const CAVE_SEG_SOURCE="graphene://middleauth+"+CAVE_SERVER+"/segmentation/table/"+CAVE_DATASTACK;
+const CAVE_VERSIONS=["1300","1822","1718","1621","1507","943"];
+const CAVE_TOKEN_GUIDE_URL="https://tutorial.microns-explorer.org/quickstart_notebooks/01-caveclient-setup.html";
+function caveParseBigSafe(text){return JSON.parse(text.replace(/([:\[,]\s*)(-?\d{16,})(\s*[,\]\}])/g,'$1"$2"$3'));}
+function caveToRecords(json){
+  if(Array.isArray(json))return json;
+  if(!json||typeof json!=="object")return[];
+  const keys=Object.keys(json);if(!keys.length)return[];
+  const first=json[keys[0]];
+  if(Array.isArray(first))return first.map((_,i)=>Object.fromEntries(keys.map(k=>[k,json[k][i]])));
+  if(first&&typeof first==="object")return Object.keys(first).map(i=>Object.fromEntries(keys.map(k=>[k,json[k][i]])));
+  return[];
+}
+/* Strips surrounding quotes (single, double, or a stray matching pair of either) and whitespace,
+   so a token pasted as "abc123", 'abc123', or plain abc123 are all accepted -- per Sören's
+   request, since it's an easy copy-paste mistake to include the quotes CAVE's own token page
+   sometimes wraps the value in. */
+function sanitizeCaveToken(raw){
+  let t=String(raw||"").trim();
+  for(let i=0;i<2;i++){
+    if(t.length>=2&&((t[0]==='"'&&t[t.length-1]==='"')||(t[0]==="'"&&t[t.length-1]==="'")))t=t.slice(1,-1).trim();
+    else break;
+  }
+  return t;
+}
+async function caveApiQuery(table,filterJson,token,version){
+  const url=CAVE_SERVER+"/materialize/api/v3/datastack/"+CAVE_DATASTACK+"/version/"+version+"/table/"+table+"/query?return_pyarrow=false";
+  const res=await fetch(url,{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json","Accept":"application/json"},body:filterJson});
+  if(!res.ok)throw new Error(res.status+" "+res.statusText+" — "+(await res.text()).slice(0,200));
+  return caveToRecords(caveParseBigSafe(await res.text()));
+}
+function caveSynFilter(rootId,direction){
+  const col=direction==="input"?"post_pt_root_id":"pre_pt_root_id";
+  return '{"filter_in_dict":{"'+CAVE_SYN_TABLE+'":{"'+col+'":['+rootId+']}}}';
+}
+function caveAggregate(rows,rootId,direction){
+  const partnerCol=direction==="input"?"pre_pt_root_id":"post_pt_root_id";
+  const map=new Map(),pts=[];
+  for(const r of rows){
+    const p=String(r[partnerCol]);
+    if(p===String(rootId)||p==="0")continue;
+    const e=map.get(p)||{partner:p,direction,syn_count:0,syn_size:0};
+    e.syn_count++;e.syn_size+=Number(r.size)||0;map.set(p,e);
+    if(r.ctr_pt_position)pts.push({pos:r.ctr_pt_position,partner:p,direction});
+  }
+  return{partners:[...map.values()].sort((a,b)=>b.syn_count-a.syn_count),points:pts};
+}
+const CAVE_MAX_SYN_POINTS=400;
+/* centerPos is this cell's own nucleus voxel position ([NX[i],NY[i],NZ[i]]) -- this is the fix
+   for bug (1) above: the state ALWAYS centres on the query cell, never on a synapse point. */
+function buildConnectivityState(centerPos,queryRootId,shown,points){
+  const segments=[String(queryRootId),...shown.map(p=>p.partner)];
+  const segmentColors={[String(queryRootId)]:"#ffffff"};
+  const dirColor={input:"#00b7ff",output:"#ff4fa3"};
+  shown.forEach(p=>segmentColors[p.partner]=dirColor[p.direction]);
+  const layers=[
+    {type:"image",source:SRC.em,tab:"rendering",name:"EM (Img65)",shaderControls:EM_SHADER_CONTROLS},
+    {type:"segmentation",source:CAVE_SEG_SOURCE,tab:"source",name:"cell + partners",segments,segmentColors,selectedAlpha:0.25,objectAlpha:0.9}
+  ];
+  if(points.length){
+    /* Same working pattern as vecArrowAnns/centAnns elsewhere in this file -- plain
+       "local://annotations" (inherits the top-level DIM, no separate nested transform to get
+       wrong), a "dir" property driving colour via a shader, instead of the fragile
+       linkedSegmentationLayer/filterBySegmentation approach that produced no visible points. */
+    const shownPts=points.slice(0,CAVE_MAX_SYN_POINTS);
+    const anns=shownPts.map((p,i)=>({type:"point",id:"syn"+i,point:p.pos.map(Number),
+      properties:{color:p.direction==="input"?"#00b7ff":"#ff4fa3"},
+      description:p.direction+" synapse · partner "+p.partner}));
+    layers.push({type:"annotation",source:"local://annotations",annotations:anns,
+      annotationProperties:[{id:"color",type:"rgb",default:"#00b7ff"}],
+      shader:"void main() { setColor(prop_color()); }",name:"synapse points"});
+  }
+  return{dimensions:DIM,position:centerPos,crossSectionScale:3.0,
+    projectionScale:Math.max(computeConnSpanNm(centerPos,shown,points)*0.3,10000),
+    layers,selectedLayer:{layer:"cell + partners",visible:true},
+    layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false};
+}
+/* Rough physical-nm span across the query cell + every rendered synapse point, so the initial
+   zoom is wide enough to see scattered partners rather than defaulting to a single-soma zoom
+   level (partners can be mm away). Falls back to a modest default span when there are no points
+   (e.g. doSyn unchecked) since segment-only meshes give no coordinate to measure from here. */
+function computeConnSpanNm(centerPos,shown,points){
+  if(!points||!points.length)return 60000;
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity,zmin=Infinity,zmax=-Infinity;
+  const cx=centerPos[0]*4,cy=centerPos[1]*4,cz=centerPos[2]*40;
+  xmin=xmax=cx;ymin=ymax=cy;zmin=zmax=cz;
+  for(const p of points){
+    const x=Number(p.pos[0])*4,y=Number(p.pos[1])*4,z=Number(p.pos[2])*40;
+    if(x<xmin)xmin=x;if(x>xmax)xmax=x;if(y<ymin)ymin=y;if(y>ymax)ymax=y;if(z<zmin)zmin=z;if(z>zmax)zmax=z;
+  }
+  return Math.max(xmax-xmin,ymax-ymin,zmax-zmin,20000);
+}
+/* Collapsible "Connectivity" panel under a cell's root ID -- closed by default per Sören
+   ("should only be unfolded if clicked"); the token guide/form is only built the first time it's
+   expanded, so a plain cell view stays lightweight. containerId is the empty <div> showNucleus()
+   leaves for this; rootId is this cell's OWN root ID (nothing is shown if there isn't one, since
+   an unsegmented cell has no partners to query); centerPos is [voxelX,voxelY,voxelZ]. */
+function loadConnectivityPanel(containerId,rootId,centerPos){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  el.innerHTML="";
+  if(!rootId){return;}
+  let built=false;
+  const label=()=>"Connectivity (synaptic partners)";
+  el.innerHTML='<a href="#" id="connToggle" class="nsub" style="font-size:12px;cursor:pointer;text-decoration:underline">+ '+label()+'</a><div id="connBody" style="display:none;margin:6px 0 2px"></div>';
+  const tog=el.querySelector("#connToggle"),bod=el.querySelector("#connBody");
+  function buildForm(){
+    if(built)return;built=true;
+    let savedToken="";try{savedToken=localStorage.getItem("cave_token")||"";}catch(_lse){}
+    let h='<div style="font-size:12px;color:var(--mut);margin-bottom:8px">Looks up this cell\'s synaptic partners directly from the CAVE materialization API and opens the cell plus its partners in Neuroglancer, coloured by direction (input '
+      +'<span style="color:#00b7ff">&#9679;</span> / output <span style="color:#ff4fa3">&#9679;</span>).</div>';
+    h+='<div style="font-size:11.5px;color:var(--mut);background:var(--panel-2,rgba(255,255,255,.03));border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
+      +'<b style="color:var(--ink)">Need a CAVE token?</b> It\'s a one-time setup: install <code>caveclient</code> (<code>pip install caveclient</code>) in Python or a free '
+      +'<a href="https://colab.research.google.com/" target="_blank" rel="noopener">Google Colab</a> notebook, then run:<br>'
+      +'<code style="display:block;margin:4px 0;padding:4px 6px;background:#00000030;border-radius:4px;white-space:pre-wrap">from caveclient import CAVEclient\nclient = CAVEclient()\nclient.auth.setup_token(make_new=True)</code>'
+      +'This opens a browser page showing your token \u2014 paste just that string below (with or without quotes around it, both are fine, they\'re stripped automatically). '
+      +'Full instructions: <a href="'+CAVE_TOKEN_GUIDE_URL+'" target="_blank" rel="noopener">CAVEclient Setup guide</a>. '
+      +'The token stays in your browser and is sent only to CAVE\'s own server \u2014 never to this site\'s backend.</div>';
+    h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">'
+      +'<div><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">CAVE token</label>'
+      +'<input type="password" id="connToken" placeholder=\'paste token, "quotes" ok\' value="'+escHtml(savedToken)+'" style="width:220px;font-family:ui-monospace,Menlo,Consolas,monospace"></div>'
+      +'<div><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">Version</label>'
+      +'<select id="connVersion">'+CAVE_VERSIONS.map(v=>'<option value="'+v+'"'+(v==="1300"?" selected":"")+'>'+v+(v==="1300"?" (matches this tool)":"")+'</option>').join("")+'</select></div>'
+      +'<div><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">Max partners/direction</label>'
+      +'<input type="number" id="connTopN" value="25" min="1" max="200" style="width:70px"></div>'
+      +'<div><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">Min synapses</label>'
+      +'<input type="number" id="connMinSyn" value="1" min="1" style="width:60px"></div></div>'
+      +'<div style="display:flex;gap:14px;font-size:12px;color:var(--mut);margin-bottom:8px">'
+      +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connIn" checked> inputs</label>'
+      +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connOut" checked> outputs</label>'
+      +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connSyn" checked> show synapse points</label>'
+      +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connRemember"'+(savedToken?" checked":"")+'> remember token in this browser</label></div>'
+      +'<button class="idbtn idbtn-submit" id="connGo">Query &amp; open in Neuroglancer</button>'
+      +'<span id="connStatus" style="margin-left:8px;font-size:12px"></span>'
+      +'<div id="connResults" style="margin-top:8px"></div>';
+    bod.innerHTML=h;
+    const setStatus=(msg,cls)=>{const s2=bod.querySelector("#connStatus");if(s2){s2.textContent=msg;s2.style.color=cls==="err"?"#ff7a7a":cls==="ok"?"#6ee7a0":"var(--mut)";}};
+    bod.querySelector("#connGo").addEventListener("click",async()=>{
+      const tokenRaw=bod.querySelector("#connToken").value;
+      const token=sanitizeCaveToken(tokenRaw);
+      const version=bod.querySelector("#connVersion").value;
+      const topN=parseInt(bod.querySelector("#connTopN").value,10)||25;
+      const minSyn=parseInt(bod.querySelector("#connMinSyn").value,10)||1;
+      const doIn=bod.querySelector("#connIn").checked,doOut=bod.querySelector("#connOut").checked;
+      const doSyn=bod.querySelector("#connSyn").checked;
+      const remember=bod.querySelector("#connRemember").checked;
+      if(!token){setStatus("Enter your CAVE token \u2014 see the guide above.","err");return;}
+      if(!doIn&&!doOut){setStatus("Pick inputs, outputs, or both.","err");return;}
+      try{remember?localStorage.setItem("cave_token",token):localStorage.removeItem("cave_token");}catch(_lse2){}
+      const goBtn=bod.querySelector("#connGo");goBtn.disabled=true;
+      try{
+        const dirs=[];if(doIn)dirs.push("input");if(doOut)dirs.push("output");
+        let allPartners=[],allPoints=[];
+        for(const dir of dirs){
+          setStatus("Querying "+dir+" synapses\u2026");
+          const rows=await caveApiQuery(CAVE_SYN_TABLE,caveSynFilter(rootId,dir),token,version);
+          const agg=caveAggregate(rows,rootId,dir);
+          allPartners.push(...agg.partners);allPoints.push(...agg.points);
+        }
+        const shown=dirs.flatMap(d=>allPartners.filter(p=>p.direction===d&&p.syn_count>=minSyn).slice(0,topN));
+        if(shown.length){
+          setStatus("Fetching cell types\u2026");
+          try{
+            const ids=shown.map(p=>p.partner).join(",");
+            const typeRows=await caveApiQuery(CAVE_TYPE_TABLE,'{"filter_in_dict":{"'+CAVE_TYPE_TABLE+'":{"pt_root_id":['+ids+']}}}',token,version);
+            const lut=new Map(typeRows.map(r=>[String(r.pt_root_id),r.cell_type]));
+            allPartners.forEach(p=>{p.cell_type=lut.get(p.partner)||"";});
+          }catch(_te){}
+        }
+        const shownIds=new Set(shown.map(p=>p.partner));
+        const points=doSyn?allPoints.filter(p=>shownIds.has(p.partner)):[];
+        const state=buildConnectivityState(centerPos,rootId,shown,points);
+        const viewerEl=document.getElementById("viewer");
+        const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
+        const url=base+"#!"+encodeURIComponent(JSON.stringify(state));
+        setStatus(shown.length+" of "+allPartners.length+" partners"+(points.length?", "+Math.min(points.length,CAVE_MAX_SYN_POINTS)+" synapse points":"")+" \u2014 opening Neuroglancer\u2026","ok");
+        window.open(url,"_blank");
+        const rt=bod.querySelector("#connResults");
+        if(rt){
+          const rows2=[...allPartners].sort((a,b)=>b.syn_count-a.syn_count);
+          rt.innerHTML='<div class="scroll" style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>'
+            +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">dir</th>'
+            +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">partner root id</th>'
+            +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">syn</th>'
+            +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">type</th></tr></thead><tbody>'
+            +rows2.map(p=>'<tr><td style="padding:4px 8px;border-bottom:1px solid var(--line)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:'+(p.direction==="input"?"#00b7ff":"#ff4fa3")+'"></span>'+p.direction+'</td>'
+              +'<td class="id" style="padding:4px 8px;border-bottom:1px solid var(--line);font-family:ui-monospace,Menlo,Consolas,monospace">'+p.partner+'</td>'
+              +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+p.syn_count+'</td>'
+              +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+escHtml(p.cell_type||"—")+'</td></tr>').join("")
+            +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; this table lists every partner found.</div>';
+        }
+      }catch(err){
+        setStatus("Query failed: "+err.message+" \u2014 if this says \"Failed to fetch\", CAVE\'s server likely blocked the cross-origin request from this page (see the standalone microns_connectivity.html file\'s CORS note for a local-proxy workaround).","err");
+      }finally{goBtn.disabled=false;}
+    });
+  }
+  tog.addEventListener("click",(e)=>{
+    e.preventDefault();
+    const open=bod.style.display==="none";
+    if(open)buildForm();
+    bod.style.display=open?"block":"none";
+    tog.textContent=(open?"– ":"+ ")+label();
+  });
 }
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
