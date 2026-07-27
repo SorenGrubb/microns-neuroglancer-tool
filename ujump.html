@@ -2446,7 +2446,11 @@ function caveAggregate(rows,rootId,direction){
     if(p===String(rootId)||p==="0")continue;
     const e=map.get(p)||{partner:p,direction,syn_count:0,syn_size:0};
     e.syn_count++;e.syn_size+=Number(r.size)||0;map.set(p,e);
-    if(r.ctr_pt_position)pts.push({pos:r.ctr_pt_position,partner:p,direction});
+    /* The raw CAVE materialize REST endpoint (unlike the caveclient Python wrapper) always
+       splits PostGIS geometry columns into _x/_y/_z fields -- there is no combined-array mode
+       at this layer, so ctr_pt_position never exists as such; only ctr_pt_position_x/_y/_z do. */
+    if(r.ctr_pt_position_x!=null&&r.ctr_pt_position_y!=null&&r.ctr_pt_position_z!=null)
+      pts.push({pos:[r.ctr_pt_position_x,r.ctr_pt_position_y,r.ctr_pt_position_z],partner:p,direction});
   }
   return{partners:[...map.values()].sort((a,b)=>b.syn_count-a.syn_count),points:pts};
 }
