@@ -2395,6 +2395,16 @@ const CAVE_SERVER="https://minnie.microns-daf.com";
 const CAVE_DATASTACK="minnie65_public";
 const CAVE_SYN_TABLE="synapses_pni_2";
 const CAVE_TYPE_TABLE="aibs_metamodel_mtypes_v661_v2";
+/* aibs_metamodel_mtypes_v661_v2 is a *reference* table on nucleus_detection_v0 (confirmed via
+   MICrONS's own CAVE Query: Cell Types tutorial): its own rows only have id/target_id/
+   classification_system/cell_type -- there is NO pt_root_id column on the table itself, that
+   only appears when CAVEclient's higher-level .tables.X() interface joins it in behind the
+   scenes. Filtering this raw single-table endpoint by pt_root_id directly throws exactly the
+   500 "'pt_root_id'" KeyError Søren hit. The fix is to do that join ourselves in two queries:
+   nucleus_detection_v0 (which DOES have its own pt_root_id) to map root id -> nucleus id
+   (its "id" column == the reference table's "target_id"), then the type table filtered by
+   target_id to map nucleus id -> cell_type. */
+const CAVE_NUCLEUS_TABLE="nucleus_detection_v0";
 /* Deliberately the graphene (dynamic, proofreading-aware) segmentation, NOT this tool's own
    SRC.seg -- SRC.seg is a frozen precomputed snapshot named after materialization version 1300
    (seg_m1300), while a CAVE synapse query's partner root IDs are only guaranteed valid against
@@ -2572,18 +2582,25 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
           setStatus("Fetching cell types\u2026");
           try{
             const ids=shown.map(p=>p.partner).join(",");
-            const typeRows=await caveApiQuery(CAVE_TYPE_TABLE,'{"filter_in_dict":{"'+CAVE_TYPE_TABLE+'":{"pt_root_id":['+ids+']}}}',token,version);
-            const lut=new Map(typeRows.map(r=>[String(r.pt_root_id),r.cell_type]));
-            allPartners.forEach(p=>{p.cell_type=lut.get(p.partner)||"";});
-            /* Not every partner has a row in the mtypes table (it only covers cells with a
-               detected soma/nucleus -- axon fragments, glial processes, and other non-somatic
-               partner IDs simply aren't in it), so some blanks are expected. But if we got zero
-               matches at all across every shown partner, that's not "no match" -- that's very
-               likely the query silently returning nothing (wrong version, empty response, schema
-               mismatch), so flag it instead of quietly showing dashes for everything. */
+            /* Two-step join (see comment above CAVE_NUCLEUS_TABLE): root id -> nucleus id via
+               nucleus_detection_v0, then nucleus id -> cell_type via the mtypes reference table. */
+            const nucRows=await caveApiQuery(CAVE_NUCLEUS_TABLE,'{"filter_in_dict":{"'+CAVE_NUCLEUS_TABLE+'":{"pt_root_id":['+ids+']}}}',token,version);
+            const rootToNuc=new Map(nucRows.map(r=>[String(r.pt_root_id),String(r.id)]));
+            let lut=new Map();
+            if(rootToNuc.size){
+              const nucIds=[...new Set(rootToNuc.values())].join(",");
+              const typeRows=await caveApiQuery(CAVE_TYPE_TABLE,'{"filter_in_dict":{"'+CAVE_TYPE_TABLE+'":{"target_id":['+nucIds+']}}}',token,version);
+              lut=new Map(typeRows.map(r=>[String(r.target_id),r.cell_type]));
+            }
+            allPartners.forEach(p=>{const nid=rootToNuc.get(p.partner);p.cell_type=(nid&&lut.get(nid))||"";});
+            /* Not every partner has a nucleus detection at all (axon fragments, glial processes,
+               and other non-somatic partner IDs simply aren't in nucleus_detection_v0), and not
+               every nucleus has a type call, so some blanks are expected. But zero matches across
+               every shown partner usually means something went wrong with the query rather than
+               these specific cells lacking a type -- flag that instead of quietly showing dashes. */
             if(shown.length&&![...lut.values()].some(v=>v)){
-              typeNote="Cell type lookup returned no matches for any partner (table: "+CAVE_TYPE_TABLE+", version "+version+") \u2014 this usually means something went wrong with that query rather than these specific cells lacking a type; open the browser console for details.";
-              console.warn("[uJump connectivity] cell-type lookup returned 0/"+shown.length+" matches",{table:CAVE_TYPE_TABLE,version,ids,sampleRow:typeRows[0]});
+              typeNote="Cell type lookup returned no matches for any partner (nucleus matches: "+rootToNuc.size+"/"+shown.length+", version "+version+") \u2014 open the browser console for details.";
+              console.warn("[uJump connectivity] cell-type lookup returned 0 type matches",{nucleusTable:CAVE_NUCLEUS_TABLE,typeTable:CAVE_TYPE_TABLE,version,ids,nucMatches:rootToNuc.size});
             }
           }catch(te){
             typeNote="Cell type lookup failed: "+te.message+" (partners and synapse points above are unaffected).";
