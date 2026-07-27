@@ -2567,6 +2567,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
           allPartners.push(...agg.partners);allPoints.push(...agg.points);
         }
         const shown=dirs.flatMap(d=>allPartners.filter(p=>p.direction===d&&p.syn_count>=minSyn).slice(0,topN));
+        let typeNote="";
         if(shown.length){
           setStatus("Fetching cell types\u2026");
           try{
@@ -2574,7 +2575,20 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
             const typeRows=await caveApiQuery(CAVE_TYPE_TABLE,'{"filter_in_dict":{"'+CAVE_TYPE_TABLE+'":{"pt_root_id":['+ids+']}}}',token,version);
             const lut=new Map(typeRows.map(r=>[String(r.pt_root_id),r.cell_type]));
             allPartners.forEach(p=>{p.cell_type=lut.get(p.partner)||"";});
-          }catch(_te){}
+            /* Not every partner has a row in the mtypes table (it only covers cells with a
+               detected soma/nucleus -- axon fragments, glial processes, and other non-somatic
+               partner IDs simply aren't in it), so some blanks are expected. But if we got zero
+               matches at all across every shown partner, that's not "no match" -- that's very
+               likely the query silently returning nothing (wrong version, empty response, schema
+               mismatch), so flag it instead of quietly showing dashes for everything. */
+            if(shown.length&&![...lut.values()].some(v=>v)){
+              typeNote="Cell type lookup returned no matches for any partner (table: "+CAVE_TYPE_TABLE+", version "+version+") \u2014 this usually means something went wrong with that query rather than these specific cells lacking a type; open the browser console for details.";
+              console.warn("[uJump connectivity] cell-type lookup returned 0/"+shown.length+" matches",{table:CAVE_TYPE_TABLE,version,ids,sampleRow:typeRows[0]});
+            }
+          }catch(te){
+            typeNote="Cell type lookup failed: "+te.message+" (partners and synapse points above are unaffected).";
+            console.warn("[uJump connectivity] cell-type lookup error",te);
+          }
         }
         const shownIds=new Set(shown.map(p=>p.partner));
         const points=doSyn?allPoints.filter(p=>shownIds.has(p.partner)):[];
@@ -2596,7 +2610,8 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
               +'<td class="id" style="padding:4px 8px;border-bottom:1px solid var(--line);font-family:ui-monospace,Menlo,Consolas,monospace">'+p.partner+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+p.syn_count+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+escHtml(p.cell_type||"—")+'</td></tr>').join("")
-            +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; this table lists every partner found.</div>';
+            +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; this table lists every partner found.</div>'
+            +(typeNote?'<div class="hint" style="margin-top:4px;color:#ffb74d">'+escHtml(typeNote)+'</div>':'');
         }
       }catch(err){
         setStatus("Query failed: "+err.message+" \u2014 if this says \"Failed to fetch\", CAVE\'s server likely blocked the cross-origin request from this page (see the standalone microns_connectivity.html file\'s CORS note for a local-proxy workaround).","err");
