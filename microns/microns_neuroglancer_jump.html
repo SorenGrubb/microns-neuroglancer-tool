@@ -2523,6 +2523,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
   const label=()=>"Connectivity (synaptic partners)";
   el.innerHTML='<a href="#" id="connToggle" class="nsub" style="font-size:12px;cursor:pointer;text-decoration:underline">+ '+label()+'</a><div id="connBody" style="display:none;margin:6px 0 2px"></div>';
   const tog=el.querySelector("#connToggle"),bod=el.querySelector("#connBody");
+  let connCsvUrl=null;
   function buildForm(){
     if(built)return;built=true;
     let savedToken="";try{savedToken=localStorage.getItem("cave_token")||"";}catch(_lse){}
@@ -2618,7 +2619,16 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
         const rt=bod.querySelector("#connResults");
         if(rt){
           const rows2=[...allPartners].sort((a,b)=>b.syn_count-a.syn_count);
-          rt.innerHTML='<div class="scroll" style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>'
+          /* Semicolon-delimited so it opens correctly in a Danish-locale Excel (Søren's own
+             list separator) without any column-splitting step; matches the same CSV export
+             already used in the standalone microns_connectivity.html tool. Exports EVERY
+             partner found, not just the top-N per direction rendered in Neuroglancer. */
+          if(connCsvUrl){URL.revokeObjectURL(connCsvUrl);connCsvUrl=null;}
+          const csvHead="query_root_id;direction;partner_root_id;syn_count;syn_size;cell_type\n";
+          const csvBody=rows2.map(p=>[rootId,p.direction,p.partner,p.syn_count,p.syn_size,p.cell_type||""].join(";")).join("\n");
+          connCsvUrl=URL.createObjectURL(new Blob(["\uFEFF"+csvHead+csvBody],{type:"text/csv;charset=utf-8"}));
+          rt.innerHTML='<div style="margin-bottom:6px"><a class="idbtn" style="text-decoration:none;display:inline-block" href="'+connCsvUrl+'" download="partners_'+rootId+'.csv">Download all connections (Excel/CSV)</a></div>'
+            +'<div class="scroll" style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">dir</th>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">partner root id</th>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">syn</th>'
@@ -2627,7 +2637,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
               +'<td class="id" style="padding:4px 8px;border-bottom:1px solid var(--line);font-family:ui-monospace,Menlo,Consolas,monospace">'+p.partner+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+p.syn_count+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+escHtml(p.cell_type||"—")+'</td></tr>').join("")
-            +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; this table lists every partner found.</div>'
+            +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the download and this table list every partner found.</div>'
             +(typeNote?'<div class="hint" style="margin-top:4px;color:#ffb74d">'+escHtml(typeNote)+'</div>':'');
         }
       }catch(err){
