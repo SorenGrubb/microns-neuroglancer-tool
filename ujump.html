@@ -3000,15 +3000,23 @@ const MeshDL=(()=>{
           slideshow, no click needed.
        Two plain (non-3D) text-box shapes were also added to the skeleton, stacked in the shape
        tree AFTER the model so they draw on top of it: a large bold yellow headline (cell type)
-       and a smaller grey subtitle (root ID + nucleus centre coordinates), both top-centred, with
-       a subtle drop shadow for legibility over the render. Their run text is the literal string
-       CELL_TYPE_PLACEHOLDER / SUBTITLE_PLACEHOLDER, swapped for the real values below.
+       and a smaller grey subtitle (root ID + nucleus centre coordinates, as raw VOXEL integers
+       -- not µm -- specifically so they can be pasted straight back into Neuroglancer's own
+       position box), both top-centred, with a subtle drop shadow for legibility over the render.
+       Their run text is the literal string CELL_TYPE_PLACEHOLDER / SUBTITLE_PLACEHOLDER, swapped
+       for the real values below.
      Per download, four things get replaced in slide2.xml: the embedded model3d1.glb itself,
      three numbers (meterPerModelUnit, preTrans, rot) that re-centre/re-scale the SAME fixed
      camera+lighting rig around whatever mesh is embedded, and the two text placeholders above.
      Camera, lighting, FOV etc. are copied verbatim from the reference file and are independent
      of which mesh is embedded, since preTrans/scale is exactly what normalises an arbitrary mesh
      into that fixed camera's frame.
+     The mesh's Y axis is negated before any of this (see the comment inline in
+     downloadRootPptx() below) -- MICrONS/Neuroglancer's Y increases downward (image-row
+     convention) but glTF and this camera rig assume Y-up, so feeding raw coordinates through
+     renders every cell upside down. Confirmed live and fixed 2026-07-28. Triangle winding is
+     flipped in lockstep so the mirror doesn't back-face-cull or invert lighting. Only this pptx
+     path is mirrored -- the plain .glb download is untouched.
      Formula reverse-engineered from the reference file's own am3d:trans block by comparing it
      against that file's actual mesh bounding box (see mesh-download-browser memory for the
      project's mesh-format validation approach) and confirmed with a synthetic off-centre test
@@ -3071,8 +3079,25 @@ const MeshDL=(()=>{
   const PPTX_FILL_BOOST=3; // see the big comment above -- makes the render actually fill the now full-height frame
   function escXmlText(s){return String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
   async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress){
-    const [{positions,indices,lod},JSZip]=await Promise.all([fetchMesh(rootIdStr,onProgress),loadJSZip()]);
+    const [{positions:rawPositions,indices:rawIndices,lod},JSZip]=await Promise.all([fetchMesh(rootIdStr,onProgress),loadJSZip()]);
     onProgress&&onProgress(0.96,"building PowerPoint…");
+    /* MICrONS/Neuroglancer's Y axis increases DOWNWARD (image-row convention: y=0 is the pia
+       surface, larger y is deeper/more ventral) but glTF and this am3d camera rig both assume
+       Y-UP. Feeding raw Y straight through renders every cell upside down (confirmed live,
+       2026-07-28) -- so the pptx export (only) negates Y here. Mirroring one axis also flips
+       triangle winding, which would otherwise make the mesh back-face-culled/inside-out and
+       wrong under this GLB's implicit (no explicit NORMAL attribute) per-face lighting, so each
+       triangle's last two indices are swapped to restore correct winding. The plain ".glb"
+       download (downloadRoot() above) is untouched -- it wasn't reported as upside down, and
+       whatever consumes it (Blender etc.) evidently already accounts for this axis convention. */
+    const positions=new Float32Array(rawPositions.length);
+    for(let k=0;k<rawPositions.length;k+=3){
+      positions[k]=rawPositions[k];positions[k+1]=-rawPositions[k+1];positions[k+2]=rawPositions[k+2];
+    }
+    const indices=new Uint32Array(rawIndices.length);
+    for(let t=0;t<rawIndices.length;t+=3){
+      indices[t]=rawIndices[t];indices[t+1]=rawIndices[t+2];indices[t+2]=rawIndices[t+1];
+    }
     let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
     for(let k=0;k<positions.length;k+=3){
       const x=positions[k],y=positions[k+1],z=positions[k+2];
@@ -3094,7 +3119,7 @@ const MeshDL=(()=>{
     slideXml=slideXml.replace(/<am3d:meterPerModelUnit n="\d+" d="\d+"\/>/,'<am3d:meterPerModelUnit n="'+n+'" d="'+d+'"/>');
     slideXml=slideXml.replace(/<am3d:preTrans dx="-?\d+" dy="-?\d+" dz="-?\d+"\/>/,'<am3d:preTrans dx="'+pre[0]+'" dy="'+pre[1]+'" dz="'+pre[2]+'"/>');
     slideXml=slideXml.replace(/<am3d:rot ax="-?\d+" ay="-?\d+" az="-?\d+"\/>/,'<am3d:rot ax="0" ay="0" az="0"/>');
-    const subtitle="Root ID "+rootIdStr+(coordStr?"   ·   "+coordStr:"");
+    const subtitle="Root ID "+rootIdStr+(coordStr?"   ·   voxel "+coordStr:"");
     slideXml=slideXml.replace("CELL_TYPE_PLACEHOLDER",escXmlText(cellTypeName||"Unclassified cell"));
     slideXml=slideXml.replace("SUBTITLE_PLACEHOLDER",escXmlText(subtitle));
     zip.file("ppt/slides/slide2.xml",slideXml);
@@ -3139,16 +3164,18 @@ document.addEventListener("click",(e)=>{
     });
 });
 /* nucVox is [x,y,z] in the tool's usual 4x4x40nm-voxel convention (same as NX/NY/NZ everywhere
-   else in this file) -- converted to µm here, once, so every call site can just hand over
-   whatever voxel triple it already has on hand instead of repeating the *4/1000, *40/1000 math. */
-function voxelToUmStr(v){
+   else in this file, same numbers coordSpan() shows as click-to-copy elsewhere on the page) --
+   deliberately left as RAW voxel integers, not converted to µm, because these are exactly what
+   Neuroglancer's own position box expects: paste them straight back in and you land on the same
+   spot. An earlier version of this converted to µm for readability, but Søren pointed out µm
+   can't be pasted back into MICrONS/Neuroglancer, so voxel wins over readability here. */
+function voxelToPasteStr(v){
   if(!v||v[0]==null)return "";
-  const x=(v[0]*4/1000).toFixed(1),y=(v[1]*4/1000).toFixed(1),z=(v[2]*40/1000).toFixed(1);
-  return x+', '+y+', '+z+' µm';
+  return v[0]+', '+v[1]+', '+v[2];
 }
 function meshDlButtonHtml(rootId,cellTypeName,nucVox){
   if(!rootId)return "";
-  const ct=escHtml(cellTypeName||"Unclassified cell"),coords=escHtml(voxelToUmStr(nucVox));
+  const ct=escHtml(cellTypeName||"Unclassified cell"),coords=escHtml(voxelToPasteStr(nucVox));
   return '<button class="idbtn meshdl" data-root="'+rootId+'" title="Download this cell’s 3D model as a .glb (no CAVE token needed) — runs entirely in your browser" style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ 3D model</button>'
     +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'" data-coords="'+coords+'" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates — the Turntable spin autoplays in the slideshow, no click needed — built entirely in your browser, no CAVE token needed" style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>';
 }
