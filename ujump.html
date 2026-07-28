@@ -1409,7 +1409,7 @@ function showNucleus(pos){
   }
   h+='<div class="ids">';
   h+='<div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+nid+'">'+nid+'</span></div>';
-  if(root)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span></div>';
+  if(root)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span>'+meshDlButtonHtml(root)+'</div>';
   else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">unsegmented &mdash; no cell mesh</span></div>';
   h+='</div>';
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
@@ -2341,6 +2341,7 @@ function loadRootIdPanel(nid){
           +'<button class="idbtn ridvote" data-rid="'+x.rootId+'" data-v="-1" style="padding:1px 7px">▼</button>'
           +(x.by?'<span style="font-size:11px;color:var(--mut)">by '+String(x.by).replace(/</g,"&lt;")+'</span>':'')
           +(isOwner?'<button class="idbtn ridremove" data-rid="'+x.rootId+'" style="padding:1px 7px;color:#c62828">remove</button>':'')
+          +(st==="img65"?meshDlButtonHtml(x.rootId):'') // mesh download only exists for seg_m1300 (Img65) root IDs -- Seg35 lives in a different bucket/format, and a nucleus ID has no mesh at all (see mesh-download-browser memory)
           +'</div>';
       });
     } else {
@@ -2664,6 +2665,336 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
     bod.style.display=open?"block":"none";
     tog.textContent=(open?"– ":"+ ")+label();
   });
+}
+
+/* ============================================================================
+   Mesh download: root ID -> .glb, entirely client-side (no backend, no CAVE
+   token -- the seg_m1300 mesh bucket is public). Ported from Søren's
+   mesh_download_prototype.html / MICrONS_downloader.ipynb reverse-engineering.
+   Per Søren: attach only to this cell's own root ID row(s) (not every partner
+   in the connectivity table), and download immediately at a sensible default
+   resolution rather than opening a picker -- one click, no extra UI unless it
+   fails. See mesh-download-browser memory for the LOD/transform validation.
+
+   Pipeline: root_id --murmurhash3_x86_128--> shard+minishard --Range GET-->
+   shard index --Range GET+gunzip--> minishard index --lookup--> manifest
+   byte range --Range GET+gunzip--> neuroglancer_multilod_draco manifest
+   --Range GET (one call per LOD)--> Draco fragments --draco wasm--> verts+
+   indices --assemble--> GLB. Format spec:
+   https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md
+   ============================================================================ */
+const MeshDL=(()=>{
+  const CFG={
+    meshBase:"https://storage.googleapis.com/iarpa_microns/minnie/minnie65/seg_m1300/mesh/",
+    meshBaseAlt:"https://storage.googleapis.com/storage/v1/b/iarpa_microns/o/minnie%2Fminnie65%2Fseg_m1300%2Fmesh%2F",
+    meshBaseAltSuffix:".shard?alt=media",
+    // Defaults, OVERWRITTEN at runtime from the mesh info file (see loadInfo). Never hardcode
+    // these for real: the info file is authoritative and free to read.
+    preshiftBits:6,minishardBits:8,shardBits:13,vertexQuantizationBits:16,
+    // 4x3 row-major affine, "stored model" space -> nm. seg_m1300 meshes are built from the
+    // 16x16x40 nm mip, NOT the 8x8x40 base -- see mesh-download-browser memory.
+    transform:[16,0,0,0, 0,16,0,0, 0,0,40,0],
+    dracoWrapper:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
+    dracoWasm:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
+  };
+  function mb(n){return (n/1048576).toFixed(n>10485760?0:1)+" MB";}
+  function rotl32(x,r){return ((x<<r)|(x>>>(32-r)))>>>0;}
+  function fmix32(h){h=(h^(h>>>16))>>>0;h=Math.imul(h,0x85ebca6b)>>>0;h=(h^(h>>>13))>>>0;h=Math.imul(h,0xc2b2ae35)>>>0;return (h^(h>>>16))>>>0;}
+  function murmur64(valBig){
+    const c1=0x239b961b,c2=0xab0e9789,c3=0x38b34ae5;
+    const high32=Number((valBig>>32n)&0xffffffffn),low32=Number(valBig&0xffffffffn);
+    let h1=0,h2=0,h3=0,h4=0;
+    let k2=Math.imul(high32,c2)>>>0;k2=rotl32(k2,16);k2=Math.imul(k2,c3)>>>0;h2=(h2^k2)>>>0;
+    let k1=Math.imul(low32,c1)>>>0;k1=rotl32(k1,15);k1=Math.imul(k1,c2)>>>0;h1=(h1^k1)>>>0;
+    const len=8;h1=(h1^len)>>>0;h2=(h2^len)>>>0;h3=(h3^len)>>>0;h4=(h4^len)>>>0;
+    h1=(h1+h2+h3+h4)>>>0;h2=(h2+h1)>>>0;h3=(h3+h1)>>>0;h4=(h4+h1)>>>0;
+    h1=fmix32(h1);h2=fmix32(h2);h3=fmix32(h3);h4=fmix32(h4);
+    h1=(h1+h2+h3+h4)>>>0;h2=(h2+h1)>>>0;
+    return (BigInt(h1)|(BigInt(h2)<<32n));
+  }
+  function shardAndMinishard(rootIdBig){
+    const hashed=murmur64(rootIdBig>>BigInt(CFG.preshiftBits));
+    const mask=(1n<<BigInt(CFG.minishardBits+CFG.shardBits))-1n;
+    const sm=hashed&mask;
+    const minishard=Number(sm&((1n<<BigInt(CFG.minishardBits))-1n));
+    const shard=Number((sm>>BigInt(CFG.minishardBits))&((1n<<BigInt(CFG.shardBits))-1n));
+    return {shard:shard.toString(16).padStart(4,"0"),minishard};
+  }
+  let useAlt=false;
+  function shardUrl(shard){return useAlt?(CFG.meshBaseAlt+shard+CFG.meshBaseAltSuffix):(CFG.meshBase+shard+".shard");}
+  async function rangeGet(url,start,end,onProgress){
+    const res=await fetch(url,{headers:{Range:"bytes="+start+"-"+end}});
+    if(res.status!==206)throw new Error("expected HTTP 206 for byte range, got "+res.status);
+    const total=end-start+1;
+    if(!onProgress||!res.body)return new Uint8Array(await res.arrayBuffer());
+    const reader=res.body.getReader();
+    const out=new Uint8Array(total);
+    let got=0;
+    for(;;){
+      const {done,value}=await reader.read();
+      if(done)break;
+      out.set(value,got);got+=value.length;
+      onProgress(got/total);
+    }
+    return got===total?out:out.subarray(0,got);
+  }
+  async function gunzip(u8){
+    const ds=new DecompressionStream("gzip");
+    const stream=new Blob([u8]).stream().pipeThrough(ds);
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  let infoLoaded=false;
+  async function loadInfo(){
+    if(infoLoaded)return;
+    const res=await fetch(CFG.meshBase+"info");
+    if(!res.ok){infoLoaded=true;return;} // fall back to the built-in defaults above
+    const j=await res.json();
+    if(j["@type"]!=="neuroglancer_multilod_draco")throw new Error('unexpected mesh format "'+j["@type"]+'"');
+    if(Array.isArray(j.transform)&&j.transform.length===12)CFG.transform=j.transform;
+    if(j.vertex_quantization_bits)CFG.vertexQuantizationBits=j.vertex_quantization_bits;
+    const sh=j.sharding||{};
+    if(sh.preshift_bits!=null)CFG.preshiftBits=sh.preshift_bits;
+    if(sh.minishard_bits!=null)CFG.minishardBits=sh.minishard_bits;
+    if(sh.shard_bits!=null)CFG.shardBits=sh.shard_bits;
+    if(sh.hash&&sh.hash!=="murmurhash3_x86_128")throw new Error('unsupported sharding hash "'+sh.hash+'"');
+    infoLoaded=true;
+  }
+  async function findManifest(rootIdBig){
+    const {shard,minishard}=shardAndMinishard(rootIdBig);
+    let url=shardUrl(shard);
+    const shardIndexSize=(1<<CFG.minishardBits)*16;
+    const off=minishard*16;
+    let entry;
+    try{entry=await rangeGet(url,off,off+15);}
+    catch(e){
+      if(!useAlt){useAlt=true;url=shardUrl(shard);entry=await rangeGet(url,off,off+15);}
+      else throw e;
+    }
+    const ev=new DataView(entry.buffer,entry.byteOffset,entry.byteLength);
+    const startOffset=ev.getBigUint64(0,true),endOffset=ev.getBigUint64(8,true);
+    if(startOffset===endOffset)throw new Error("minishard "+minishard+" is empty — root ID not in this dataset (or was later merged/split away)?");
+    const msStart=BigInt(shardIndexSize)+startOffset,msEnd=BigInt(shardIndexSize)+endOffset;
+    const idxRaw=await gunzip(await rangeGet(url,Number(msStart),Number(msEnd-1n)));
+    const aligned=new Uint8Array(idxRaw.length);aligned.set(idxRaw);
+    const arr=new BigUint64Array(aligned.buffer);
+    const n=arr.length/3;
+    const ids=arr.slice(0,n),starts=arr.slice(n,2*n),sizes=arr.slice(2*n);
+    for(let i=1;i<n;i++)ids[i]+=ids[i-1];
+    let prev=BigInt(shardIndexSize);
+    for(let i=0;i<n;i++){starts[i]+=prev;prev=starts[i]+sizes[i];}
+    let idx=-1;
+    for(let i=0;i<n;i++)if(ids[i]===rootIdBig){idx=i;break;}
+    if(idx<0)throw new Error("root ID "+rootIdBig+" not found in minishard "+minishard+" ("+n+" entries) — wrong dataset, or this ID predates/postdates the seg_m1300 snapshot?");
+    return {shard,minishard,manifestStart:Number(starts[idx]),manifestSize:Number(sizes[idx]),url};
+  }
+  function parseManifest(u8){
+    const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+    let p=0;
+    const chunkShape=[dv.getFloat32(p,true),dv.getFloat32(p+4,true),dv.getFloat32(p+8,true)];p+=12;
+    const gridOrigin=[dv.getFloat32(p,true),dv.getFloat32(p+4,true),dv.getFloat32(p+8,true)];p+=12;
+    const numLods=dv.getUint32(p,true);p+=4;
+    const lodScales=[];for(let i=0;i<numLods;i++){lodScales.push(dv.getFloat32(p,true));p+=4;}
+    const vertexOffsets=[];
+    for(let i=0;i<numLods;i++){vertexOffsets.push([dv.getFloat32(p,true),dv.getFloat32(p+4,true),dv.getFloat32(p+8,true)]);p+=12;}
+    const numFragsPerLod=[];for(let i=0;i<numLods;i++){numFragsPerLod.push(dv.getUint32(p,true));p+=4;}
+    const lods=[];
+    for(let l=0;l<numLods;l++){
+      const n=numFragsPerLod[l];
+      const pos=new Uint32Array(3*n);
+      for(let i=0;i<3*n;i++){pos[i]=dv.getUint32(p,true);p+=4;}
+      const sizes=new Uint32Array(n);
+      for(let i=0;i<n;i++){sizes[i]=dv.getUint32(p,true);p+=4;}
+      lods.push({n,pos,sizes});
+    }
+    return {chunkShape,gridOrigin,numLods,lodScales,vertexOffsets,numFragsPerLod,lods};
+  }
+  function fragmentLayout(parsed,manifestStart){
+    let totalBytes=0;
+    for(const lod of parsed.lods)for(const s of lod.sizes)totalBytes+=s;
+    let offset=manifestStart-totalBytes;
+    const perLod=[];
+    for(const lod of parsed.lods){
+      const start=offset,frags=[];
+      for(const s of lod.sizes){frags.push([offset,s]);offset+=s;}
+      perLod.push({start,end:offset-1,bytes:offset-start,frags});
+    }
+    return perLod;
+  }
+  let dracoPromise=null;
+  function loadDraco(){
+    if(dracoPromise)return dracoPromise;
+    dracoPromise=(async()=>{
+      const [wrapperSrc,wasmBinary]=await Promise.all([
+        fetch(CFG.dracoWrapper).then(r=>{if(!r.ok)throw new Error("draco wrapper "+r.status);return r.text();}),
+        fetch(CFG.dracoWasm).then(r=>{if(!r.ok)throw new Error("draco wasm "+r.status);return r.arrayBuffer();})
+      ]);
+      const factory=new Function(wrapperSrc+"\nreturn DracoDecoderModule;")();
+      return await factory({wasmBinary});
+    })();
+    return dracoPromise;
+  }
+  function decodeDracoFragment(draco,decoder,bytes){
+    const buf=new draco.DecoderBuffer();
+    buf.Init(new Int8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength),bytes.byteLength);
+    const mesh=new draco.Mesh();
+    const status=decoder.DecodeBufferToMesh(buf,mesh);
+    if(!status.ok()){draco.destroy(mesh);draco.destroy(buf);throw new Error("draco decode failed: "+status.error_msg());}
+    const numPoints=mesh.num_points(),numFaces=mesh.num_faces();
+    const attId=decoder.GetAttributeId(mesh,draco.POSITION);
+    const att=decoder.GetAttribute(mesh,attId);
+    const nVals=numPoints*3;
+    const pPtr=draco._malloc(nVals*4);
+    decoder.GetAttributeDataArrayForAllPoints(mesh,att,draco.DT_FLOAT32,nVals*4,pPtr);
+    const verts=new Float32Array(draco.HEAPF32.buffer,pPtr,nVals).slice();
+    draco._free(pPtr);
+    const nIdx=numFaces*3;
+    const iPtr=draco._malloc(nIdx*4);
+    decoder.GetTrianglesUInt32Array(mesh,nIdx*4,iPtr);
+    const idx=new Uint32Array(draco.HEAPF32.buffer,iPtr,nIdx).slice();
+    draco._free(iPtr);
+    draco.destroy(mesh);draco.destroy(buf);
+    return {verts,idx};
+  }
+  function buildGLB(positions,indices,name){
+    let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+    for(let i=0;i<positions.length;i+=3){
+      const x=positions[i],y=positions[i+1],z=positions[i+2];
+      if(x<minX)minX=x;if(y<minY)minY=y;if(z<minZ)minZ=z;
+      if(x>maxX)maxX=x;if(y>maxY)maxY=y;if(z>maxZ)maxZ=z;
+    }
+    const idxBytes=indices.byteLength;
+    const idxPad=(4-(idxBytes%4))%4;
+    const posOffset=idxBytes+idxPad;
+    const binLength=posOffset+positions.byteLength;
+    const json={
+      asset:{version:"2.0",generator:"uJump MICrONS mesh downloader"},
+      scene:0,scenes:[{nodes:[0]}],nodes:[{mesh:0,name}],
+      meshes:[{name,primitives:[{attributes:{POSITION:1},indices:0,mode:4}]}],
+      accessors:[
+        {bufferView:0,componentType:5125,count:indices.length,type:"SCALAR"},
+        {bufferView:1,componentType:5126,count:positions.length/3,type:"VEC3",min:[minX,minY,minZ],max:[maxX,maxY,maxZ]}
+      ],
+      bufferViews:[
+        {buffer:0,byteOffset:0,byteLength:idxBytes,target:34963},
+        {buffer:0,byteOffset:posOffset,byteLength:positions.byteLength,target:34962}
+      ],
+      buffers:[{byteLength:binLength}]
+    };
+    let jsonBytes=new TextEncoder().encode(JSON.stringify(json));
+    const jsonPad=(4-(jsonBytes.length%4))%4;
+    if(jsonPad){const padded=new Uint8Array(jsonBytes.length+jsonPad);padded.set(jsonBytes);padded.fill(0x20,jsonBytes.length);jsonBytes=padded;}
+    const binPadded=binLength+((4-(binLength%4))%4);
+    const total=12+8+jsonBytes.length+8+binPadded;
+    const out=new Uint8Array(total);
+    const dv=new DataView(out.buffer);
+    let o=0;
+    dv.setUint32(o,0x46546C67,true);o+=4;
+    dv.setUint32(o,2,true);o+=4;
+    dv.setUint32(o,total,true);o+=4;
+    dv.setUint32(o,jsonBytes.length,true);o+=4;
+    dv.setUint32(o,0x4E4F534A,true);o+=4;
+    out.set(jsonBytes,o);o+=jsonBytes.length;
+    dv.setUint32(o,binPadded,true);o+=4;
+    dv.setUint32(o,0x004E4942,true);o+=4;
+    out.set(new Uint8Array(indices.buffer,indices.byteOffset,idxBytes),o);
+    out.set(new Uint8Array(positions.buffer,positions.byteOffset,positions.byteLength),o+posOffset);
+    return out;
+  }
+  /* One click, no picker: pick the coarsest LOD still under ~8MB (falling back to the
+     coarsest LOD available), absolute dataset coordinates in micrometres so multiple
+     downloaded meshes stay spatially aligned with each other and with Neuroglancer/Blender
+     imports of MICrONS data -- same default as mesh_download_prototype.html's LOD table. */
+  async function downloadRoot(rootIdStr,onProgress){
+    const rootId=BigInt(rootIdStr);
+    onProgress&&onProgress(0,"reading manifest…");
+    await loadInfo();
+    const info=await findManifest(rootId);
+    const manifest=await gunzip(await rangeGet(info.url,info.manifestStart,info.manifestStart+info.manifestSize-1));
+    const parsed=parseManifest(manifest);
+    const layout=fragmentLayout(parsed,info.manifestStart);
+    let lod=parsed.numLods-1;
+    for(let l=parsed.numLods-1;l>=0;l--){if(layout[l].bytes<8*1048576)lod=l;}
+    const L=layout[lod];
+    onProgress&&onProgress(0.05,"fetching "+mb(L.bytes)+"…");
+    const blob=await rangeGet(info.url,L.start,L.end,f=>onProgress&&onProgress(0.05+f*0.55,"fetching…"));
+    const draco=await loadDraco();
+    const decoder=new draco.Decoder();
+    const quant=Math.pow(2,CFG.vertexQuantizationBits)-1;
+    const cs=parsed.chunkShape,go=parsed.gridOrigin,vo=parsed.vertexOffsets[lod];
+    const lodScale=Math.pow(2,lod);
+    const T=CFG.transform;
+    const P=parsed.lods[lod].pos,nF=parsed.lods[lod].n;
+    const vertChunks=[],idxChunks=[];
+    let totalVerts=0,totalIdx=0,decoded=0;
+    for(let i=0;i<nF;i++){
+      const [off,size]=L.frags[i];
+      if(size===0)continue;
+      const slice=blob.subarray(off-L.start,off-L.start+size);
+      let r;
+      try{r=decodeDracoFragment(draco,decoder,slice);}catch(_e){continue;}
+      const fx=P[i],fy=P[nF+i],fz=P[2*nF+i];
+      const v=r.verts;
+      const scale=1000; // micrometres
+      for(let k=0;k<v.length;k+=3){
+        const sx=go[0]+vo[0]+cs[0]*lodScale*(fx+v[k]/quant);
+        const sy=go[1]+vo[1]+cs[1]*lodScale*(fy+v[k+1]/quant);
+        const sz=go[2]+vo[2]+cs[2]*lodScale*(fz+v[k+2]/quant);
+        v[k]=(T[0]*sx+T[1]*sy+T[2]*sz+T[3])/scale;
+        v[k+1]=(T[4]*sx+T[5]*sy+T[6]*sz+T[7])/scale;
+        v[k+2]=(T[8]*sx+T[9]*sy+T[10]*sz+T[11])/scale;
+      }
+      const base=totalVerts/3;
+      if(base)for(let k=0;k<r.idx.length;k++)r.idx[k]+=base;
+      vertChunks.push(v);idxChunks.push(r.idx);
+      totalVerts+=v.length;totalIdx+=r.idx.length;decoded++;
+      if(i%8===0){onProgress&&onProgress(0.6+0.35*(i/nF),"decoding…");await new Promise(requestAnimationFrame);}
+    }
+    draco.destroy(decoder);
+    if(!decoded)throw new Error("no fragments decoded (LOD "+lod+", "+nF+" fragments in manifest)");
+    const positions=new Float32Array(totalVerts),indices=new Uint32Array(totalIdx);
+    let vo2=0,io2=0;
+    for(let i=0;i<vertChunks.length;i++){
+      positions.set(vertChunks[i],vo2);vo2+=vertChunks[i].length;
+      indices.set(idxChunks[i],io2);io2+=idxChunks[i].length;
+    }
+    const glb=buildGLB(positions,indices,"microns_"+rootIdStr+"_lod"+lod);
+    onProgress&&onProgress(1,"saving…");
+    const filename="microns_"+rootIdStr+"_lod"+lod+"_um.glb";
+    const url=URL.createObjectURL(new Blob([glb],{type:"model/gltf-binary"}));
+    const a=document.createElement("a");
+    a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+    return {lod,numLods:parsed.numLods,bytes:L.bytes,vertices:totalVerts/3,filename};
+  }
+  return {downloadRoot};
+})();
+/* Delegated (not re-bound per render) since root ID rows get rebuilt on every jump/reclassify --
+   a single document-level listener means every ".meshdl" button works regardless of which
+   render function drew it. Button label doubles as the status line; no separate progress UI. */
+document.addEventListener("click",(e)=>{
+  const btn=e.target.closest(".meshdl");
+  if(!btn)return;
+  e.preventDefault();
+  if(btn.disabled)return;
+  const rootId=btn.dataset.root;
+  const orig=btn.dataset.origLabel||btn.textContent;
+  btn.dataset.origLabel=orig;
+  btn.disabled=true;
+  MeshDL.downloadRoot(rootId,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";})
+    .then(info=>{
+      btn.textContent="✓ saved (LOD "+info.lod+"/"+(info.numLods-1)+", "+(info.vertices>=1000?(info.vertices/1000).toFixed(0)+"k":info.vertices)+" verts)";
+      setTimeout(()=>{btn.textContent=orig;btn.disabled=false;},4000);
+    })
+    .catch(err=>{
+      console.warn("[uJump mesh download]",err);
+      btn.textContent="✗ failed: "+err.message;
+      btn.title=String(err.message);
+      setTimeout(()=>{btn.textContent=orig;btn.disabled=false;},5000);
+    });
+});
+function meshDlButtonHtml(rootId){
+  if(!rootId)return "";
+  return '<button class="idbtn meshdl" data-root="'+rootId+'" title="Download this cell’s mesh as a .glb (no CAVE token needed) — runs entirely in your browser" style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ mesh</button>';
 }
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
@@ -3026,7 +3357,7 @@ function renderUserReportedCell(ur,panel){
   oh+=renderLocationDiagram(ur.pos);
   if(ur.rootId||ur.nucRootId){
     oh+='<div class="ids">';
-    if(ur.rootId)oh+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.rootId)+'">'+escHtml(ur.rootId)+'</span></div>';
+    if(ur.rootId)oh+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.rootId)+'">'+escHtml(ur.rootId)+'</span>'+meshDlButtonHtml(ur.rootId)+'</div>';
     if(ur.nucRootId)oh+='<div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.nucRootId)+'">'+escHtml(ur.nucRootId)+'</span></div>';
     oh+='</div>';
   }
