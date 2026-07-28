@@ -2348,8 +2348,14 @@ function loadRootIdPanel(nid){
           +'<button class="idbtn ridvote" data-rid="'+x.rootId+'" data-v="-1" style="padding:1px 7px">▼</button>'
           +(x.by?'<span style="font-size:11px;color:var(--mut)">by '+String(x.by).replace(/</g,"&lt;")+'</span>':'')
           +(isOwner?'<button class="idbtn ridremove" data-rid="'+x.rootId+'" style="padding:1px 7px;color:#c62828">remove</button>':'')
-          +(st==="img65"?meshDlButtonHtml(x.rootId,window.CUR_CELLTYPE_DISPLAY,window.CUR_NUC_CENTER_VOX):'') // mesh download only exists for seg_m1300 (Img65) root IDs -- Seg35 lives in a different bucket/format, and a nucleus ID has no mesh at all (see mesh-download-browser memory). Reuses the SAME nucleus's headline/coords globals set by showNucleus() -- these are alternate root IDs proposed for that one nucleus, not separate cells.
           +'</div>';
+        /* No per-row mesh/PowerPoint button here any more (removed 2026-07-28) -- these
+           img65-segType extra root IDs are fragments of the SAME cell as the main root ID
+           (segmentation is patchy, one cell often spans several meshes), and since every
+           mesh's vertices are in absolute dataset coordinates, they can just be merged into
+           ONE combined download instead of downloading each fragment separately. See the
+           main root ID row's meshDlButtonHtml() call and downloadRoot()/downloadRootPptx()
+           in the MeshDL IIFE below, which now fold CUR_EXTRA_ROOTS (img65 only) in automatically. */
       });
     } else {
       body+='<div style="font-size:12px;color:var(--mut)">None proposed yet.</div>';
@@ -2968,16 +2974,65 @@ const MeshDL=(()=>{
     }
     return {positions,indices,lod,numLods:parsed.numLods,bytes:L.bytes};
   }
+  /* Additional root IDs proposed for the CURRENT nucleus (CUR_EXTRA_ROOTS, populated by
+     loadRootIdPanel()) are usually fragments of the SAME cell that a patchy automatic
+     segmentation split apart, not separate cells -- so the main root ID's downloads (both the
+     .glb and the PowerPoint) fold them in automatically, added 2026-07-28 at Søren's request.
+     Only img65-segType extras qualify: Seg35 lives in a different bucket/format fetchMesh() can't
+     read, and a bare nucleus ID has no mesh at all (see mesh-download-browser memory) -- same
+     restriction the old per-row mesh button used to enforce, now centralised here since those
+     per-row buttons were removed (extra root IDs are no longer individually downloadable). */
+  function extraImg65RootIds(mainRootIdStr){
+    const seen={};seen[String(mainRootIdStr)]=1;
+    const out=[];
+    (typeof CUR_EXTRA_ROOTS!=="undefined"?CUR_EXTRA_ROOTS:[]).forEach(function(r){
+      const id=r&&r.id;
+      if(!id||seen[String(id)])return;
+      if(r.segType&&r.segType!=="img65")return;
+      seen[String(id)]=1;out.push(String(id));
+    });
+    return out;
+  }
+  /* Merges the main root ID's mesh with any qualifying extra root IDs into one vertex/index
+     buffer. Safe to do naively -- fetchMesh() already returns absolute dataset coordinates
+     specifically so multiple downloaded meshes stay spatially aligned (see the comment on
+     fetchMesh above) -- so these fragments land in their true positions relative to each other,
+     not stacked on top of one another. Falls back to a single, unmodified fetchMesh() result
+     when there are no extras (the common case), preserving the original per-mesh lod/numLods
+     info that only makes sense for a single fetch. */
+  async function fetchCombinedMesh(mainRootIdStr,onProgress){
+    const rootIds=[String(mainRootIdStr)].concat(extraImg65RootIds(mainRootIdStr));
+    if(rootIds.length===1){
+      const m=await fetchMesh(mainRootIdStr,onProgress);
+      return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds};
+    }
+    const n=rootIds.length,meshes=[];
+    for(let i=0;i<n;i++){
+      const idx=i;
+      meshes.push(await fetchMesh(rootIds[i],(frac,msg)=>onProgress&&onProgress((idx+frac)/n,(msg||"")+" (fragment "+(idx+1)+"/"+n+")")));
+    }
+    let totalV=0,totalI=0,bytes=0;
+    meshes.forEach(m=>{totalV+=m.positions.length;totalI+=m.indices.length;bytes+=m.bytes||0;});
+    const positions=new Float32Array(totalV),indices=new Uint32Array(totalI);
+    let vOff=0,vCount=0,iOff=0;
+    meshes.forEach(m=>{
+      positions.set(m.positions,vOff);
+      for(let k=0;k<m.indices.length;k++)indices[iOff+k]=m.indices[k]+vCount;
+      vOff+=m.positions.length;iOff+=m.indices.length;vCount+=m.positions.length/3;
+    });
+    return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:n,rootIds};
+  }
   async function downloadRoot(rootIdStr,onProgress){
-    const {positions,indices,lod,numLods,bytes}=await fetchMesh(rootIdStr,onProgress);
-    const glb=buildGLB(positions,indices,"microns_"+rootIdStr+"_lod"+lod);
+    const {positions,indices,lod,numLods,bytes,fragmentCount}=await fetchCombinedMesh(rootIdStr,onProgress);
+    const tag=fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod;
+    const glb=buildGLB(positions,indices,"microns_"+rootIdStr+tag);
     onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+rootIdStr+"_lod"+lod+"_um.glb";
+    const filename="microns_"+rootIdStr+tag+"_um.glb";
     const url=URL.createObjectURL(new Blob([glb],{type:"model/gltf-binary"}));
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {lod,numLods,bytes,vertices:positions.length/3,filename};
+    return {lod,numLods,bytes,vertices:positions.length/3,filename,fragmentCount};
   }
   /* ---------- PowerPoint (.pptx) with a live, auto-spinning 3D model ----------
      PPTXSK is a ~32KB skeleton .pptx -- ONE slide holding a 3D-model placeholder with the
@@ -3079,7 +3134,7 @@ const MeshDL=(()=>{
   const PPTX_FILL_BOOST=3; // see the big comment above -- makes the render actually fill the now full-height frame
   function escXmlText(s){return String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
   async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress){
-    const [{positions:rawPositions,indices:rawIndices,lod},JSZip]=await Promise.all([fetchMesh(rootIdStr,onProgress),loadJSZip()]);
+    const [{positions:rawPositions,indices:rawIndices,fragmentCount},JSZip]=await Promise.all([fetchCombinedMesh(rootIdStr,onProgress),loadJSZip()]);
     onProgress&&onProgress(0.96,"building PowerPoint…");
     /* MICrONS/Neuroglancer's Y axis increases DOWNWARD (image-row convention: y=0 is the pia
        surface, larger y is deeper/more ventral) but glTF and this am3d camera rig both assume
@@ -3110,7 +3165,7 @@ const MeshDL=(()=>{
     const cx=(minX+maxX)/2,cy=(minY+maxY)/2,cz=(minZ+maxZ)/2;
     const n=Math.round(PPTX_FILL_BOOST*1000000/longest),d=1000000;
     const pre=[Math.round(-cx*n*36),Math.round(-cy*n*36),Math.round(-cz*n*36)];
-    const glb=buildGLB(positions,indices,"microns_"+rootIdStr+"_lod"+lod);
+    const glb=buildGLB(positions,indices,"microns_"+rootIdStr+(fragmentCount>1?"_combined"+fragmentCount:""));
     const zip=await JSZip.loadAsync(PPTXSK_B64,{base64:true});
     zip.file("ppt/media/model3d1.glb",glb);
     const pngB64=renderThumbnailPNG(positions,minX,maxX,minY,maxY);
@@ -3119,18 +3174,18 @@ const MeshDL=(()=>{
     slideXml=slideXml.replace(/<am3d:meterPerModelUnit n="\d+" d="\d+"\/>/,'<am3d:meterPerModelUnit n="'+n+'" d="'+d+'"/>');
     slideXml=slideXml.replace(/<am3d:preTrans dx="-?\d+" dy="-?\d+" dz="-?\d+"\/>/,'<am3d:preTrans dx="'+pre[0]+'" dy="'+pre[1]+'" dz="'+pre[2]+'"/>');
     slideXml=slideXml.replace(/<am3d:rot ax="-?\d+" ay="-?\d+" az="-?\d+"\/>/,'<am3d:rot ax="0" ay="0" az="0"/>');
-    const subtitle="Root ID "+rootIdStr+(coordStr?"   ·   voxel "+coordStr:"");
+    const subtitle="Root ID "+rootIdStr+(fragmentCount>1?" (+"+(fragmentCount-1)+" more, combined)":"")+(coordStr?"   ·   voxel "+coordStr:"");
     slideXml=slideXml.replace("CELL_TYPE_PLACEHOLDER",escXmlText(cellTypeName||"Unclassified cell"));
     slideXml=slideXml.replace("SUBTITLE_PLACEHOLDER",escXmlText(subtitle));
     zip.file("ppt/slides/slide2.xml",slideXml);
     const blob=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation"});
     onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+rootIdStr+"_turntable.pptx";
+    const filename="microns_"+rootIdStr+(fragmentCount>1?"_combined"+fragmentCount:"")+"_turntable.pptx";
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {filename,vertices:positions.length/3};
+    return {filename,vertices:positions.length/3,fragmentCount};
   }
   return {downloadRoot,downloadRootPptx};
 })();
@@ -3152,8 +3207,10 @@ document.addEventListener("click",(e)=>{
   const task=isPptx?MeshDL.downloadRootPptx(rootId,btn.dataset.celltype,btn.dataset.coords,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";})
                    :MeshDL.downloadRoot(rootId,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";});
   task.then(info=>{
-      btn.textContent=isPptx?"✓ saved ("+(info.vertices>=1000?(info.vertices/1000).toFixed(0)+"k":info.vertices)+" verts, autoplays)"
-                            :"✓ saved (LOD "+info.lod+"/"+(info.numLods-1)+", "+(info.vertices>=1000?(info.vertices/1000).toFixed(0)+"k":info.vertices)+" verts)";
+      const vertStr=(info.vertices>=1000?(info.vertices/1000).toFixed(0)+"k":info.vertices)+" verts";
+      const combinedStr=info.fragmentCount>1?info.fragmentCount+" fragments combined, ":"";
+      btn.textContent=isPptx?"✓ saved ("+combinedStr+vertStr+", autoplays)"
+                            :"✓ saved ("+(info.fragmentCount>1?combinedStr+vertStr:"LOD "+info.lod+"/"+(info.numLods-1)+", "+vertStr)+")";
       setTimeout(()=>{btn.textContent=orig;btn.disabled=false;},4000);
     })
     .catch(err=>{
@@ -3176,8 +3233,8 @@ function voxelToPasteStr(v){
 function meshDlButtonHtml(rootId,cellTypeName,nucVox){
   if(!rootId)return "";
   const ct=escHtml(cellTypeName||"Unclassified cell"),coords=escHtml(voxelToPasteStr(nucVox));
-  return '<button class="idbtn meshdl" data-root="'+rootId+'" title="Download this cell’s 3D model as a .glb (no CAVE token needed) — runs entirely in your browser" style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ 3D model</button>'
-    +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'" data-coords="'+coords+'" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates — the Turntable spin autoplays in the slideshow, no click needed — built entirely in your browser, no CAVE token needed" style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>';
+  return '<button class="idbtn meshdl" data-root="'+rootId+'" title="Download this cell’s 3D model as a .glb (no CAVE token needed) — automatically combined with any additionally-proposed root IDs for this nucleus, since those are usually fragments of the same cell — runs entirely in your browser" style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ 3D model</button>'
+    +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'" data-coords="'+coords+'" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates — automatically combined with any additionally-proposed root IDs for this nucleus — the Turntable spin autoplays in the slideshow, no click needed — built entirely in your browser, no CAVE token needed" style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>';
 }
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
