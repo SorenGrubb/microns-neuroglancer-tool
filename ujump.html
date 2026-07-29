@@ -6316,18 +6316,18 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         if(g===65535||g>glMax)return null;
         gl=g;
       }
-      /* estimateLayerFast is computed once per row whenever either the layer filter or the
-         white-matter-distance filter needs it (both read from the same IDW pia/WM surfaces),
-         so turning both on doesn't do the interpolation twice. */
-      let layerLabel=null,wmDist=null;
-      if(layers.size||wmOn){
-        const pos=rowPos(row);
-        const est=estimateLayerFast(pos[0],pos[1],pos[2]);
-        layerLabel=est.label;
-        wmDist=est.wmDistUm;
-        if(layers.size&&!layers.has(layerLabel))return null;
-        if(wmOn&&(wmDist==null||wmDist>wmMaxUm))return null;
-      }
+      /* estimateLayerFast is now always looked up (grid-accelerated IDW over the pia/WM point
+         clouds -- same cost class as the vessel-type/distance and V1-column lookups above,
+         which are also always computed) so the Excel export can always show which cortical
+         layer a cell is in, not just while actively filtering by layer or by distance to
+         white matter. Previously this was only computed when layers.size||wmOn, so the
+         "Cortical layer" column existed but was blank on every row unless that filter was on. */
+      const pos=rowPos(row);
+      const est=estimateLayerFast(pos[0],pos[1],pos[2]);
+      const layerLabel=est.label;
+      const wmDist=est.wmDistUm;
+      if(layers.size&&!layers.has(layerLabel))return null;
+      if(wmOn&&(wmDist==null||wmDist>wmMaxUm))return null;
       return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,regionBoxLabel};
     }
     const out=[];
@@ -6467,7 +6467,11 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       }},
       {header:"Allen m-type (fine subtype)",get:m=>{const p=rowPos(m.row);const mt=mtypeInfo(p[0],p[1],p[2]);return mt?mt.name:"";}},
       {header:"Vessel type",get:m=>m.fine!=null?(window.FINE_NAMES||[])[m.fine]:""},
-      {header:"Distance to nearest vessel (µm)",get:m=>m.fineDist!=null&&m.fineDist!==65535?(m.fineDist/1000).toFixed(1):""}
+      {header:"Distance to nearest vessel (µm)",get:m=>m.fineDist!=null&&m.fineDist!==65535?(m.fineDist/1000).toFixed(1):""},
+      // Always included now (see the estimateLayerFast comment in evalRow()) -- not gated on
+      // result.layerActive, so it shows up on every export regardless of whether the layer
+      // filter checkboxes are in use.
+      {header:"Cortical layer",get:m=>m.layerLabel||""}
     ];
     /* Community-report columns -- only added when REPORT_ENDPOINT is configured at all, since
        otherwise there's no reporting feature to report on. Needs REPORTS_CACHE to have been
@@ -6495,7 +6499,6 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     }
     if(result.glActive)cols.push({header:"Distance to glia limitans (µm)",get:m=>m.gl!=null?(m.gl/1000).toFixed(1):""});
     if(result.wmActive)cols.push({header:"Distance to white matter border (µm)",get:m=>m.wmDist!=null?m.wmDist.toFixed(1):""});
-    if(result.layerActive)cols.push({header:"Cortical layer",get:m=>m.layerLabel||""});
     if(result.v1ColActive)cols.push({header:"V1 column bucket",get:m=>m.v1Bucket==="neuron"?"Neuronal":m.v1Bucket==="nonvascular"?"Non-vascular, non-neuronal":m.v1Bucket==="vascular"?"Vascular (pericyte)":""});
     if(result.regionActive)cols.push({header:"Region box",get:m=>m.regionBoxLabel||""});
     for(let k=0;k<3;k++){
