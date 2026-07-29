@@ -322,6 +322,16 @@ function mural3(name){var l=String(name).toLowerCase();if(l.indexOf("mural")<0&&
 const N=D.N,CT_NAMES=D.CT_NAMES.map(mural3),CT_CLASS=D.CT_CLASS,BB=D.bbox,HI=D.HI;
 const CAB={excitatory_neuron:"exc",inhibitory_neuron:"inh",nonneuron:"non"};
 function rootId(i){const h=NH[i];if(h===255)return null;return (BigInt(HI[h])*4294967296n+BigInt(NLO[i]>>>0)).toString();}
+/* Nucleus id -> array index, built lazily on first use. Added 2026-07-30 for
+   renderMergedSubCell()'s "what was the whole merged blob originally classified as" history
+   note -- every other lookup in this file goes index-to-id (NID[i]), this is the one place that
+   needs the reverse direction, since a merged-split report only carries the PARENT's nucleus id
+   as text, not its array index. */
+let NID_INDEX=null;
+function nidToIndex(nid){
+  if(!NID_INDEX){NID_INDEX=new Map();for(let k=0;k<N;k++)NID_INDEX.set(String(NID[k]),k);}
+  return NID_INDEX.has(String(nid))?NID_INDEX.get(String(nid)):-1;
+}
 
 const LD=JSON.parse(document.getElementById("layerdata").textContent);
 const PIA_X=new Float32Array(b64(LD.PIA.X).buffer),PIA_Y=new Float32Array(b64(LD.PIA.Y).buffer),PIA_Z=new Float32Array(b64(LD.PIA.Z).buffer),PIA_N=LD.PIA.N;
@@ -1036,14 +1046,41 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
       (__inCells[commKey]=__inCells[commKey]||{label:cinfo.label,cat:cinfo.cat,cells:[]}).cells.push(ci);
     }
     for(var ik in __inCells){if(!RP[ik])RP[ik]={label:__inCells[ik].label,cat:__inCells[ik].cat,picks:[],k:ik};RP[ik].picks.push({src:"c",cells:__inCells[ik].cells});}
+    /* Community-reported, identified merged-nucleus sub-cells (2026-07-30) -- merged into the
+       SAME pool a normal cell of that type would use (via keyFor(), just like the community-
+       override block above), not a separate isolated bucket, so "random endothelial cell" can
+       return one of these exactly as if it were any other endothelial cell. These aren't
+       nucleus-array indices (a merged sub-cell shares its parent's index, at a different real
+       position), so they carry raw [x,y,z] positions instead and jump via jumpToVoxel(), same as
+       the "o" (own-verified) pools already do below. */
+    var __msubs=await fetchIdentifiedMergedSubs(),__msPos={};
+    if(__msubs&&__msubs.length){
+      __msubs.forEach(function(sub){
+        var c=(sub.coord||"").split(",").map(Number);
+        if(c.length!==3||c.some(isNaN))return;
+        var info=keyFor(sub.identified,null);
+        (__msPos[info.k]=__msPos[info.k]||{label:info.label,cat:info.cat,positions:[]}).positions.push(c);
+      });
+      for(var mk in __msPos){if(!RP[mk])RP[mk]={label:__msPos[mk].label,cat:__msPos[mk].cat,picks:[],k:mk};RP[mk].picks.push({src:"ms",positions:__msPos[mk].positions});}
+    }
   }catch(_ce){}
   for(const k in RP){const p=RP[k];(groups[p.cat]=groups[p.cat]||[]).push(p);}
   const CAT_SEQ=["Excitatory neurons","Inhibitory neurons","Neurons","Glia","Vascular cells","Immune & perivascular cells","Leptomeninges","Other"];
+  /* Per-pick example count, shared by the optgroup label counter just below and the weighted
+     random draw in randomOfTypeBtn's click handler further down -- kept as one function so the
+     two never silently drift out of sync when a new pick source (like "ms") is added. */
+  function pickCount(pk){
+    if(pk.src==="c")return pk.cells.length;
+    if(pk.src==="ms")return pk.positions.length;
+    if(pk.src==="m")return (IDX_BY_TYPE[pk.key]||[]).length;
+    return (OWN_POS_BY_TYPE[pk.key]||[]).length;
+  }
+  window.__pickCount=pickCount;
   let opts="";
   for(const cat of CAT_SEQ){
     if(!groups[cat]||!groups[cat].length)continue;
     const items=groups[cat].slice().sort((a,b)=>a.label.localeCompare(b.label));
-    opts+='<optgroup label="'+cat+'">'+items.map(p=>{let c=0;p.picks.forEach(pk=>c+=(pk.src==="c"?pk.cells.length:(pk.src==="m"?(IDX_BY_TYPE[pk.key]||[]).length:(OWN_POS_BY_TYPE[pk.key]||[]).length)));c-=(RECLASS_OUT[p.k]||0);if(c<0)c=0;return '<option value="'+p.k+'">'+p.label+' ('+c+')</option>';}).join("")+'</optgroup>';
+    opts+='<optgroup label="'+cat+'">'+items.map(p=>{let c=0;p.picks.forEach(pk=>c+=pickCount(pk));c-=(RECLASS_OUT[p.k]||0);if(c<0)c=0;return '<option value="'+p.k+'">'+p.label+' ('+c+')</option>';}).join("")+'</optgroup>';
   }
   randomTypeSelect.innerHTML=opts;
   window.RAND_POOLS=RP;
@@ -1076,10 +1113,12 @@ if(randomOfTypeBtn)randomOfTypeBtn.addEventListener("click",()=>{
   const pool=(window.RAND_POOLS||{})[sel];
   if(!pool||!pool.picks.length){alert("No examples of that type found.");return;}
   let total=0;const cum=[];
-  pool.picks.forEach(pk=>{const c=(pk.src==="c"?pk.cells.length:(pk.src==="m"?(IDX_BY_TYPE[pk.key]||[]).length:(OWN_POS_BY_TYPE[pk.key]||[]).length));if(c>0){total+=c;cum.push({pk,upto:total});}});
+  const pickCount=window.__pickCount||(pk=>(pk.src==="c"?pk.cells.length:(pk.src==="ms"?pk.positions.length:(pk.src==="m"?(IDX_BY_TYPE[pk.key]||[]).length:(OWN_POS_BY_TYPE[pk.key]||[]).length))));
+  pool.picks.forEach(pk=>{const c=pickCount(pk);if(c>0){total+=c;cum.push({pk,upto:total});}});
   if(!total){alert("No examples of that type found.");return;}
   const r=Math.random()*total;const chosen=(cum.find(c=>r<c.upto)||cum[cum.length-1]).pk;
   if(chosen.src==="c"){jumpToNucleusIndex(chosen.cells[Math.floor(Math.random()*chosen.cells.length)]);return;}
+  if(chosen.src==="ms"){const p=chosen.positions[Math.floor(Math.random()*chosen.positions.length)];jumpToVoxel(p[0],p[1],p[2]);return;}
   if(chosen.src==="m"){const i=pickRandom(IDX_BY_TYPE[chosen.key]);if(i<0){alert("No examples of that type found.");return;}jumpToNucleusIndex(i);}
   else{const pos=pickRandom(OWN_POS_BY_TYPE[chosen.key]);if(pos===-1){alert("No examples of that type found.");return;}jumpToVoxel(pos[0],pos[1],pos[2]);}
 });
@@ -1289,6 +1328,16 @@ function showNucleus(pos){
   const[vx,vy,vz]=pos,panel=document.getElementById("nucpanel");
   LAST_OOB_QUERY++;
   panel.className="nuc show";CUR_ROOT=null;CUR_NUCID=null;CUR_NUC_ROOT=null;CUR_IS_NEURON=false;
+  /* Checked FIRST, ahead of even the standalone-annotation check below: a community-reported,
+     identified sub-cell of a merged-nucleus detection sits INSIDE a real MICrONS nucleus
+     detection (unlike a standalone point), so without this check the normal nearest() lookup a
+     few lines down would just find the single fused PARENT detection again and show the generic
+     "merged nucleus segmentation" panel -- exactly the "buried as a footnote" problem Søren asked
+     to fix. Same tight 300nm radius reasoning as stTight below: only matches a query that's
+     essentially AT a previously-reported sub-cell's own coordinate. See nearestMergedSub()/
+     renderMergedSubCell() above. */
+  const subTight=nearestMergedSub(vx,vy,vz,300);
+  if(subTight){renderMergedSubCell(subTight,panel);return;}
   /* A standalone (out-of-nucleus-detection) own annotation can sit INSIDE the MICrONS
      predicted-volume bounding box without the automatic detector ever producing a matching
      nucleus there. inRegion() only checks the bounding box, so such points used to fall through
@@ -1757,13 +1806,20 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
        } else if(d.type==="merged_split"){
          // One row per sub-nucleus a user reported inside a single fused MICrONS detection --
          // groupId ties every sub-nucleus from the same report together, subIndex/subCount
-         // record its position within that group (e.g. "2 of 3").
+         // record its position within that group (e.g. "2 of 3"). rootId here is the PARENT
+         // detection's root ID (unchanged, same as every other report type). subRootId (added
+         // 2026-07-30) is a DIFFERENT thing: this specific sub-cell's own reported root ID --
+         // since the nucleus DETECTOR merged 2+ real nuclei into one detection, but the
+         // underlying cell SEGMENTATION is a separate process, each sub-cell almost certainly
+         // has its own real, distinct root ID, and capturing it is what makes that sub-cell
+         // independently findable afterward (see ?identifiedMergedSubs=1 below, and
+         // MERGED_SUB_REPORTS_CACHE / renderMergedSubCell() on the client).
          var sh=ss.getSheetByName("Merged splits")||ss.insertSheet("Merged splits");
          if(sh.getLastRow()===0){
-           sh.appendRow(["timestamp","nucleusId","rootId","coord","groupId","subIndex","subCount","identified","path","reporterName","reporterEmail","comment","certainty"]);
+           sh.appendRow(["timestamp","nucleusId","rootId","coord","groupId","subIndex","subCount","identified","path","reporterName","reporterEmail","comment","certainty","subRootId"]);
          }
          sh.appendRow([d.timestamp||new Date().toISOString(),d.nucleusId||"",d.rootId||"",
-                       d.coord||"",d.groupId||"",d.subIndex||"",d.subCount||"",d.identified||"",d.path||"",d.reporterName||"",d.reporterEmail||"",d.comment||"",d.certainty||""]);
+                       d.coord||"",d.groupId||"",d.subIndex||"",d.subCount||"",d.identified||"",d.path||"",d.reporterName||"",d.reporterEmail||"",d.comment||"",d.certainty||"",d.subRootId||""]);
        } else if(d.type==="organelle_location"){
          // One row per centriole/cilium a user reported on an already-identified cell --
          // groupId+subIndex/subCount tie multiple structures from the same submission together,
@@ -1942,6 +1998,45 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
          return ContentService.createTextOutput(JSON.stringify({organelles:organelles}))
            .setMimeType(ContentService.MimeType.JSON);
        }
+       if(e.parameter.identifiedMergedSubs==="1"){
+         // Bulk mode (added 2026-07-30) for merged_split rows that HAVE an identity given --
+         // this is what makes a reported sub-cell of a merged nucleus independently findable on
+         // the client: the random-example picker and the bulk cell-type filter both need every
+         // identified sub-cell's own coordinate/identity/root ID up front, not just the one
+         // parent nucleus a user happens to be looking at (unlike the per-nucleus mergedGroups
+         // branch further below, which only ever returns sub-rows for ONE nucleusId at a time).
+         // Rows with a blank "identified" are excluded on purpose -- an unidentified sub-cell
+         // isn't findable by type, same bar as every other "reported" cell in this tool.
+         var ss=SpreadsheetApp.getActiveSpreadsheet();
+         var sh=ss.getSheetByName("Merged splits");
+         var subs=[];
+         if(sh&&sh.getLastRow()>=2){
+           var data=sh.getDataRange().getValues();
+           var headers=data[0];
+           var nidIdx=headers.indexOf("nucleusId");
+           var identIdx=headers.indexOf("identified");
+           var coordIdx=headers.indexOf("coord");
+           var subRootIdx=headers.indexOf("subRootId");
+           var groupIdx=headers.indexOf("groupId");
+           var subIdxIdx=headers.indexOf("subIndex");
+           var subCountIdx=headers.indexOf("subCount");
+           for(var si=1;si<data.length;si++){
+             var ident=String(data[si][identIdx]||"").trim();
+             if(!ident)continue;
+             subs.push({
+               nucleusId:String(data[si][nidIdx]||""),
+               identified:ident,
+               coord:data[si][coordIdx]||"",
+               subRootId:subRootIdx>=0?(data[si][subRootIdx]||""):"",
+               groupId:data[si][groupIdx]||"",
+               subIndex:data[si][subIdxIdx]||"",
+               subCount:data[si][subCountIdx]||""
+             });
+           }
+         }
+         return ContentService.createTextOutput(JSON.stringify({mergedSubs:subs}))
+           .setMimeType(ContentService.MimeType.JSON);
+       }
        if(e.parameter.allIds==="1"){
          // Bulk mode for (a) the "unclassified" filter tiers that need to know what's already
          // reported, and (b) the "Reported by community?" / "Community report details" Excel
@@ -2051,12 +2146,18 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
            var mGroupIdx=mheaders.indexOf("groupId");
            var mSubIdx=mheaders.indexOf("subIndex");
            var mSubCountIdx=mheaders.indexOf("subCount");
+           // coord/subRootId (added 2026-07-30, alongside the merged-sub-cell findability
+           // feature) so a user re-opening THIS SAME parent nucleus's report thread can jump
+           // straight to a specific sub-cell instead of only seeing its identity/comment text.
+           var mCoordIdx=mheaders.indexOf("coord");
+           var mSubRootIdx=mheaders.indexOf("subRootId");
            var groups={};
            for(var mi=1;mi<mdata.length;mi++){
              if(String(mdata[mi][midIdx])!==String(nucleusId))continue;
              var gid=String(mdata[mi][mGroupIdx]);
              if(!groups[gid])groups[gid]={subCount:mdata[mi][mSubCountIdx]||0,subs:[]};
-             groups[gid].subs.push({identified:mdata[mi][mIdentIdx],comment:mdata[mi][mCommentIdx]||"",subIndex:mdata[mi][mSubIdx]});
+             groups[gid].subs.push({identified:mdata[mi][mIdentIdx],comment:mdata[mi][mCommentIdx]||"",subIndex:mdata[mi][mSubIdx],
+               coord:mCoordIdx>=0?(mdata[mi][mCoordIdx]||""):"",subRootId:mSubRootIdx>=0?(mdata[mi][mSubRootIdx]||""):""});
            }
            var mergedGroups=[];
            for(var gid2 in groups)mergedGroups.push(groups[gid2]);
@@ -2177,6 +2278,26 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
    nucleus)" sheet already has rows, manually add a "nucRootId" header in its last column --
    the header-row-write in doPost only fires once, when the sheet is still empty. Redeploy steps
    (a)/(b) apply: paste the updated doPost/doGet and create a new deployment version.
+   ALSO IMPORTANT if you already deployed before merged-nucleus sub-cells became independently
+   findable (2026-07-30): each sub-nucleus row in the "report a merged nucleus" form can now
+   also carry its own root ID -- doPost's merged_split branch writes it as a NEW "subRootId"
+   column (appended LAST, same convention as "certainty"/"nucRootId" above, so it won't shift
+   any existing columns). If the "Merged splits" sheet already has rows, manually add a
+   "subRootId" header in its last column -- the header-row-write only fires once, when the sheet
+   is still empty. The per-nucleus doGet branch (mergedGroups) now also returns each sub's coord
+   and subRootId, not just identified/comment, so a user re-opening the same parent nucleus's
+   report thread can jump straight to a specific sub-cell. Separately, doGet gained a whole new
+   bulk mode, "?identifiedMergedSubs=1", returning every merged_split row that has a non-blank
+   identified (coord, identified, subRootId, nucleusId, groupId, subIndex, subCount) ACROSS EVERY
+   nucleus, not just one -- this is what the client's random-example picker and bulk cell-type
+   filter use to make a reported, identified sub-cell show up as its own findable cell, same as
+   any other classified cell in the tool, with its origin as a merged-detection split preserved
+   as history rather than lost. Centriole/cilium structures logged inside a merged sub-row need
+   NO backend change at all -- they're posted as ordinary organelle_location rows with a
+   deliberately BLANK nucleusId (same as a "new cell, no nucleus" report), so the EXISTING
+   "?newCellOrganelles=1" bulk mode and organellesNearPos() coordinate-matching already pick them
+   up without modification. Redeploy steps (a)/(b) apply: paste the updated doPost/doGet and
+   create a new deployment version.
    Note: the POST below uses mode:"no-cors" (required for a plain fetch to an Apps Script
    web app without extra CORS setup), so the button shows a success message optimistically --
    it can't read back a real success/failure. Check the sheet itself to confirm rows arrive.
@@ -2344,14 +2465,26 @@ function loadIdentityVotesPanel(nid,seeds){
   fetch(REPORT_ENDPOINT+"?identityVotes="+encodeURIComponent(nid)).then(function(r){return r.json();}).then(function(d){render((d&&d.identityVotes)||[]);}).catch(function(){});
 }
 function segTypeLabel(t){return t==="img35"?"Seg35":(t==="nucleus35"?"Nucleus·35":((t==="nucleus"||t==="nucleus65")?"Nucleus·65":"Seg65"));}
-function loadRootIdPanel(nid){
-  CUR_EXTRA_ROOTS=[];
-  const el=document.getElementById("rootIdPanel");
+/* containerEl (optional, added 2026-07-30) lets this same propose/vote panel be embedded more
+   than once on screen at once -- e.g. one instance per sub-nucleus row in the merged-nucleus
+   report form (see renderMergedReport()), each keyed by that row's OWN coordinate string, same
+   convention as the existing no-nucleus-point call below. Defaults to the single page-level
+   #rootIdPanel element so both pre-existing call sites (the main per-nucleus panel, and the
+   out-of-region standalone panel) are unaffected. Only the FIRST/most-recently-loaded instance
+   still writes CUR_EXTRA_ROOTS (used by the main root ID's mesh/pptx download buttons to fold in
+   img65 fragments) -- per-row instances inside the merged report form don't touch it, since
+   their extra IDs belong to a not-yet-real sub-cell, not to whatever nucleus is currently on
+   screen behind the report form. */
+function loadRootIdPanel(nid,containerEl){
+  const el=containerEl||document.getElementById("rootIdPanel");
+  if(!containerEl)CUR_EXTRA_ROOTS=[];
   if(!el||!REPORT_ENDPOINT||!nid){if(el)el.innerHTML="";return;}
   el.innerHTML="";
   const render=(list)=>{
-    CUR_EXTRA_ROOTS=list.map(function(x){return {id:x.rootId,segType:x.segType||"img65"};}).filter(function(o){return o.id;});
-    try{var _h=document.getElementById("ctHeadline");if(_h&&window.CUR_POS){var _a=_h.querySelector("a[href]");if(_a)_a.href=neuroglancerLinkForPos(window.CUR_POS);}}catch(_e){}
+    if(!containerEl){
+      CUR_EXTRA_ROOTS=list.map(function(x){return {id:x.rootId,segType:x.segType||"img65"};}).filter(function(o){return o.id;});
+      try{var _h=document.getElementById("ctHeadline");if(_h&&window.CUR_POS){var _a=_h.querySelector("a[href]");if(_a)_a.href=neuroglancerLinkForPos(window.CUR_POS);}}catch(_e){}
+    }
     const isOwner=OWNER_EMAIL&&REPORTER_EMAIL===OWNER_EMAIL;
     const n=list.length;
     let body='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Segmentation and nucleus detection are often patchy — one cell can span several meshes. Proposed IDs are added to the matching Neuroglancer layer for everyone; vote whether each belongs. Pick which segmentation each ID comes from — an Img65 or Img35 segment ID, or a Nucleus ID — because an ID only works in its own segmentation.</div>';
@@ -2386,24 +2519,30 @@ function loadRootIdPanel(nid){
     el.innerHTML='<a href="#" id="ridToggle" class="nsub" style="font-size:12px;cursor:pointer;text-decoration:underline">+ '+label()+'</a>'
       +'<div id="ridBody" style="display:none;margin:6px 0 2px">'+body+'</div>';
     const tog=el.querySelector("#ridToggle"),bod=el.querySelector("#ridBody");
-    const setOpen=(open)=>{bod.style.display=open?"block":"none";tog.textContent=(open?"– ":"+ ")+label();window.__ridOpen=open;};
+    /* window.__ridOpen only persists open/closed state for the single page-level panel (the
+       common case: keep it open across re-renders while a user is actively proposing/voting on
+       the currently-displayed nucleus). Per-row instances inside the merged report form each get
+       their own independent, non-persisted open state -- sharing one global flag across several
+       simultaneous rows would make opening one row's panel appear to force-open every other
+       row's panel too on its next render. */
+    const setOpen=(open)=>{bod.style.display=open?"block":"none";tog.textContent=(open?"– ":"+ ")+label();if(!containerEl)window.__ridOpen=open;};
     tog.addEventListener("click",(e)=>{e.preventDefault();setOpen(bod.style.display==="none");});
     el.querySelectorAll(".ridcopy").forEach(b=>b.addEventListener("click",()=>{navigator.clipboard&&navigator.clipboard.writeText(b.dataset.rid);const o=b.textContent;b.textContent="copied";setTimeout(()=>b.textContent=o,800);}));
     el.querySelectorAll(".ridvote").forEach(b=>b.addEventListener("click",()=>{
-      if(postReport({type:"vote_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid,vote:Number(b.dataset.v)},"Vote recorded — thank you.")){window.__ridOpen=true;setTimeout(()=>loadRootIdPanel(nid),1500);}
+      if(postReport({type:"vote_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid,vote:Number(b.dataset.v)},"Vote recorded — thank you.")){if(!containerEl)window.__ridOpen=true;setTimeout(()=>loadRootIdPanel(nid,containerEl),1500);}
     }));
     el.querySelectorAll(".ridremove").forEach(b=>b.addEventListener("click",()=>{
       if(!confirm("Remove proposed ID "+b.dataset.rid+" from this cell for everyone?"))return;
-      if(postReport({type:"remove_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid},"Removed.")){window.__ridOpen=true;setTimeout(()=>loadRootIdPanel(nid),1500);}
+      if(postReport({type:"remove_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid},"Removed.")){if(!containerEl)window.__ridOpen=true;setTimeout(()=>loadRootIdPanel(nid,containerEl),1500);}
     }));
     const pb=el.querySelector("#ridPropose");
     if(pb)pb.addEventListener("click",()=>{
       const v=((el.querySelector("#ridInput")||{}).value||"").trim();
       const stv=((el.querySelector("#ridType")||{}).value)||"img65";
       if(!/^\d{5,}$/.test(v)){alert("Enter a numeric ID (the long segment or nucleus ID from Neuroglancer).");return;}
-      if(postReport({type:"propose_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:v,segType:stv},"Proposed — thank you.")){window.__ridOpen=true;setTimeout(()=>loadRootIdPanel(nid),1500);}
+      if(postReport({type:"propose_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:v,segType:stv},"Proposed — thank you.")){if(!containerEl)window.__ridOpen=true;setTimeout(()=>loadRootIdPanel(nid,containerEl),1500);}
     });
-    if(window.__ridOpen)setOpen(true);
+    if(containerEl||window.__ridOpen)setOpen(true);
   };
   fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(nid)).then(r=>r.json()).then(d=>render((d&&d.rootIds)||[])).catch(()=>{});
 }
@@ -3717,6 +3856,53 @@ function nearestUserReportedCell(vx,vy,vz,maxDistNm){
     rootId:best.rootId||"",nucRootId:best.nucRootId||"",comment:best.comment||"",
     certainty:best.certainty||"",dist:distNm,reportIdx:bestIdx};
 }
+/* ---------- Findable merged-nucleus sub-cells (2026-07-30) ----------
+   A community-reported sub-nucleus of a merged detection (see the "Report a merged nucleus" flow
+   above) only becomes independently findable once it has BOTH an identity AND (implicitly, for
+   anything more than a bare identity string) is reachable by jumping back to its own coordinate
+   -- MICrONS never produced a separate nucleus detection for it, so the normal nearest()/NX-NY-NZ
+   lookup would just find the single fused parent detection again. Mirrors NEW_CELL_REPORTS_CACHE/
+   fetchNewCellReports()/nearestUserReportedCell() immediately above almost exactly -- same
+   eager-fetch-on-load, same coordinate-proximity matching -- the difference is the identity bar:
+   an UNIDENTIFIED sub-cell report isn't included here at all (server-side filter, see
+   ?identifiedMergedSubs=1), same "findable only once classified" bar every other cell in this
+   tool is held to. */
+let MERGED_SUB_REPORTS_CACHE=null;
+async function fetchIdentifiedMergedSubs(){
+  if(MERGED_SUB_REPORTS_CACHE)return MERGED_SUB_REPORTS_CACHE;
+  if(!REPORT_ENDPOINT)return null;
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?identifiedMergedSubs=1");
+    const d=await r.json();
+    if(!d||!d.mergedSubs)return null;
+    MERGED_SUB_REPORTS_CACHE=d.mergedSubs;
+    return MERGED_SUB_REPORTS_CACHE;
+  }catch(_){return null;}
+}
+fetchIdentifiedMergedSubs();
+/* Same TIE_NM/completeness-preferring pattern as nearestUserReportedCell() above -- a merged
+   sub-cell can plausibly get more than one report over time (different users splitting the same
+   fused detection independently), and whichever one has a root ID filled in is the more useful
+   candidate to show when two land essentially on top of each other. */
+function nearestMergedSub(vx,vy,vz,maxDistNm){
+  if(!MERGED_SUB_REPORTS_CACHE)return null;
+  let best=null,bestPos=null,bestD=Infinity,bestIdx=-1;
+  const px=vx*4,py=vy*4,pz=vz*40;
+  const TIE_NM=50,tieD=TIE_NM*TIE_NM;
+  const completeness=r=>r.subRootId?1:0;
+  MERGED_SUB_REPORTS_CACHE.forEach((sub,idx)=>{
+    const c=(sub.coord||"").split(",").map(Number);
+    if(c.length!==3||c.some(isNaN))return;
+    const dx=px-c[0]*4,dy=py-c[1]*4,dz=pz-c[2]*40,d=dx*dx+dy*dy+dz*dz;
+    const better=best===null||d<bestD-tieD||(Math.abs(d-bestD)<=tieD&&completeness(sub)>completeness(best));
+    if(better){bestD=d;best=sub;bestPos=c;bestIdx=idx;}
+  });
+  if(!best)return null;
+  const distNm=Math.sqrt(bestD);
+  if(maxDistNm!=null&&distNm>maxDistNm)return null;
+  return{pos:bestPos,identified:best.identified||"",subRootId:best.subRootId||"",
+    parentNucleusId:best.nucleusId||"",subCount:Number(best.subCount)||0,dist:distNm,subIdx:bestIdx};
+}
 /* Same idea as kNearest() (the "3 nearest neighbouring cells" list shown for a normal in-region
    MICrONS nucleus), but for out-of-region coordinates -- nucleus_detection_v0 (NX/NY/NZ, what
    kNearest searches) simply has no rows out here at all. The only things that DO exist in
@@ -3857,6 +4043,72 @@ function renderUserReportedCell(ur,panel){
   const newCellBtn=panel.querySelector("#idfNewCellGo");
   if(newCellBtn)newCellBtn.addEventListener("click",()=>openIdentify(newCellCtx));
   wireLeafSearch("newCellLeaf",slug=>openIdentifyToLeaf(newCellCtx,slug));
+}
+/* Shown when a query coordinate lands on (within 300nm of) a community-reported, IDENTIFIED
+   sub-cell of a merged-nucleus detection (see nearestMergedSub()/MERGED_SUB_REPORTS_CACHE) --
+   this is what makes such a sub-cell "findable as its own cell" rather than only ever showing
+   the generic fused-blob panel. Deliberately its own function (not folded into
+   renderUserReportedCell(), which is for out-of-region community reports with no MICrONS
+   nucleus involved at all) because this case is fundamentally different: it's IN region, DOES
+   sit inside a real MICrONS nucleus detection, and its whole reason for needing a dedicated
+   panel is preserving the history of what that detection covers and what it was originally
+   (mis)classified as -- exactly what Søren asked to keep visible ("with their history as merged
+   nuclei and what they used to be, eg. unclassified"). */
+function renderMergedSubCell(sub,panel){
+  panel.className="nuc show";
+  CUR_ROOT=sub.subRootId||null;CUR_NUCID=null;CUR_NUC_ROOT=null;
+  CUR_IS_NEURON=looksLikeNeuron(sub.identified);
+  window.CUR_POS=sub.pos;window.CUR_CELLTYPE_DISPLAY=sub.identified;
+  let h='<span class="tag" style="background:#332900;color:#e8b923;border:1px solid #e8b923" title="Reported through the ‘report a merged nucleus’ flow: MICrONS’s automatic nucleus detector fused this cell together with at least one other real nucleus into a single detection, but this specific sub-cell has since been given its own identity (and, if known, its own root ID) by a tool user.">community-reported — merged-nucleus split</span>';
+  h+='<div class="celltype">'+celltypeLink(sub.pos,escHtml(sub.identified))+'</div>';
+  /* History/provenance: the parent nucleus id, how many real cells MICrONS fused together
+     (subCount, if the source report included it), and -- via nidToIndex()/typeInfo() -- what
+     the whole fused blob was originally (mis)classified as, e.g. "Unclassified" or a MICrONS
+     broad-type guess. This is the "history as merged nuclei and what they used to be" Søren
+     explicitly asked to preserve, not just a dead-end identity. */
+  let origLabel="unknown (parent nucleus not found in this dataset build)";
+  if(sub.parentNucleusId){
+    const pIdx=nidToIndex(sub.parentNucleusId);
+    if(pIdx>=0)origLabel=longName(typeInfo(pIdx).name);
+  }
+  h+='<div class="meta">Part of nucleus '+escHtml(sub.parentNucleusId||"?")+(sub.subCount>1?", which MICrONS’s detector fused together with "+(sub.subCount-1)+" other real nucle"+(sub.subCount-1>1?"i":"us"):", flagged by a tool user as covering more than one real nucleus")+' — the whole fused detection was originally (mis)classified as <b>'+escHtml(origLabel)+'</b>.</div>';
+  h+='<div class="meta">'+(sub.dist<50?"at":sub.dist.toFixed(0)+" nm from")+' voxel ('+coordSpan(sub.pos[0],sub.pos[1],sub.pos[2])+') &mdash; this is the reporter’s own estimated center for this sub-cell, not an independent MICrONS nucleus detection.</div>';
+  h+=renderLocationDiagram(sub.pos);
+  h+='<div class="ids">';
+  if(sub.subRootId)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(sub.subRootId)+'">'+escHtml(sub.subRootId)+'</span>'+meshDlButtonHtml(sub.subRootId,sub.identified,sub.pos,true)+'</div>';
+  else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">not reported yet — propose one below</span></div>';
+  h+='</div>';
+  h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
+  const organelles=organellesNearPos(sub.pos[0],sub.pos[1],sub.pos[2],5000);
+  if(organelles&&organelles.length){
+    const centCount=organelles.filter(s=>s.kind==="centriole").length;
+    const ciliumCount=organelles.filter(s=>s.kind==="cilium").length;
+    const parts=[];
+    if(centCount)parts.push(centCount+" centriole"+(centCount>1?"s":""));
+    if(ciliumCount)parts.push(ciliumCount+" cilium"+(ciliumCount>1?"a":""));
+    h+='<div class="meta" style="margin-top:8px;color:var(--accent)">&#128172; Centriole/cilium location'+(organelles.length>1?"s":"")+' logged for this cell'+(parts.length?" &mdash; "+parts.join(", "):"")+'.</div>';
+    h+=organelleStructRowsHtml(organelles);
+  } else if(organelles===null){
+    const orgToken=LAST_OOB_QUERY;
+    fetchNewCellOrganelles().then(()=>{
+      if(orgToken!==LAST_OOB_QUERY)return;
+      const orgs2=organellesNearPos(sub.pos[0],sub.pos[1],sub.pos[2],5000);
+      if(orgs2&&orgs2.length)renderMergedSubCell(sub,panel);
+    });
+  }
+  h+='<button class="jump" data-x="'+sub.pos[0]+'" data-y="'+sub.pos[1]+'" data-z="'+sub.pos[2]+'">Jump to this sub-cell &#8599;</button>';
+  if(sub.parentNucleusId){
+    const pIdx=nidToIndex(sub.parentNucleusId);
+    if(pIdx>=0)h+='<button class="jump" style="margin-left:6px" data-x="'+NX[pIdx]+'" data-y="'+NY[pIdx]+'" data-z="'+NZ[pIdx]+'">Jump to parent merged detection &#8599;</button>';
+  }
+  h+='<p class="hint" style="margin-top:10px">Want to correct this identity, or report a different split? Jump to the parent merged detection above, then use its “Report a merged nucleus” link again.</p>';
+  panel.innerHTML=h;
+  panel.querySelectorAll(".jump").forEach(b=>b.addEventListener("click",()=>{
+    unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
+    document.getElementById("x").value=b.dataset.x;document.getElementById("y").value=b.dataset.y;document.getElementById("z").value=b.dataset.z;document.getElementById("go").click();
+  }));
+  panel.querySelectorAll(".idval").forEach(el=>el.addEventListener("click",()=>{navigator.clipboard&&navigator.clipboard.writeText(el.dataset.c);const o=el.textContent;el.textContent="copied";setTimeout(()=>el.textContent=o,900);}));
+  loadRootIdPanel(sub.pos.join(","));
 }
 
 let ID_PATH=[],ID_NODE=null,ID_CTX={};
@@ -4473,6 +4725,73 @@ function renderResult(slug){
    the Apps Script reference doPost/doGet above (REPORT_ENDPOINT) for the sheet-side handling,
    which needs a "Merged splits" sheet and a few extra columns; the reference snippet has been
    updated to match. */
+/* Compact, repeatable centriole/cilium mini-list embedded inside ONE merged-nucleus sub-row (see
+   addRow() in renderMergedReport() below). Deliberately NOT reusing organelleFormHtml()/
+   wireOrganelleForm() (the standalone "Report centriole / cilium location" flow further down)
+   directly -- those come bundled with their own submit button, comment field and reporter-
+   identity block, which would fire independently of (and out of sync with) the merged report's
+   single "Submit merged-nucleus report" button. This is the same kind-dropdown/centriole-vs-
+   cilium-fields pattern, just returning its collected rows to the CALLER instead of posting them
+   itself -- getStructures() is read by the merged report's own submit handler once the whole
+   form (all sub-nuclei) is ready to go, and returns null if any row here is left incomplete so
+   the caller can alert and abort exactly like every other validation in that submit handler. */
+function buildMergedRowOrganelleWidget(container){
+  container.innerHTML='<div class="mrOrganRows"></div><button type="button" class="idbtn mrOrganAdd" style="margin-top:6px;padding:4px 10px;font-size:12px;width:auto">+ Add centriole / cilium</button>';
+  const rowsEl=container.querySelector(".mrOrganRows");
+  function wirePasteSplit(xEl,yEl,zEl,focusAfter){
+    xEl.addEventListener("input",e=>{
+      const p=e.target.value.split(/[\s,]+/).filter(s=>s!=="");
+      if(p.length>=3){e.target.value=p[0];yEl.value=p[1];zEl.value=p[2];if(focusAfter)focusAfter.focus();}
+    });
+  }
+  function addRow(){
+    const row=document.createElement("div");
+    row.style.cssText="border:1px dashed var(--line);border-radius:6px;padding:8px;margin-top:6px";
+    row.innerHTML=
+      '<div class="row" style="justify-content:space-between;align-items:center">'
+      +'<span style="font-size:11px;color:var(--mut)">Structure</span>'
+      +'<button type="button" class="mrOrganRemove" style="background:none;border:none;color:var(--mut);cursor:pointer;font-size:15px;line-height:1;padding:0 4px" title="Remove">&times;</button>'
+      +'</div>'
+      +'<select class="mrOrganKind" style="width:100%;margin-top:4px"><option value="centriole">Centriole / centrosome</option><option value="cilium">Primary cilium (base + tip)</option></select>'
+      +'<div class="mrOrganCentriole" style="margin-top:4px">'
+      +'<div class="row" style="gap:6px"><div class="coord"><input type="text" class="mrocx" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" class="mrocy" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" class="mrocz" inputmode="decimal" placeholder="z"></div></div></div>'
+      +'<div class="mrOrganCilium" style="margin-top:4px;display:none">'
+      +'<label style="display:block;font-size:11px;color:var(--mut)">Base</label>'
+      +'<div class="row" style="gap:6px"><div class="coord"><input type="text" class="mrobx" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" class="mroby" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" class="mrobz" inputmode="decimal" placeholder="z"></div></div>'
+      +'<label style="display:block;font-size:11px;color:var(--mut);margin-top:4px">Tip</label>'
+      +'<div class="row" style="gap:6px"><div class="coord"><input type="text" class="mrotx" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" class="mroty" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" class="mrotz" inputmode="decimal" placeholder="z"></div></div></div>';
+    rowsEl.appendChild(row);
+    row.querySelector(".mrOrganRemove").addEventListener("click",()=>row.remove());
+    const kindEl=row.querySelector(".mrOrganKind");
+    const cFields=row.querySelector(".mrOrganCentriole"),ciFields=row.querySelector(".mrOrganCilium");
+    kindEl.addEventListener("change",()=>{const isC=kindEl.value==="cilium";cFields.style.display=isC?"none":"";ciFields.style.display=isC?"":"none";});
+    const cx=row.querySelector(".mrocx"),cy=row.querySelector(".mrocy"),cz=row.querySelector(".mrocz");
+    const bx=row.querySelector(".mrobx"),by=row.querySelector(".mroby"),bz=row.querySelector(".mrobz");
+    const tx=row.querySelector(".mrotx"),ty=row.querySelector(".mroty"),tz=row.querySelector(".mrotz");
+    wirePasteSplit(cx,cy,cz);wirePasteSplit(bx,by,bz,tx);wirePasteSplit(tx,ty,tz);
+  }
+  container.querySelector(".mrOrganAdd").addEventListener("click",()=>addRow());
+  return{
+    getStructures(){
+      const rows=[...rowsEl.children];
+      const out=[];
+      for(const row of rows){
+        const kind=row.querySelector(".mrOrganKind").value;
+        if(kind==="cilium"){
+          const bx=row.querySelector(".mrobx").value.trim(),by=row.querySelector(".mroby").value.trim(),bz=row.querySelector(".mrobz").value.trim();
+          const tx=row.querySelector(".mrotx").value.trim(),ty=row.querySelector(".mroty").value.trim(),tz=row.querySelector(".mrotz").value.trim();
+          if(bx===""||by===""||bz===""||tx===""||ty===""||tz==="")return null;
+          out.push({kind,pointA:bx+","+by+","+bz,pointB:tx+","+ty+","+tz});
+        } else {
+          const x=row.querySelector(".mrocx").value.trim(),y=row.querySelector(".mrocy").value.trim(),z=row.querySelector(".mrocz").value.trim();
+          if(x===""||y===""||z==="")return null;
+          out.push({kind,pointA:x+","+y+","+z,pointB:""});
+        }
+      }
+      return out;
+    }
+  };
+}
 function mergedFlagHtml(lead){
   return '<div style="margin-top:10px"><span class="hint">&#9888; '+(lead||"Looks like more than one nucleus fused into this one detection?")+' <span class="idf-back" id="idfMergedFlag" style="margin:0">Report a merged nucleus instead &rarr;</span></span></div>';
 }
@@ -4532,7 +4851,20 @@ function renderMergedReport(returnFn){
       +'<p class="hint" style="margin-top:2px">Paste "x, y, z" into the x field &mdash; it splits automatically.</p>'
       +'<div style="margin-top:6px">'+leafSearchHtml(pfx,"Identity — click a suggestion to select (optional; leave blank if unsure)")+'</div>'
       +'<label style="display:block;font-size:11px;color:var(--mut);margin-top:8px">Certainty (optional)</label>'
-      +'<select class="merged-row-cert" style="width:100%"><option value="">not sure</option><option value="1">1 — not sure</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5 — certain</option></select>';
+      +'<select class="merged-row-cert" style="width:100%"><option value="">not sure</option><option value="1">1 — not sure</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5 — certain</option></select>'
+      /* Root ID + additional root/nucleus IDs + centriole/cilium, added 2026-07-30 per Søren's
+         request: since the nucleus DETECTOR merged these into one detection but the underlying
+         cell SEGMENTATION is a separate process, each sub-nucleus almost certainly has its own
+         real, distinct root ID -- capturing it here (plus organelle locations) is what makes a
+         reported sub-cell independently findable later (random-example picker, bulk filter/
+         Excel export, and jumping straight back to its own coordinate) instead of forever being
+         a footnote buried in the parent nucleus's report thread. See renderMergedSubCell() and
+         MERGED_SUB_REPORTS_CACHE for the read side of this. */
+      +'<label style="display:block;font-size:11px;color:var(--mut);margin-top:8px">Root ID (if known)</label>'
+      +'<input type="text" class="merged-row-rootid" inputmode="numeric" placeholder="numeric root ID, if you found one">'
+      +'<div class="merged-row-ridpanel" style="margin-top:6px"></div>'
+      +'<label style="display:block;font-size:11px;color:var(--mut);margin-top:10px">Centriole / primary cilium (optional)</label>'
+      +'<div class="merged-row-organ" style="margin-top:2px"></div>';
     rowsEl.appendChild(row);
     row.querySelector(".merged-row-remove").addEventListener("click",()=>{
       if(rowsEl.children.length<=2){alert("At least 2 nuclei are needed to report a merge — use “Start over” instead if that’s not what you meant to report.");return;}
@@ -4545,11 +4877,24 @@ function renderMergedReport(returnFn){
       document.getElementById("x").value=x;document.getElementById("y").value=y;document.getElementById("z").value=z;document.getElementById("go").click();
     });
     const xEl=row.querySelector(".mrx"),yEl=row.querySelector(".mry"),zEl=row.querySelector(".mrz");
+    /* The "+ additional root/nucleus IDs" propose/vote panel is keyed by this row's OWN
+       coordinate string (same convention as the existing no-nucleus-point call to
+       loadRootIdPanel() elsewhere in the file) -- refreshed on blur so it always reflects
+       whatever x/y/z is currently filled in, and left blank/inert until all three are set. */
+    const ridPanel=row.querySelector(".merged-row-ridpanel");
+    function refreshRidPanel(){
+      const x=xEl.value.trim(),y=yEl.value.trim(),z=zEl.value.trim();
+      if(x===""||y===""||z===""){ridPanel.innerHTML='<span class="hint">Fill in x/y/z above to propose additional root or nucleus IDs for this sub-cell.</span>';return;}
+      loadRootIdPanel(x+","+y+","+z,ridPanel);
+    }
     xEl.addEventListener("input",e=>{
       const p=e.target.value.split(/[\s,]+/).filter(s=>s!=="");
       if(p.length>=3){e.target.value=p[0];yEl.value=p[1];zEl.value=p[2];}
     });
+    [xEl,yEl,zEl].forEach(el=>el.addEventListener("blur",refreshRidPanel));
     if(prefill&&prefill.pos){xEl.value=prefill.pos[0];yEl.value=prefill.pos[1];zEl.value=prefill.pos[2];}
+    refreshRidPanel();
+    row.__organWidget=buildMergedRowOrganelleWidget(row.querySelector(".merged-row-organ"));
     wireLeafSearch(pfx,slug=>{
       const input=document.getElementById(pfx+"Input");
       if(input)input.value=LEAF_NAMES[slug];
@@ -4575,14 +4920,18 @@ function renderMergedReport(returnFn){
     if(!REPORT_ENDPOINT){alert("Reporting isn't wired up yet — set REPORT_ENDPOINT near the top of the script (see the comment above it) to a Google Apps Script web app URL.");return;}
     const rows=[...rowsEl.children];
     if(rows.length<2){alert("Add at least 2 nuclei.");return;}
-    let allFilled=true;
+    let allFilled=true,organIncomplete=false;
     const subs=rows.map(row=>{
       const x=row.querySelector(".mrx").value.trim(),y=row.querySelector(".mry").value.trim(),z=row.querySelector(".mrz").value.trim();
       if(x===""||y===""||z==="")allFilled=false;
       const slug=row.dataset.slug;
-      return{coord:x+","+y+","+z,identified:slug?LEAF_NAMES[slug]:"",certainty:row.querySelector(".merged-row-cert").value};
+      const subRootId=row.querySelector(".merged-row-rootid").value.trim();
+      const structures=row.__organWidget?row.__organWidget.getStructures():[];
+      if(structures===null)organIncomplete=true;
+      return{coord:x+","+y+","+z,identified:slug?LEAF_NAMES[slug]:"",certainty:row.querySelector(".merged-row-cert").value,subRootId,structures:structures||[]};
     });
     if(!allFilled){alert("Please fill in an approximate x/y/z center for every nucleus listed.");return;}
+    if(organIncomplete){alert("Please fill in every coordinate field for each centriole/cilium structure listed (or remove the incomplete row).");return;}
     const commentEl=document.getElementById("mergedComment");
     const comment=commentEl?commentEl.value.trim():"";
     const path=ID_PATH.map(n=>(TREE[n]?TREE[n].q:n)).join(" > ");
@@ -4595,10 +4944,40 @@ function renderMergedReport(returnFn){
       coord:s.coord,
       groupId,subIndex:i+1,subCount:subs.length,
       identified:s.identified,certainty:s.certainty,
+      /* subRootId is this SUB-CELL's own reported root ID -- deliberately a different field
+         from rootId above, which stays the PARENT/whole-detection's root ID for traceability.
+         See the "Merged splits" sheet schema note in the Apps Script reference (REPORT_ENDPOINT)
+         -- this needs its own column, added 2026-07-30 alongside this feature. */
+      subRootId:s.subRootId,
       comment,path
     }));
+    /* Centriole/cilium structures collected per sub-row are posted as ordinary
+       organelle_location reports (same type/shape as the standalone "Report centriole / cilium
+       location" flow below), keyed by the SUB-CELL's own coordinate rather than the parent
+       nucleus's, since that's what organellesNearPos() actually matches against for display.
+       nucleusId is deliberately left BLANK here, NOT the parent's -- the existing
+       ?newCellOrganelles=1 bulk endpoint that feeds organellesNearPos() only returns rows with
+       a blank nucleusId (see its doPost/doGet comments above), on the reasoning that a row with
+       a real nucleusId belongs to the ordinary per-nucleus lookup instead. A merged sub-cell has
+       no independent nucleus detection of its own -- same underlying situation as a "new cell,
+       no nucleus" report -- so blank is actually the more correct value here, not just a
+       workaround. rootId is kept as the PARENT's, for whatever traceability that still offers. */
+    subs.forEach((s,i)=>{
+      if(!s.structures.length)return;
+      const organGroupId=groupId+"_sub"+(i+1)+"_org";
+      s.structures.forEach((st,j)=>postReport({
+        type:"organelle_location",
+        timestamp:new Date().toISOString(),
+        nucleusId:"",rootId:ID_CTX.root||"",
+        coord:s.coord,
+        groupId:organGroupId,subIndex:j+1,subCount:s.structures.length,
+        kind:st.kind,pointA:st.pointA,pointB:st.pointB,
+        identified:s.identified||"",
+        comment,path
+      }));
+    });
     submitBtn.textContent="submitted";
-    document.getElementById("idfThanks").innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">Thanks — your merged-nucleus report ('+subs.length+' nuclei) has been logged against this detection. Once it&rsquo;s re-segmented, these sub-identities help confirm the split.</div>';
+    document.getElementById("idfThanks").innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">Thanks — your merged-nucleus report ('+subs.length+' nuclei) has been logged against this detection. Once it&rsquo;s re-segmented, these sub-identities help confirm the split. Any sub-cell you gave a root ID and an identity for should now be findable on its own — jump to its coordinate again, or look for it via the random-example picker or the bulk cell-type filter.</div>';
   });
 }
 
@@ -5452,6 +5831,21 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const ni=parseInt(k,10);
       for(const m of MERGED[k])rows.push({type:m.type,source:"own",space:"N",i:ni,merged:true});
     }
+    /* Community-reported, identified merged-nucleus sub-cells (2026-07-30) -- see
+       MERGED_SUB_REPORTS_CACHE/fetchIdentifiedMergedSubs()/renderMergedSubCell() above. Only
+       rows with a valid, parseable coord make it in (a malformed coordinate can't be filtered/
+       exported meaningfully anyway); type goes through commToRowType() so these merge into the
+       SAME type-checkbox buckets a normal cell of that identity would use, exactly like the
+       __COMM_ROWTYPE override just above does for ordinary community-identified nuclei. */
+    if(typeof MERGED_SUB_REPORTS_CACHE!=="undefined"&&MERGED_SUB_REPORTS_CACHE){
+      for(const sub of MERGED_SUB_REPORTS_CACHE){
+        const c=(sub.coord||"").split(",").map(Number);
+        if(c.length!==3||c.some(isNaN))continue;
+        const rt=commToRowType(sub.identified);
+        if(!rt)continue;
+        rows.push({type:rt,source:"community",space:"MS",subRef:{pos:c,nucleusId:sub.nucleusId||"",subRootId:sub.subRootId||"",subCount:sub.subCount||""}});
+      }
+    }
     ALL_IDENTITIES=rows;
     return rows;
   }
@@ -5480,7 +5874,14 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
   }
   window.ensureCommunityOverride=ensureCommunityOverride;
   ensureCommunityOverride(); // fire-and-forget at init so the override is usually ready before first use
-  function rowPos(row){return row.space==="N"?[NX[row.i],NY[row.i],NZ[row.i]]:[ST_X[row.i],ST_Y[row.i],ST_Z[row.i]];}
+  /* row.space==="MS" (2026-07-30) = a community-reported, identified merged-nucleus sub-cell --
+     see buildAllIdentities()'s MERGED_SUB_REPORTS_CACHE loop below. Unlike "N"/"ST" rows, which
+     index into a shared array by row.i, an MS row carries its own data directly on row.subRef,
+     since it has no shared index array of its own (it shares its parent's nucleus index, at a
+     different real position). rowFine/rowGL/rowFineDist below all fall through to their normal
+     "no data" sentinel for MS rows -- a merged sub-cell has no vessel-proximity/V1-column data
+     of its own, which is honest (not a bug to fix), not a blocker for it being findable by type. */
+  function rowPos(row){return row.space==="MS"?row.subRef.pos:(row.space==="N"?[NX[row.i],NY[row.i],NZ[row.i]]:[ST_X[row.i],ST_Y[row.i],ST_Z[row.i]]);}
   /* Maps each of the 22 guided-ID leaf slugs (LEAF_NAMES, defined earlier in the file) to the
      exact row.type string(s) in ALL_IDENTITIES that represent it, for the "see another example"
      feature on the result screen. own is the exact OWN_TYPE_NAMES string for Søren's verified
@@ -5554,6 +5955,13 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(!map)return null;
     const own=[],mic=[];
     for(const row of ALL_IDENTITIES){
+      /* MS (merged-nucleus sub-cell) rows deliberately excluded from "see another example" --
+         this function's noDiscrepancy()/return shape both assume row.i indexes into the shared
+         nucleus array, which an MS row has none of (see rowPos()'s doc comment above). Excluding
+         them here is a scope choice, not a limitation to fix later: Søren's merged-sub-cell
+         findability request was specifically about the random-example picker and the bulk
+         filter/Excel export (see those instead), not this guided-ID "see another example" flow. */
+      if(row.space==="MS")continue;
       if(map.own&&row.type===map.own)own.push(row);
       else if(map.microns&&map.microns.indexOf(row.type)!==-1)mic.push(row);
     }
@@ -5576,11 +5984,15 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     return{pos:rowPos(row),trust,space:row.space,i:row.i};
   }
   window.pickLeafExample=pickLeafExample;
-  function rowFine(row){const arr=row.space==="N"?window.OWN_FINE:window.ST_FINE;return arr?arr[row.i]:255;}
-  function rowGL(row){const arr=row.space==="N"?window.OWN_GL:window.ST_GL;return arr?arr[row.i]:65535;}
-  function rowFineDist(row){const arr=row.space==="N"?window.OWN_FINE_DIST:window.ST_FINE_DIST;return arr?arr[row.i]:65535;}
-  function rowNucId(row){return row.space==="N"?String(NID[row.i]):"";}
-  function rowRootId(row){return row.space==="N"?(rootId(row.i)||""):"";}
+  function rowFine(row){if(row.space==="MS")return 255;const arr=row.space==="N"?window.OWN_FINE:window.ST_FINE;return arr?arr[row.i]:255;}
+  function rowGL(row){if(row.space==="MS")return 65535;const arr=row.space==="N"?window.OWN_GL:window.ST_GL;return arr?arr[row.i]:65535;}
+  function rowFineDist(row){if(row.space==="MS")return 65535;const arr=row.space==="N"?window.OWN_FINE_DIST:window.ST_FINE_DIST;return arr?arr[row.i]:65535;}
+  /* rowNucId for an MS row returns the PARENT nucleus id -- technically correct (this sub-cell's
+     detection really is filed under that nucleus id, it just isn't independently detected), and
+     lets an Excel user cross-reference it against the parent's own row. See the "History" column
+     in buildColumns() for the human-readable "this came from a merged split" note. */
+  function rowNucId(row){return row.space==="MS"?(row.subRef.nucleusId||""):(row.space==="N"?String(NID[row.i]):"");}
+  function rowRootId(row){return row.space==="MS"?(row.subRef.subRootId||""):(row.space==="N"?(rootId(row.i)||""):"");}
 
   /* Some concepts have two distinct raw type strings depending on source (own-verified vs
      MICrONS-predicted). Without merging them, checking one checkbox only ever matched cells
@@ -5800,12 +6212,24 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     const on=document.getElementById("filterRegionOn");
     if(!on||!on.checked)return[];
     const boxes=[];
-    document.querySelectorAll("#regionBoxes .rbox-row").forEach(row=>{
+    /* n (1-based, in on-screen row order) and the raw voxel corners x1/y1/z1/x2/y2/z2 (added
+       2026-07-31, kept alongside the min/max-normalised nm bounds below) exist purely so the
+       Excel export's "Region box" column can say exactly which box a matched cell fell in and
+       show its corners AS THE USER TYPED THEM -- unsorted, in voxel units, matching what's
+       actually in the input fields (the hint text says "either diagonal works, order doesn't
+       matter", so corner 1 isn't necessarily the min corner). The xmin/xmax/etc below are the
+       ones every existing consumer (the OR-match in evalRow, buildFilterViewerState's 3D boxes)
+       already relies on and are left untouched. */
+    document.querySelectorAll("#regionBoxes .rbox-row").forEach((row,idx)=>{
       const gv=cls=>{const el=row.querySelector("."+cls);const v=el?parseFloat(el.value):NaN;return v;};
       const x1=gv("rx1"),y1=gv("ry1"),z1=gv("rz1"),x2=gv("rx2"),y2=gv("ry2"),z2=gv("rz2");
       if([x1,y1,z1,x2,y2,z2].some(v=>isNaN(v)))return;
       const nx1=x1*4,nx2=x2*4,ny1=y1*4,ny2=y2*4,nz1=z1*40,nz2=z2*40;
-      boxes.push({xmin:Math.min(nx1,nx2),xmax:Math.max(nx1,nx2),ymin:Math.min(ny1,ny2),ymax:Math.max(ny1,ny2),zmin:Math.min(nz1,nz2),zmax:Math.max(nz1,nz2)});
+      // n = idx+1 (DOM row position), NOT a count of valid boxes pushed so far -- matches
+      // renumberRegionBoxes()'s own on-screen "Box N" labelling exactly, including when an
+      // earlier row is left blank/incomplete (which would otherwise desync the two numberings).
+      boxes.push({xmin:Math.min(nx1,nx2),xmax:Math.max(nx1,nx2),ymin:Math.min(ny1,ny2),ymax:Math.max(ny1,ny2),zmin:Math.min(nz1,nz2),zmax:Math.max(nz1,nz2),
+        n:idx+1,x1,y1,z1,x2,y2,z2});
     });
     return boxes;
   }
@@ -5832,10 +6256,18 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
        pass (over ALL_IDENTITIES) and the needs-attention pass (over every nucleus, see below).
        Returns the match object to push, or null if this row should be excluded. */
     function evalRow(row){
+      let regionBoxLabel=null;
       if(regionOn&&regionValid){
         const pos=rowPos(row);
         const nx=pos[0]*4,ny=pos[1]*4,nz=pos[2]*40;
-        if(!regionBoxesNM.some(b=>nx>=b.xmin&&nx<=b.xmax&&ny>=b.ymin&&ny<=b.ymax&&nz>=b.zmin&&nz<=b.zmax))return null;
+        const hitBoxes=regionBoxesNM.filter(b=>nx>=b.xmin&&nx<=b.xmax&&ny>=b.ymin&&ny<=b.ymax&&nz>=b.zmin&&nz<=b.zmax);
+        if(!hitBoxes.length)return null;
+        /* Label uses the RAW, unsorted voxel corners as Søren typed them (e.g. "Box 1 -
+           142982, 73419, 19809 to 177430, 250250, 16729"), not the nm-normalized min/max --
+           those are two different representations of the same box kept on the same object
+           (see getRegionBoxesNM()). A cell can fall inside more than one overlapping box,
+           so multiple hits are joined with "; ". */
+        regionBoxLabel=hitBoxes.map(b=>"Box "+b.n+" - "+b.x1+", "+b.y1+", "+b.z1+" to "+b.x2+", "+b.y2+", "+b.z2).join("; ");
       }
       /* V1-column membership is always looked up (cheap object lookup), same reasoning as the
          vessel-type/distance fields above -- so the Excel export can show it on every matched row,
@@ -5896,7 +6328,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         if(layers.size&&!layers.has(layerLabel))return null;
         if(wmOn&&(wmDist==null||wmDist>wmMaxUm))return null;
       }
-      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket};
+      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,regionBoxLabel};
     }
     const out=[];
     if(attention){
@@ -6015,7 +6447,24 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       {header:"nm Y",get:m=>rowPos(m.row)[1]*4},
       {header:"nm Z",get:m=>rowPos(m.row)[2]*40},
       {header:"Cell type",get:m=>m.row.type},
-      {header:"Source",get:m=>m.row.source==="own"?"Own — verified, Grubb et al.":m.row.source==="none"?"No prediction (unclassified)":"MICrONS prediction"},
+      /* MS (merged-nucleus sub-cell) rows checked FIRST here: they carry source:"community" like
+         an ordinary community-identified nucleus does, but "MICrONS prediction" (the ternary's
+         fallback for anything that isn't "own"/"none") would be actively wrong for one -- MICrONS
+         never independently detected this cell at all, that's the entire premise of it being a
+         merged-split report. See the "History" column below for the fuller merged-nucleus story. */
+      {header:"Source",get:m=>m.row.space==="MS"?"Community — merged-nucleus split":(m.row.source==="own"?"Own — verified, Grubb et al.":m.row.source==="none"?"No prediction (unclassified)":"MICrONS prediction")},
+      /* Preserves the "history as merged nuclei and what they used to be" Søren explicitly asked
+         for -- blank for every normal row, populated only for MS rows: the parent nucleus id,
+         how many real cells MICrONS's detector fused together (when the source report recorded
+         it), and what the whole fused blob was originally (mis)classified as (via nidToIndex()/
+         typeInfo(), same lookup renderMergedSubCell() uses on-screen). */
+      {header:"History",get:m=>{
+        if(m.row.space!=="MS")return "";
+        const ref=m.row.subRef;
+        let orig="unknown";
+        if(ref.nucleusId){const pIdx=nidToIndex(ref.nucleusId);if(pIdx>=0)orig=longName(typeInfo(pIdx).name);}
+        return "Part of nucleus "+(ref.nucleusId||"?")+(ref.subCount>1?", fused by MICrONS's detector with "+(ref.subCount-1)+" other real nucle"+(ref.subCount-1>1?"i":"us"):"")+" — originally (mis)classified as "+orig;
+      }},
       {header:"Allen m-type (fine subtype)",get:m=>{const p=rowPos(m.row);const mt=mtypeInfo(p[0],p[1],p[2]);return mt?mt.name:"";}},
       {header:"Vessel type",get:m=>m.fine!=null?(window.FINE_NAMES||[])[m.fine]:""},
       {header:"Distance to nearest vessel (µm)",get:m=>m.fineDist!=null&&m.fineDist!==65535?(m.fineDist/1000).toFixed(1):""}
@@ -6048,6 +6497,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(result.wmActive)cols.push({header:"Distance to white matter border (µm)",get:m=>m.wmDist!=null?m.wmDist.toFixed(1):""});
     if(result.layerActive)cols.push({header:"Cortical layer",get:m=>m.layerLabel||""});
     if(result.v1ColActive)cols.push({header:"V1 column bucket",get:m=>m.v1Bucket==="neuron"?"Neuronal":m.v1Bucket==="nonvascular"?"Non-vascular, non-neuronal":m.v1Bucket==="vascular"?"Vascular (pericyte)":""});
+    if(result.regionActive)cols.push({header:"Region box",get:m=>m.regionBoxLabel||""});
     for(let k=0;k<3;k++){
       const n=k+1;
       cols.push({header:"Nearest neighbour "+n+" — identity",get:m=>{const nb=m.neighbors&&m.neighbors[k];return nb?neighborLabel(nb):"";}});
