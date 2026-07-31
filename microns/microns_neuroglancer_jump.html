@@ -8,6 +8,12 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple
 .wrap{max-width:760px;margin:0 auto}
 h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Segoe UI",system-ui,-apple-system,sans-serif;letter-spacing:-.03em;margin:0 0 6px;display:inline-flex;align-items:baseline}.logo .mu{color:var(--accent);font-style:italic;transform:translateY(1px)}.logo .jm{color:var(--ink)}.logo::after{content:"\2197";font-size:18px;font-weight:700;color:var(--accent);margin-left:4px;transform:translateY(-8px)}
 .sub{color:var(--mut);font-size:13px;margin:0 0 20px}
+.tabbar{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 16px}
+.tabbtn{display:inline-block;font:inherit;font-size:12px;color:var(--mut);text-decoration:none;background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 11px;vertical-align:middle;cursor:pointer}
+.tabbtn:hover{color:var(--ink);border-color:var(--accent)}
+.tabbtn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+.tabpanel{display:none}
+.tabpanel.active{display:block}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
 label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:6px}
 .row{display:flex;gap:10px;flex-wrap:wrap}.coord{flex:1;min-width:90px}
@@ -119,8 +125,39 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 </head><body>
 <div class="wrap">
 <a href="#" id="logoHome" style="text-decoration:none;color:inherit;display:inline-block" title="Reload µJump"><h1 class="logo"><span class="mu">µ</span><span class="jm">Jump</span></h1></a>
-<a href="ujump_dashboard.html" target="_blank" rel="noopener" style="display:inline-block;margin-left:10px;font-size:12px;color:var(--mut);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:3px 9px;vertical-align:middle" title="Live/static statistics dashboard built from this dataset + the community-reporting backend">📊 Statistics dashboard</a>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
+<div class="tabbar" id="mainTabs" role="tablist">
+<button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
+<button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
+<button type="button" class="tabbtn" data-tab="refs" role="tab" aria-selected="false">📚 References</button>
+<a href="ujump_dashboard.html" target="_blank" rel="noopener" class="tabbtn" title="Live/static statistics dashboard built from this dataset + the community-reporting backend">📊 Statistics dashboard</a>
+</div>
+<script>
+(function(){
+  var bar=document.getElementById("mainTabs");
+  if(!bar)return;
+  var btns=Array.prototype.slice.call(bar.querySelectorAll(".tabbtn[data-tab]"));
+  function activate(name){
+    btns.forEach(function(b){var on=b.dataset.tab===name;b.classList.toggle("active",on);b.setAttribute("aria-selected",on?"true":"false");});
+    document.querySelectorAll(".tabpanel").forEach(function(p){p.classList.toggle("active",p.dataset.tabpanel===name);});
+    try{localStorage.setItem("ujump_active_tab",name);}catch(e){}
+  }
+  btns.forEach(function(b){b.addEventListener("click",function(){activate(b.dataset.tab);});});
+  window.__ujumpActivateTab=activate;
+  /* The .tabpanel elements this activate() call needs to toggle are defined LATER in the HTML
+     source (this script tag sits right after the tab bar itself, before any tab content), so
+     calling activate() synchronously here -- before the parser has reached them -- would find
+     zero .tabpanel elements via querySelectorAll and silently do nothing to them (the button
+     highlight would still update, since the buttons DO already exist, but the wrong panel(s)
+     could stay visible). Deferring to DOMContentLoaded guarantees the whole document, including
+     every .tabpanel, exists first. */
+  document.addEventListener("DOMContentLoaded",function(){
+    var saved=null;try{saved=localStorage.getItem("ujump_active_tab");}catch(e){}
+    activate(saved&&btns.some(function(b){return b.dataset.tab===saved;})?saved:"jump");
+  });
+})();
+</script>
+<div class="tabpanel active" data-tabpanel="jump">
 <div class="card">
 <label style="display:none">Input units</label>
 <div class="units" id="units" style="display:none"><button data-u="voxel" class="on">voxels (4&middot;4&middot;40 nm)</button><button data-u="nm">nanometres</button><button data-u="um">micrometres</button></div>
@@ -153,8 +190,10 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div class="out" id="out" style="display:none"><label>Neuroglancer state URL</label><div class="urlbox" id="url"></div>
 <div class="actions"><button class="copy" id="copy">Copy link</button></div></div>
 </div>
-<details class="card" id="filterCard">
-<summary class="card-toggle">Download cells matching criteria</summary>
+</div>
+<div class="tabpanel" data-tabpanel="filter">
+<div class="card" id="filterCard">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Filter and show</div>
 <p class="hint" style="margin-top:8px">Select any combination of cell type(s), vessel proximity, glia-limitans proximity, white-matter-border proximity, and/or cortical layer, then download the matching cells (with coordinates and root/nucleus IDs) as an Excel file.</p>
 <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterTypes"></div>
 <div style="margin-top:12px">
@@ -220,6 +259,16 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div class="row" style="margin-top:8px;gap:10px">
 <button class="idbtn" id="filterViewerAll" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Open all matches in Neuroglancer (3D)</button>
 </div>
+<div class="card" id="stepThroughCard" style="margin-top:14px;background:#0f1420;display:none">
+<label style="font-size:12px">Systematically step through matches</label>
+<p class="hint" style="margin-top:4px">Visits every matched cell exactly once, in a fixed order &mdash; unlike the random buttons on the Jump tab, nothing is skipped or repeated. Each step loads the cell into the Jump tab's identification panel, same as clicking there directly. Progress (current position + how many you've checked) is remembered in this browser for this exact set of matched cells, so closing the tab and coming back later resumes where you left off &mdash; changing the filters above and re-previewing starts a fresh count.</p>
+<p class="hint" id="stepCounter" style="margin-top:10px;font-weight:600;color:var(--ink)"></p>
+<div class="row" style="gap:8px;margin-top:6px">
+<button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
+<button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
+</div>
+<button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched cells">Reset progress</button>
+</div>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterVasc" style="width:auto"> Include vasculature outline</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterEMOn" style="width:auto"> Include EM imagery (ultrastructure)</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterV1ColOn" style="width:auto"> Include V1 column boundary (Allen ground-truth column, derived envelope)</label>
@@ -246,9 +295,11 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 </div>
 <label style="margin-top:14px">What &ldquo;Open all matches in Neuroglancer (3D)&rdquo; shows</label>
 <p class="hint">Opens a zoomed-out 3D view (nuclei + segmentation by default) sized and centred to fit every matching cell. Each cell type gets its own colour-coded layer (e.g. red = mural cells, purple = astrocytes, green = microglia) plus its own nuclei layer (always blue), so you can switch individual types on/off from Neuroglancer's layer panel. "Include vasculature outline" adds the traced vessel mesh (Img65 + Img35) as its own toggleable layer. "Include EM imagery" adds the raw EM layer(s) so you can inspect ultrastructure directly, not just the segmentation -- off by default since EM tiles are heavier to load. Normally it adds Img65 and/or Img35, whichever the matched cells actually fall in; if either vasculature overlay is on it adds both, since the vessels span the whole imaged volume rather than just the minnie65 predicted region. "Include V1 column boundary" adds a green wireframe outline of the Allen Institute's manually-classified V1 column (a derived envelope, not an official published shape -- see the "V1 column" filters below for selecting its member cells). If "Limit to region(s)" is on, each box is drawn as its own colour-matched, toggleable outline layer too.</p>
-</details>
-<details class="card">
-<summary class="card-toggle">References</summary>
+</div>
+</div>
+<div class="tabpanel" data-tabpanel="refs">
+<div class="card">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">References</div>
 <p class="hint" style="margin-top:8px">Grubb, &ldquo;Ultrastructure of precapillary sphincters and the neurovascular unit,&rdquo; <a class="ref" href="https://doi.org/10.1530/vb-23-0011" target="_blank" rel="noopener">Vascular Biology 5, VB-23-0011 (2023)</a>.</p>
 <p class="hint">Grubb, &ldquo;Ultrastructure of the brain waste-clearance pathway,&rdquo; <a class="ref" href="https://doi.org/10.1101/2023.04.14.536712" target="_blank" rel="noopener">bioRxiv preprint (2023), not yet peer-reviewed</a>.</p>
 <p class="hint">Grubb, Chaddha, Lippincott-Schwartz, Ott &amp; Mughal, &ldquo;Pericyte and Endothelial Primary Cilia and Centrioles have Disparate Organization Across the Brain Microvasculature,&rdquo; <a class="ref" href="https://doi.org/10.1101/2025.11.19.689283" target="_blank" rel="noopener">bioRxiv preprint (2025), not yet peer-reviewed</a>.</p>
@@ -277,7 +328,8 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <p class="hint">Leptomeningeal cell subtypes (arachnoid barrier cell tight junctions; shared, location-defined fibroblast subtypes) &mdash; basis for the guided leptomeninges step: <a class="ref" href="https://doi.org/10.1016/j.neuron.2023.09.002" target="_blank" rel="noopener">Pietil&auml; et al., &ldquo;Molecular anatomy of adult mouse leptomeninges,&rdquo; Neuron 111, 3745&ndash;3764.e7 (2023)</a>.</p>
 <p class="hint">White matter function: <a class="ref" href="https://doi.org/10.1016/j.tins.2008.04.001" target="_blank" rel="noopener">Fields, &ldquo;White matter in learning, cognition and psychiatric disorders,&rdquo; Trends in Neurosciences 31, 361&ndash;370 (2008)</a>.</p>
 <p class="hint">Nearest-nucleus, IDs &amp; predictions from <a class="ref" href="https://minnie.microns-daf.com/dash/datastack/minnie65_public/apps/table_viewer/?datastack=%22minnie65_public%22" target="_blank" rel="noopener" title="Opens the CAVE Table Viewer &mdash; choose this table from the dropdown"><code>nucleus_detection_v0</code></a> and <a class="ref" href="https://minnie.microns-daf.com/dash/datastack/minnie65_public/apps/table_viewer/?datastack=%22minnie65_public%22" target="_blank" rel="noopener" title="Opens the CAVE Table Viewer &mdash; choose this table from the dropdown"><code>aibs_metamodel_celltypes_V661</code></a> (minnie65 only).</p>
-</details>
+</div>
+</div>
 <div class="card" style="background:#0f1420">
 <p class="hint" style="margin:0">This tool was made by <b>S&oslash;ren Grubb</b> (Neuroscience Academy Denmark) to make identifying brain cortical cells in electron microscopy easy. It was built using Claude AI. Predictions from the <a class="ref" href="https://doi.org/10.1038/s41586-025-08790-w" target="_blank" rel="noopener">MICrONS consortium</a> are included, but you can help identify cells that lack a prediction, or revise ones already made &mdash; identification discrepancies and newly identified cells are shared back with the MICrONS consortium.</p>
 </div>
@@ -7224,6 +7276,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(runBtn)runBtn.title="Filters changed since the last preview — click to refresh the match count";
     if(dlBtn){dlBtn.disabled=true;dlBtn.title="Filters changed since last preview — click \"Preview matches\" again";}
     if(viewAllBtn){viewAllBtn.disabled=true;viewAllBtn.title="Filters changed since last preview — click \"Preview matches\" again";}
+    initStepThrough(null);
   }
   const filterCard=document.getElementById("filterCard");
   const STALE_IGNORE_IDS=new Set(["filterVasc","filterEMOn","filterV1ColOn","filterRun","filterDownload","filterViewerAll","regionAddBox",
@@ -7254,6 +7307,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          (105,951 for an unfiltered preview) and an unseparated run of digits is hard to read. */
       setRunBtnLabel(noMatches?"No matching cells — adjust filters":nMatch.toLocaleString()+" matching cell"+(nMatch===1?"":"s")+" found");
       runBtn.title=noMatches?"":"Click again to re-run the filters";
+      initStepThrough(lastResult.matches);
     },10);
   });
   /* Neuroglancer local annotations (and, at large scale, big segment-ID lists) are embedded
@@ -7323,6 +7377,96 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       dlBtn.disabled=false;dlBtn.textContent=dlOrigText;
     },10);
   });
+
+  /* Systematic step-through of the current preview's matches (added for Gary's cortical-column
+     microglia-checking workflow): unlike the "random cell" buttons on the Jump tab, this visits
+     every matched cell EXACTLY ONCE in a fixed order (the same order runFilter() returned them
+     in), so nothing is skipped and nothing repeats, with a counter showing progress. Each step
+     just calls jumpToVoxel() on that match's position -- the same function the coordinate "Go"
+     button and every random-cell button already use -- so it lands in the normal Jump-tab
+     identification panel (nucpanel/idfpanel) exactly as if it had been typed in by hand; this
+     feature only handles NAVIGATION + progress-tracking, the actual "is it a microglia?" call is
+     still made through that existing panel.
+
+     Progress (current index + which indices have been visited) is kept in localStorage, keyed
+     by a lightweight signature of the match set (count + first/last match position) rather than
+     the full list -- cheap to compute even for six-figure match counts, and good enough to tell
+     "same filter, same data" apart from "the filters changed" without hashing every row. A false
+     match (different middle rows, same length/first/last) is possible in principle but very
+     unlikely in practice, and the cost of a false positive is trivial (an oddly-numbered resume
+     point) so a full hash was judged not worth the complexity. Re-running "Preview matches" with
+     an unchanged signature resumes exactly where you left off; any change to the filters (or the
+     underlying data) starts progress over from zero. */
+  const STEP_LS_KEY="ujump_stepthrough_v1";
+  const stepCard=document.getElementById("stepThroughCard");
+  const stepCounterEl=document.getElementById("stepCounter");
+  const stepPrevBtn=document.getElementById("stepPrev");
+  const stepNextBtn=document.getElementById("stepNext");
+  const stepResetBtn=document.getElementById("stepReset");
+  let stepMatches=null,stepIndex=0,stepVisited=[];
+  function stepSig(matches){
+    if(!matches||!matches.length)return "";
+    const a=rowPos(matches[0].row),b=rowPos(matches[matches.length-1].row);
+    return matches.length+"|"+a.join(",")+"|"+b.join(",");
+  }
+  function loadStepState(){
+    try{return JSON.parse(localStorage.getItem(STEP_LS_KEY))||null;}catch(e){return null;}
+  }
+  function saveStepState(){
+    try{localStorage.setItem(STEP_LS_KEY,JSON.stringify({sig:stepSig(stepMatches),index:stepIndex,visited:stepVisited}));}catch(e){}
+  }
+  function updateStepUI(){
+    if(!stepCard)return;
+    if(!stepMatches||!stepMatches.length){stepCard.style.display="none";return;}
+    stepCard.style.display="";
+    const total=stepMatches.length;
+    const visitedCount=stepVisited.length;
+    if(stepCounterEl)stepCounterEl.textContent="Cell "+(stepIndex+1).toLocaleString()+" of "+total.toLocaleString()+" — "+visitedCount.toLocaleString()+" checked so far";
+    if(stepPrevBtn)stepPrevBtn.disabled=stepIndex<=0;
+    if(stepNextBtn)stepNextBtn.textContent=stepIndex>=total-1?"Done — restart from #1":"Next →";
+  }
+  /* initStepThrough(matches): called with the fresh match array right after every successful
+     "Preview matches" (matches=null when the filters change and invalidate the old preview). */
+  function initStepThrough(matches){
+    stepMatches=(matches&&matches.length)?matches:null;
+    if(!stepMatches){stepVisited=[];stepIndex=0;updateStepUI();return;}
+    const sig=stepSig(stepMatches);
+    const saved=loadStepState();
+    let resumeIndex=0;
+    if(saved&&sig&&saved.sig===sig){
+      resumeIndex=Math.min(Math.max(0,saved.index||0),stepMatches.length-1);
+      stepVisited=Array.isArray(saved.visited)?saved.visited.filter(i=>i>=0&&i<stepMatches.length):[];
+    } else {
+      stepVisited=[];
+    }
+    /* Jump straight to the resume point (or cell #1 for a fresh preview) rather than just
+       showing the counter -- otherwise the FIRST "Next" click would skip from cell #1 straight
+       to cell #2, since Next always advances from the current index. This also means "Preview
+       matches" itself is the action that loads the first/resumed cell into the Jump panel. */
+    stepGoTo(resumeIndex);
+  }
+  function stepGoTo(i){
+    if(!stepMatches||i<0||i>=stepMatches.length)return;
+    stepIndex=i;
+    if(!stepVisited.includes(i))stepVisited.push(i);
+    const pos=rowPos(stepMatches[i].row);
+    jumpToVoxel(pos[0],pos[1],pos[2]);
+    saveStepState();
+    updateStepUI();
+  }
+  if(stepPrevBtn)stepPrevBtn.addEventListener("click",()=>{if(stepMatches)stepGoTo(Math.max(0,stepIndex-1));});
+  if(stepNextBtn)stepNextBtn.addEventListener("click",()=>{
+    if(!stepMatches)return;
+    stepGoTo(stepIndex>=stepMatches.length-1?0:stepIndex+1);
+  });
+  if(stepResetBtn)stepResetBtn.addEventListener("click",()=>{
+    if(!stepMatches)return;
+    if(!confirm("Clear step-through progress ("+stepVisited.length.toLocaleString()+" cell(s) checked so far) for this set of "+stepMatches.length.toLocaleString()+" matched cells?"))return;
+    stepIndex=0;stepVisited=[];
+    saveStepState();
+    updateStepUI();
+  });
+  updateStepUI();
 
   /* Live top-view / side-view preview of the region-filter box (task: visualize the box
      against the full MICrONS dataset extent). Y is the cortical-depth axis: smaller Y is
