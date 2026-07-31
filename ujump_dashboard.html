@@ -196,21 +196,56 @@ function sortByCategory(types,secondaryFn){
     return String(a).localeCompare(String(b));
   });
 }
-/* Plotly's "multicategory" x-axis takes x as TWO parallel arrays -- [outerLabelPerPoint,
-   innerLabelPerPoint] -- and automatically draws the outer label as a grouped label spanning
-   its inner ticks. That's exactly the "category name below the individual cell types" look
-   Søren asked for, with no manual annotation positioning needed. */
-function multiCatX(types){return [types.map(categoryOf),types];}
-const MULTICAT_XAXIS=Object.assign({},BASE_LAYOUT.xaxis,{type:"multicategory"});
+/* Plotly's built-in "multicategory" axis type turned out unreliable here -- it renders fine
+   for a single bar trace, but dotMedianChart draws one BOX trace per cell type (needed so each
+   type gets its own jittered point cloud + median line), and multicategory positioning breaks
+   down across many independent traces: category names leaked in as if they were their own data
+   points, ticks duplicated, and default supercategory divider lines were heavy black bars.
+   Simpler and robust instead: keep x as a plain, explicitly-ordered category axis
+   (categoryorder:"array"/categoryarray guarantees the Excitatory->...->Leptomeninges order
+   regardless of trace order), then add light dotted divider lines + a small centered text
+   label per category group via ordinary shapes/annotations -- Plotly supports numeric x
+   positions on a category axis (0,1,2,... matching the categoryarray order), which is what
+   lets the annotations/dividers land exactly between/under the right ticks. */
+function categoryGroupDecor(types){
+  const shapes=[],annotations=[];
+  let groupStart=0;
+  for(let i=0;i<types.length;i++){
+    const isLast=i===types.length-1;
+    const sameAsNext=!isLast&&categoryOf(types[i])===categoryOf(types[i+1]);
+    if(!sameAsNext){
+      annotations.push({
+        x:(groupStart+i)/2,xref:"x",xanchor:"center",
+        y:0,yref:"paper",yanchor:"top",yshift:-92,
+        text:categoryOf(types[i]),showarrow:false,
+        font:{size:10,color:"#8a8580"}
+      });
+      if(!isLast){
+        shapes.push({type:"line",xref:"x",x0:i+0.5,x1:i+0.5,yref:"paper",y0:0,y1:1,
+          line:{color:"#e4e1db",width:1,dash:"dot"}});
+      }
+      groupStart=i+1;
+    }
+  }
+  return {shapes:shapes,annotations:annotations};
+}
+function categorizedLayout(types,extra){
+  const decor=categoryGroupDecor(types);
+  return Object.assign({},BASE_LAYOUT,{
+    xaxis:Object.assign({},BASE_LAYOUT.xaxis,{categoryorder:"array",categoryarray:types}),
+    margin:Object.assign({},BASE_LAYOUT.margin,{b:150}),
+    shapes:decor.shapes,annotations:decor.annotations
+  },extra||{});
+}
 
 function barChart(divId,dataObj,yTitle,byCategory){
   let types=Object.keys(dataObj);
   types=byCategory?sortByCategory(types,t=>dataObj[t]):types.sort((a,b)=>dataObj[b]-dataObj[a]);
   const y=types.map(t=>dataObj[t]);
-  const x=byCategory?multiCatX(types):types;
-  const layout=Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle})});
-  if(byCategory)layout.xaxis=MULTICAT_XAXIS;
-  Plotly.newPlot(divId,[{type:"bar",x,y,marker:{color:types.map(colorFor)}}],layout,PLOTLY_CFG);
+  const layout=byCategory
+    ?categorizedLayout(types,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle})})
+    :Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle})});
+  Plotly.newPlot(divId,[{type:"bar",x:types,y,marker:{color:types.map(colorFor)}}],layout,PLOTLY_CFG);
 }
 
 /* "SuperPlot"-style dot plot: jittered individual points (grey) + a coloured horizontal
@@ -221,9 +256,8 @@ function dotMedianChart(divId,dataObj,yTitle){
   let types=Object.keys(dataObj).filter(t=>dataObj[t]&&dataObj[t].length>=3);
   types=sortByCategory(types,t=>dataObj[t].length);
   const traces=types.map(function(t){
-    const n=dataObj[t].length;
     return {
-      type:"box", name:t, y:dataObj[t], x:dataObj[t].map(()=>[categoryOf(t),t]),
+      type:"box", name:t, y:dataObj[t], x0:t,
       boxpoints:"all", jitter:0.55, pointpos:0,
       marker:{color:"#8a8a8a",size:3,opacity:0.45},
       line:{color:colorFor(t),width:3},
@@ -232,8 +266,7 @@ function dotMedianChart(divId,dataObj,yTitle){
       hoverinfo:"y+name"
     };
   });
-  Plotly.newPlot(divId,traces,Object.assign({},BASE_LAYOUT,{
-    xaxis:MULTICAT_XAXIS,
+  Plotly.newPlot(divId,traces,categorizedLayout(types,{
     yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle}),
     showlegend:false
   }),PLOTLY_CFG);
@@ -262,13 +295,11 @@ function renderStaticCharts(){
   const layerColors={"Leptomeninges":"#c9c2b4","Layer 1":"#e8d9b5","Layer 2/3":"#d9b56a","Layer 4":"#b5883a",
     "Layer 5a":"#8a6b3a","Layer 5b":"#6b4a2a","Layer 6a":"#4a5a3a","Layer 6b":"#3a4a2a",
     "White matter":"#8a8a8a","Unknown":"#e0e0e0"};
-  const catX=multiCatX(types);
   const layerTraces=layerOrder.map(function(layer){
-    return {type:"bar",name:layer,x:catX,y:types.map(t=>(perLayer[t]&&perLayer[t][layer])||0),
+    return {type:"bar",name:layer,x:types,y:types.map(t=>(perLayer[t]&&perLayer[t][layer])||0),
       marker:{color:layerColors[layer]||"#999"}};
   });
-  Plotly.newPlot("plotCellsPerLayer",layerTraces,Object.assign({},BASE_LAYOUT,{
-    xaxis:MULTICAT_XAXIS,
+  Plotly.newPlot("plotCellsPerLayer",layerTraces,categorizedLayout(types,{
     barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
     yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"# of cells"})
   }),PLOTLY_CFG);
@@ -289,11 +320,11 @@ function renderStaticCharts(){
   const pcTypes=sortByCategory(Object.keys(pc),t=>pc[t].percent);
   Plotly.newPlot("plotCiliaPercent",[{
     type:"bar",
-    x:multiCatX(pcTypes), y:pcTypes.map(t=>pc[t].percent),
+    x:pcTypes, y:pcTypes.map(t=>pc[t].percent),
     text:pcTypes.map(t=>pc[t].with_cilium+"/"+pc[t].checked),
     textposition:"outside",
     marker:{color:pcTypes.map(colorFor)}
-  }],Object.assign({},BASE_LAYOUT,{xaxis:MULTICAT_XAXIS,yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"% with primary cilium",range:[0,105]})}),PLOTLY_CFG);
+  }],categorizedLayout(pcTypes,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"% with primary cilium",range:[0,105]})}),PLOTLY_CFG);
 
   renderCiliaAndCentrioleCharts([]);
 
@@ -307,9 +338,9 @@ function renderStaticCharts(){
     const top8=sortedEntries(nc[t]||{}).slice(0,8).map(e=>e[0]);
     const ordered=sortByCategory(top8,nt=>(nc[t]||{})[nt]||0);
     Plotly.newPlot("plotNeighborComposition",[{
-      type:"bar",x:multiCatX(ordered),y:ordered.map(nt=>(nc[t]||{})[nt]||0),
+      type:"bar",x:ordered,y:ordered.map(nt=>(nc[t]||{})[nt]||0),
       marker:{color:ordered.map(colorFor)}
-    }],Object.assign({},BASE_LAYOUT,{xaxis:MULTICAT_XAXIS,yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"neighbour occurrences (×3 per "+t+" cell)"})}),PLOTLY_CFG);
+    }],categorizedLayout(ordered,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"neighbour occurrences (×3 per "+t+" cell)"})}),PLOTLY_CFG);
   }
   picker.addEventListener("change",renderNeighbor);
   if(ncTypes.length){picker.value=ncTypes.includes("Pericyte")?"Pericyte":ncTypes[0];renderNeighbor();}
@@ -423,9 +454,9 @@ function renderVolumes(rows){
     const fbTypes=sortByCategory(Object.keys(nucByType),meanOf).slice(0,20);
     const div=document.createElement("div");div.className="plot";div.id="plotVolumesFallback";
     area.parentNode.appendChild(div);
-    Plotly.newPlot(div.id,[{type:"bar",x:multiCatX(fbTypes),y:fbTypes.map(meanOf),
+    Plotly.newPlot(div.id,[{type:"bar",x:fbTypes,y:fbTypes.map(meanOf),
       marker:{color:fbTypes.map(colorFor)}}],
-      Object.assign({},BASE_LAYOUT,{xaxis:MULTICAT_XAXIS,yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"mean nucleus volume (µm³)"})}),PLOTLY_CFG);
+      categorizedLayout(fbTypes,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"mean nucleus volume (µm³)"})}),PLOTLY_CFG);
     return;
   }
 
@@ -443,9 +474,9 @@ function renderVolumes(rows){
     const withBoth=sortByCategory(allTypes.filter(t=>nucMean(t)!=null||meshMean(t)!=null),
       t=>meshMean(t)||nucMean(t)||0);
     Plotly.newPlot(area.id,[
-      {type:"bar",name:"Nucleus volume (mean, static, independent sample)",x:multiCatX(withBoth),y:withBoth.map(nucMean),marker:{color:"#3a6b5a"}},
-      {type:"bar",name:"Mesh (root-ID) volume (mean, live n="+unpaired.length+", independent sample)",x:multiCatX(withBoth),y:withBoth.map(meshMean),marker:{color:"#8a3b2a"}}
-    ],Object.assign({},BASE_LAYOUT,{xaxis:MULTICAT_XAXIS,barmode:"group",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
+      {type:"bar",name:"Nucleus volume (mean, static, independent sample)",x:withBoth,y:withBoth.map(nucMean),marker:{color:"#3a6b5a"}},
+      {type:"bar",name:"Mesh (root-ID) volume (mean, live n="+unpaired.length+", independent sample)",x:withBoth,y:withBoth.map(meshMean),marker:{color:"#8a3b2a"}}
+    ],categorizedLayout(withBoth,{barmode:"group",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
       yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"volume (µm³)",type:"log"})}),PLOTLY_CFG);
     return;
   }
@@ -461,18 +492,17 @@ function renderVolumes(rows){
   const nucMeans=types.map(t=>{const rs=byType[t];return rs.reduce((s,r)=>s+r.nucVolumeUm3,0)/rs.length;});
   const ns=types.map(t=>byType[t].length);
   const pctText=types.map((t,i)=>meshMeans[i]>0?Math.round(100*nucMeans[i]/meshMeans[i])+"% nucleus":"");
-  const catX=multiCatX(types);
 
   Plotly.newPlot(area.id,[
-    {type:"bar",name:"Whole cell (mesh) volume",x:catX,y:meshMeans,width:0.62,
+    {type:"bar",name:"Whole cell (mesh) volume",x:types,y:meshMeans,width:0.62,
       marker:{color:"#8a3b2a",opacity:0.35,line:{color:"#8a3b2a",width:1}},
       hovertemplate:"%{x}<br>whole cell: %{y:.0f} µm³<extra></extra>"},
-    {type:"bar",name:"Nucleus volume (same cells)",x:catX,y:nucMeans,width:0.32,
+    {type:"bar",name:"Nucleus volume (same cells)",x:types,y:nucMeans,width:0.32,
       marker:{color:"#3a6b5a"},
       text:pctText,textposition:"outside",textfont:{size:9},
       customdata:ns,
       hovertemplate:"%{x}<br>nucleus: %{y:.0f} µm³ (%{customdata} paired cells)<extra></extra>"}
-  ],Object.assign({},BASE_LAYOUT,{xaxis:MULTICAT_XAXIS,barmode:"overlay",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
+  ],categorizedLayout(types,{barmode:"overlay",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
     yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"volume (µm³)"})}),PLOTLY_CFG);
 
   if(unpaired.length){
