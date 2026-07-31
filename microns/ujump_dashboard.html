@@ -196,45 +196,27 @@ function sortByCategory(types,secondaryFn){
     return String(a).localeCompare(String(b));
   });
 }
-/* Plotly's built-in "multicategory" axis type turned out unreliable here -- it renders fine
-   for a single bar trace, but dotMedianChart draws one BOX trace per cell type (needed so each
-   type gets its own jittered point cloud + median line), and multicategory positioning breaks
-   down across many independent traces: category names leaked in as if they were their own data
-   points, ticks duplicated, and default supercategory divider lines were heavy black bars.
-   Simpler and robust instead: keep x as a plain, explicitly-ordered category axis
-   (categoryorder:"array"/categoryarray guarantees the Excitatory->...->Leptomeninges order
-   regardless of trace order), then add light dotted divider lines + a small centered text
-   label per category group via ordinary shapes/annotations -- Plotly supports numeric x
-   positions on a category axis (0,1,2,... matching the categoryarray order), which is what
-   lets the annotations/dividers land exactly between/under the right ticks. */
-function categoryGroupDecor(types){
-  const shapes=[],annotations=[];
-  let groupStart=0;
-  for(let i=0;i<types.length;i++){
-    const isLast=i===types.length-1;
-    const sameAsNext=!isLast&&categoryOf(types[i])===categoryOf(types[i+1]);
-    if(!sameAsNext){
-      annotations.push({
-        x:(groupStart+i)/2,xref:"x",xanchor:"center",
-        y:0,yref:"paper",yanchor:"top",yshift:-92,
-        text:categoryOf(types[i]),showarrow:false,
-        font:{size:10,color:"#8a8580"}
-      });
-      if(!isLast){
-        shapes.push({type:"line",xref:"x",x0:i+0.5,x1:i+0.5,yref:"paper",y0:0,y1:1,
-          line:{color:"#e4e1db",width:1,dash:"dot"}});
-      }
-      groupStart=i+1;
-    }
-  }
-  return {shapes:shapes,annotations:annotations};
-}
+/* Two earlier attempts at showing the category grouping ON the chart both failed in real
+   rendering (only caught once Søren looked at actual screenshots -- jsdom stubs Plotly.newPlot
+   and never renders, so neither attempt was visible to any smoke test):
+   1) Plotly's built-in "multicategory" xaxis type -- works for one trace, but dotMedianChart
+      draws one BOX trace per cell type, and multicategory positioning breaks down across many
+      independent traces (category names leaked in as if they were their own data points).
+   2) Dotted divider lines + a small centered text label per group, drawn as ordinary
+      shapes/annotations below the axis (yshift:-92) -- this avoided the multicategory bug, but
+      the tick labels themselves are long names rendered at tickangle:-45 (automargin:true makes
+      Plotly grow the bottom margin to fit them, and how far down that is varies chart-to-chart
+      with the longest label), so a fixed yshift landed the category text and divider lines
+      right on top of/through the rotated tick labels rather than below them.
+   Given two rendering-only failures in a row that this sandbox can't visually pre-check, the
+   category grouping is now ORDER-ONLY: types are still sorted Excitatory->Inhibitory->Glia->
+   Vascular->Immune & perivascular->Leptomeninges (via sortByCategory/categoryorder:"array"), so
+   related cell types still sit next to each other on every chart, but nothing is drawn on the
+   chart itself to mark the boundaries -- eliminates the overlap risk entirely rather than
+   trying a third positioning heuristic with no way to confirm it renders correctly. */
 function categorizedLayout(types,extra){
-  const decor=categoryGroupDecor(types);
   return Object.assign({},BASE_LAYOUT,{
-    xaxis:Object.assign({},BASE_LAYOUT.xaxis,{categoryorder:"array",categoryarray:types}),
-    margin:Object.assign({},BASE_LAYOUT.margin,{b:150}),
-    shapes:decor.shapes,annotations:decor.annotations
+    xaxis:Object.assign({},BASE_LAYOUT.xaxis,{categoryorder:"array",categoryarray:types})
   },extra||{});
 }
 
@@ -462,10 +444,8 @@ function renderVolumes(rows){
 
   if(!paired.length){
     // No same-cell pairs yet (only legacy/unpaired rows) -- fall back to the old independent-
-    // averages comparison, but say plainly that it's not a same-cell portion-of-whole view.
-    const note=document.createElement("p");note.className="footnote";
-    note.textContent="No same-cell nucleus+mesh pairs yet (only available for rows recorded from the main nucleus panel after nucleus-volume pairing was added) — showing independent per-type averages instead, which are NOT the same individual cells.";
-    area.parentNode.insertBefore(note,area.nextSibling);
+    // averages comparison. Trace names already say "independent sample" so the legend itself
+    // makes clear these aren't paired same-cell measurements; no separate footnote needed.
     const meshByType={};
     unpaired.forEach(r=>{(meshByType[r.cellType]=meshByType[r.cellType]||[]).push(r.volumeUm3);});
     const allTypes=Array.from(new Set(Object.keys(nucByType).concat(Object.keys(meshByType))));
