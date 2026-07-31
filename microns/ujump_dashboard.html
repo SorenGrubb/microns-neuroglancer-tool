@@ -94,7 +94,7 @@
 
   <div class="card wide">
     <h2>Nucleus volume as a share of whole-cell (mesh) volume, by cell type</h2>
-    <p class="sub">The nucleus is physically part of the whole cell, so the bars overlap rather than sitting side by side. LIVE — grows one same-cell pair at a time whenever someone clicks "Compute volume" in µJump from a nucleus's main panel while signed in.</p>
+    <p class="sub">One dot per paired cell = nucleus volume ÷ whole-cell (mesh) volume for that same cell, %. Coloured bar = median. Physically-impossible ratios (&gt;100%) and statistical outliers (Tukey 1.5×IQR) are excluded — see the note below the chart. LIVE — grows one same-cell pair at a time whenever someone clicks "Compute volume" in µJump from a nucleus's main panel while signed in.</p>
     <div class="plot" id="plotVolumes"></div>
   </div>
 
@@ -457,37 +457,58 @@ function renderVolumes(rows){
       {type:"bar",name:"Nucleus volume (mean, static, independent sample)",x:withBoth,y:withBoth.map(nucMean),marker:{color:"#3a6b5a"}},
       {type:"bar",name:"Mesh (root-ID) volume (mean, live n="+unpaired.length+", independent sample)",x:withBoth,y:withBoth.map(meshMean),marker:{color:"#8a3b2a"}}
     ],categorizedLayout(withBoth,{barmode:"group",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
-      yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"volume (µm³)",type:"log"})}),PLOTLY_CFG);
+      yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"volume (µm³)"})}),PLOTLY_CFG);
     return;
   }
 
-  // Same-cell paired data exists: show nucleus volume NESTED inside (overlapping) the whole-cell
-  // mesh volume, per cell type -- the nucleus really is a physical subset of the whole cell, so
-  // it's drawn as a narrower, opaque bar sitting inside the wider, translucent whole-cell bar,
-  // rather than two side-by-side bars or a stack that would double-count the overlap.
+  // Same-cell paired data exists: show nucleus volume as a % of that SAME cell's whole-cell
+  // (mesh) volume -- one dot per paired cell (SuperPlot-style, same dotMedianChart convention
+  // as the cilium-length/nucleus-centriole charts), rather than two absolute-volume bars. A
+  // ratio per cell is the honest way to show "share of whole-cell volume"; plotting the pooled
+  // means as two bars (the earlier design) obscured cell-to-cell spread entirely.
+  // Two-stage filtering before plotting:
+  //  1. Hard sanity filter: a nucleus cannot physically exceed its own cell's volume, so any
+  //     pct outside (0,100] is a bad pairing/segmentation artifact, not a real measurement --
+  //     dropped unconditionally, not just flagged as a statistical outlier.
+  //  2. Tukey 1.5x-IQR fences, computed on the POOLED set of valid percentages across all types
+  //     (per-type n is often too small for a stable per-type IQR) -- standard, well-known
+  //     descriptive-stats outlier convention, not a paper-backed scientific claim, so no
+  //     citation is needed for using it here.
   const byType={};
-  paired.forEach(function(r){(byType[r.cellType]=byType[r.cellType]||[]).push(r);});
-  const types=sortByCategory(Object.keys(byType),t=>byType[t].length);
-  const meshMeans=types.map(t=>{const rs=byType[t];return rs.reduce((s,r)=>s+r.volumeUm3,0)/rs.length;});
-  const nucMeans=types.map(t=>{const rs=byType[t];return rs.reduce((s,r)=>s+r.nucVolumeUm3,0)/rs.length;});
-  const ns=types.map(t=>byType[t].length);
-  const pctText=types.map((t,i)=>meshMeans[i]>0?Math.round(100*nucMeans[i]/meshMeans[i])+"% nucleus":"");
+  let droppedImpossible=0;
+  paired.forEach(function(r){
+    if(!(r.volumeUm3>0))return;
+    const pct=100*r.nucVolumeUm3/r.volumeUm3;
+    if(!(pct>0&&pct<=100)){droppedImpossible++;return;}
+    (byType[r.cellType]=byType[r.cellType]||[]).push(pct);
+  });
+  const pooled=Object.values(byType).reduce((a,b)=>a.concat(b),[]).sort((a,b)=>a-b);
+  let loFence=-Infinity,hiFence=Infinity;
+  if(pooled.length>=4){
+    const q=function(p){const idx=(pooled.length-1)*p,lo=Math.floor(idx),hi=Math.ceil(idx);
+      return pooled[lo]+(pooled[hi]-pooled[lo])*(idx-lo);};
+    const q1=q(0.25),q3=q(0.75),iqr=q3-q1;
+    loFence=q1-1.5*iqr;hiFence=q3+1.5*iqr;
+  }
+  let droppedIqr=0;
+  const filteredByType={};
+  Object.keys(byType).forEach(function(t){
+    filteredByType[t]=byType[t].filter(function(v){
+      const keep=v>=loFence&&v<=hiFence;
+      if(!keep)droppedIqr++;
+      return keep;
+    });
+  });
 
-  Plotly.newPlot(area.id,[
-    {type:"bar",name:"Whole cell (mesh) volume",x:types,y:meshMeans,width:0.62,
-      marker:{color:"#8a3b2a",opacity:0.35,line:{color:"#8a3b2a",width:1}},
-      hovertemplate:"%{x}<br>whole cell: %{y:.0f} µm³<extra></extra>"},
-    {type:"bar",name:"Nucleus volume (same cells)",x:types,y:nucMeans,width:0.32,
-      marker:{color:"#3a6b5a"},
-      text:pctText,textposition:"outside",textfont:{size:9},
-      customdata:ns,
-      hovertemplate:"%{x}<br>nucleus: %{y:.0f} µm³ (%{customdata} paired cells)<extra></extra>"}
-  ],categorizedLayout(types,{barmode:"overlay",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
-    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"volume (µm³)"})}),PLOTLY_CFG);
+  dotMedianChart(area.id,filteredByType,"Nucleus volume (% of whole-cell mesh volume)");
 
-  if(unpaired.length){
+  const notes=[];
+  if(droppedImpossible)notes.push(droppedImpossible+" measurement(s) excluded as physically impossible (nucleus reported larger than the whole cell).");
+  if(droppedIqr)notes.push(droppedIqr+" statistical outlier(s) excluded (outside Tukey 1.5×IQR fences).");
+  if(unpaired.length)notes.push(unpaired.length+" additional mesh-volume measurement(s) have no paired nucleus volume yet and aren't shown here.");
+  if(notes.length){
     const note=document.createElement("p");note.className="footnote";
-    note.textContent="n="+paired.length+" same-cell nucleus+mesh pairs shown above (bars overlap because the nucleus is physically part of the whole cell). "+unpaired.length+" additional mesh-volume measurement(s) have no paired nucleus volume yet and aren't included here.";
+    note.textContent="n="+paired.length+" same-cell nucleus+mesh pairs. "+notes.join(" ");
     area.parentNode.insertBefore(note,area.nextSibling);
   }
 }
