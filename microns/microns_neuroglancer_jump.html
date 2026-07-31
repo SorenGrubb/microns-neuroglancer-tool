@@ -119,6 +119,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 </head><body>
 <div class="wrap">
 <a href="#" id="logoHome" style="text-decoration:none;color:inherit;display:inline-block" title="Reload µJump"><h1 class="logo"><span class="mu">µ</span><span class="jm">Jump</span></h1></a>
+<a href="ujump_dashboard.html" target="_blank" rel="noopener" style="display:inline-block;margin-left:10px;font-size:12px;color:var(--mut);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:3px 9px;vertical-align:middle" title="Live/static statistics dashboard built from this dataset + the community-reporting backend">📊 Statistics dashboard</a>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <div class="card">
 <label style="display:none">Input units</label>
@@ -2298,6 +2299,37 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
    "?newCellOrganelles=1" bulk mode and organellesNearPos() coordinate-matching already pick them
    up without modification. Redeploy steps (a)/(b) apply: paste the updated doPost/doGet and
    create a new deployment version.
+   ALSO IMPORTANT if you already deployed before the µJump statistics dashboard existed
+   (2026-07-31): the dashboard's graphs are built from a mix of static data baked into this
+   file and a few new LIVE aggregate reads from this same Apps Script backend, added so the
+   dashboard can genuinely grow over time rather than being a one-off snapshot:
+   - doPost handles a sixth type, "save_computed_volume" -- one row per successful click of
+     the "Compute volume" button next to a cell's root ID (see MeshDL.computeVolume() in the
+     HTML). MICrONS publishes no whole-cell mesh volume anywhere, and computing one requires
+     fetching+decoding a full mesh, too expensive to do for the whole dataset at once -- so
+     rather than a batch job or a "coming soon" placeholder, Søren chose to seed the
+     dashboard's "root-ID volume vs nucleus volume" graph FROM REAL USAGE: every successful
+     click adds one row to a new "Computed volumes" sheet (columns: timestamp, rootId,
+     nucleusId [blank for a standalone point or merged-nucleus sub-cell], cellType,
+     volumeUm3, vertices, fragmentCount, reporterEmail), and the graph fills in organically
+     as more cells get looked at. Worth 1 point in the gamification tally, same as most other
+     report types (added to REPORT_SHEETS_POINTS).
+   - doGet gained "?computedVolumes=1", a public bulk read of every row in that new sheet
+     (reporterEmail withheld, same privacy rule as every other bulk mode here), which the
+     dashboard fetches fresh on every load/refresh.
+   - doGet gained "?reportsOverTime=1" for the dashboard's "cumulative reports over time"
+     graph: every report-type sheet's row count (plus Root ID proposals/votes), binned by
+     UTC calendar day and returned as one small per-day array rather than every individual
+     row, since these sheets can grow into the thousands over time and the graph only ever
+     needs a running daily total.
+   Redeploy steps (a)/(b) apply as always: paste the updated doPost/doGet (see the current
+   full reference at Code.gs.txt in the project folder, which is regenerated from and kept in
+   sync with this comment's intent, though the literal code snapshot frozen above predates
+   Google sign-in entirely -- always work from Code.gs.txt for the actual paste, not the
+   snapshot above) and create a new deployment version. No existing sheet needs a header
+   added by hand for this one -- "Computed volumes" is entirely new, so its header writes
+   itself on the very first submission.
+
    Note: the POST below uses mode:"no-cors" (required for a plain fetch to an Apps Script
    web app without extra CORS setup), so the button shows a success message optimistically --
    it can't read back a real success/failure. Check the sheet itself to confirm rows arrive.
@@ -2366,6 +2398,25 @@ function showSubmitToast(ok,msg){
   t.style.opacity="1";
   clearTimeout(showSubmitToast._h);
   showSubmitToast._h=setTimeout(function(){t.style.opacity="0";},ok?4500:8000);
+}
+/* Best-effort, SILENT save of a "Compute volume" result to the µJump dashboard's growing
+   dataset (see the "Computed volumes" ALSO IMPORTANT note above REPORT_ENDPOINT). Deliberately
+   does NOT reuse postReport() below: that function alerts and fires the Google sign-in prompt
+   whenever the user isn't signed in, which is right for an explicit "submit a report" action
+   but wrong here -- computing a volume is primarily something a user does to see the number for
+   themselves, and most people trying it won't be signed in. So this only saves when a verified
+   sign-in already exists in this session; otherwise it does nothing and the button behaves
+   exactly as if this feature didn't exist. Never shown to the user either way -- no toast, no
+   error -- since a failed save here shouldn't undermine confidence in the volume number itself. */
+function maybeSaveComputedVolume(rootId,cellType,info){
+  if(!REPORT_ENDPOINT||!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
+  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)return;
+  const payload={type:"save_computed_volume",rootId:rootId||"",nucleusId:"",
+    cellType:cellType||"",volumeUm3:Math.round((info.volumeUm3||0)*100)/100,
+    vertices:info.vertices||0,fragmentCount:info.fragmentCount||1,
+    reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
+    credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
+  fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
 }
 function postReport(payload,okMsg){
   if(!REPORT_ENDPOINT){alert("Reporting isn't wired up yet — set REPORT_ENDPOINT near the top of the script (see the comment above it) to a Google Apps Script web app URL.");return false;}
@@ -3498,12 +3549,14 @@ document.addEventListener("click",(e)=>{
     if(volBtn.disabled)return;
     const rootId=volBtn.dataset.root;
     volBtn.disabled=true;
+    const volLiveCellType=(volBtn.dataset.followLive==="1"&&typeof CUR_CELLTYPE_DISPLAY!=="undefined"&&CUR_CELLTYPE_DISPLAY)?CUR_CELLTYPE_DISPLAY:volBtn.dataset.celltype;
     MeshDL.computeVolume(rootId,(frac,msg)=>{volBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";})
       .then(info=>{
         const combinedStr=info.fragmentCount>1?" ("+info.fragmentCount+" fragments combined)":"";
         volBtn.textContent="≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"+combinedStr;
         volBtn.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices) — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure. Click again to recompute.";
         volBtn.disabled=false;
+        maybeSaveComputedVolume(rootId,volLiveCellType,info);
       })
       .catch(err=>{
         console.warn("[uJump mesh volume]",err);
@@ -3569,7 +3622,7 @@ function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive){
   const ct=escHtml(cellTypeName||"Unclassified cell"),coords=escHtml(voxelToPasteStr(nucVox));
   return '<button class="idbtn meshdl" data-root="'+rootId+'" title="Download this cell’s 3D model as a .glb (no CAVE token needed) — automatically combined with any additionally-proposed root IDs for this nucleus, since those are usually fragments of the same cell — runs entirely in your browser" style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ 3D model</button>'
     +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+' data-coords="'+coords+'" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates, plus an embedded scale-bar rod below it that spins along with the model — automatically combined with any additionally-proposed root IDs for this nucleus — the Turntable spin autoplays in the slideshow, no click needed — built entirely in your browser, no CAVE token needed" style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>'
-    +'<button class="idbtn meshvol" data-root="'+rootId+'" title="Estimate this cell’s mesh volume (µm³) by fetching and decoding its full 3D geometry — not precomputed, so this costs one real mesh fetch, same as the 3D model download — automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries" style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
+    +'<button class="idbtn meshvol" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+' title="Estimate this cell’s mesh volume (µm³) by fetching and decoding its full 3D geometry — not precomputed, so this costs one real mesh fetch, same as the 3D model download — automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries. Saved (root ID, cell type, volume) to the shared µJump dashboard when signed in with Google." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
 }
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
