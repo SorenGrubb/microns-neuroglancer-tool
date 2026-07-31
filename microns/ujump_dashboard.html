@@ -94,7 +94,7 @@
 
   <div class="card wide">
     <h2>Nucleus volume as a share of whole-cell (mesh) volume, by cell type</h2>
-    <p class="sub">One dot per paired cell = nucleus volume ÷ whole-cell (mesh) volume for that same cell, %. Coloured bar = median. Physically-impossible ratios (&gt;100%) and statistical outliers (Tukey 1.5×IQR) are excluded — see the note below the chart. LIVE — grows one same-cell pair at a time whenever someone clicks "Compute volume" in µJump from a nucleus's main panel while signed in.</p>
+    <p class="sub">Always a dot plot. Once same-cell nucleus+mesh pairs exist: one dot per paired cell = nucleus volume ÷ whole-cell volume for that same cell, %, with physically-impossible (&gt;100%) and statistically outlying (Tukey 1.5×IQR) ratios excluded. Until then: nucleus and whole-cell volumes shown as two independent per-type distributions, clearly labelled as not the same cells. Merged-nucleus-blob detections (not yet split into individual cells) are excluded throughout. LIVE — grows whenever someone clicks "Compute volume" in µJump while signed in.</p>
     <div class="plot" id="plotVolumes"></div>
   </div>
 
@@ -254,6 +254,58 @@ function dotMedianChart(divId,dataObj,yTitle){
   }),PLOTLY_CFG);
 }
 
+/* ujump.html shows an unresolved merged-nucleus-blob detection (MICrONS's automatic detector
+   merged several real nuclei into one) as a joined summary string, e.g. "Astrocyte + Perivascular
+   Fibroblast" or "2 × Astrocyte + Endothelial cell" (see the longName()-based _sum builder around
+   line 1401 of ujump.html). That's a placeholder for "not yet individually identified," never a
+   real single cell type -- if someone clicks "Compute volume" or logs a centriole/cilium while
+   looking at such a blob, that joined string can leak into live report data. Filter it out
+   everywhere the dashboard reads a live cellType/identified string, so it never appears as if it
+   were its own cell type in any chart. */
+function isMergedBlobType(name){
+  return /[+×]/.test(String(name||""));
+}
+
+/* Grouped dot-plot: multiple independent per-type distributions (e.g. nucleus volume vs. mesh
+   volume, NOT necessarily the same cells) shown side by side per category via Plotly's standard
+   boxmode:"group" behavior -- ordinary, well-documented grouping of box traces sharing an x
+   category, unlike the earlier multicategory-axis experiment. seriesList: [{name,color,dataObj}]. */
+function groupedDotChart(divId,seriesList,yTitle){
+  const allTypes=new Set();
+  seriesList.forEach(function(s){
+    Object.keys(s.dataObj).forEach(function(t){
+      if(s.dataObj[t]&&s.dataObj[t].length>=3)allTypes.add(t);
+    });
+  });
+  const types=sortByCategory(Array.from(allTypes),function(t){
+    return Math.max.apply(null,seriesList.map(function(s){return (s.dataObj[t]||[]).length;}));
+  });
+  const traces=[];
+  seriesList.forEach(function(s){
+    let legendShown=false;
+    types.forEach(function(t){
+      const arr=s.dataObj[t];
+      if(!arr||arr.length<3)return;
+      traces.push({
+        type:"box", name:s.name, x0:t, y:arr,
+        boxpoints:"all", jitter:0.55, pointpos:0,
+        marker:{color:"#8a8a8a",size:3,opacity:0.4},
+        line:{color:s.color,width:2.5},
+        fillcolor:"rgba(0,0,0,0)",
+        whiskerwidth:0, quartilemethod:"linear",
+        showlegend:!legendShown,
+        hoverinfo:"y+name"
+      });
+      legendShown=true;
+    });
+  });
+  Plotly.newPlot(divId,traces,categorizedLayout(types,{
+    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle}),
+    boxmode:"group",
+    showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
+  }),PLOTLY_CFG);
+}
+
 function renderStaticCharts(){
   // Unclassified is already excluded server-side (precompute_dashboard.py) -- category-ordered.
   barChart("plotCellsPerType",DATA.cells_per_type.combined_best_identity,"# of cells",true);
@@ -356,7 +408,7 @@ function mergeLiveOrganelles(liveReports){
   (liveReports||[]).forEach(function(r){
     const nid=String(r.nucleusId||"");
     const type=r.identified||"";
-    if(!nid||!type||type==="Unclassified")return;
+    if(!nid||!type||type==="Unclassified"||isMergedBlobType(type))return;
     if(r.kind==="cilium"){
       if(ciliumCovered.has(nid))return;
       const a=parseVox(r.pointA),b=parseVox(r.pointB);
@@ -407,110 +459,99 @@ function renderPredictedVerified(liveIdentifiedCount){
   }],Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"# of nuclei"})}),PLOTLY_CFG);
 }
 
+/* renderVolumes(): always a dot plot, never a bar -- three tiers depending on what data is
+   actually available right now, each strictly better than the last as more real pairing data
+   accumulates. Merged-nucleus-blob rows (see isMergedBlobType()) are stripped before any of
+   the three tiers see them, so a composite "X + Y" string can never appear as its own category. */
 function renderVolumes(rows){
   const area=document.getElementById("plotVolumes");
   area.innerHTML="";
-  const extra=document.getElementById("plotVolumesFallback");
-  if(extra)extra.remove();
-  const sub=area.parentNode.querySelector(".footnote");
-  if(sub)sub.remove();
+  const oldFallback=document.getElementById("plotVolumesFallback");
+  if(oldFallback)oldFallback.remove();
+  area.parentNode.querySelectorAll(".footnote").forEach(function(n){n.remove();});
 
   const nucByType=DATA.nucleus_volume_um3;
-  const allRows=(rows||[]).filter(r=>r.cellType&&r.volumeUm3);
+  const allRows=(rows||[]).filter(r=>r.cellType&&r.volumeUm3&&!isMergedBlobType(r.cellType));
   /* PAIRED rows: the nucleus volume and mesh volume were measured on the exact same cell (the
      "Compute volume" click happened from the main nucleus display, where NV[i] -- the
      precomputed nucleus volume -- was already known; see meshDlButtonHtml()'s comment in the
      HTML). Only these can honestly show nucleus volume as a real physical PORTION of the whole
      cell -- older rows (recorded before nucVolumeUm3 existed) or clicks from a community/
-     standalone/merged-sub cell panel have no paired nucleus number and fall back separately
-     below, clearly labelled as independent averages rather than same-cell measurements. */
+     standalone/merged-sub cell panel have no paired nucleus number and fall into Tier 2 below. */
   const paired=allRows.filter(r=>r.nucVolumeUm3>0);
   const unpaired=allRows.filter(r=>!(r.nucVolumeUm3>0));
 
-  if(!allRows.length){
-    area.innerHTML=
-      "<div class='placeholder'>No mesh-volume data yet — this graph grows every time someone "+
-      "clicks &ldquo;Compute volume&rdquo; in µJump while signed in with Google. "+
-      "Nucleus-volume-only view shown below in the meantime.</div>";
-    const meanOf=t=>{const a=nucByType[t];return a&&a.length?a.reduce((x,y)=>x+y,0)/a.length:0;};
-    const fbTypes=sortByCategory(Object.keys(nucByType),meanOf).slice(0,20);
-    const div=document.createElement("div");div.className="plot";div.id="plotVolumesFallback";
-    area.parentNode.appendChild(div);
-    Plotly.newPlot(div.id,[{type:"bar",x:fbTypes,y:fbTypes.map(meanOf),
-      marker:{color:fbTypes.map(colorFor)}}],
-      categorizedLayout(fbTypes,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"mean nucleus volume (µm³)"})}),PLOTLY_CFG);
-    return;
-  }
-
-  if(!paired.length){
-    // No same-cell pairs yet (only legacy/unpaired rows) -- fall back to the old independent-
-    // averages comparison. Trace names already say "independent sample" so the legend itself
-    // makes clear these aren't paired same-cell measurements; no separate footnote needed.
-    const meshByType={};
-    unpaired.forEach(r=>{(meshByType[r.cellType]=meshByType[r.cellType]||[]).push(r.volumeUm3);});
-    const allTypes=Array.from(new Set(Object.keys(nucByType).concat(Object.keys(meshByType))));
-    const nucMean=t=>{const a=nucByType[t];return a&&a.length?a.reduce((x,y)=>x+y,0)/a.length:null;};
-    const meshMean=t=>{const a=meshByType[t];return a&&a.length?a.reduce((x,y)=>x+y,0)/a.length:null;};
-    const withBoth=sortByCategory(allTypes.filter(t=>nucMean(t)!=null||meshMean(t)!=null),
-      t=>meshMean(t)||nucMean(t)||0);
-    Plotly.newPlot(area.id,[
-      {type:"bar",name:"Nucleus volume (mean, static, independent sample)",x:withBoth,y:withBoth.map(nucMean),marker:{color:"#3a6b5a"}},
-      {type:"bar",name:"Mesh (root-ID) volume (mean, live n="+unpaired.length+", independent sample)",x:withBoth,y:withBoth.map(meshMean),marker:{color:"#8a3b2a"}}
-    ],categorizedLayout(withBoth,{barmode:"group",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
-      yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"volume (µm³)"})}),PLOTLY_CFG);
-    return;
-  }
-
-  // Same-cell paired data exists: show nucleus volume as a % of that SAME cell's whole-cell
-  // (mesh) volume -- one dot per paired cell (SuperPlot-style, same dotMedianChart convention
-  // as the cilium-length/nucleus-centriole charts), rather than two absolute-volume bars. A
-  // ratio per cell is the honest way to show "share of whole-cell volume"; plotting the pooled
-  // means as two bars (the earlier design) obscured cell-to-cell spread entirely.
-  // Two-stage filtering before plotting:
-  //  1. Hard sanity filter: a nucleus cannot physically exceed its own cell's volume, so any
-  //     pct outside (0,100] is a bad pairing/segmentation artifact, not a real measurement --
-  //     dropped unconditionally, not just flagged as a statistical outlier.
-  //  2. Tukey 1.5x-IQR fences, computed on the POOLED set of valid percentages across all types
-  //     (per-type n is often too small for a stable per-type IQR) -- standard, well-known
-  //     descriptive-stats outlier convention, not a paper-backed scientific claim, so no
-  //     citation is needed for using it here.
-  const byType={};
-  let droppedImpossible=0;
-  paired.forEach(function(r){
-    if(!(r.volumeUm3>0))return;
-    const pct=100*r.nucVolumeUm3/r.volumeUm3;
-    if(!(pct>0&&pct<=100)){droppedImpossible++;return;}
-    (byType[r.cellType]=byType[r.cellType]||[]).push(pct);
-  });
-  const pooled=Object.values(byType).reduce((a,b)=>a.concat(b),[]).sort((a,b)=>a-b);
-  let loFence=-Infinity,hiFence=Infinity;
-  if(pooled.length>=4){
-    const q=function(p){const idx=(pooled.length-1)*p,lo=Math.floor(idx),hi=Math.ceil(idx);
-      return pooled[lo]+(pooled[hi]-pooled[lo])*(idx-lo);};
-    const q1=q(0.25),q3=q(0.75),iqr=q3-q1;
-    loFence=q1-1.5*iqr;hiFence=q3+1.5*iqr;
-  }
-  let droppedIqr=0;
-  const filteredByType={};
-  Object.keys(byType).forEach(function(t){
-    filteredByType[t]=byType[t].filter(function(v){
-      const keep=v>=loFence&&v<=hiFence;
-      if(!keep)droppedIqr++;
-      return keep;
+  // ---- Tier 1: real same-cell pairs exist -- the gold-standard metric: nucleus volume as a %
+  // of that SAME cell's whole-cell volume, one dot per paired cell (SuperPlot-style, same
+  // dotMedianChart convention as the cilium-length/nucleus-centriole charts). Two-stage
+  // filtering before plotting: (1) hard sanity filter -- a nucleus cannot physically exceed its
+  // own cell's volume, so any pct outside (0,100] is a bad pairing/segmentation artifact, not a
+  // real measurement, dropped unconditionally; (2) Tukey 1.5x-IQR fences on the POOLED set of
+  // valid percentages across all types (per-type n is often too small for a stable per-type
+  // IQR) -- a standard descriptive-stats convention, not a paper-backed claim needing citation.
+  if(paired.length){
+    const byType={};
+    let droppedImpossible=0;
+    paired.forEach(function(r){
+      if(!(r.volumeUm3>0))return;
+      const pct=100*r.nucVolumeUm3/r.volumeUm3;
+      if(!(pct>0&&pct<=100)){droppedImpossible++;return;}
+      (byType[r.cellType]=byType[r.cellType]||[]).push(pct);
     });
-  });
+    const pooled=Object.values(byType).reduce((a,b)=>a.concat(b),[]).sort((a,b)=>a-b);
+    let loFence=-Infinity,hiFence=Infinity;
+    if(pooled.length>=4){
+      const q=function(p){const idx=(pooled.length-1)*p,lo=Math.floor(idx),hi=Math.ceil(idx);
+        return pooled[lo]+(pooled[hi]-pooled[lo])*(idx-lo);};
+      const q1=q(0.25),q3=q(0.75),iqr=q3-q1;
+      loFence=q1-1.5*iqr;hiFence=q3+1.5*iqr;
+    }
+    let droppedIqr=0;
+    const filteredByType={};
+    Object.keys(byType).forEach(function(t){
+      filteredByType[t]=byType[t].filter(function(v){
+        const keep=v>=loFence&&v<=hiFence;
+        if(!keep)droppedIqr++;
+        return keep;
+      });
+    });
 
-  dotMedianChart(area.id,filteredByType,"Nucleus volume (% of whole-cell mesh volume)");
+    dotMedianChart(area.id,filteredByType,"Nucleus volume (% of whole-cell mesh volume)");
 
-  const notes=[];
-  if(droppedImpossible)notes.push(droppedImpossible+" measurement(s) excluded as physically impossible (nucleus reported larger than the whole cell).");
-  if(droppedIqr)notes.push(droppedIqr+" statistical outlier(s) excluded (outside Tukey 1.5×IQR fences).");
-  if(unpaired.length)notes.push(unpaired.length+" additional mesh-volume measurement(s) have no paired nucleus volume yet and aren't shown here.");
-  if(notes.length){
-    const note=document.createElement("p");note.className="footnote";
-    note.textContent="n="+paired.length+" same-cell nucleus+mesh pairs. "+notes.join(" ");
-    area.parentNode.insertBefore(note,area.nextSibling);
+    const notes=[];
+    if(droppedImpossible)notes.push(droppedImpossible+" measurement(s) excluded as physically impossible (nucleus reported larger than the whole cell).");
+    if(droppedIqr)notes.push(droppedIqr+" statistical outlier(s) excluded (outside Tukey 1.5×IQR fences).");
+    if(unpaired.length)notes.push(unpaired.length+" additional mesh-volume measurement(s) have no paired nucleus volume yet and aren't shown here.");
+    if(notes.length){
+      const note=document.createElement("p");note.className="footnote";
+      note.textContent="n="+paired.length+" same-cell nucleus+mesh pairs. "+notes.join(" ");
+      area.parentNode.insertBefore(note,area.nextSibling);
+    }
+    return;
   }
+
+  // ---- Tier 2: no same-cell pairs yet, but SOME volume data exists (live "Compute volume"
+  // clicks and/or the static nucleus-volume sample) -- show nucleus and mesh volumes as two
+  // independent per-type dot-plot distributions, grouped side by side (Plotly's standard
+  // boxmode:"group", not the earlier broken multicategory axis), rather than pretending they
+  // form a ratio. Still a dot plot, still linear scale, never a bar.
+  const meshByType={};
+  unpaired.forEach(r=>{(meshByType[r.cellType]=meshByType[r.cellType]||[]).push(r.volumeUm3);});
+  const hasNuc=Object.values(nucByType).some(a=>a&&a.length);
+  const hasMesh=Object.values(meshByType).some(a=>a&&a.length);
+  if(hasNuc||hasMesh){
+    const series=[];
+    if(hasNuc)series.push({name:"Nucleus volume (static, independent sample)",color:"#3a6b5a",dataObj:nucByType});
+    if(hasMesh)series.push({name:"Whole-cell mesh volume (live, independent sample)",color:"#8a3b2a",dataObj:meshByType});
+    groupedDotChart(area.id,series,"volume (µm³)");
+    const note=document.createElement("p");note.className="footnote";
+    note.textContent="No same-cell nucleus+mesh pairs recorded yet, so nucleus and whole-cell volumes are shown as independent distributions (not the same individual cells) rather than a per-cell share. The paired % chart above will replace this automatically once “Compute volume” clicks from a nucleus's main panel start recording both numbers together."+(unpaired.length?" ("+unpaired.length+" live mesh-volume measurement(s) so far.)":"");
+    area.parentNode.insertBefore(note,area.nextSibling);
+    return;
+  }
+
+  // ---- Tier 3: no volume data of any kind yet.
+  area.innerHTML="<div class='placeholder'>No volume data yet — this graph grows every time someone clicks &ldquo;Compute volume&rdquo; in µJump while signed in with Google.</div>";
 }
 
 function renderReportsOverTime(daily){
