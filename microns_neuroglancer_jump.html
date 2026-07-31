@@ -2344,6 +2344,18 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
    If you already deployed before this existed, add a "nucVolumeUm3" header to the last column
    of the "Computed volumes" sheet by hand (same convention as every other appended-column note
    in this file) -- redeploy steps (a)/(b) apply as always.
+   ALSO IMPORTANT (2026-08-xx): doGet's "?allOrganelles=1" (used by the dashboard's cilia-length/
+   nucleus-centriole charts) now also returns "identified" alongside the existing nucleusId/kind/
+   pointA/pointB/coord fields -- the exact cell-type string that was on screen at the moment the
+   organelle_location report was submitted (see wireOrganelleForm()'s identified:name||"" calls),
+   same convention save_computed_volume already uses for its cellType field. Reason: Søren wanted
+   the dashboard's organelle charts to grow from LIVE community reports rather than needing a
+   periodic manual re-bake of the static owndata/cildata snapshot (chosen over the alternative of
+   re-generating that snapshot every so often) -- with "identified" already on every report row,
+   and "coord" already being the reporting nucleus's own position, the dashboard can bucket and
+   measure live reports without any separate nucleus-ID-to-type lookup table. No redeploy-breaking
+   change for existing sheets (no header rename, no data migration) -- just add the one field to
+   the doGet response; redeploy steps (a)/(b) still apply to pick it up.
 
    Note: the POST below uses mode:"no-cors" (required for a plain fetch to an Apps Script
    web app without extra CORS setup), so the button shows a success message optimistically --

@@ -120,6 +120,7 @@ D = get_block("nucdata")
 N = D["N"]
 NX = b64u32(D["XB"]); NY = b64u32(D["YB"]); NZ = b64u16(D["ZB"])
 NT = b64u8(D["TB"])                       # FIX: 0 = unclassified; 1..16 -> CT_NAMES[value-1]
+NID = b64u32(D["NB"])                     # real MICrONS nucleus ID per main-nucleus index (matches ujump.html's own NID=new Uint32Array(b64(D.NB).buffer))
 NV = b64f32(D["VB"])                      # nucleus volume um3, 0 = not available
 CT_NAMES = [canon(mural3(n)) for n in D["CT_NAMES"]]   # 16 broad MICrONS categories
 CT_CLASS = D["CT_CLASS"]                  # excitatory_neuron / inhibitory_neuron / nonneuron
@@ -426,7 +427,28 @@ primary_cilia = {
             "or came straight from MICrONS (e.g. a neuron whose MICrONS type didn't need "
             "correcting). extra_positive_findings_outside_checked_pass shows, per type, how many "
             "of those length measurements came from outside the checked-pass denominator, for "
-            "transparency about the percent figures' true coverage."
+            "transparency about the percent figures' true coverage. A further, LIVE top-up of "
+            "organelle reports not yet folded into this static snapshot is merged in client-side "
+            "-- see live_organelle_merge below."
+}
+
+# ---- Live-organelle-merge support: which main-nucleus IDs are ALREADY covered by the static
+# cilium/centriole data above, so the dashboard's live "?allOrganelles=1" merge (added 2026-08,
+# Søren's chosen option over periodically re-baking this static snapshot) can skip reports that
+# would otherwise double-count once a future re-bake folds them in here too. Every
+# organelle_location report already carries the cell-type string it was reported against
+# (doGet's ?allOrganelles=1 "identified" field, added alongside this) and the reporting
+# nucleus's own position (its "coord" field), so no nucleus-ID-to-type/-position lookup table
+# needs to be embedded here at all -- just these two small ID lists.
+live_organelle_merge = {
+    "already_covered_cilium_nucleus_ids": [int(x) for x in NID[OWN_HASCIL == 1].tolist()],
+    "already_covered_centriole_nucleus_ids": [int(x) for x in NID[OWN_HASCENT == 1].tolist()],
+    "note": "Real MICrONS nucleus IDs (not array indices) already represented in "
+            "length_um_by_type/nucleus_to_centriole_um above -- the dashboard's live merge skips "
+            "any '?allOrganelles=1' report whose nucleusId appears here, and only merges in "
+            "reports with a non-blank, resolvable nucleusId and a non-Unclassified 'identified' "
+            "value (percent_with_cilium_by_type is NOT extended live -- there's no way to know "
+            "the true 'checked and not found' denominator for arbitrary live reports)."
 }
 
 # ---- Graph 5: nucleus-to-centriole distance per cell type -----
@@ -547,6 +569,7 @@ out = {
     "cells_per_type_per_layer": cells_per_type_per_layer,
     "unclassified_per_layer": unclassified_per_layer,
     "primary_cilia": primary_cilia,
+    "live_organelle_merge": live_organelle_merge,
     "nucleus_to_centriole_um": nucleus_to_centriole,
     "identified_vs_unclassified": identified_vs_unclassified,
     "predicted_vs_verified_static": predicted_vs_verified_static,
