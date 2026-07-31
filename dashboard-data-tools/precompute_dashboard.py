@@ -62,19 +62,58 @@ def mural3(name):
 # pericyte, while Søren's own-verified dataset uses capitalized full names (Astrocyte/Microglia) --
 # without reconciling these, the same biological category fragments into two separate bars in
 # every chart below (e.g. "astrocyte": 1672 MICrONS-only + "Astrocyte": 1497 own-verified, when
-# it should be one "Astrocyte" bar). Canonicalize to long-form names (reusing the same LONG_NAMES
-# mapping used for on-screen labels in ujump.html's own LABELS dict) so MICrONS and own-verified
-# entries of the same category merge into one bar everywhere.
+# it should be one "Astrocyte" bar). Canonicalize to long-form names.
+#
+# 2026-08 correction: these MUST be byte-for-byte identical to what ujump.html's own longName()
+# function produces at runtime (it builds a code->fullname map from LEAF_NAMES, e.g.
+# LEAF_NAMES.exc_l23_it = "L2/3 pyramidal neuron (23P)", then looks up by the "(CODE)" suffix) --
+# an earlier, shorter version of this dict ("L2/3 pyramidal neuron", no "(23P)") caused the SAME
+# cell type to appear as two separate bars in the volume chart: one from this script's static
+# aggregate, one from live "Compute volume" rows whose cellType field is whatever longName()
+# was showing on screen at click time. Copied verbatim from LEAF_NAMES in ujump.html.
 LONG_NAMES = {
-    "23P": "L2/3 pyramidal neuron", "4P": "L4 pyramidal neuron", "5P-IT": "L5 IT pyramidal neuron",
-    "5P-ET": "L5 ET pyramidal neuron", "5P-NP": "L5 NP pyramidal neuron", "6P-CT": "L6 CT pyramidal neuron",
-    "6P-IT": "L6 IT pyramidal neuron", "BC": "Basket cell", "MC": "Martinotti cell", "BPC": "Bipolar cell",
-    "NGC": "Neurogliaform cell", "astrocyte": "Astrocyte", "oligo": "Oligodendrocyte", "OPC": "OPC",
+    "23P": "L2/3 pyramidal neuron (23P)",
+    "4P": "Layer 4 pyramidal / spiny-stellate neuron (4P)",
+    "5P-ET": "Layer 5 ET thick-tufted pyramidal neuron (5P-ET)",
+    "5P-IT": "Layer 5 IT pyramidal neuron (5P-IT)",
+    "5P-NP": "Layer 5 near-projecting neuron (5P-NP)",
+    "6P-CT": "Layer 6 CT pyramidal neuron (6P-CT)",
+    "6P-IT": "Layer 6 IT pyramidal neuron (6P-IT)",
+    "BC": "Basket cell — PV / perisomatic-targeting (BC)",
+    "MC": "Martinotti cell — SST / distal-targeting (MC)",
+    "BPC": "Bipolar cell — VIP / inhibitory-targeting (BPC)",
+    "NGC": "Neurogliaform cell — sparsely-targeting (NGC)",
+    "astrocyte": "Astrocyte", "oligo": "Oligodendrocyte", "OPC": "OPC",
     "microglia": "Microglia", "pericyte": "Pericyte",
 }
 
 def canon(name):
     return LONG_NAMES.get(name, name)
+
+# ---- Cell-type category grouping (2026-08) ----------------------------------------------------
+# Matches CATEGORY_OF/catFor() in ujump.html's own random-picker dropdown exactly, so the
+# dashboard's cell-type ordering matches what Søren already sees there: Excitatory neurons ->
+# Inhibitory neurons -> Glia -> Vascular cells -> Immune & perivascular cells -> Leptomeninges.
+CATEGORY_ORDER = ["Excitatory neurons", "Inhibitory neurons", "Glia", "Vascular cells",
+                   "Immune & perivascular cells", "Leptomeninges"]
+TYPE_CATEGORY = {}
+for _n in ["23P", "4P", "5P-ET", "5P-IT", "5P-NP", "6P-CT", "6P-IT"]:
+    TYPE_CATEGORY[canon(_n)] = "Excitatory neurons"
+for _n in ["BC", "MC", "BPC", "NGC"]:
+    TYPE_CATEGORY[canon(_n)] = "Inhibitory neurons"
+for _n in ["Astrocyte", "Microglia", "Oligodendrocyte", "OPC"]:
+    TYPE_CATEGORY[_n] = "Glia"
+for _n in ["Pericyte", "Smooth muscle cell", "Venular smooth muscle cell", "High order pericyte",
+           "Endothelial cell"]:
+    TYPE_CATEGORY[_n] = "Vascular cells"
+for _n in ["Dendritic cell", "Lymphocyte", "Macrophage", "Perivascular Fibroblast"]:
+    TYPE_CATEGORY[_n] = "Immune & perivascular cells"
+for _n in ["Arachnoid barrier cell", "Dural border cell", "Fibroblast reticular cell",
+           "Inner arachnoid fibroblast", "Pia mater Fibroblast", "Pial sheath Fibroblast"]:
+    TYPE_CATEGORY[_n] = "Leptomeninges"
+
+def category_of(type_name):
+    return TYPE_CATEGORY.get(type_name, "Other")
 
 # ---------------------------------------------------------------- nucdata (main nuclei) ----
 D = get_block("nucdata")
@@ -272,8 +311,15 @@ for gid in MG:
         merged_counts[sub["type"]] += 1
 combined_counts.update(merged_counts)
 
+# 2026-08: "Unclassified" is deliberately dropped from this graph (and the per-layer one below)
+# -- Søren doesn't want it cluttering the per-cell-type comparisons; it has its own dedicated
+# identified_vs_unclassified pie chart, and now also its own per-layer breakdown (Graph 2b below).
+combined_counts.pop("Unclassified", None)
+counts_main_no_unclassified = collections.Counter(counts_main)
+counts_main_no_unclassified.pop("Unclassified", None)
+
 cells_per_type = {
-    "microns_predicted_only": dict(counts_main.most_common()),
+    "microns_predicted_only": dict(counts_main_no_unclassified.most_common()),
     "combined_best_identity": dict(combined_counts.most_common()),
     "merged_nucleus_sub_identifications": dict(merged_counts.most_common()),
     "note": "microns_predicted_only counts every main-nucleus's single best identity "
@@ -283,20 +329,32 @@ cells_per_type = {
             "distinct cells) as additional tallies. merged_nucleus_sub_identifications is that "
             "same tally shown on its own for transparency. Counts are from the static dataset "
             "baked into ujump.html at generation time -- they will run somewhat behind the live "
-            "µJump bulk export, which also reflects newer community-submitted identifications."
+            "µJump bulk export, which also reflects newer community-submitted identifications. "
+            "Unclassified cells are excluded here on purpose -- see identified_vs_unclassified "
+            "and unclassified_per_layer instead."
 }
 
-# ---- Graph 2: # of cells per cell type per cortical layer -----
+# ---- Graph 2: # of cells per cell type per cortical layer (Unclassified excluded, see above) --
 layer_order = ["Leptomeninges", "Layer 1", "Layer 2/3", "Layer 4", "Layer 5a", "Layer 5b",
                "Layer 6a", "Layer 6b", "White matter", "Unknown"]
 per_type_per_layer = collections.defaultdict(lambda: collections.Counter())
+unclassified_per_layer_counts = collections.Counter()
 for i in range(N):
+    if best_identity[i] == "Unclassified":
+        unclassified_per_layer_counts[main_layers[i]] += 1
+        continue
     per_type_per_layer[best_identity[i]][main_layers[i]] += 1
 for j in range(ST_N):
     per_type_per_layer[st_identity[j]][st_layers[j]] += 1
 cells_per_type_per_layer = {
     "layer_order": layer_order,
     "data": {t: dict(c) for t, c in per_type_per_layer.items()}
+}
+
+# ---- Graph 2b: unclassified cells per cortical layer (its own chart, split out of Graph 2) ---
+unclassified_per_layer = {
+    "layer_order": layer_order,
+    "counts": dict(unclassified_per_layer_counts)
 }
 
 # ---- Graph 3/4: primary cilia % and length per cell type -----
@@ -417,12 +475,12 @@ predicted_vs_verified_static = {
     "unclassified": int((identity_source == "unclassified").sum()),
 }
 
-# ---- Graph 8: nucleus volume per cell type (sampled) -----
+# ---- Graph 8: nucleus volume per cell type (sampled; Unclassified excluded, see Graph 1) -----
 rng = np.random.default_rng(42)
 vol_by_type = collections.defaultdict(list)
 for i in range(N):
     v = NV[i]
-    if v and v > 0:
+    if v and v > 0 and best_identity[i] != "Unclassified":
         vol_by_type[best_identity[i]].append(float(v))
 MAX_SAMPLE = 800
 nucleus_volume_um3 = {}
@@ -458,6 +516,23 @@ for row_i, src_idx in enumerate(id_pts_idx):
 
 neighbor_composition_out = {t: dict(c.most_common(10)) for t, c in neighbor_composition.items()}
 
+# ---- Cell-type category lookup for every type name that appears ANYWHERE in this output ------
+# (built from the actual type names in play, not just the static TYPE_CATEGORY dict, so any
+# name this script produces -- including ones from live community/computed-volume rows the
+# dashboard merges in later -- always resolves to something via categoryFor()'s "Other" fallback
+# on the JS side too; this is just the authoritative static half of that lookup.)
+_all_type_names = set()
+_all_type_names.update(cells_per_type["combined_best_identity"].keys())
+_all_type_names.update(cells_per_type_per_layer["data"].keys())
+_all_type_names.update(nucleus_to_centriole.keys())
+_all_type_names.update(primary_cilia["percent_with_cilium_by_type"].keys())
+_all_type_names.update(primary_cilia["length_um_by_type"].keys())
+_all_type_names.update(nucleus_volume_um3.keys())
+_all_type_names.update(neighbor_composition_out.keys())
+for _partners in neighbor_composition_out.values():
+    _all_type_names.update(_partners.keys())
+category_of_type = {t: category_of(t) for t in _all_type_names}
+
 # ================================================================================
 out = {
     "meta": {
@@ -466,8 +541,11 @@ out = {
         "n_main_nuclei": N, "n_standalone": ST_N, "n_merged_groups": len(MG),
         "n_merged_sub_identifications": sum(len(v) for v in MG.values()),
     },
+    "category_order": CATEGORY_ORDER,
+    "category_of_type": category_of_type,
     "cells_per_type": cells_per_type,
     "cells_per_type_per_layer": cells_per_type_per_layer,
+    "unclassified_per_layer": unclassified_per_layer,
     "primary_cilia": primary_cilia,
     "nucleus_to_centriole_um": nucleus_to_centriole,
     "identified_vs_unclassified": identified_vs_unclassified,
