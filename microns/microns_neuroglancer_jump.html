@@ -40,6 +40,13 @@ details.card{padding-bottom:14px}details.card:not([open]){padding-bottom:18px}
 .err{color:var(--warn);font-size:12px;margin-top:8px;display:none}
 code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-size:12px}
 .nuc{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:16px;background:#0b0f14;display:none}.nuc.show{display:block}.nuc.oob{border-color:var(--warn)}
+/* #cellPanelCard wraps err/nucpanel/idfpanel/out and lives OUTSIDE the tab panels (so it shows
+   under whichever tab is active -- Jump, Filter and show, or References -- instead of only being
+   reachable from the Jump tab). All four children default to display:none until a cell is
+   actually loaded, so without this the wrapping card would show as an empty padded box on first
+   load; :has() hides the card itself until either .nuc or .idf actually turns on. */
+#cellPanelCard{display:none}
+#cellPanelCard:has(.nuc.show),#cellPanelCard:has(.idf.show){display:block}
 .tag{display:inline-block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:3px 9px;border-radius:20px;font-weight:600}
 .tag.exc{background:rgba(240,136,62,.15);color:var(--exc);border:1px solid var(--exc)}
 .tag.inh{background:rgba(88,166,255,.15);color:var(--inh);border:1px solid var(--inh)}
@@ -152,8 +159,14 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
      could stay visible). Deferring to DOMContentLoaded guarantees the whole document, including
      every .tabpanel, exists first. */
   document.addEventListener("DOMContentLoaded",function(){
+    /* ?tab=... in the URL (used by links FROM the statistics dashboard, e.g.
+       "ujump.html?tab=filter", so it reads as one continuous app rather than two separate
+       pages) takes priority over the remembered localStorage tab, which in turn beats the
+       "jump" default. */
+    var fromUrl=null;try{fromUrl=new URLSearchParams(location.search).get("tab");}catch(e){}
     var saved=null;try{saved=localStorage.getItem("ujump_active_tab");}catch(e){}
-    activate(saved&&btns.some(function(b){return b.dataset.tab===saved;})?saved:"jump");
+    var pick=[fromUrl,saved].find(function(t){return t&&btns.some(function(b){return b.dataset.tab===t;});});
+    activate(pick||"jump");
   });
 })();
 </script>
@@ -184,11 +197,6 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <select id="viewer"><option value="https://ngl.microns-explorer.org/">MICrONS Neuroglancer (has Share button)</option><option value="https://spelunker.cave-explorer.org/">Spelunker / CAVE explorer</option><option value="https://neuroglancer-demo.appspot.com/">Google Neuroglancer (no login)</option><option value="https://neuroglancer.neuvue.io/">neuvue (MICrONS)</option></select>
 <label style="margin-top:12px">Use my own Neuroglancer link as the base (optional)</label>
 <textarea id="base" placeholder="Paste a working Neuroglancer URL or JSON state; position and the selected cell/nucleus segments are overwritten."></textarea></details>
-<p class="err" id="err"></p>
-<div class="nuc" id="nucpanel"></div>
-<div class="idf" id="idfpanel"></div>
-<div class="out" id="out" style="display:none"><label>Neuroglancer state URL</label><div class="urlbox" id="url"></div>
-<div class="actions"><button class="copy" id="copy">Copy link</button></div></div>
 </div>
 </div>
 <div class="tabpanel" data-tabpanel="filter">
@@ -329,6 +337,13 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <p class="hint">White matter function: <a class="ref" href="https://doi.org/10.1016/j.tins.2008.04.001" target="_blank" rel="noopener">Fields, &ldquo;White matter in learning, cognition and psychiatric disorders,&rdquo; Trends in Neurosciences 31, 361&ndash;370 (2008)</a>.</p>
 <p class="hint">Nearest-nucleus, IDs &amp; predictions from <a class="ref" href="https://minnie.microns-daf.com/dash/datastack/minnie65_public/apps/table_viewer/?datastack=%22minnie65_public%22" target="_blank" rel="noopener" title="Opens the CAVE Table Viewer &mdash; choose this table from the dropdown"><code>nucleus_detection_v0</code></a> and <a class="ref" href="https://minnie.microns-daf.com/dash/datastack/minnie65_public/apps/table_viewer/?datastack=%22minnie65_public%22" target="_blank" rel="noopener" title="Opens the CAVE Table Viewer &mdash; choose this table from the dropdown"><code>aibs_metamodel_celltypes_V661</code></a> (minnie65 only).</p>
 </div>
+</div>
+<div class="card" id="cellPanelCard">
+<p class="err" id="err"></p>
+<div class="nuc" id="nucpanel"></div>
+<div class="idf" id="idfpanel"></div>
+<div class="out" id="out" style="display:none"><label>Neuroglancer state URL</label><div class="urlbox" id="url"></div>
+<div class="actions"><button class="copy" id="copy">Copy link</button></div></div>
 </div>
 <div class="card" style="background:#0f1420">
 <p class="hint" style="margin:0">This tool was made by <b>S&oslash;ren Grubb</b> (Neuroscience Academy Denmark) to make identifying brain cortical cells in electron microscopy easy. It was built using Claude AI. Predictions from the <a class="ref" href="https://doi.org/10.1038/s41586-025-08790-w" target="_blank" rel="noopener">MICrONS consortium</a> are included, but you can help identify cells that lack a prediction, or revise ones already made &mdash; identification discrepancies and newly identified cells are shared back with the MICrONS consortium.</p>
@@ -2501,7 +2516,75 @@ function maybeSaveComputedVolume(rootId,cellType,info,nucVolUm3){
     reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
   fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
+  if(window._computedVolumesMap)window._computedVolumesMap[String(rootId)]={volumeUm3:info.volumeUm3||0,nucVolumeUm3:nucVolUm3||0,cellType:cellType||"",timestamp:payload.timestamp};
 }
+/* Session-cached map of rootId -> {volumeUm3,nucVolumeUm3,cellType,timestamp}, built from every
+   "Compute volume" click ever saved to the shared dashboard sheet (?computedVolumes=1, public
+   GET, no token needed -- see the doGet reference above REPORT_ENDPOINT). Lets a ".meshvol"
+   button show an already-known volume -- and say "Recalculate" instead of "Compute volume" --
+   BEFORE the user ever clicks it, rather than only ever showing a value after their own click in
+   this same session. Added 2026-08-02 alongside the Code.gs upsert-by-rootId change (see the
+   "save_computed_volume" doPost comment in the Apps Script reference) so a repeat click updates
+   the one saved row for that root ID instead of appending a duplicate. If the sheet still has
+   more than one historic row for the same rootId (rows saved before the upsert fix landed), the
+   LATEST by timestamp wins client-side too, so an old duplicate can't shadow a newer value. */
+let _computedVolumesFetchPromise=null;
+function fetchComputedVolumesMap(){
+  if(_computedVolumesFetchPromise)return _computedVolumesFetchPromise;
+  _computedVolumesFetchPromise=(async function(){
+    const map={};
+    if(!REPORT_ENDPOINT){window._computedVolumesMap=map;return map;}
+    try{
+      const r=await fetch(REPORT_ENDPOINT+"?computedVolumes=1");
+      const d=await r.json();
+      const rows=(d&&d.computedVolumes)||[];
+      rows.forEach(function(row){
+        if(!row||!row.rootId)return;
+        const key=String(row.rootId);
+        const prev=map[key];
+        if(!prev||String(row.timestamp||"")>String(prev.timestamp||"")){
+          map[key]={volumeUm3:Number(row.volumeUm3)||0,nucVolumeUm3:Number(row.nucVolumeUm3)||0,
+            cellType:row.cellType||"",timestamp:row.timestamp||""};
+        }
+      });
+    }catch(e){console.warn("[uJump computed volumes]",e);}
+    window._computedVolumesMap=map;
+    return map;
+  })();
+  return _computedVolumesFetchPromise;
+}
+/* Fills in any already-rendered ".meshvol" button whose root ID already has a known volume --
+   relabels it "Recalculate (≈ N µm³)" instead of the default "Compute volume" so a returning
+   user (or a different user looking at the same cell) sees the existing measurement immediately,
+   without clicking to re-fetch+decode the mesh themselves. Safe to call repeatedly: a button
+   that's mid-computation (disabled) or already holds a FRESH result from THIS session
+   (data-vol-fresh="1", set by the click handler right after a successful compute) is left alone
+   so this can't stomp on a value the user just watched get computed with a slightly-stale map. */
+function decorateMeshVolButtons(){
+  const map=window._computedVolumesMap;
+  if(!map)return;
+  document.querySelectorAll("#cellPanelCard .meshvol").forEach(function(btn){
+    if(btn.disabled||btn.dataset.volFresh==="1")return;
+    const rootId=btn.dataset.root;
+    const known=rootId&&map[String(rootId)];
+    if(!known)return;
+    const label="Recalculate (≈ "+Math.round(known.volumeUm3).toLocaleString()+" µm³)";
+    btn.textContent=label;
+    btn.dataset.origLabel=label;
+    btn.title="A volume for this root ID was already computed and saved to the shared dashboard"+(known.timestamp?" on "+String(known.timestamp).slice(0,10):"")+". Click to recalculate (e.g. after a re-proofread mesh) -- this replaces the saved value rather than adding a duplicate.";
+  });
+}
+/* Deferred to DOMContentLoaded for the same reason the tab-bar init is: this script block runs
+   before #cellPanelCard (defined later in the HTML) has been parsed, so an immediate
+   querySelectorAll/MutationObserver.observe here would silently find nothing. The map fetch
+   itself doesn't need DOM, but kicking it off at the same time keeps this self-contained. */
+document.addEventListener("DOMContentLoaded",function(){
+  fetchComputedVolumesMap().then(decorateMeshVolButtons);
+  const panel=document.getElementById("cellPanelCard");
+  if(!panel)return;
+  const mo=new MutationObserver(function(){decorateMeshVolButtons();});
+  mo.observe(panel,{childList:true,subtree:true});
+});
 function postReport(payload,okMsg){
   if(!REPORT_ENDPOINT){alert("Reporting isn't wired up yet — set REPORT_ENDPOINT near the top of the script (see the comment above it) to a Google Apps Script web app URL.");return false;}
   if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){
@@ -3160,6 +3243,26 @@ const MeshDL=(()=>{
     draco.destroy(mesh);draco.destroy(buf);
     return {verts,idx};
   }
+  /* MICrONS/Neuroglancer's Y axis increases DOWNWARD (image-row convention: y=0 is the pia
+     surface, larger y is deeper/more ventral) but glTF/GLB assumes Y-UP, so feeding raw Y
+     straight through renders the mesh upside down in any standard glTF viewer (Blender, the
+     am3d PowerPoint camera, etc.). The PowerPoint export already negates Y (see the long
+     comment inline in downloadRootPptx() below, confirmed live 2026-07-28); the plain .glb
+     download was deliberately left un-mirrored at the time on the assumption that whatever
+     opened it already accounted for the convention -- Søren reported otherwise (2026-08), so
+     the SAME fix now applies here too. Mirroring one axis also flips triangle winding, so each
+     triangle's last two indices are swapped to restore correct front-face orientation/lighting. */
+  function flipYForGLTF(rawPositions,rawIndices){
+    const positions=new Float32Array(rawPositions.length);
+    for(let k=0;k<rawPositions.length;k+=3){
+      positions[k]=rawPositions[k];positions[k+1]=-rawPositions[k+1];positions[k+2]=rawPositions[k+2];
+    }
+    const indices=new Uint32Array(rawIndices.length);
+    for(let t=0;t<rawIndices.length;t+=3){
+      indices[t]=rawIndices[t];indices[t+1]=rawIndices[t+2];indices[t+2]=rawIndices[t+1];
+    }
+    return {positions,indices};
+  }
   function buildGLB(positions,indices,name){
     let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
     for(let i=0;i<positions.length;i+=3){
@@ -3315,7 +3418,8 @@ const MeshDL=(()=>{
     return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:n,rootIds};
   }
   async function downloadRoot(rootIdStr,onProgress){
-    const {positions,indices,lod,numLods,bytes,fragmentCount}=await fetchCombinedMesh(rootIdStr,onProgress);
+    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount}=await fetchCombinedMesh(rootIdStr,onProgress);
+    const {positions,indices}=flipYForGLTF(rawPositions,rawIndices);
     const tag=fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod;
     const glb=buildGLB(positions,indices,"microns_"+rootIdStr+tag);
     onProgress&&onProgress(1,"saving…");
@@ -3552,25 +3656,16 @@ const MeshDL=(()=>{
     const rawIndices=new Uint32Array(cellRawIndices.length+bar.indices.length);
     rawIndices.set(cellRawIndices,0);
     for(let t=0;t<bar.indices.length;t++)rawIndices[cellRawIndices.length+t]=bar.indices[t]+cellVertCount;
-    /* MICrONS/Neuroglancer's Y axis increases DOWNWARD (image-row convention: y=0 is the pia
-       surface, larger y is deeper/more ventral) but glTF and this am3d camera rig both assume
-       Y-UP. Feeding raw Y straight through renders every cell upside down (confirmed live,
-       2026-07-28) -- so the pptx export (only) negates Y here. Mirroring one axis also flips
-       triangle winding, which would otherwise make the mesh back-face-culled/inside-out and
-       wrong under this GLB's implicit (no explicit NORMAL attribute) per-face lighting, so each
-       triangle's last two indices are swapped to restore correct winding. The plain ".glb"
-       download (downloadRoot() above) is untouched -- it wasn't reported as upside down, and
-       whatever consumes it (Blender etc.) evidently already accounts for this axis convention.
-       Applied to rawPositions/rawIndices AFTER the scale bar is concatenated in, above, so the
-       bar gets the exact same treatment as the cell and needs no separate winding logic. */
-    const positions=new Float32Array(rawPositions.length);
-    for(let k=0;k<rawPositions.length;k+=3){
-      positions[k]=rawPositions[k];positions[k+1]=-rawPositions[k+1];positions[k+2]=rawPositions[k+2];
-    }
-    const indices=new Uint32Array(rawIndices.length);
-    for(let t=0;t<rawIndices.length;t+=3){
-      indices[t]=rawIndices[t];indices[t+1]=rawIndices[t+2];indices[t+2]=rawIndices[t+1];
-    }
+    /* Same Y-flip + winding-swap as the plain .glb download (downloadRoot() above) -- see
+       flipYForGLTF()'s comment for the full axis-convention explanation. Both paths used to
+       apply this independently (this one only, historically -- the plain .glb was left
+       un-mirrored on the assumption viewers already accounted for the convention, which turned
+       out not to hold, so it now gets the same treatment too, 2026-08); now shared through one
+       function so the two can't drift apart. Applied to rawPositions/rawIndices AFTER the scale
+       bar is concatenated in, above, so the bar gets the exact same treatment as the cell and
+       needs no separate winding logic. */
+    const flipped=flipYForGLTF(rawPositions,rawIndices);
+    const positions=flipped.positions,indices=flipped.indices;
     let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
     for(let k=0;k<positions.length;k+=3){
       const x=positions[k],y=positions[k+1],z=positions[k+2];
@@ -3632,14 +3727,23 @@ document.addEventListener("click",(e)=>{
     e.preventDefault();
     if(volBtn.disabled)return;
     const rootId=volBtn.dataset.root;
+    /* origLabel captures whatever the button said right before this click -- "Compute volume"
+       the very first time, or "Recalculate (≈ N µm³)" if decorateMeshVolButtons() already found
+       a saved value for this root ID -- so a failed compute reverts to the CORRECT prior state
+       instead of always falling back to "Compute volume" (which used to erase a known value). */
+    const origVolLabel=volBtn.dataset.origLabel||volBtn.textContent;
+    volBtn.dataset.origLabel=origVolLabel;
     volBtn.disabled=true;
     const volLiveCellType=(volBtn.dataset.followLive==="1"&&typeof CUR_CELLTYPE_DISPLAY!=="undefined"&&CUR_CELLTYPE_DISPLAY)?CUR_CELLTYPE_DISPLAY:volBtn.dataset.celltype;
     const volNucVolUm3=volBtn.dataset.nucvol?parseFloat(volBtn.dataset.nucvol):null;
     MeshDL.computeVolume(rootId,(frac,msg)=>{volBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";})
       .then(info=>{
         const combinedStr=info.fragmentCount>1?" ("+info.fragmentCount+" fragments combined)":"";
-        volBtn.textContent="≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"+combinedStr;
-        volBtn.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices) — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure. Click again to recompute.";
+        const label="Recalculate (≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"+combinedStr+")";
+        volBtn.textContent=label;
+        volBtn.dataset.origLabel=label;
+        volBtn.dataset.volFresh="1"; // protects this label from being overwritten by a stale decorateMeshVolButtons() pass
+        volBtn.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices) — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure. Saved to the shared dashboard, replacing any earlier value for this root ID. Click again to recalculate.";
         volBtn.disabled=false;
         maybeSaveComputedVolume(rootId,volLiveCellType,info,volNucVolUm3);
       })
@@ -3647,7 +3751,7 @@ document.addEventListener("click",(e)=>{
         console.warn("[uJump mesh volume]",err);
         volBtn.textContent="✗ failed: "+err.message;
         volBtn.title=String(err.message);
-        setTimeout(()=>{volBtn.textContent="Compute volume";volBtn.disabled=false;},5000);
+        setTimeout(()=>{volBtn.textContent=origVolLabel;volBtn.disabled=false;},5000);
       });
     return;
   }
