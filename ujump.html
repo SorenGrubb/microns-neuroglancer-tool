@@ -2653,9 +2653,66 @@ function postReport(payload,okMsg){
    doGet, which selects reporterName and timestamp but deliberately omits reporterEmail). Anyone
    submitting a report types the name themselves or signs in with Google, so the displayed name is
    the one they chose to attach. */
-/* Shared renderer for a list of {kind,pointA,pointB} centriole/cilium structures -- pointA/pointB
-   are "x,y,z" voxel strings (pointA only for a centriole; pointA=base, pointB=tip for a cilium).
-   Used both by loadCommunityReports() below (in-region, per-nucleus organelleGroups) and
+/* ---------- Organelle/structure kinds (2026-08-02) ----------
+   Søren: "Instead of report centriole/cilium, it should be report an organelle... there should
+   also be options for lysosomes, peroxisomes, golgi apparatus, endoplasmic reticulum,
+   mitochondria, multivesicular bodies, lipid droplet, phagosome, glycogen, adherens junction,
+   gap junction, tight junction, GFAP, synapse. All these should be a single annotation. I still
+   want centrioles to be the default one and primary cilia to be the default if adding another
+   one." This ONE list drives every "what is this?" dropdown (the main organelle-report form's
+   .organ-row-kind AND the merged-nucleus mini-widget's .mrOrganKind, which must stay in sync --
+   previously they were two independently hand-written <select> option lists) plus every
+   read-back display (organelleStructRowsHtml/organelleCountParts below). `vector:true` is what
+   distinguishes cilium (the one kind needing base+tip, i.e. two points) from every other kind
+   here, which is "a single annotation" (one x/y/z point) per Søren's own phrasing -- adding a
+   17th kind later only means appending one entry here, never touching the three functions that
+   already loop over ORGANELLE_KINDS generically. `short` is the compact name used in count
+   summaries ("2× centriole, 1× Golgi apparatus"), separate from the fuller dropdown `label`
+   (e.g. cilium's label spells out "(base + tip)", which would read oddly repeated in a tally).
+   kind VALUES are stored verbatim in the "Organelle locations" sheet's free-text `kind` column
+   (see doPost's organelle_location branch in Code.gs.txt) -- no backend schema change was needed
+   to add the 14 new kinds, since that column was never an enum server-side. */
+const ORGANELLE_KINDS=[
+  {value:"centriole",label:"Centriole / centrosome",short:"centriole",vector:false},
+  {value:"cilium",label:"Primary cilium (base + tip)",short:"cilium",vector:true},
+  {value:"lysosome",label:"Lysosome",short:"lysosome",vector:false},
+  {value:"peroxisome",label:"Peroxisome",short:"peroxisome",vector:false},
+  {value:"golgi",label:"Golgi apparatus",short:"Golgi apparatus",vector:false},
+  {value:"er",label:"Endoplasmic reticulum",short:"ER",vector:false},
+  {value:"mitochondria",label:"Mitochondria",short:"mitochondrion",vector:false},
+  {value:"mvb",label:"Multivesicular body",short:"MVB",vector:false},
+  {value:"lipid_droplet",label:"Lipid droplet",short:"lipid droplet",vector:false},
+  {value:"phagosome",label:"Phagosome",short:"phagosome",vector:false},
+  {value:"glycogen",label:"Glycogen",short:"glycogen",vector:false},
+  {value:"adherens_junction",label:"Adherens junction",short:"adherens junction",vector:false},
+  {value:"gap_junction",label:"Gap junction",short:"gap junction",vector:false},
+  {value:"tight_junction",label:"Tight junction",short:"tight junction",vector:false},
+  {value:"gfap",label:"GFAP",short:"GFAP",vector:false},
+  {value:"synapse",label:"Synapse",short:"synapse",vector:false}
+];
+const ORGANELLE_KIND_BY_VALUE={};ORGANELLE_KINDS.forEach(k=>ORGANELLE_KIND_BY_VALUE[k.value]=k);
+/* <option> list shared verbatim by both organelle-reporting forms (see the big comment above). */
+const ORGANELLE_KIND_OPTIONS_HTML=ORGANELLE_KINDS.map(k=>'<option value="'+k.value+'">'+k.label+'</option>').join("");
+/* Tally a flat list of {kind,...} structures into short "N× label" parts, generically over
+   EVERY kind in ORGANELLE_KINDS (not just centriole/cilium) -- shared by the three near-identical
+   "structures logged for this cell" summary lines (main nucleus panel, out-of-region community
+   panel, merged-sub-cell panel) so a newly-added kind shows up correctly in all three at once
+   rather than needing three separate hand-edits (the exact drift this file's own
+   organelleStructRowsHtml comment already warned about). An unrecognized kind string (e.g. from
+   an older report predating this kind, or a future kind added server-side before this dropdown
+   catches up) falls back to showing the raw kind string rather than being silently dropped. */
+function organelleCountParts(structs){
+  const counts={};
+  structs.forEach(s=>{counts[s.kind]=(counts[s.kind]||0)+1;});
+  return Object.keys(counts).map(k=>{
+    const info=ORGANELLE_KIND_BY_VALUE[k];
+    return counts[k]+"× "+(info?info.short:k);
+  });
+}
+/* Shared renderer for a list of {kind,pointA,pointB} organelle/structure annotations -- pointA/
+   pointB are "x,y,z" voxel strings (pointA only for a single-point kind; pointA=base, pointB=tip
+   only for cilium, the one vector kind -- see ORGANELLE_KINDS above). Used both by
+   loadCommunityReports() below (in-region, per-nucleus organelleGroups) and
    renderUserReportedCell() (out-of-region, coordinate-matched organelle reports -- see
    organellesNearPos()), factored out so both stay in sync rather than drifting apart. */
 function organelleStructRowsHtml(structs){
@@ -2663,15 +2720,18 @@ function organelleStructRowsHtml(structs){
   const jumpBtn=p=>'<button type="button" class="jumpview" data-x="'+p[0]+'" data-y="'+p[1]+'" data-z="'+p[2]+'" style="margin-left:6px;padding:2px 8px;font-size:11px">Jump</button>';
   return structs.map(s=>{
     const pa=parsePt(s.pointA);
-    if(s.kind==="cilium"){
+    const info=ORGANELLE_KIND_BY_VALUE[s.kind];
+    const label=info?info.short:(s.kind||"Structure");
+    const capLabel=label.charAt(0).toUpperCase()+label.slice(1);
+    if(info&&info.vector){
       const pb=parsePt(s.pointB);
       if(!pa&&!pb)return"";
-      return '<div class="meta" style="margin-top:4px">Cilium'
+      return '<div class="meta" style="margin-top:4px">'+capLabel
         +(pa?' base ('+coordSpan(pa[0],pa[1],pa[2])+')'+jumpBtn(pa):'')
         +(pb?' &rarr; tip ('+coordSpan(pb[0],pb[1],pb[2])+')'+jumpBtn(pb):'')
         +'</div>';
     }
-    return pa?'<div class="meta" style="margin-top:4px">Centriole at ('+coordSpan(pa[0],pa[1],pa[2])+')'+jumpBtn(pa)+'</div>':"";
+    return pa?'<div class="meta" style="margin-top:4px">'+capLabel+' at ('+coordSpan(pa[0],pa[1],pa[2])+')'+jumpBtn(pa)+'</div>':"";
   }).join("");
 }
 function loadIdentityVotesPanel(nid,seeds){
@@ -3995,13 +4055,9 @@ function loadCommunityReports(nid,cellPos){
       let organRowsHtml="";
       if(organelleGroups.length){
         const allStructs=[].concat(...organelleGroups.map(g=>(g.structures||[]).map(s=>({kind:s.kind,pointA:s.pointA,pointB:s.pointB}))));
-        const centCount=allStructs.filter(s=>s.kind==="centriole").length;
-        const ciliumCount=allStructs.filter(s=>s.kind==="cilium").length;
-        const parts=[];
-        if(centCount)parts.push(centCount+" centriole"+(centCount>1?"s":""));
-        if(ciliumCount)parts.push(ciliumCount+" cilium"+(ciliumCount>1?"a":""));
+        const parts=organelleCountParts(allStructs);
         const comments=organelleGroups.filter(g=>g.comment).map(g=>g.comment);
-        html+=(html?"<br>":"")+'<span style="color:var(--accent)">&#128172; '+organelleGroups.length+' '+(organelleGroups.length>1?"users have":"user has")+' logged centriole/cilium locations for this cell'+(parts.length?" &mdash; "+parts.join(", "):"")+(comments.length?" ("+comments.join("; ")+")":"")+'.</span>';
+        html+=(html?"<br>":"")+'<span style="color:var(--accent)">&#128172; '+organelleGroups.length+' '+(organelleGroups.length>1?"users have":"user has")+' logged organelle locations for this cell'+(parts.length?" &mdash; "+parts.join(", "):"")+(comments.length?" ("+comments.join("; ")+")":"")+'.</span>';
         organRowsHtml=organelleStructRowsHtml(allStructs);
       }
       /* Entry point for proposing a centriole/cilium location from the CELL PANEL. Until now the
@@ -4019,9 +4075,9 @@ function loadCommunityReports(nid,cellPos){
          organReporterInput vs reporterInput. */
       const already=organelleGroups.length;
       html+=(html?'<br>':'')+'<span class="hint">'
-        +(already?'Think a centriole or cilium sits somewhere else? ':'Know where the centriole(s) or a primary cilium sit on this cell? ')
+        +(already?'Think an organelle sits somewhere else? ':'Know where an organelle sits on this cell? ')
         +'<span class="idf-back" id="commOrganelleToggle" style="margin:0">'
-        +(already?'Suggest a different location':'Report centriole / cilium location')+' &rarr;</span></span>'
+        +(already?'Suggest a different location':'Report an organelle')+' &rarr;</span></span>'
         +'<div id="commOrganelleBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div>';
       el.innerHTML=html+organRowsHtml;
       const cTog=el.querySelector("#commOrganelleToggle"),cBody=el.querySelector("#commOrganelleBody");
@@ -4029,8 +4085,8 @@ function loadCommunityReports(nid,cellPos){
         let cWired=false;
         cTog.addEventListener("click",()=>{
           const showing=cBody.style.display!=="none";
-          if(showing){cBody.style.display="none";cTog.innerHTML=(already?"Suggest a different location":"Report centriole / cilium location")+" &rarr;";return;}
-          cBody.style.display="";cTog.innerHTML="Hide centriole / cilium form &uarr;";
+          if(showing){cBody.style.display="none";cTog.innerHTML=(already?"Suggest a different location":"Report an organelle")+" &rarr;";return;}
+          cBody.style.display="";cTog.innerHTML="Hide organelle form &uarr;";
           if(!cWired){
             /* The form reads ID_CTX for the nucleus/root/coordinate it should file against. Coming
                from here there has been no guided-ID run to populate it, so it is seeded from the
@@ -4290,13 +4346,9 @@ function renderUserReportedCell(ur,panel){
      since been searched (same pattern as the community-report re-check in showNucleus()). */
   const organelles=organellesNearPos(ur.pos[0],ur.pos[1],ur.pos[2],5000);
   if(organelles&&organelles.length){
-    const centCount=organelles.filter(s=>s.kind==="centriole").length;
-    const ciliumCount=organelles.filter(s=>s.kind==="cilium").length;
-    const parts=[];
-    if(centCount)parts.push(centCount+" centriole"+(centCount>1?"s":""));
-    if(ciliumCount)parts.push(ciliumCount+" cilium"+(ciliumCount>1?"a":""));
+    const parts=organelleCountParts(organelles);
     const orgComments=[...new Set(organelles.filter(s=>s.comment).map(s=>escHtml(s.comment)))];
-    oh+='<div class="meta" style="margin-top:8px;color:var(--accent)">&#128172; Centriole/cilium location'+(organelles.length>1?"s":"")+' logged for this cell'+(parts.length?" &mdash; "+parts.join(", "):"")+(orgComments.length?" ("+orgComments.join("; ")+")":"")+'.</div>';
+    oh+='<div class="meta" style="margin-top:8px;color:var(--accent)">&#128172; Organelle location'+(organelles.length>1?"s":"")+' logged for this cell'+(parts.length?" &mdash; "+parts.join(", "):"")+(orgComments.length?" ("+orgComments.join("; ")+")":"")+'.</div>';
     oh+=organelleStructRowsHtml(organelles);
   } else if(organelles===null){
     const orgToken=LAST_OOB_QUERY;
@@ -4373,12 +4425,8 @@ function renderMergedSubCell(sub,panel){
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
   const organelles=organellesNearPos(sub.pos[0],sub.pos[1],sub.pos[2],5000);
   if(organelles&&organelles.length){
-    const centCount=organelles.filter(s=>s.kind==="centriole").length;
-    const ciliumCount=organelles.filter(s=>s.kind==="cilium").length;
-    const parts=[];
-    if(centCount)parts.push(centCount+" centriole"+(centCount>1?"s":""));
-    if(ciliumCount)parts.push(ciliumCount+" cilium"+(ciliumCount>1?"a":""));
-    h+='<div class="meta" style="margin-top:8px;color:var(--accent)">&#128172; Centriole/cilium location'+(organelles.length>1?"s":"")+' logged for this cell'+(parts.length?" &mdash; "+parts.join(", "):"")+'.</div>';
+    const parts=organelleCountParts(organelles);
+    h+='<div class="meta" style="margin-top:8px;color:var(--accent)">&#128172; Organelle location'+(organelles.length>1?"s":"")+' logged for this cell'+(parts.length?" &mdash; "+parts.join(", "):"")+'.</div>';
     h+=organelleStructRowsHtml(organelles);
   } else if(organelles===null){
     const orgToken=LAST_OOB_QUERY;
@@ -5028,7 +5076,7 @@ function renderResult(slug){
    form (all sub-nuclei) is ready to go, and returns null if any row here is left incomplete so
    the caller can alert and abort exactly like every other validation in that submit handler. */
 function buildMergedRowOrganelleWidget(container){
-  container.innerHTML='<div class="mrOrganRows"></div><button type="button" class="idbtn mrOrganAdd" style="margin-top:6px;padding:4px 10px;font-size:12px;width:auto">+ Add centriole / cilium</button>';
+  container.innerHTML='<div class="mrOrganRows"></div><button type="button" class="idbtn mrOrganAdd" style="margin-top:6px;padding:4px 10px;font-size:12px;width:auto">+ Add an organelle</button>';
   const rowsEl=container.querySelector(".mrOrganRows");
   function wirePasteSplit(xEl,yEl,zEl,focusAfter){
     xEl.addEventListener("input",e=>{
@@ -5037,6 +5085,12 @@ function buildMergedRowOrganelleWidget(container){
     });
   }
   function addRow(){
+    // Same default convention as the main organelle-report form's addRow() (organReporterInput
+    // et al. further down) -- first row defaults to Centriole, every row added after that
+    // defaults to Primary cilium, per Søren's explicit request. Kept in sync by hand since this
+    // is a genuinely separate widget (see the big comment above buildMergedRowOrganelleWidget for
+    // why it isn't just a call into the main form).
+    const isFirstRow=rowsEl.children.length===0;
     const row=document.createElement("div");
     row.style.cssText="border:1px dashed var(--line);border-radius:6px;padding:8px;margin-top:6px";
     row.innerHTML=
@@ -5044,7 +5098,7 @@ function buildMergedRowOrganelleWidget(container){
       +'<span style="font-size:11px;color:var(--mut)">Structure</span>'
       +'<button type="button" class="mrOrganRemove" style="background:none;border:none;color:var(--mut);cursor:pointer;font-size:15px;line-height:1;padding:0 4px" title="Remove">&times;</button>'
       +'</div>'
-      +'<select class="mrOrganKind" style="width:100%;margin-top:4px"><option value="centriole">Centriole / centrosome</option><option value="cilium">Primary cilium (base + tip)</option></select>'
+      +'<select class="mrOrganKind" style="width:100%;margin-top:4px">'+ORGANELLE_KIND_OPTIONS_HTML+'</select>'
       +'<div class="mrOrganCentriole" style="margin-top:4px">'
       +'<div class="row" style="gap:6px"><div class="coord"><input type="text" class="mrocx" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" class="mrocy" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" class="mrocz" inputmode="decimal" placeholder="z"></div></div></div>'
       +'<div class="mrOrganCilium" style="margin-top:4px;display:none">'
@@ -5056,7 +5110,10 @@ function buildMergedRowOrganelleWidget(container){
     row.querySelector(".mrOrganRemove").addEventListener("click",()=>row.remove());
     const kindEl=row.querySelector(".mrOrganKind");
     const cFields=row.querySelector(".mrOrganCentriole"),ciFields=row.querySelector(".mrOrganCilium");
-    kindEl.addEventListener("change",()=>{const isC=kindEl.value==="cilium";cFields.style.display=isC?"none":"";ciFields.style.display=isC?"":"none";});
+    // isC means "is this kind the vector (base+tip) shape" -- see the matching comment in the
+    // main form's addRow() above for why this checks .vector rather than a hardcoded ==="cilium".
+    kindEl.addEventListener("change",()=>{const info=ORGANELLE_KIND_BY_VALUE[kindEl.value];const isC=!!(info&&info.vector);cFields.style.display=isC?"none":"";ciFields.style.display=isC?"":"none";});
+    if(!isFirstRow){kindEl.value="cilium";cFields.style.display="none";ciFields.style.display="";}
     const cx=row.querySelector(".mrocx"),cy=row.querySelector(".mrocy"),cz=row.querySelector(".mrocz");
     const bx=row.querySelector(".mrobx"),by=row.querySelector(".mroby"),bz=row.querySelector(".mrobz");
     const tx=row.querySelector(".mrotx"),ty=row.querySelector(".mroty"),tz=row.querySelector(".mrotz");
@@ -5069,7 +5126,8 @@ function buildMergedRowOrganelleWidget(container){
       const out=[];
       for(const row of rows){
         const kind=row.querySelector(".mrOrganKind").value;
-        if(kind==="cilium"){
+        const info=ORGANELLE_KIND_BY_VALUE[kind];
+        if(info&&info.vector){
           const bx=row.querySelector(".mrobx").value.trim(),by=row.querySelector(".mroby").value.trim(),bz=row.querySelector(".mrobz").value.trim();
           const tx=row.querySelector(".mrotx").value.trim(),ty=row.querySelector(".mroty").value.trim(),tz=row.querySelector(".mrotz").value.trim();
           if(bx===""||by===""||bz===""||tx===""||ty===""||tz==="")return null;
@@ -5223,7 +5281,7 @@ function renderMergedReport(returnFn){
       return{coord:x+","+y+","+z,identified:slug?LEAF_NAMES[slug]:"",certainty:row.querySelector(".merged-row-cert").value,subRootId,structures:structures||[]};
     });
     if(!allFilled){alert("Please fill in an approximate x/y/z center for every nucleus listed.");return;}
-    if(organIncomplete){alert("Please fill in every coordinate field for each centriole/cilium structure listed (or remove the incomplete row).");return;}
+    if(organIncomplete){alert("Please fill in every coordinate field for each organelle/structure listed (or remove the incomplete row).");return;}
     const commentEl=document.getElementById("mergedComment");
     const comment=commentEl?commentEl.value.trim():"";
     const path=ID_PATH.map(n=>(TREE[n]?TREE[n].q:n)).join(" > ");
@@ -5284,7 +5342,7 @@ function renderMergedReport(returnFn){
    (type:"organelle_location"), tied together by a shared groupId + subIndex/subCount, mirroring
    the merged_split convention -- see the Apps Script reference doPost above (REPORT_ENDPOINT),
    which needs an "Organelle locations" sheet; the reference snippet has been updated to match. */
-/* ---------- Centriole / cilium reporting ----------
+/* ---------- Organelle reporting (centriole, cilium, and 14 other single-point structures) ----------
    Used to be its own full-screen replacement of #idfpanel (renderOrganelleReport), which meant
    "back one step" was needed to return to the cell-type result -- Søren asked for this to stay
    inline instead, so the identification never leaves the screen while logging organelle
@@ -5299,7 +5357,7 @@ function renderMergedReport(returnFn){
    showing its own identity block, and duplicate ids would mean only one of the two ever gets
    wired correctly. */
 function organelleFlagHtml(){
-  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Also want to log where the centriole(s) or a primary cilium sit on this cell? <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Report centriole / cilium location &rarr;</span></span>'
+  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Also want to log an organelle\'s location on this cell? <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Report an organelle &rarr;</span></span>'
     +'<div id="organelleInlineBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
 }
 function wireOrganelleFlag(slug){
@@ -5310,17 +5368,17 @@ function wireOrganelleFlag(slug){
     const showing=body.style.display!=="none";
     if(showing){
       body.style.display="none";
-      toggle.innerHTML="Report centriole / cilium location &rarr;";
+      toggle.innerHTML="Report an organelle &rarr;";
       return;
     }
     body.style.display="";
-    toggle.innerHTML="Hide centriole / cilium form &uarr;";
+    toggle.innerHTML="Hide organelle form &uarr;";
     if(!wired){body.innerHTML=organelleFormHtml(slug);wireOrganelleForm(body,slug);wired=true;}
   });
 }
 function organelleFormHtml(slug){
   const name=slug?LEAF_NAMES[slug]:null;
-  let h='<p class="hint">Mark the centriole(s)/centrosome and/or the base and tip of the primary cilium for this cell. Add one row per structure — you can mix centriole and cilium rows, and log more than one cilium if the cell has one.</p>';
+  let h='<p class="hint">Mark where an organelle or structure sits on this cell — centriole, primary cilium, or any of the others in the list below. Add one row per structure — mix and match freely, and log more than one of the same kind if the cell has more than one (e.g. two centrioles, or several mitochondria).</p>';
   h+='<div class="meta">'+(name?"Identified as: <b>"+name+"</b> &middot; ":"")+(ID_CTX.nucId?"nucleus "+ID_CTX.nucId:"no nucleus ID on file")+(ID_CTX.root?" &middot; root "+ID_CTX.root:"")+(ID_CTX.pos?" &middot; voxel ("+coordSpan(ID_CTX.pos[0],ID_CTX.pos[1],ID_CTX.pos[2])+")":"")+'</div>';
   h+='<div id="organRows"></div>';
   h+='<button type="button" class="idbtn" id="organAddRow" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another structure</button>';
@@ -5388,7 +5446,7 @@ function wireOrganelleForm(container,slug){
       +'<button type="button" class="organ-row-remove" style="background:none;border:none;color:var(--mut);cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Remove this structure">&times;</button>'
       +'</div>'
       +'<label style="display:block;font-size:11px;color:var(--mut);margin-top:6px">What is this?</label>'
-      +'<select class="organ-row-kind" style="width:100%"><option value="centriole">Centriole / centrosome</option><option value="cilium">Primary cilium (base + tip)</option></select>'
+      +'<select class="organ-row-kind" style="width:100%">'+ORGANELLE_KIND_OPTIONS_HTML+'</select>'
       +'<div class="organ-centriole-fields" style="margin-top:6px">'
       +'<label style="display:block;font-size:11px;color:var(--mut)">Approx. location (voxel)</label>'
       +'<div class="row" style="gap:8px;margin-top:2px">'
@@ -5420,8 +5478,14 @@ function wireOrganelleForm(container,slug){
     });
     const kindEl=row.querySelector(".organ-row-kind");
     const centrioleFields=row.querySelector(".organ-centriole-fields"),ciliumFields=row.querySelector(".organ-cilium-fields");
+    // isCilium really means "is this kind the vector (base+tip) shape" -- checked via
+    // ORGANELLE_KIND_BY_VALUE[...].vector rather than a hardcoded ==="cilium" so a future vector
+    // kind (if one's ever added to ORGANELLE_KINDS) would automatically get the two-point fields
+    // too, with zero changes needed here. Cilium is the only vector kind today, so this behaves
+    // identically to the old check for every kind currently offered.
     kindEl.addEventListener("change",()=>{
-      const isCilium=kindEl.value==="cilium";
+      const info=ORGANELLE_KIND_BY_VALUE[kindEl.value];
+      const isCilium=!!(info&&info.vector);
       centrioleFields.style.display=isCilium?"none":"";
       ciliumFields.style.display=isCilium?"":"none";
     });
@@ -5447,7 +5511,8 @@ function wireOrganelleForm(container,slug){
     let allFilled=true;
     const subs=rows.map(row=>{
       const kind=row.querySelector(".organ-row-kind").value;
-      if(kind==="cilium"){
+      const info=ORGANELLE_KIND_BY_VALUE[kind];
+      if(info&&info.vector){
         const bx=row.querySelector(".orbx").value.trim(),by=row.querySelector(".orby").value.trim(),bz=row.querySelector(".orbz").value.trim();
         const tx=row.querySelector(".ortx").value.trim(),ty=row.querySelector(".orty").value.trim(),tz=row.querySelector(".ortz").value.trim();
         if(bx===""||by===""||bz===""||tx===""||ty===""||tz==="")allFilled=false;
@@ -5599,6 +5664,44 @@ function refreshFavStars(){
     var on=window.FAV_SET.has(String(b.dataset.nid||""))||(b.dataset.coord&&window.FAV_SET.has(String(b.dataset.coord)));b.textContent=on?"★":"☆";b.style.color=on?"var(--accent)":"var(--mut)";b.title=on?"In favourites":"Save to favourites";});
 }
 function gamifyOnSignIn(){renderChip();loadMyStats();loadFavourites();}
+/* "Download your work" (2026-08-02) -- Søren: "I want the user to be able to download all the
+   annotation that they have made themselves, when looking at their profile below the 'Reports
+   needing review' as a button that says 'Download your work'." Pulls every report/annotation the
+   signed-in user has ever submitted via the new ?myReports= backend endpoint (see myReportsList()
+   in Code.gs.txt) and writes it out as one multi-sheet Excel workbook, one tab per report type --
+   same SheetJS pattern (XLSX.utils.aoa_to_sheet/book_new/book_append_sheet/writeFile) the
+   "Download as Excel" filter export already uses (dlBtn's click handler above). Deliberately does
+   NOT reuse gamifyGet() for this call: gamifyGet() silently swallows fetch errors (.catch(function(){}))
+   which is fine for a background stats refresh but wrong for an explicit download action -- the
+   user needs to actually be told if it failed, not see nothing happen. */
+function downloadMyWork(){
+  var btn=document.getElementById("downloadMyWorkBtn");
+  if(!REPORT_ENDPOINT){alert("No report backend is configured — nothing to download.");return;}
+  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){alert("Please sign in with Google first.");return;}
+  var origText=btn?btn.textContent:"";
+  if(btn){btn.disabled=true;btn.textContent="Preparing…";}
+  fetch(REPORT_ENDPOINT+"?myReports="+encodeURIComponent(GOOGLE_CREDENTIAL))
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(!d||d.error){alert("Couldn't load your work"+(d&&d.error?(": "+d.error):"")+". Try signing in again.");return;}
+      var sheets=d.sheets||{};
+      var names=Object.keys(sheets);
+      if(!names.length){alert("No annotations found for your account yet — nothing to download.");return;}
+      var wb=XLSX.utils.book_new();
+      names.forEach(function(name){
+        var s=sheets[name];
+        var data=[s.headers].concat(s.rows);
+        var ws=XLSX.utils.aoa_to_sheet(data);
+        // Sheet tab names are capped at 31 characters and can't contain []:*?/\ -- Excel enforces
+        // this, so sanitize before appending rather than letting book_append_sheet throw.
+        var tabName=name.replace(/[\[\]\*\?\/\\:]/g,"").slice(0,31);
+        XLSX.utils.book_append_sheet(wb,ws,tabName);
+      });
+      XLSX.writeFile(wb,"my_microns_work_"+(d.email||"me").replace(/[^a-z0-9]+/gi,"_")+".xlsx");
+    })
+    .catch(function(err){alert("Couldn't download your work — network error. Please try again.");})
+    .finally(function(){if(btn){btn.disabled=false;btn.textContent=origText;}});
+}
 function openDashboard(){
   var d=document.getElementById("gameDash");if(!d)return;
   d.style.display="flex";
@@ -5625,12 +5728,15 @@ function openDashboard(){
       +'<button class="dbtn" id="handleSave">Save</button></div>';
     h+='<h3>Favourites</h3><div id="favList" style="font-size:13px">Loading…</div>';
     h+='<h3>Leaderboard — top 10</h3><div id="lbList">Loading…</div>';h+='<h3>Reports needing review</h3><div style="font-size:12px;color:var(--mut);margin-bottom:4px">Cells where your identification has received down-votes — worth a second look. Re-identifying a cell updates your earlier report.</div><div id="dvList">Loading…</div>';
+    h+='<div style="margin-top:10px"><button class="dbtn" id="downloadMyWorkBtn">Download your work</button><div style="font-size:11px;color:var(--mut);margin-top:4px">Every identification, confirmation, organelle report, and other annotation you\'ve submitted, as an Excel file (one tab per report type).</div></div>';
     h+='<div style="margin-top:16px;font-size:11px;color:var(--mut,#8b949e)">We store your Google name, email and contribution activity to power these stats and the public leaderboard, which shows your chosen display name. Contact soren@grubb.dk to remove your data.</div>';
     body.innerHTML=h;
     document.getElementById("handleSave").addEventListener("click",function(){
       var v=(document.getElementById("handleInput").value||"").trim();if(!v)return;
       if(postReport({type:"set_handle",timestamp:new Date().toISOString(),handle:v},"Display name saved.")){setTimeout(function(){loadMyStats();openDashboard();},1400);}
     });
+    var dmwBtn=document.getElementById("downloadMyWorkBtn");
+    if(dmwBtn)dmwBtn.addEventListener("click",downloadMyWork);
     loadFavourites(function(fd){
       var favs=(fd&&fd.favourites)||[],fl=document.getElementById("favList");if(!fl)return;
       fl.innerHTML=favs.length?favs.map(function(f){
