@@ -96,23 +96,48 @@ if not ROOT_IDS_BY_TYPE:
 # and adjust pre_ids=/post_ids= below to match. The MICrONS tutorial notebooks
 # (https://tutorial.microns-explorer.org) are the reference if anything here errors.
 
+# ---- Retry helper (added 2026-08-02) -----------------------------------------------------------
+# The shared public CAVE server occasionally returns "503 Service Temporarily Unavailable" under
+# load -- this is a SERVER-SIDE issue (nginx itself refusing the request, not an auth/query
+# problem on our end), so a client-side fix can't prevent it, but it's usually transient and a
+# few spaced-out retries often get through. Every synapse_query call below goes through this.
+def query_with_retries(fn, *args, max_attempts=4, base_delay=8, **kwargs):
+    last_err = None
+    for attempt in range(max_attempts):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            last_err = e
+            msg = str(e)
+            transient = ("503" in msg or "502" in msg or "504" in msg or "timeout" in msg.lower()
+                         or "Temporarily Unavailable" in msg or "ConnectionError" in type(e).__name__)
+            if not transient or attempt == max_attempts - 1:
+                raise
+            wait = base_delay * (2 ** attempt)  # 8s, 16s, 32s by default
+            print(f"    transient server error ({msg.splitlines()[0][:120]}) -- retrying in {wait}s "
+                  f"(attempt {attempt + 2}/{max_attempts})...")
+            time.sleep(wait)
+    raise last_err  # pragma: no cover -- loop always returns or raises above
+
 connectivity = {}   # source type -> Counter of partner type -> synapse count
 partner_cells = {}  # source type -> Counter of partner type -> DISTINCT partner cell count
 synapse_io = {}     # source type -> {input/output synapse totals + per-sampled-cell averages}
+failed_types = []   # types that failed even after retries -- re-attempted once more at the end
 
-for src_type, root_ids in ROOT_IDS_BY_TYPE.items():
-    print("Querying synapses for", src_type, "(", len(root_ids), "sampled cells )...")
+def query_one_type(src_type, root_ids):
+    """Returns True on success (fills connectivity/partner_cells/synapse_io for src_type),
+    False if it failed even after retries (caller decides whether to note it as failed)."""
     root_ids_int = [int(r) for r in root_ids]
     syn_counter = collections.Counter()
     seen_partners = collections.defaultdict(set)
 
     try:
-        out_df = client.materialize.synapse_query(pre_ids=root_ids_int)   # synapses THIS type sends
-        in_df = client.materialize.synapse_query(post_ids=root_ids_int)   # synapses THIS type receives
+        out_df = query_with_retries(client.materialize.synapse_query, pre_ids=root_ids_int)   # synapses THIS type sends
+        time.sleep(0.5)  # brief pause between the two queries for the same type
+        in_df = query_with_retries(client.materialize.synapse_query, post_ids=root_ids_int)    # synapses THIS type receives
     except Exception as e:
-        print("  Query failed for", src_type, "--", e)
-        print("  Skipping this type; see the NOTE above about checking synapse_query's signature.")
-        continue
+        print("  Query failed for", src_type, "after retries --", e)
+        return False
 
     for _, row in out_df.iterrows():
         partner = str(row["post_pt_root_id"])
@@ -143,7 +168,37 @@ for src_type, root_ids in ROOT_IDS_BY_TYPE.items():
         "avg_output_synapses_per_cell": round(len(out_df) / n_sampled, 1) if n_sampled else 0,
         "avg_input_synapses_per_cell": round(len(in_df) / n_sampled, 1) if n_sampled else 0,
     }
-    time.sleep(0.5)  # be polite to the shared CAVE server between types
+    return True
+
+# ---- First pass over every type ----
+for src_type, root_ids in ROOT_IDS_BY_TYPE.items():
+    print("Querying synapses for", src_type, "(", len(root_ids), "sampled cells )...")
+    if not query_one_type(src_type, root_ids):
+        failed_types.append(src_type)
+    time.sleep(1.5)  # be polite to the shared CAVE server between types (raised from 0.5s
+                      # on 2026-08-02 after a run hit repeated 503s -- gentler pacing plus the
+                      # retry helper above should make transient server load less disruptive)
+
+# ---- Second pass: one more attempt at whatever failed, after a longer cool-down ----
+# If the WHOLE first pass failed (e.g. the server was down for a few minutes), retrying
+# immediately would likely just fail again -- wait longer once, then try the failed types again.
+if failed_types:
+    print(f"\n{len(failed_types)} type(s) failed in the first pass ({', '.join(failed_types)}) "
+          f"-- waiting 90s then trying them once more...")
+    time.sleep(90)
+    still_failed = []
+    for src_type in failed_types:
+        print("Retrying", src_type, "...")
+        if not query_one_type(src_type, ROOT_IDS_BY_TYPE[src_type]):
+            still_failed.append(src_type)
+        time.sleep(1.5)
+    failed_types = still_failed
+
+print(f"\nDone querying. {len(ROOT_IDS_BY_TYPE) - len(failed_types)} of {len(ROOT_IDS_BY_TYPE)} "
+      f"types succeeded." + (f" Still failing after retries: {', '.join(failed_types)} -- "
+      f"if this list isn't empty, the CAVE server may be down for longer than a couple of "
+      f"minutes; wait a while and re-run just this cell (Steps 1-4 don't need to be redone in "
+      f"the same Colab session)." if failed_types else ""))
 
 # ---- STEP 6: save the result ----
 out = {
