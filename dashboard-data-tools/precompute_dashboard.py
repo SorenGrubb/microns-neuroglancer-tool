@@ -246,6 +246,13 @@ def apply_vasc_patch(block_name, extra_names_key=None, single_name_key=None):
 apply_vasc_patch("vascdata", extra_names_key="TYPE_NAMES_EXTRA")
 apply_vasc_patch("vascdata8")
 apply_vasc_patch("vascdata9", single_name_key="TYPE_NAME_NEW")
+# "owncorrections" (added 2026-08-02): manual one-off fixes for individual nuclei Søren caught
+# as data-entry errors (e.g. nucleus 73397/id 484140, previously miscoded as a Mural+Endothelial
+# merged detection -- see ujump.html's own comment on this block for the full story). Same
+# OV_TYPE_IDX/VAL shape as vascdata/8/9, so apply_vasc_patch() handles it unchanged. Must run
+# AFTER vascdata/8/9 (matches ujump.html's own <script> tag order) since it reuses type-name
+# index 16 ("Mural cell - Venular smooth muscle cell/pericyte"), registered by vascdata above.
+apply_vasc_patch("owncorrections")
 
 # Any remaining merged-sub "type" strings not touched by a vascdata* patch still need the
 # normal canon(mural3(...)) normalization pass (matches ujump.html's own MG normalization).
