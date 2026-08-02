@@ -2419,6 +2419,28 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
    measure live reports without any separate nucleus-ID-to-type lookup table. No redeploy-breaking
    change for existing sheets (no header rename, no data migration) -- just add the one field to
    the doGet response; redeploy steps (a)/(b) still apply to pick it up.
+   SUPERSEDED (2026-08-02): every note above describing the dashboard as "static data baked into
+   this file plus a few live reads" is now obsolete -- Søren asked for the dashboard to have
+   NO static charts at all ("none of them should be static... changed by user reports"). The
+   dashboard's embedded JSON data block is gone entirely; every chart now reads a single new
+   doGet mode, "?dashboardLive=1" (function dashboardLive() in Code.gs.txt), which recomputes
+   cells-per-type, per-layer breakdowns, cilia %/length, nucleus-to-centriole distance, nucleus
+   volume, and 5-nearest-neighbor type composition FROM SCRATCH on every call by reading a new
+   "Master cell list" sheet tab (one row per cell, whole dataset -- see the master-cell-list.md
+   memory) and folding in any not-yet-reseeded "Organelle locations" rows. "?allOrganelles=1" and
+   "?allIds=1" are no longer used by the dashboard (dashboardLive() already returns everything
+   merged). Geometry (estimated cortical layer, which 10 cells are nearest neighbors) is still
+   precomputed offline into the Master Cell List's seed CSV, since it can't change from a report
+   and is too slow to redo per-request -- but WHICH TYPE a cell or its neighbors currently resolve
+   to is always looked up live from that sheet's current_identity column, so every chart bucketed
+   by cell type is genuinely live even though the underlying geometry isn't re-run. Two one-time
+   setup steps are required before this works: (1) import master_cell_list_seed.csv as a sheet
+   tab named exactly "Master cell list" (replaces any earlier smaller version -- the seed schema
+   grew 8 new columns: has_cilium, cilium_checked, cilium_length_um, has_centriole,
+   centriole_dist_um, nucleus_volume_um3, estimated_layer, neighbor_10_keys), and (2) redeploy
+   Code.gs.txt (steps (a)/(b) above) so dashboardLive() exists server-side. Until both are done,
+   the dashboard shows an explicit "Live data not available yet" placeholder rather than an error
+   or stale numbers (see showLiveNotReady() in ujump_dashboard.html).
 
    Note: the POST below uses mode:"no-cors" (required for a plain fetch to an Apps Script
    web app without extra CORS setup), so the button shows a success message optimistically --
