@@ -1676,6 +1676,7 @@ const TREE={
  lepto:{q:"Leptomeningeal compartment?",opts:[
    {label:"Part of the pia mater",next:"pia1"},
    {label:"Part of the arachnoid mater",next:"arach1"},
+   {label:"Part of the dura mater",next:"dura1"},
    {label:"Part of the vasculature",next:"w1"},
    {label:"In the perivascular space",next:"p1"}]},
  pia1:{q:"Pia mater cell type — the pial fibroblast subtypes share one fibroblast ultrastructure and are separated mainly by location, not by a single-section EM feature (Pietilä et al. 2023).",opts:[
@@ -1685,6 +1686,8 @@ const TREE={
    {label:"Arachnoid barrier cell — epithelial-like cells joined by continuous tight + adherens junctions, forming the CSF–blood barrier; minimal collagen between them, no own basement membrane",leaf:"arachnoid_barrier_cell"},
    {label:"Inner arachnoid fibroblast — the same common leptomeningeal fibroblast type as the pia/pial-sheath fibroblasts, sitting deep to the barrier layer in the subarachnoid trabeculae",leaf:"inner_arachnoid_fibroblast"},
    {label:"Fibroblast reticular cell — reticular fibroblast in the subarachnoid trabeculae; closely related to / sometimes named \"inner arachnoid fibroblast\" (naming overlap)",leaf:"fibroblast_reticular_cell"}]},
+ dura1:{q:"Dura mater cell type — the dural border cell is the outermost leptomeningeal fibroblast layer, sitting at the dura–arachnoid interface; it shares the same fibroblast ultrastructure as the pia/arachnoid fibroblasts and is distinguished mainly by location, not by a single-section EM feature (Pietilä et al. 2023).",opts:[
+   {label:"Dural border cell — outermost leptomeningeal fibroblast, at the dura–arachnoid interface; elongated, RER-rich, collagen-associated, gap junctions, no tight junctions, no own basement membrane",leaf:"dural_border_cell"}]},
  q2:{q:"Where is the cell / how does it relate to the vasculature?",opts:[
    {label:"Free in vascular lumen",next:"l1"},{label:"Part of vessel wall",next:"w1"},
    {label:"Perivascular space",next:"p1"},{label:"Parenchyma (brain tissue proper)",next:"n1"},
@@ -1772,7 +1775,7 @@ const CONFUSED_WITH={
   inh_martinotti:{withName:"Excitatory (layer 5) neuron",note:"The broad MICrONS classifier can misclassify layer 5 inhibitory neurons as excitatory based on soma/nucleus shape alone; the fine m-type call is more reliable here.",ref:"https://doi.org/10.1038/s41586-024-07765-7",refLabel:"Elabbady et al., Nature 2025"},
   dendritic_cell:{withName:"Perivascular macrophage",note:"Both are perivascular immune cells with overlapping ultrastructure; dendritic cells are far rarer, so a confident call benefits from a second opinion.",ref:"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/",refLabel:"PMC7930431"}
 };
-const LEAF_NAMES={erythrocyte:"Erythrocyte",platelet:"Platelet",neutrophil:"Neutrophil",lymphocyte:"Lymphocyte",monocyte:"Monocyte",endothelial_cell:"Endothelial cell",pericyte:"Pericyte",smooth_muscle_cell:"Smooth muscle cell",venular_smooth_muscle_pericyte:"Venular smooth muscle cell",perivascular_macrophage:"Perivascular macrophage",perivascular_fibroblast:"Perivascular fibroblast",dendritic_cell:"Dendritic cell",excitatory_neuron:"Excitatory neuron",inhibitory_neuron:"Inhibitory neuron",exc_l23_it:"L2/3 pyramidal neuron (23P)",exc_l4:"Layer 4 pyramidal / spiny-stellate neuron (4P)",exc_l5_it:"Layer 5 IT pyramidal neuron (5P-IT)",exc_l5_et:"Layer 5 ET thick-tufted pyramidal neuron (5P-ET)",exc_l5_np:"Layer 5 near-projecting neuron (5P-NP)",exc_l6_it:"Layer 6 IT pyramidal neuron (6P-IT)",exc_l6_ct:"Layer 6 CT pyramidal neuron (6P-CT)",inh_basket:"Basket cell — PV / perisomatic-targeting (BC)",inh_martinotti:"Martinotti cell — SST / distal-targeting (MC)",inh_bipolar:"Bipolar cell — VIP / inhibitory-targeting (BPC)",inh_neurogliaform:"Neurogliaform cell — sparsely-targeting (NGC)",astrocyte:"Astrocyte",microglia:"Microglia",oligodendrocyte:"Oligodendrocyte",opc:"OPC",pia_mater_fibroblast:"Pia mater fibroblast",pial_sheath_fibroblast:"Pial sheath fibroblast",arachnoid_barrier_cell:"Arachnoid barrier cell",fibroblast_reticular_cell:"Fibroblast reticular cell",inner_arachnoid_fibroblast:"Inner arachnoid fibroblast"};
+const LEAF_NAMES={erythrocyte:"Erythrocyte",platelet:"Platelet",neutrophil:"Neutrophil",lymphocyte:"Lymphocyte",monocyte:"Monocyte",endothelial_cell:"Endothelial cell",pericyte:"Pericyte",smooth_muscle_cell:"Smooth muscle cell",venular_smooth_muscle_pericyte:"Venular smooth muscle cell",perivascular_macrophage:"Perivascular macrophage",perivascular_fibroblast:"Perivascular fibroblast",dendritic_cell:"Dendritic cell",excitatory_neuron:"Excitatory neuron",inhibitory_neuron:"Inhibitory neuron",exc_l23_it:"L2/3 pyramidal neuron (23P)",exc_l4:"Layer 4 pyramidal / spiny-stellate neuron (4P)",exc_l5_it:"Layer 5 IT pyramidal neuron (5P-IT)",exc_l5_et:"Layer 5 ET thick-tufted pyramidal neuron (5P-ET)",exc_l5_np:"Layer 5 near-projecting neuron (5P-NP)",exc_l6_it:"Layer 6 IT pyramidal neuron (6P-IT)",exc_l6_ct:"Layer 6 CT pyramidal neuron (6P-CT)",inh_basket:"Basket cell — PV / perisomatic-targeting (BC)",inh_martinotti:"Martinotti cell — SST / distal-targeting (MC)",inh_bipolar:"Bipolar cell — VIP / inhibitory-targeting (BPC)",inh_neurogliaform:"Neurogliaform cell — sparsely-targeting (NGC)",astrocyte:"Astrocyte",microglia:"Microglia",oligodendrocyte:"Oligodendrocyte",opc:"OPC",pia_mater_fibroblast:"Pia mater fibroblast",pial_sheath_fibroblast:"Pial sheath fibroblast",arachnoid_barrier_cell:"Arachnoid barrier cell",fibroblast_reticular_cell:"Fibroblast reticular cell",inner_arachnoid_fibroblast:"Inner arachnoid fibroblast",dural_border_cell:"Dural border cell"};
 // Real files currently sitting in the image library folders (matches what's on disk today).
 // coord is [x,y,z] in VOXELS, filled in from the catalog's Notes/coordinate column.
 // Left null until supplied -- thumbnails without a coord show greyed-out with no jump link.
@@ -1828,7 +1831,8 @@ const IMAGE_LIBRARY={
  pial_sheath_fibroblast:{dir:"F_leptomeninges/pial_sheath_fibroblast",files:[]},
  arachnoid_barrier_cell:{dir:"F_leptomeninges/arachnoid_barrier_cell",files:[]},
  fibroblast_reticular_cell:{dir:"F_leptomeninges/fibroblast_reticular_cell",files:[]},
- inner_arachnoid_fibroblast:{dir:"F_leptomeninges/inner_arachnoid_fibroblast",files:[]}
+ inner_arachnoid_fibroblast:{dir:"F_leptomeninges/inner_arachnoid_fibroblast",files:[]},
+ dural_border_cell:{dir:"F_leptomeninges/dural_border_cell",files:[]}
 };
 /* Column E ("Feature to capture (discriminator)") from brain_cell_image_library_catalog.xlsx's
    "Image catalog" sheet, keyed by filename (column G) -- shown in reference-image tooltips
@@ -6195,7 +6199,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     pial_sheath_fibroblast:{own:"Pial sheath Fibroblast",microns:null},
     arachnoid_barrier_cell:{own:"Arachnoid barrier cell",microns:null},
     fibroblast_reticular_cell:{own:"Fibroblast reticular cell",microns:null},
-    inner_arachnoid_fibroblast:{own:"Inner arachnoid fibroblast",microns:null}
+    inner_arachnoid_fibroblast:{own:"Inner arachnoid fibroblast",microns:null},
+    dural_border_cell:{own:"Dural border cell",microns:null}
   };
   /* Picks one random example of a leaf type: own-verified cells first (trusted by
      construction), falling back to MICrONS predictions only if no own-verified example
