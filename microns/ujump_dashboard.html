@@ -110,7 +110,7 @@
   </div>
 
   <div class="card">
-    <h2>MICrONS-predicted vs. verified-by-us vs. community-identified</h2>
+    <h2>MICrONS-predicted vs. verified by Grubb et al. vs. community-identified</h2>
     <p class="sub">All 4 bars LIVE from "Master cell list"'s current identity source, main nuclei only.</p>
     <div class="plot" id="plotIdentitySource"></div>
   </div>
@@ -551,7 +551,7 @@ function renderLiveCoreCharts(live){
    loaded / not ready) shows a "(loading…)" label instead of a zero bar. */
 function renderPredictedVerified(live){
   const s=live&&live.ready?live.predicted_vs_verified_live:null;
-  const labels=["MICrONS-predicted only","Verified by us (own)","Community-identified (majority vote)","Unclassified"];
+  const labels=["MICrONS-predicted only","Verified by Grubb et al.","Community-identified (majority vote)","Unclassified"];
   const values=s?[s.microns_predicted_no_override,s.own_verified,s.community_majority,s.unclassified]:[0,0,0,0];
   const colors=["#8a6b3a","#3a6b5a","#5a4a7a","#c9c2b4"];
   Plotly.newPlot("plotIdentitySource",[{
