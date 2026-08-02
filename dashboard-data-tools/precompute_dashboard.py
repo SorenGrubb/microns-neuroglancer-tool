@@ -512,7 +512,9 @@ for t, vals in vol_by_type.items():
         arr = rng.choice(arr, size=MAX_SAMPLE, replace=False)
     nucleus_volume_um3[t] = [round(float(x), 2) for x in arr]
 
-# ---- Graph 9: 3-nearest-neighbor type composition per cell type -----
+# ---- Graph 9: 5-nearest-neighbor type composition per cell type -----
+# (2026-08-02: expanded from 3 to 5 nearest neighbours per Søren's request -- k=6 below is
+# self+5, same convention as the original self+3/k=4.)
 print("Building spatial index over", N + ST_N, "identified points for neighbor composition ...")
 all_x = np.concatenate([NX.astype(np.float64) * 4, ST_X.astype(np.float64) * 4])
 all_y = np.concatenate([NY.astype(np.float64) * 4, ST_Y.astype(np.float64) * 4])
@@ -522,14 +524,14 @@ all_is_id = (all_identity != "Unclassified")
 
 pts = np.stack([all_x, all_y, all_z], axis=1)
 tree_all = cKDTree(pts)
-# query k=4 (self + 3 neighbours), only for identified points, restricted to identified targets
+# query k=6 (self + 5 neighbours), only for identified points, restricted to identified targets
 id_pts_idx = np.where(all_is_id)[0]
-print(" ", len(id_pts_idx), "identified points; querying k=4 nearest ...")
-dists, nbr_idx = tree_all.query(pts[id_pts_idx], k=4)
+print(" ", len(id_pts_idx), "identified points; querying k=6 nearest ...")
+dists, nbr_idx = tree_all.query(pts[id_pts_idx], k=6)
 neighbor_composition = collections.defaultdict(lambda: collections.Counter())
 for row_i, src_idx in enumerate(id_pts_idx):
     src_type = all_identity[src_idx]
-    for col in range(1, 4):  # skip col 0 = self
+    for col in range(1, 6):  # skip col 0 = self
         nb = nbr_idx[row_i, col]
         nb_type = all_identity[nb]
         if nb_type == "Unclassified":

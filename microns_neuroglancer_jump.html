@@ -2842,7 +2842,7 @@ function caveAggregate(rows,rootId,direction){
        splits PostGIS geometry columns into _x/_y/_z fields -- there is no combined-array mode
        at this layer, so ctr_pt_position never exists as such; only ctr_pt_position_x/_y/_z do. */
     if(r.ctr_pt_position_x!=null&&r.ctr_pt_position_y!=null&&r.ctr_pt_position_z!=null)
-      pts.push({pos:[r.ctr_pt_position_x,r.ctr_pt_position_y,r.ctr_pt_position_z],partner:p,direction});
+      pts.push({pos:[r.ctr_pt_position_x,r.ctr_pt_position_y,r.ctr_pt_position_z],partner:p,direction,size:Number(r.size)||0});
   }
   return{partners:[...map.values()].sort((a,b)=>b.syn_count-a.syn_count),points:pts};
 }
@@ -2867,9 +2867,22 @@ function buildConnectivityState(centerPos,queryRootId,shown,points){
        Yellow (not blue/pink like the meshes) so the points never blend into a same-coloured
        partner mesh underneath them -- per Søren, they were hard to see as blue. */
     const shownPts=points.slice(0,CAVE_MAX_SYN_POINTS);
-    const anns=shownPts.map((p,i)=>({type:"point",id:"syn"+i,point:p.pos.map(Number),
-      properties:{color:SYN_POINT_COLOR},
-      description:p.direction+" synapse · partner "+p.partner}));
+    /* Size + depth per synapse point (2026-08-02, Søren's request), shown in each annotation's
+       hover/click description in Neuroglancer -- capped to shownPts (<=CAVE_MAX_SYN_POINTS=400)
+       rather than computed for every synapse the CAVE query returned, since estimateLayer() does
+       an O(PIA_N+WM_N) linear scan per call with no spatial index (fine for a bounded ~400-point
+       UI action; would NOT be fine run over every synapse of a "hub" cell that might have
+       thousands). "size" is CAVE's own synapses_pni_2.size field, unconverted -- shown as raw
+       units rather than asserting a physical (e.g. voxel or nm²) meaning this project hasn't
+       independently verified against a citable source. */
+    const anns=shownPts.map((p,i)=>{
+      const layer=estimateLayer(Number(p.pos[0]),Number(p.pos[1]),Number(p.pos[2]));
+      const depthStr=(layer&&layer.depthUm!=null&&isFinite(layer.depthUm))?layer.depthUm.toFixed(0)+" µm from pia":"depth unavailable";
+      const sizeStr=p.size?String(p.size):"unknown";
+      return{type:"point",id:"syn"+i,point:p.pos.map(Number),
+        properties:{color:SYN_POINT_COLOR},
+        description:p.direction+" synapse · partner "+p.partner+" · size "+sizeStr+" (raw CAVE units) · "+(layer?layer.label:"unknown layer")+", "+depthStr};
+    });
     layers.push({type:"annotation",source:"local://annotations",annotations:anns,
       annotationProperties:[{id:"color",type:"rgb",default:SYN_POINT_COLOR}],
       shader:"void main() { setColor(prop_color()); }",name:"synapse points"});
@@ -3016,12 +3029,14 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">dir</th>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">partner root id</th>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">syn</th>'
+            +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)" title="Total of CAVE\'s raw synapses_pni_2.size field across every synapse with this partner -- unconverted, no confirmed physical unit">syn size</th>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">type</th></tr></thead><tbody>'
             +rows2.map(p=>'<tr><td style="padding:4px 8px;border-bottom:1px solid var(--line)"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:'+(p.direction==="input"?"#00b7ff":"#ff4fa3")+'"></span>'+p.direction+'</td>'
               +'<td class="id" style="padding:4px 8px;border-bottom:1px solid var(--line);font-family:ui-monospace,Menlo,Consolas,monospace">'+p.partner+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+p.syn_count+'</td>'
+              +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+(p.syn_size||0)+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+escHtml(p.cell_type||"—")+'</td></tr>').join("")
-            +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the download and this table list every partner found.</div>'
+            +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the download and this table list every partner found. Per-synapse size and cortical depth are shown in Neuroglancer itself -- click/hover a yellow synapse point.</div>'
             +(typeNote?'<div class="hint" style="margin-top:4px;color:#ffb74d">'+escHtml(typeNote)+'</div>':'');
           const xlsxBtn=rt.querySelector("#connXlsx");
           if(xlsxBtn)xlsxBtn.addEventListener("click",()=>{

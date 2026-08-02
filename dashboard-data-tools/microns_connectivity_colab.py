@@ -98,6 +98,7 @@ if not ROOT_IDS_BY_TYPE:
 
 connectivity = {}   # source type -> Counter of partner type -> synapse count
 partner_cells = {}  # source type -> Counter of partner type -> DISTINCT partner cell count
+synapse_io = {}     # source type -> {input/output synapse totals + per-sampled-cell averages}
 
 for src_type, root_ids in ROOT_IDS_BY_TYPE.items():
     print("Querying synapses for", src_type, "(", len(root_ids), "sampled cells )...")
@@ -129,6 +130,19 @@ for src_type, root_ids in ROOT_IDS_BY_TYPE.items():
 
     connectivity[src_type] = dict(syn_counter.most_common(10))
     partner_cells[src_type] = {k: len(v) for k, v in seen_partners.items()}
+    # 2026-08-02: input/output synapse counts per type, added for the dashboard's new
+    # "input vs output synapses per cell type" chart -- out_df/in_df are already fetched above
+    # for the partner-type tally, so this just re-uses them rather than querying again.
+    # len(root_ids_int) (not len(out_df)/len(in_df)) is the denominator for the per-cell
+    # averages, since it's the actual sample size regardless of how many synapses turned up.
+    n_sampled = len(root_ids_int)
+    synapse_io[src_type] = {
+        "n_sampled_cells": n_sampled,
+        "output_synapses_total": int(len(out_df)),
+        "input_synapses_total": int(len(in_df)),
+        "avg_output_synapses_per_cell": round(len(out_df) / n_sampled, 1) if n_sampled else 0,
+        "avg_input_synapses_per_cell": round(len(in_df) / n_sampled, 1) if n_sampled else 0,
+    }
     time.sleep(0.5)  # be polite to the shared CAVE server between types
 
 # ---- STEP 6: save the result ----
@@ -136,10 +150,14 @@ out = {
     "note": "Synaptic partner-type tallies, sampled up to 40 cells per source type "
             "(fewer for rare types). by_synapse_count sums individual synapses; "
             "by_distinct_partner_cells counts unique partner cells once each regardless "
-            "of how many synapses they share with the sampled cells.",
+            "of how many synapses they share with the sampled cells. synapse_io (added "
+            "2026-08-02) gives per-type input/output synapse totals AND per-sampled-cell "
+            "averages for the same sample -- the average is the fairer cross-type comparison, "
+            "since different cell types have very different sample sizes here.",
     "sample_size_per_type": {t: len(v) for t, v in ROOT_IDS_BY_TYPE.items()},
     "by_synapse_count": connectivity,
     "by_distinct_partner_cells": partner_cells,
+    "synapse_io": synapse_io,
 }
 with open("connectivity_aggregate.json", "w") as f:
     json.dump(out, f, indent=2)
