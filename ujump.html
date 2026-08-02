@@ -202,18 +202,17 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div class="tabpanel" data-tabpanel="filter">
 <div class="card" id="filterCard">
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Filter and show</div>
-<p class="hint" style="margin-top:8px">Select any combination of cell type(s), vessel proximity, glia-limitans proximity, white-matter-border proximity, and/or cortical layer, then download the matching cells (with coordinates and root/nucleus IDs) as an Excel file.</p>
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="Select any combination of cell type(s), vessel proximity, glia-limitans proximity, white-matter-border proximity, and/or cortical layer, then download the matching cells (with coordinates and root/nucleus IDs) as an Excel file.">Filter the data</div>
 <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterTypes"></div>
 <div style="margin-top:12px">
-<label style="font-size:12px">...or find cells needing attention (ignores the cell-type checkboxes above)</label>
-<select id="filterAttention" style="width:100%">
+<label style="font-size:12px" title="The &quot;user-reported&quot; and &quot;totally unclassified&quot; options require a brief internet fetch to check which cells already have a report on file.">...or find cells needing attention (ignores the cell-type checkboxes above)</label>
+<select id="filterAttention" style="width:100%" title="The &quot;user-reported&quot; and &quot;totally unclassified&quot; options require a brief internet fetch to check which cells already have a report on file.">
 <option value="">Not filtering by this — use the cell-type checkboxes above</option>
 <option value="all">All unclassified cells (no MICrONS prediction on file, any verification/report status)</option>
 <option value="verified">Unclassified but verified cells (no MICrONS prediction, but verified by Grubb et al.)</option>
 <option value="reported">User-reported unclassified cells (no MICrONS prediction, not yet verified, but someone has reported an identification)</option>
 <option value="untouched">Totally unclassified cells (no MICrONS prediction, not verified, no report on file — needs attention most)</option>
 </select>
-<p class="hint">The "user-reported" and "totally unclassified" options require a brief internet fetch to check which cells already have a report on file.</p>
 <p class="hint" id="filterAttnWarning" style="display:none;color:var(--warn);font-weight:600">This dropdown overrides the cell-type checkboxes above — with it set, you're filtering only by attention status (plus vessel/glia-limitans/layer/region below, if those are also set), and the checked cell type(s) above are being ignored.</p>
 </div>
 <div class="row" style="margin-top:12px;align-items:center">
@@ -230,16 +229,15 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <span style="font-size:12px;color:var(--mut)">µm of the white matter border</span>
 </div>
 <div style="margin-top:10px">
-<label style="font-size:12px">V1 column membership (Allen ground-truth set — optional, in addition to any cell type(s) checked above)</label>
+<label style="font-size:12px" title="Restricts matches to cells in the Allen Institute's manually-classified V1 column (allen_v1_column_types_slanted_ref / aibs_column_nonneuronal_ref). &quot;Any member&quot; matches every column cell regardless of type (including pericytes/vascular); &quot;Neuronal members&quot; and &quot;non-vascular, non-neuronal members&quot; (glia and other non-neuronal calls, excluding pericytes) are narrower and can be checked together to match either. Check &quot;Include V1 column boundary&quot; below to also draw the column's outline in the 3D view.">V1 column membership (Allen ground-truth set — optional, in addition to any cell type(s) checked above)</label>
 <div class="toggles" style="margin-top:4px">
 <label style="font-size:12px"><input type="checkbox" id="filterV1ColAny"> V1 column — any member (all cell types)</label>
 <label style="font-size:12px"><input type="checkbox" id="filterV1ColNeuron"> V1 column — neuronal members</label>
 <label style="font-size:12px"><input type="checkbox" id="filterV1ColNonVasc"> V1 column — non-vascular, non-neuronal members</label>
 </div>
-<p class="hint">Restricts matches to cells in the Allen Institute's manually-classified V1 column (<code>allen_v1_column_types_slanted_ref</code> / <code>aibs_column_nonneuronal_ref</code>). "Any member" matches every column cell regardless of type (including pericytes/vascular); "Neuronal members" and "non-vascular, non-neuronal members" (glia and other non-neuronal calls, excluding pericytes) are narrower and can be checked together to match either. Check "Include V1 column boundary" below to also draw the column's outline in the 3D view.</p>
 </div>
 <div style="margin-top:10px">
-<label style="font-size:12px">Cortical layer</label>
+<label style="font-size:12px" title="Layer filtering re-estimates each candidate cell's cortical depth on the fly and can take a few seconds for large result sets.">Cortical layer</label>
 <div class="toggles" style="margin-top:4px" id="filterLayers">
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Leptomeninges"> Leptomeninges</label>
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 1"> Layer 1</label>
@@ -251,37 +249,19 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 6b"> Layer 6b</label>
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="White matter"> White matter</label>
 </div>
-<p class="hint">Layer filtering re-estimates each candidate cell's cortical depth on the fly and can take a few seconds for large result sets.</p>
 </div>
 <div style="margin-top:10px">
-<label style="font-size:12px"><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box)</label>
+<label style="font-size:12px" title="Two diagonal corners per box, in the same voxel coordinates as the main search box above (X/Y at 4 nm/voxel, Z at 40 nm/voxel). Either diagonal works — order doesn't matter. Add as many boxes as you like; a cell matches if it falls inside any of them. Matching cells within 10 µm of a traced vessel will include the vessel type and distance in the download. You can paste x, y, z into either corner's x field — it splits automatically, just like the main coordinate field above."><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box)</label>
 <div id="regionBoxes"></div>
 <button type="button" class="idbtn" id="regionAddBox" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another box</button>
-<p class="hint">Two diagonal corners per box, in the same voxel coordinates as the main search box above (X/Y at 4&nbsp;nm/voxel, Z at 40&nbsp;nm/voxel). Either diagonal works &mdash; order doesn't matter. Add as many boxes as you like; a cell matches if it falls inside <i>any</i> of them. Matching cells within 10&nbsp;µm of a traced vessel will include the vessel type and distance in the download. You can paste <code>x, y, z</code> into either corner's x field &mdash; it splits automatically, just like the main coordinate field above.</p>
 <div id="regionViz"></div>
 </div>
-<div class="row" style="margin-top:14px;gap:10px">
-<button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
-<button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
-</div>
-<div class="row" style="margin-top:8px;gap:10px">
-<button class="idbtn" id="filterViewerAll" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Open all matches in Neuroglancer (3D)</button>
-</div>
-<div class="card" id="stepThroughCard" style="margin-top:14px;background:#0f1420;display:none">
-<label style="font-size:12px">Systematically step through matches</label>
-<p class="hint" style="margin-top:4px">Visits every matched cell exactly once, in a fixed order &mdash; unlike the random buttons on the Jump tab, nothing is skipped or repeated. Each step loads the cell into the Jump tab's identification panel, same as clicking there directly. Progress (current position + how many you've checked) is remembered in this browser for this exact set of matched cells, so closing the tab and coming back later resumes where you left off &mdash; changing the filters above and re-previewing starts a fresh count.</p>
-<p class="hint" id="stepCounter" style="margin-top:10px;font-weight:600;color:var(--ink)"></p>
-<div class="row" style="gap:8px;margin-top:6px">
-<button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
-<button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
-</div>
-<button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched cells">Reset progress</button>
-</div>
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:18px 0 2px;padding-top:14px;border-top:1px solid var(--line)" title="These only add extra 3D layers to the Neuroglancer view opened below — they never change which cells match, and none of them show up in the Excel export.">Add to the Neuroglancer view (not included in the Excel export)</div>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterVasc" style="width:auto"> Include vasculature outline</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterEMOn" style="width:auto"> Include EM imagery (ultrastructure)</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterV1ColOn" style="width:auto"> Include V1 column boundary (Allen ground-truth column, derived envelope)</label>
 <div style="margin-top:10px">
-<label style="font-size:12px">Traced vasculature outlines, by vessel type &amp; capillary order (arterial → capillary bed → venous)</label>
+<label style="font-size:12px" title="Draws Søren's hand-traced vessel centerlines as colour-coded 3D line annotations in the viewer opened below, one independently-toggleable layer per category you check here. Distinct from &quot;Include vasculature outline&quot; above, which shows the pre-segmented vessel mesh rather than the actual tracing. The tracing data is hosted separately (not embedded in this file) and is only fetched for the categories you check, cached in this browser tab after the first load — requires network access.">Traced vasculature outlines, by vessel type &amp; capillary order (arterial → capillary bed → venous)</label>
 <div class="toggles" style="margin-top:4px">
 <label style="font-size:12px"><input type="checkbox" id="fvt_pial_arterioles" class="fvasctrace" value="pial_arterioles"> Pial arterioles</label>
 <label style="font-size:12px"><input type="checkbox" id="fvt_penetrating_arterioles" class="fvasctrace" value="penetrating_arterioles"> Penetrating arterioles</label>
@@ -294,15 +274,27 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <label style="font-size:12px"><input type="checkbox" id="fvt_ascending_venules" class="fvasctrace" value="ascending_venules"> Ascending venules</label>
 <label style="font-size:12px"><input type="checkbox" id="fvt_pial_venules" class="fvasctrace" value="pial_venules"> Pial venules</label>
 </div>
-<p class="hint">Draws Søren's hand-traced vessel centerlines as colour-coded 3D line annotations in the viewer opened below, one independently-toggleable layer per category you check here. Distinct from "Include vasculature outline" above, which shows the pre-segmented vessel mesh rather than the actual tracing. The tracing data is hosted separately (not embedded in this file) and is only fetched for the categories you check, cached in this browser tab after the first load — requires network access.</p>
 </div>
 <div style="margin-top:10px">
-<label style="font-size:12px"><input type="checkbox" id="filterCentVec" style="width:auto"> Include nucleus-to-centriole vectors</label>
-<label style="font-size:12px"><input type="checkbox" id="filterCilVec" style="width:auto"> Include primary cilia base-to-tip vectors</label>
-<p class="hint">Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell&rsquo;s nucleus centre to its centriole, or from cilium base to tip, for cells that carry one in the verified dataset. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included.</p>
+<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell's nucleus centre to its centriole, or from cilium base to tip, for cells that carry one in the verified dataset. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCentVec" style="width:auto"> Include nucleus-to-centriole vectors</label>
+<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell's nucleus centre to its centriole, or from cilium base to tip, for cells that carry one in the verified dataset. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCilVec" style="width:auto"> Include primary cilia base-to-tip vectors</label>
 </div>
-<label style="margin-top:14px">What &ldquo;Open all matches in Neuroglancer (3D)&rdquo; shows</label>
-<p class="hint">Opens a zoomed-out 3D view (nuclei + segmentation by default) sized and centred to fit every matching cell. Each cell type gets its own colour-coded layer (e.g. red = mural cells, purple = astrocytes, green = microglia) plus its own nuclei layer (always blue), so you can switch individual types on/off from Neuroglancer's layer panel. "Include vasculature outline" adds the traced vessel mesh (Img65 + Img35) as its own toggleable layer. "Include EM imagery" adds the raw EM layer(s) so you can inspect ultrastructure directly, not just the segmentation -- off by default since EM tiles are heavier to load. Normally it adds Img65 and/or Img35, whichever the matched cells actually fall in; if either vasculature overlay is on it adds both, since the vessels span the whole imaged volume rather than just the minnie65 predicted region. "Include V1 column boundary" adds a green wireframe outline of the Allen Institute's manually-classified V1 column (a derived envelope, not an official published shape -- see the "V1 column" filters below for selecting its member cells). If "Limit to region(s)" is on, each box is drawn as its own colour-matched, toggleable outline layer too.</p>
+<div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
+<button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
+<button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
+</div>
+<div class="row" style="margin-top:8px;gap:10px">
+<button class="idbtn" id="filterViewerAll" disabled title="Click &quot;Preview matches&quot; first — opens a zoomed-out 3D view sized to fit every matching cell, one colour-coded layer per cell type plus its own nuclei layer; any &quot;Add to the Neuroglancer view&quot; options checked above (vasculature outline, EM imagery, V1 column boundary, traced vessel lines, centriole/cilia vectors) are added as extra toggleable layers, but never change which cells matched or what's in the Excel export." style="flex:1">Open all matches in Neuroglancer (3D)</button>
+</div>
+<div class="card" id="stepThroughCard" style="margin-top:14px;background:#0f1420;display:none">
+<label style="font-size:12px" title="Visits every matched cell exactly once, in a fixed order — unlike the random buttons on the Jump tab, nothing is skipped or repeated. Each step loads the cell into the Jump tab's identification panel, same as clicking there directly. Progress (current position + how many you've checked) is remembered in this browser for this exact set of matched cells, so closing the tab and coming back later resumes where you left off — changing the filters above and re-previewing starts a fresh count.">Systematically step through matches</label>
+<p class="hint" id="stepCounter" style="margin-top:10px;font-weight:600;color:var(--ink)"></p>
+<div class="row" style="gap:8px;margin-top:6px">
+<button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
+<button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
+</div>
+<button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched cells">Reset progress</button>
+</div>
 </div>
 </div>
 <div class="tabpanel" data-tabpanel="refs">
