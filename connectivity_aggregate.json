@@ -1,5 +1,5 @@
 {
-  "note": "Synaptic partner-type tallies, sampled up to 40 cells per source type (fewer for rare types). by_synapse_count sums individual synapses; by_distinct_partner_cells counts unique partner cells once each regardless of how many synapses they share with the sampled cells.",
+  "note": "Synaptic partner-type tallies, sampled up to 40 cells per source type (fewer for rare types). by_synapse_count sums individual synapses; by_distinct_partner_cells counts unique partner cells once each regardless of how many synapses they share with the sampled cells. synapse_io (added 2026-08-02) gives per-type input/output synapse totals AND per-sampled-cell averages for the same sample -- the average is the fairer cross-type comparison, since different cell types have very different sample sizes here.",
   "sample_size_per_type": {
     "L6 IT pyramidal neuron": 40,
     "L2/3 pyramidal neuron": 40,
@@ -23,5 +23,6 @@
     "Lymphocyte": 3
   },
   "by_synapse_count": {},
-  "by_distinct_partner_cells": {}
+  "by_distinct_partner_cells": {},
+  "synapse_io": {}
 }
