@@ -251,6 +251,17 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 </div>
 </div>
 <div style="margin-top:10px">
+<label style="font-size:12px" title="Filters by whether a primary cilium and/or centriole has been ANNOTATED for this cell — not a confirmed biological absence. &quot;Neither annotated yet&quot; could just mean nobody has looked yet, not that the cell genuinely lacks one. Cilium/centriole coordinates come from Søren's own-verified dataset (including merged-nucleus breakdowns); community-reported cells and plain MICrONS predictions have no organelle data recorded, so they always count as &quot;neither&quot; here regardless of biology.">Primary cilium / centriole</label>
+<select id="filterOrganelle" style="width:100%" title="Filters by whether a primary cilium and/or centriole has been ANNOTATED for this cell — not a confirmed biological absence. &quot;Neither annotated yet&quot; could just mean nobody has looked yet.">
+<option value="">Not filtering by this</option>
+<option value="either">Has a cilium and/or centriole annotated</option>
+<option value="cilium">Has a cilium annotated</option>
+<option value="centriole">Has a centriole annotated</option>
+<option value="both">Has both a cilium and a centriole annotated</option>
+<option value="neither">Neither annotated yet (may just mean not yet checked)</option>
+</select>
+</div>
+<div style="margin-top:10px">
 <label style="font-size:12px" title="Two diagonal corners per box, in the same voxel coordinates as the main search box above (X/Y at 4 nm/voxel, Z at 40 nm/voxel). Either diagonal works — order doesn't matter. Add as many boxes as you like; a cell matches if it falls inside any of them. Matching cells within 10 µm of a traced vessel will include the vessel type and distance in the download. You can paste x, y, z into either corner's x field — it splits automatically, just like the main coordinate field above."><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box)</label>
 <div id="regionBoxes"></div>
 <button type="button" class="idbtn" id="regionAddBox" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another box</button>
@@ -6152,7 +6163,13 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     for(let i=0;i<ST_N;i++)rows.push({type:OWN_TYPE_NAMES[ST_TYPE[i]],source:"own",space:"ST",i});
     for(const k in MERGED){
       const ni=parseInt(k,10);
-      for(const m of MERGED[k])rows.push({type:m.type,source:"own",space:"N",i:ni,merged:true});
+      // mergedSub:m carries this SPECIFIC sub-cell's own centriole/cilium fields (cilium is
+      // patched onto m by the CD.MERGED_CIL loop above, when a patch exists) -- needed so the
+      // "Primary cilium / centriole" filter (see evalRow()) can check organelle presence for the
+      // right sub-cell rather than the combined main-nucleus index (which has no own-type
+      // override at all for a merged detection, so OWN_HASCIL[ni]/OWN_HASCENT[ni] would always
+      // read false here even when a real sub-cell has one).
+      for(const m of MERGED[k])rows.push({type:m.type,source:"own",space:"N",i:ni,merged:true,mergedSub:m});
     }
     /* Community-reported, identified merged-nucleus sub-cells (2026-07-30) -- see
        MERGED_SUB_REPORTS_CACHE/fetchIdentifiedMergedSubs()/renderMergedSubCell() above. Only
@@ -6572,6 +6589,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     const regionOn=document.getElementById("filterRegionOn")?document.getElementById("filterRegionOn").checked:false;
     const regionBoxesNM=getRegionBoxesNM();
     const regionValid=regionBoxesNM.length>0;
+    const organelleSel=document.getElementById("filterOrganelle")?document.getElementById("filterOrganelle").value:"";
     const v1AnyOn=document.getElementById("filterV1ColAny")?document.getElementById("filterV1ColAny").checked:false;
     const v1NeuronOn=document.getElementById("filterV1ColNeuron")?document.getElementById("filterV1ColNeuron").checked:false;
     const v1NonVascOn=document.getElementById("filterV1ColNonVasc")?document.getElementById("filterV1ColNonVasc").checked:false;
@@ -6652,7 +6670,45 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const wmDist=est.wmDistUm;
       if(layers.size&&!layers.has(layerLabel))return null;
       if(wmOn&&(wmDist==null||wmDist>wmMaxUm))return null;
-      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,regionBoxLabel};
+      /* Primary cilium / centriole presence -- always computed (same "cheap lookup, so the Excel
+         export can always show it" convention as vessel type/layer/V1-column above), not just
+         while the filter dropdown is actively set. This is presence of an ANNOTATION, not a
+         confirmed biological absence -- "neither" can just mean nobody has checked yet (Søren).
+         Main-nucleus ("N") rows read the dense OWN_HASCIL/OWN_HASCENT arrays, which cover every
+         nucleus regardless of source (own/community/MICrONS) since organelle annotation isn't
+         gated on having an own-type override (see the dashboard's own cilia/centriole-stats
+         gating fix for the same reasoning). A MERGED row (row.merged, carrying row.mergedSub) is
+         the one exception -- the combined main-nucleus index has no own-type override at all for
+         a merged detection, so OWN_HASCIL[i]/OWN_HASCENT[i] would always read false there even
+         when a specific sub-cell genuinely has one; row.mergedSub.cilium/.centriole (patched onto
+         the sub-cell object by the CD.MERGED_CIL loop near buildAllIdentities()) is read instead.
+         Standalone ("ST") rows read ST_HASCIL/ST_HASCENT, which cover every standalone point
+         (all own-verified by construction). Community-reported merged-sub rows ("MS" space) and
+         any row not covered above have no organelle data recorded at all, so they fall through
+         to the false/false default -- correctly counted as "neither annotated yet". */
+      let hasCil=false,hasCent=false;
+      if(row.space==="N"){
+        if(row.merged&&row.mergedSub){
+          hasCil=!!row.mergedSub.cilium;
+          hasCent=!!row.mergedSub.centriole;
+        } else {
+          hasCil=!!OWN_HASCIL[row.i];
+          hasCent=!!OWN_HASCENT[row.i];
+        }
+      } else if(row.space==="ST"){
+        hasCil=!!ST_HASCIL[row.i];
+        hasCent=!!ST_HASCENT[row.i];
+      }
+      if(organelleSel){
+        const organelleMatch=
+          organelleSel==="either"?(hasCil||hasCent):
+          organelleSel==="cilium"?hasCil:
+          organelleSel==="centriole"?hasCent:
+          organelleSel==="both"?(hasCil&&hasCent):
+          organelleSel==="neither"?(!hasCil&&!hasCent):true;
+        if(!organelleMatch)return null;
+      }
+      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,regionBoxLabel,hasCil,hasCent};
     }
     const out=[];
     if(attention){
@@ -6682,7 +6738,12 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         if(!include)continue;
         const own=ownOverride(i),merged=mergedInfo(i);
         const typeName=own?own.type:(merged&&merged[0]&&merged[0].type)||"Unclassified";
-        const m=evalRow({type:typeName,source:verified?"own":"none",space:"N",i});
+        // When there's no own-override but there IS a merged-nucleus breakdown, this row
+        // represents merged[0] specifically (see typeName above) -- pass mergedSub so the
+        // "Primary cilium / centriole" filter in evalRow() checks THAT sub-cell's own organelle
+        // fields, same reasoning as buildAllIdentities()'s merged-row loop above.
+        const m=evalRow(own?{type:typeName,source:"own",space:"N",i}
+          :{type:typeName,source:verified?"own":"none",space:"N",i,merged:!!merged,mergedSub:merged&&merged[0]});
         if(m)out.push(m);
       }
     } else {
@@ -6795,7 +6856,12 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       // Always included now (see the estimateLayerFast comment in evalRow()) -- not gated on
       // result.layerActive, so it shows up on every export regardless of whether the layer
       // filter checkboxes are in use.
-      {header:"Cortical layer",get:m=>m.layerLabel||""}
+      {header:"Cortical layer",get:m=>m.layerLabel||""},
+      // Always included (same convention as Vessel type/Cortical layer above) -- presence of an
+      // ANNOTATION, not a confirmed biological absence; see the "Primary cilium / centriole"
+      // filter's own comment in evalRow() for why "No" can just mean "not yet checked".
+      {header:"Primary cilium annotated?",get:m=>m.hasCil?"Yes":"No"},
+      {header:"Centriole annotated?",get:m=>m.hasCent?"Yes":"No"}
     ];
     /* Community-report columns -- only added when REPORT_ENDPOINT is configured at all, since
        otherwise there's no reporting feature to report on. Needs REPORTS_CACHE to have been

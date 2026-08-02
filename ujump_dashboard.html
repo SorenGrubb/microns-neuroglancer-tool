@@ -209,6 +209,43 @@ const TYPE_CATEGORY={};
 ["Arachnoid barrier cell","Dural border cell","Fibroblast reticular cell",
  "Inner arachnoid fibroblast","Pia mater Fibroblast","Pial sheath Fibroblast"
 ].forEach(t=>TYPE_CATEGORY[t]="Leptomeninges");
+/* SHORT-NAME aliases (2026-08-02): microns_connectivity_colab.py/.ipynb's ROOT_IDS_BY_TYPE (and
+   therefore connectivity_aggregate.json's by_synapse_count/synapse_io keys) uses shorter type
+   names ("L6 IT pyramidal neuron", "Basket cell") than the long coded names above ("Layer 6 IT
+   pyramidal neuron (6P-IT)", "Basket cell — PV / perisomatic-targeting (BC)"). Without these
+   aliases every neuron type in that dataset fell into the implicit "Other" category (same rank
+   for all of them), so sortByCategory's category-grouping did nothing and the input/output-
+   synapses chart came out ordered only by synapse count -- Søren: "the excitatory neuronal types
+   should come first, then the inhibitory neuronal types, etc. like on the other graphs." The
+   vascular/glia/immune short names already happen to equal their long-name counterparts
+   (Pericyte, Astrocyte, Endothelial cell, etc.), so only the neuron short names needed adding. */
+["L2/3 pyramidal neuron","L4 pyramidal neuron","L5 IT pyramidal neuron","L5 ET pyramidal neuron",
+ "L5 NP pyramidal neuron","L6 CT pyramidal neuron","L6 IT pyramidal neuron"
+].forEach(t=>TYPE_CATEGORY[t]="Excitatory neurons");
+["Basket cell","Martinotti cell","Bipolar cell","Neurogliaform cell"
+].forEach(t=>TYPE_CATEGORY[t]="Inhibitory neurons");
+
+/* Explicit WITHIN-CATEGORY order (2026-08-02), used only where Søren asked for a specific
+   biological order rather than the default "most samples first" tie-break: excitatory neurons
+   ordered by cortical layer (L2/3 -> L4 -> L5 -> L6; the three L5 subtypes and two L6 subtypes
+   don't have a further Søren-specified order, so IT/ET/NP and IT/CT are just kept in a fixed,
+   stable order among themselves), and vascular cells with Endothelial cell first. Both the long
+   coded name and the short connectivity-aggregate name map to the same rank, so this applies
+   consistently everywhere a type name might appear. Types not listed here have no explicit rank
+   (typeRank() returns Infinity for them) and keep falling back to whatever secondary sort the
+   caller already used (e.g. sample count) -- see sortByCategoryAndRank(). */
+const TYPE_RANK={};
+[["L2/3 pyramidal neuron (23P)",0],["L2/3 pyramidal neuron",0],
+ ["Layer 4 pyramidal / spiny-stellate neuron (4P)",1],["L4 pyramidal neuron",1],
+ ["Layer 5 IT pyramidal neuron (5P-IT)",2],["L5 IT pyramidal neuron",2],
+ ["Layer 5 ET thick-tufted pyramidal neuron (5P-ET)",3],["L5 ET pyramidal neuron",3],
+ ["Layer 5 near-projecting neuron (5P-NP)",4],["L5 NP pyramidal neuron",4],
+ ["Layer 6 IT pyramidal neuron (6P-IT)",5],["L6 IT pyramidal neuron",5],
+ ["Layer 6 CT pyramidal neuron (6P-CT)",6],["L6 CT pyramidal neuron",6],
+ ["Endothelial cell",0],["Pericyte",1],["Smooth muscle cell",2],
+ ["Venular smooth muscle cell",3],["High order pericyte",4]
+].forEach(([t,r])=>TYPE_RANK[t]=r);
+function typeRank(t){return TYPE_RANK[t]!==undefined?TYPE_RANK[t]:Infinity;}
 
 /* One consistent colour per cell type across every chart on the page, so "Pericyte" is
    always the same colour whichever panel you're looking at. Palette chosen to sit close to
@@ -257,6 +294,23 @@ function sortByCategory(types,secondaryFn){
     return String(a).localeCompare(String(b));
   });
 }
+/* Like sortByCategory, but for charts where Søren wants a specific WITHIN-category order
+   (nucleus-volume dot charts: excitatory neurons by cortical layer, vascular cells with
+   Endothelial cell first -- see TYPE_RANK above) rather than "most samples first". Explicit
+   ranks win when either type has one; unranked types (both Infinity) fall through to the same
+   count-descending/alphabetical tie-break sortByCategory always used, so charts/categories Søren
+   didn't ask to reorder (inhibitory neurons, glia, immune & perivascular, leptomeninges) are
+   unaffected. */
+function sortByCategoryAndRank(types,fallbackSecondaryFn){
+  return types.slice().sort(function(a,b){
+    const ra=catRank(a),rb=catRank(b);
+    if(ra!==rb)return ra-rb;
+    const rka=typeRank(a),rkb=typeRank(b);
+    if(rka!==rkb&&(rka!==Infinity||rkb!==Infinity))return rka-rkb;
+    if(fallbackSecondaryFn){const d=fallbackSecondaryFn(b)-fallbackSecondaryFn(a);if(d)return d;}
+    return String(a).localeCompare(String(b));
+  });
+}
 /* Two earlier attempts at showing the category grouping ON the chart both failed in real
    rendering (only caught once Søren looked at actual screenshots -- jsdom stubs Plotly.newPlot
    and never renders, so neither attempt was visible to any smoke test):
@@ -302,9 +356,9 @@ function barChart(divId,dataObj,yTitle,byCategory){
    median bar per category, approximating the style in Søren's reference images. Built from
    a box trace with the box/whiskers hidden (width:0, transparent fill) so only points +
    median line remain, rather than a full box-and-whisker chart. */
-function dotMedianChart(divId,dataObj,yTitle,tight){
+function dotMedianChart(divId,dataObj,yTitle,tight,useRank){
   let types=Object.keys(dataObj).filter(t=>dataObj[t]&&dataObj[t].length>=3);
-  types=sortByCategory(types,t=>dataObj[t].length);
+  types=(useRank?sortByCategoryAndRank:sortByCategory)(types,t=>dataObj[t].length);
   const traces=types.map(function(t){
     return {
       type:"box", name:t, y:dataObj[t], x0:t,
@@ -338,14 +392,14 @@ function isMergedBlobType(name){
    volume, NOT necessarily the same cells) shown side by side per category via Plotly's standard
    boxmode:"group" behavior -- ordinary, well-documented grouping of box traces sharing an x
    category, unlike the earlier multicategory-axis experiment. seriesList: [{name,color,dataObj}]. */
-function groupedDotChart(divId,seriesList,yTitle,tight){
+function groupedDotChart(divId,seriesList,yTitle,tight,useRank){
   const allTypes=new Set();
   seriesList.forEach(function(s){
     Object.keys(s.dataObj).forEach(function(t){
       if(s.dataObj[t]&&s.dataObj[t].length>=3)allTypes.add(t);
     });
   });
-  const types=sortByCategory(Array.from(allTypes),function(t){
+  const types=(useRank?sortByCategoryAndRank:sortByCategory)(Array.from(allTypes),function(t){
     return Math.max.apply(null,seriesList.map(function(s){return (s.dataObj[t]||[]).length;}));
   });
   const traces=[];
@@ -587,7 +641,7 @@ function renderVolumes(rows){
       area.innerHTML="<div class='placeholder'>No paired measurements in this category yet.</div>";
       return;
     }
-    dotMedianChart(area.id,filteredByType,"Nucleus volume (% of whole-cell mesh volume)",true);
+    dotMedianChart(area.id,filteredByType,"Nucleus volume (% of whole-cell mesh volume)",true,true);
 
     const bits=["n="+paired.length+" pairs"];
     if(droppedImpossible)bits.push(droppedImpossible+" impossible excluded");
@@ -613,7 +667,7 @@ function renderVolumes(rows){
     const series=[];
     if(hasNuc)series.push({name:"Nucleus volume (live, independent sample)",color:"#3a6b5a",dataObj:nucByType});
     if(hasMesh)series.push({name:"Whole-cell mesh volume (live, independent sample)",color:"#8a3b2a",dataObj:meshByType});
-    groupedDotChart(area.id,series,"volume (µm³)",true);
+    groupedDotChart(area.id,series,"volume (µm³)",true,true);
     const note=document.createElement("p");note.className="footnote";
     note.title="No same-cell nucleus+mesh pairs recorded yet, so nucleus and whole-cell volumes are shown as independent distributions (not the same individual cells) rather than a per-cell share. The paired % chart above will replace this automatically once “Compute volume” clicks from a nucleus's main panel start recording both numbers together.";
     note.textContent="Independent samples, not paired"+(unpaired.length?" · "+unpaired.length+" live mesh measurements so far":"");
