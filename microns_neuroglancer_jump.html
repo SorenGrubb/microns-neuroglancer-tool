@@ -1554,7 +1554,7 @@ function showNucleus(pos){
      panel.querySelectorAll(".idval") below) that reads a data-c attribute this span doesn't have;
      reusing it here would silently "copy" the string "undefined" on click. */
   if(nvStr)h+='<div class="idrow"><span class="k">nucleus volume</span><span style="font-family:monospace" title="From Søren\'s CAVE nucleus_detection_v0 export — precomputed, not an estimate">'+nvStr+'</span></div>';
-  if(root)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span>'+meshDlButtonHtml(root,window.CUR_CELLTYPE_DISPLAY,[NX[i],NY[i],NZ[i]],true,NV[i])+'</div>';
+  if(root)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span>'+meshDlButtonHtml(root,window.CUR_CELLTYPE_DISPLAY,[NX[i],NY[i],NZ[i]],true,NV[i],nid)+'</div>';
   else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">unsegmented &mdash; no cell mesh</span></div>';
   h+='</div>';
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
@@ -2531,14 +2531,19 @@ function showSubmitToast(ok,msg){
    sign-in already exists in this session; otherwise it does nothing and the button behaves
    exactly as if this feature didn't exist. Never shown to the user either way -- no toast, no
    error -- since a failed save here shouldn't undermine confidence in the volume number itself. */
-function maybeSaveComputedVolume(rootId,cellType,info,nucVolUm3){
+function maybeSaveComputedVolume(rootId,cellType,info,nucVolUm3,nucleusId){
   if(!REPORT_ENDPOINT||!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
   if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)return;
   /* nucVolUm3, when known (only from the main nucleus display -- see meshDlButtonHtml's comment),
      is the PRECOMPUTED nucleus volume for this exact same cell, sent alongside the freshly
      computed mesh volume so the dashboard can plot nucleus-volume-as-a-share-of-the-whole-cell
-     per real paired measurement, instead of two unrelated per-type averages. */
-  const payload={type:"save_computed_volume",rootId:rootId||"",nucleusId:"",
+     per real paired measurement, instead of two unrelated per-type averages.
+     nucleusId (2026-08-02 fix -- was previously hardcoded to "" here regardless of the caller,
+     Søren: "the nucleusID is not shown although there is a column for it") is likewise only ever
+     known when the click came from the main nucleus display (see meshDlButtonHtml's own data-nucid
+     comment) -- blank whenever it isn't (a community-reported/standalone/merged-sub cell's own
+     panel), same scoping as nucVolUm3 above. */
+  const payload={type:"save_computed_volume",rootId:rootId||"",nucleusId:nucleusId||"",
     cellType:cellType||"",volumeUm3:Math.round((info.volumeUm3||0)*100)/100,
     nucVolumeUm3:(nucVolUm3&&nucVolUm3>0)?Math.round(nucVolUm3*100)/100:"",
     vertices:info.vertices||0,fragmentCount:info.fragmentCount||1,
@@ -3840,6 +3845,7 @@ document.addEventListener("click",(e)=>{
     volBtn.disabled=true;
     const volLiveCellType=(volBtn.dataset.followLive==="1"&&typeof CUR_CELLTYPE_DISPLAY!=="undefined"&&CUR_CELLTYPE_DISPLAY)?CUR_CELLTYPE_DISPLAY:volBtn.dataset.celltype;
     const volNucVolUm3=volBtn.dataset.nucvol?parseFloat(volBtn.dataset.nucvol):null;
+    const volNucleusId=volBtn.dataset.nucid||"";
     MeshDL.computeVolume(rootId,(frac,msg)=>{volBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";})
       .then(info=>{
         const combinedStr=info.fragmentCount>1?" ("+info.fragmentCount+" fragments combined)":"";
@@ -3849,7 +3855,7 @@ document.addEventListener("click",(e)=>{
         volBtn.dataset.volFresh="1"; // protects this label from being overwritten by a stale decorateMeshVolButtons() pass
         volBtn.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices) — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure. Saved to the shared dashboard, replacing any earlier value for this root ID. Click again to recalculate.";
         volBtn.disabled=false;
-        maybeSaveComputedVolume(rootId,volLiveCellType,info,volNucVolUm3);
+        maybeSaveComputedVolume(rootId,volLiveCellType,info,volNucVolUm3,volNucleusId);
       })
       .catch(err=>{
         console.warn("[uJump mesh volume]",err);
@@ -3910,7 +3916,7 @@ function voxelToPasteStr(v){
    Buttons for OTHER users' reported cells (renderUserReportedCell) must NOT set this -- their
    cellTypeName is already final at render time and has nothing to do with CUR_CELLTYPE_DISPLAY,
    which tracks the separate, currently-displayed nucleus. */
-function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive,nucVolUm3){
+function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive,nucVolUm3,nucleusId){
   if(!rootId)return "";
   const ct=escHtml(cellTypeName||"Unclassified cell"),coords=escHtml(voxelToPasteStr(nucVox));
   /* nucVolUm3 (only ever passed from the main nucleus display, where NV[i] is known) is stashed
@@ -3919,9 +3925,15 @@ function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive,nucVolUm3){
      per-type samples) is what lets the dashboard's "root-ID volume vs nucleus volume" graph show
      nucleus volume as a real portion of the whole cell rather than two unrelated averages. */
   const nucvolAttr=(nucVolUm3&&nucVolUm3>0)?' data-nucvol="'+nucVolUm3+'"':'';
+  /* nucleusId (2026-08-02 fix): only ever passed from the main nucleus display too (the one call
+     site where a real MICrONS nucleus ID is actually known -- see its own call site's "nid"
+     variable) -- stashed the same way as nucvolAttr so the click handler can forward it to
+     maybeSaveComputedVolume(), which previously always sent nucleusId:"" regardless of whether one
+     was available (Søren: "the nucleusID is not shown although there is a column for it"). */
+  const nucidAttr=nucleusId?' data-nucid="'+escHtml(String(nucleusId))+'"':'';
   return '<button class="idbtn meshdl" data-root="'+rootId+'" title="Download this cell’s 3D model as a .glb (no CAVE token needed) — automatically combined with any additionally-proposed root IDs for this nucleus, since those are usually fragments of the same cell — runs entirely in your browser" style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ 3D model</button>'
     +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+' data-coords="'+coords+'" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates, plus an embedded scale-bar rod below it that spins along with the model — automatically combined with any additionally-proposed root IDs for this nucleus — the Turntable spin autoplays in the slideshow, no click needed — built entirely in your browser, no CAVE token needed" style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>'
-    +'<button class="idbtn meshvol" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+nucvolAttr+' title="Estimate this cell’s mesh volume (µm³) by fetching and decoding its full 3D geometry — not precomputed, so this costs one real mesh fetch, same as the 3D model download — automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries. Saved (root ID, cell type, volume) to the shared µJump dashboard when signed in with Google." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
+    +'<button class="idbtn meshvol" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+nucvolAttr+nucidAttr+' title="Estimate this cell’s mesh volume (µm³) by fetching and decoding its full 3D geometry — not precomputed, so this costs one real mesh fetch, same as the 3D model download — automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries. Saved (root ID, cell type, volume) to the shared µJump dashboard when signed in with Google." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
 }
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
