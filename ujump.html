@@ -1662,7 +1662,7 @@ function showNucleus(pos){
      panel.querySelectorAll(".idval") below) that reads a data-c attribute this span doesn't have;
      reusing it here would silently "copy" the string "undefined" on click. */
   if(nvStr)h+='<div class="idrow"><span class="k">nucleus volume</span><span style="font-family:monospace" title="From Søren\'s CAVE nucleus_detection_v0 export — precomputed, not an estimate">'+nvStr+'</span></div>';
-  if(root)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span>'+meshDlButtonHtml(root,window.CUR_CELLTYPE_DISPLAY,[NX[i],NY[i],NZ[i]],true,NV[i],nid)+'</div>';
+  if(root)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span>'+meshDlButtonHtml(root,window.CUR_CELLTYPE_DISPLAY,[NX[i],NY[i],NZ[i]],true,NV[i],nid)+'</div>'+meshVolRowHtml(root);
   else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">unsegmented &mdash; no cell mesh</span></div>';
   h+='</div>';
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
@@ -2709,7 +2709,7 @@ function maybeSaveComputedVolume(rootId,cellType,info,nucVolUm3,nucleusId){
     reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
   fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
-  if(window._computedVolumesMap)window._computedVolumesMap[String(rootId)]={volumeUm3:info.volumeUm3||0,nucVolumeUm3:nucVolUm3||0,cellType:cellType||"",timestamp:payload.timestamp};
+  if(window._computedVolumesMap)window._computedVolumesMap[String(rootId)]={volumeUm3:info.volumeUm3||0,nucVolumeUm3:nucVolUm3||0,cellType:cellType||"",fragmentCount:info.fragmentCount||1,timestamp:payload.timestamp};
 }
 /* Session-cached map of rootId -> {volumeUm3,nucVolumeUm3,cellType,timestamp}, built from every
    "Compute volume" click ever saved to the shared dashboard sheet (?computedVolumes=1, public
@@ -2737,7 +2737,7 @@ function fetchComputedVolumesMap(){
         const prev=map[key];
         if(!prev||String(row.timestamp||"")>String(prev.timestamp||"")){
           map[key]={volumeUm3:Number(row.volumeUm3)||0,nucVolumeUm3:Number(row.nucVolumeUm3)||0,
-            cellType:row.cellType||"",timestamp:row.timestamp||""};
+            cellType:row.cellType||"",fragmentCount:Number(row.fragmentCount)||1,timestamp:row.timestamp||""};
         }
       });
     }catch(e){console.warn("[uJump computed volumes]",e);}
@@ -2746,36 +2746,73 @@ function fetchComputedVolumesMap(){
   })();
   return _computedVolumesFetchPromise;
 }
-/* Fills in any already-rendered ".meshvol" button whose root ID already has a known volume --
-   relabels it "Recalculate (≈ N µm³)" instead of the default "Compute volume" so a returning
-   user (or a different user looking at the same cell) sees the existing measurement immediately,
-   without clicking to re-fetch+decode the mesh themselves. Safe to call repeatedly: a button
-   that's mid-computation (disabled) or already holds a FRESH result from THIS session
-   (data-vol-fresh="1", set by the click handler right after a successful compute) is left alone
-   so this can't stomp on a value the user just watched get computed with a slightly-stale map. */
+/* Fills in the hidden "volume" idrow (see meshVolRowHtml() above) for any already-rendered
+   ".meshvol" button whose root ID already has a known volume, and decides whether the button
+   itself should even be offered.
+
+   2026-08-05 redesign (Søren: two changes at once):
+   1. The volume number moved OFF the button's own label and onto its own idrow, styled like the
+      Nucleus ID row (grey label + .idval pill) instead of living inside "Recalculate (≈ N µm³)".
+   2. "Recalculate" is now only shown once MORE root IDs exist for this nucleus than the saved
+      computation actually combined -- comparing known.fragmentCount (saved alongside the volume,
+      see maybeSaveComputedVolume/fetchComputedVolumesMap) against MeshDL.currentFragmentCount()
+      (main root ID + any additional img65 IDs proposed since). If nothing's changed, offering a
+      recalculate would just redo the exact same fetch+decode for the same answer, so the button
+      is hidden entirely and only the volume idrow shows.
+
+   volEl is found purely by DOM adjacency (the .idrow immediately after the button's own root-ID
+   .idrow), not an id/attribute match -- see meshVolRowHtml()'s own comment for why.
+
+   Safe to call repeatedly, including from the MutationObserver below watching #cellPanelCard: a
+   button mid-computation (disabled) or already holding a FRESH result from THIS session
+   (data-vol-fresh="1", set by the click handler right after a successful compute) has its button
+   state left alone (the volume row is still refreshed either way, since that's cheap and always
+   correct). Every DOM write below is guarded by an actual-change check first -- see the 2026-08-03
+   "µJump freezes" comment history: writing identical text/style still counts as a childList/attr
+   mutation and re-triggers the observer, so an unconditional write becomes an infinite microtask
+   loop the moment enough cells have a saved volume for this to run on ordinary navigation instead
+   of only right after a fresh click. */
 function decorateMeshVolButtons(){
   const map=window._computedVolumesMap;
   if(!map)return;
   document.querySelectorAll("#cellPanelCard .meshvol").forEach(function(btn){
-    if(btn.disabled||btn.dataset.volFresh==="1")return;
+    if(btn.disabled)return;
     const rootId=btn.dataset.root;
     const known=rootId&&map[String(rootId)];
-    if(!known)return;
-    const label="Recalculate (≈ "+Math.round(known.volumeUm3).toLocaleString()+" µm³)";
-    /* 2026-08-03 fix (Søren: "if I input a coordinate of a cell that has its computed volume...
-       µJump freezes"). `btn.textContent=label` ALWAYS replaces the button's child text node, even
-       when the string is byte-for-byte identical to what's already there -- that's still a
-       childList mutation. This function is invoked by the MutationObserver below watching
-       #cellPanelCard with {childList:true,subtree:true}, so writing textContent here re-triggers
-       that same observer, which calls decorateMeshVolButtons() again, which writes textContent
-       again... an infinite microtask loop that pegs the JS thread and hangs the tab. It only bit
-       once enough cells had a saved volume that navigating to one (map already "known" from a
-       PRIOR session, not data-vol-fresh from this click) became routine -- the guard below makes
-       the function idempotent: skip the DOM write entirely once the label already matches. */
-    if(btn.dataset.origLabel===label)return;
+    const rowEl=btn.closest(".idrow");
+    const volEl=(rowEl&&rowEl.nextElementSibling&&rowEl.nextElementSibling.classList&&rowEl.nextElementSibling.classList.contains("volrow"))?rowEl.nextElementSibling:null;
+    if(!known){
+      if(volEl&&volEl.style.display!=="none")volEl.style.display="none";
+      if(btn.dataset.origLabel!=="Compute volume"){btn.textContent="Compute volume";btn.dataset.origLabel="Compute volume";}
+      if(btn.style.display!=="")btn.style.display="";
+      return;
+    }
+    const savedFragCount=known.fragmentCount||1;
+    const curFragCount=(typeof MeshDL!=="undefined"&&MeshDL.currentFragmentCount)?MeshDL.currentFragmentCount(rootId):savedFragCount;
+    const stale=curFragCount>savedFragCount;
+    if(volEl){
+      const valSpan=volEl.querySelector(".idval");
+      const volStr="≈ "+Math.round(known.volumeUm3).toLocaleString()+" µm³";
+      const volTitle=(stale?(curFragCount-savedFragCount)+" additional root ID"+(curFragCount-savedFragCount>1?"s have":" has")+" been proposed since this was computed — may be out of date. ":"")
+        +"Computed from the decoded mesh geometry"+(known.timestamp?" on "+String(known.timestamp).slice(0,10):"")
+        +(savedFragCount>1?" ("+savedFragCount+" fragments combined)":"")+". Click to copy.";
+      if(valSpan&&valSpan.textContent!==volStr){valSpan.textContent=volStr;valSpan.dataset.c=String(Math.round(known.volumeUm3*100)/100);}
+      if(valSpan&&valSpan.title!==volTitle)valSpan.title=volTitle;
+      if(volEl.style.display!=="flex")volEl.style.display="flex";
+    }
+    if(btn.dataset.volFresh==="1")return; // the click handler already set the button's final state itself
+    if(!stale){
+      if(btn.style.display!=="none")btn.style.display="none";
+      return;
+    }
+    if(btn.style.display!=="")btn.style.display="";
+    const label="Recalculate";
+    const addedN=curFragCount-savedFragCount;
+    const title=addedN+" additional root ID"+(addedN>1?"s have":" has")+" been proposed for this nucleus since the saved volume was computed ("+savedFragCount+" → "+curFragCount+" fragments) — click to recalculate including "+(addedN>1?"them":"it")+".";
+    if(btn.dataset.origLabel===label&&btn.title===title)return;
     btn.textContent=label;
     btn.dataset.origLabel=label;
-    btn.title="A volume for this root ID was already computed and saved to the shared dashboard"+(known.timestamp?" on "+String(known.timestamp).slice(0,10):"")+". Click to recalculate (e.g. after a re-proofread mesh) -- this replaces the saved value rather than adding a duplicate.";
+    btn.title=title;
   });
 }
 /* Deferred to DOMContentLoaded for the same reason the tab-bar init is: this script block runs
@@ -4319,7 +4356,12 @@ const MeshDL=(()=>{
     setTimeout(()=>URL.revokeObjectURL(url),30000);
     return {filename,vertices:positions.length/3,fragmentCount,barLenUm:barLen};
   }
-  return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache};
+  /* 2026-08-05 (Sören: recalculate should only be offered once MORE root IDs exist than the
+     saved computation used) -- exposes the exact "main + qualifying extras" count
+     fetchCombinedMesh() would use, so decorateMeshVolButtons() can compare against it without
+     duplicating extraImg65RootIds()'s own filter logic. */
+  function currentFragmentCount(mainRootIdStr){return 1+extraImg65RootIds(mainRootIdStr).length;}
+  return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache,currentFragmentCount};
 })();
 /* Delegated (not re-bound per render) since root ID rows get rebuilt on every jump/reclassify --
    a single document-level listener means every ".meshdl"/".pptxdl" button works regardless of
@@ -4344,12 +4386,30 @@ document.addEventListener("click",(e)=>{
     const volNucleusId=volBtn.dataset.nucid||"";
     MeshDL.computeVolume(rootId,(frac,msg)=>{volBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey)
       .then(info=>{
-        const combinedStr=info.fragmentCount>1?" ("+info.fragmentCount+" fragments combined)":"";
-        const label="Recalculate (≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"+combinedStr+")";
-        volBtn.textContent=label;
-        volBtn.dataset.origLabel=label;
-        volBtn.dataset.volFresh="1"; // protects this label from being overwritten by a stale decorateMeshVolButtons() pass
-        volBtn.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices) — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure. Saved to the shared dashboard, replacing any earlier value for this root ID. Click again to recalculate.";
+        /* 2026-08-05 redesign (Søren): the number moves off the button and onto the volume idrow
+           (see meshVolRowHtml()/decorateMeshVolButtons()), and the button itself is hidden right
+           away -- a fresh compute means the saved fragment count now equals the current one, so
+           there's nothing to recalculate yet. data-vol-fresh="1" stops decorateMeshVolButtons()'s
+           own (slightly-stale, map-driven) pass from fighting the state just set here directly
+           from this compute's own result. */
+        volBtn.dataset.volFresh="1";
+        volBtn.dataset.origLabel="Compute volume";
+        volBtn.style.display="none";
+        if(window._computedVolumesMap)window._computedVolumesMap[String(rootId)]={
+          volumeUm3:info.volumeUm3||0,nucVolumeUm3:volNucVolUm3||0,cellType:volLiveCellType||"",
+          fragmentCount:info.fragmentCount||1,timestamp:new Date().toISOString()};
+        const rowEl=volBtn.closest(".idrow");
+        const volEl=(rowEl&&rowEl.nextElementSibling&&rowEl.nextElementSibling.classList&&rowEl.nextElementSibling.classList.contains("volrow"))?rowEl.nextElementSibling:null;
+        if(volEl){
+          const valSpan=volEl.querySelector(".idval");
+          const combinedStr=info.fragmentCount>1?" ("+info.fragmentCount+" fragments combined)":"";
+          if(valSpan){
+            valSpan.textContent="≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³";
+            valSpan.dataset.c=String(Math.round(info.volumeUm3*100)/100);
+            valSpan.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices)"+combinedStr+" — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure. Saved to the shared dashboard just now. Click to copy.";
+          }
+          volEl.style.display="flex";
+        }
         volBtn.disabled=false;
         maybeSaveComputedVolume(rootId,volLiveCellType,info,volNucVolUm3,volNucleusId);
       })
@@ -4419,6 +4479,14 @@ function voxelToPasteStr(v){
    Buttons for OTHER users' reported cells (renderUserReportedCell) must NOT set this -- their
    cellTypeName is already final at render time and has nothing to do with CUR_CELLTYPE_DISPLAY,
    which tracks the separate, currently-displayed nucleus. */
+/* See the long comment on decorateMeshVolButtons() below for the full design; this is just the
+   static placeholder markup, always rendered hidden -- decorateMeshVolButtons() is what fills in
+   the number and un-hides it, whether that's from a fresh click this session or an existing value
+   already saved to the shared dashboard. */
+function meshVolRowHtml(rootId){
+  if(!rootId)return "";
+  return '<div class="idrow volrow" style="display:none"><span class="k">volume</span><span class="idval" title="click to copy" data-c="">\u2014</span></div>';
+}
 function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive,nucVolUm3,nucleusId){
   if(!rootId)return "";
   const ct=escHtml(cellTypeName||"Unclassified cell"),coords=escHtml(voxelToPasteStr(nucVox));
@@ -4848,7 +4916,7 @@ function renderUserReportedCell(ur,panel){
   oh+=renderLocationDiagram(ur.pos);
   if(ur.rootId||ur.nucRootId){
     oh+='<div class="ids">';
-    if(ur.rootId)oh+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.rootId)+'">'+escHtml(ur.rootId)+'</span>'+meshDlButtonHtml(ur.rootId,isUnclassified?"Unclassified cell":ur.identified,ur.pos)+'</div>';
+    if(ur.rootId)oh+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.rootId)+'">'+escHtml(ur.rootId)+'</span>'+meshDlButtonHtml(ur.rootId,isUnclassified?"Unclassified cell":ur.identified,ur.pos)+'</div>'+meshVolRowHtml(ur.rootId);
     if(ur.nucRootId)oh+='<div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.nucRootId)+'">'+escHtml(ur.nucRootId)+'</span></div>';
     oh+='</div>';
   }
@@ -4934,7 +5002,7 @@ function renderMergedSubCell(sub,panel){
   h+='<div class="meta">'+(sub.dist<50?"at":sub.dist.toFixed(0)+" nm from")+' voxel ('+coordSpan(sub.pos[0],sub.pos[1],sub.pos[2])+') &mdash; this is the reporter’s own estimated center for this sub-cell, not an independent MICrONS nucleus detection.</div>';
   h+=renderLocationDiagram(sub.pos);
   h+='<div class="ids">';
-  if(sub.subRootId)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(sub.subRootId)+'">'+escHtml(sub.subRootId)+'</span>'+meshDlButtonHtml(sub.subRootId,sub.identified,sub.pos,true)+'</div>';
+  if(sub.subRootId)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(sub.subRootId)+'">'+escHtml(sub.subRootId)+'</span>'+meshDlButtonHtml(sub.subRootId,sub.identified,sub.pos,true)+'</div>'+meshVolRowHtml(sub.subRootId);
   else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">not reported yet — propose one below</span></div>';
   h+='</div>';
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
