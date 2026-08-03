@@ -3128,7 +3128,11 @@ function buildConnectivityState(centerPos,queryRootId,shown,points){
   const dirColor={input:"#00b7ff",output:"#ff4fa3"};
   shown.forEach(p=>segmentColors[p.partner]=dirColor[p.direction]);
   const layers=[
-    {type:"image",source:SRC.em,tab:"rendering",name:"EM (Img65)",shaderControls:EM_SHADER_CONTROLS},
+    /* visible:false (2026-08-05, Søren: "only the 3D window, EM still included, just not shown
+       when it opens") -- the EM image layer stays in the layer list so it can be toggled back on
+       from Neuroglancer's own layer panel, it just doesn't render/consume a cross-section pane
+       by default. */
+    {type:"image",source:SRC.em,tab:"rendering",name:"EM (Img65)",shaderControls:EM_SHADER_CONTROLS,visible:false},
     {type:"segmentation",source:CAVE_SEG_SOURCE,tab:"source",name:"cell + partners",segments,segmentColors,selectedAlpha:0.25,objectAlpha:0.9}
   ];
   if(points.length){
@@ -3162,7 +3166,7 @@ function buildConnectivityState(centerPos,queryRootId,shown,points){
   return{dimensions:DIM,position:centerPos,crossSectionScale:3.0,
     projectionScale:Math.max(computeConnSpanNm(centerPos,shown,points)*0.3,10000),
     layers,selectedLayer:{layer:"cell + partners",visible:true},
-    layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false};
+    layout:{type:"3d",orthographicProjection:true},showDefaultAnnotations:false};
 }
 /* Rough physical-nm span across the query cell + every rendered synapse point, so the initial
    zoom is wide enough to see scattered partners rather than defaulting to a single-soma zoom
@@ -3271,7 +3275,7 @@ function connRenderIODepthChart(divId,points){
     title:{text:"Input/Output Depth",font:CONN_AXIS_FONT},
     violingap:0,violingroupgap:0,violinmode:"overlay",
     showlegend:true,legend:{orientation:"h",y:1.14,font:{size:10}},
-    xaxis:{visible:false,range:[-1,1],fixedrange:true},
+    xaxis:{type:"category",visible:false,fixedrange:true},
     yaxis:{autorange:"reversed",tickvals:ticks.tickvals,ticktext:ticks.ticktext,
       gridcolor:"transparent",zeroline:false,title:"Synapse Depth"},
     shapes:connLayerShapes("y")
@@ -3428,7 +3432,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
           allPartners.push(...agg.partners);allPoints.push(...agg.points);
         }
         const shown=dirs.flatMap(d=>allPartners.filter(p=>p.direction===d&&p.syn_count>=minSyn).slice(0,topN));
-        let typeNote="";
+        let typeNote="",typeNoteWarn=false;
         /* 2026-08-04 (Soren: "the graphs should be showing the results of all of the synapses,
            not just the 50 neurons that the query is limited to") -- this cell-type/classification/
            soma-position lookup now covers EVERY unique partner in allPartners, not just the
@@ -3481,9 +3485,17 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
                every nucleus has a type call, so some blanks are expected. But zero matches across
                every partner usually means something went wrong with the query rather than these
                specific cells lacking a type -- flag that instead of quietly showing dashes. */
-            if(uniquePartners.length&&![...lut.values()].some(v=>v&&v.cell_type)){
+            const typedCount=uniquePartners.filter(function(pid){const pi=partnerInfo.get(pid);return pi&&pi.cell_type;}).length;
+            if(uniquePartners.length&&!typedCount){
+              typeNoteWarn=true;
               typeNote="Cell type lookup returned no matches for any partner (nucleus matches: "+rootToNuc.size+"/"+uniquePartners.length+", version "+version+") \u2014 open the browser console for details.";
               console.warn("[uJump connectivity] cell-type lookup returned 0 type matches",{nucleusTable:CAVE_NUCLEUS_TABLE,typeTable:CAVE_TYPE_TABLE,version,ids,nucMatches:rootToNuc.size});
+            }else if(uniquePartners.length){
+              /* Informational, not a warning -- most partners lacking a type is often correct
+                 (axon/dendrite fragments and glial processes have no nucleus of their own), so
+                 this just gives Sören the raw join numbers rather than us silently guessing
+                 whether a big "No Type" bucket in the graphs below is expected or a bug. */
+              typeNote="Cell type lookup: "+rootToNuc.size+"/"+uniquePartners.length+" partners matched a nucleus, "+typedCount+"/"+uniquePartners.length+" matched a type (version "+version+"). The rest fall under \u201cNo Type\u201d in the graphs below \u2014 usually fragments/glia without their own nucleus detection, not necessarily a lookup problem.";
             }
           }catch(te){
             typeNote="Cell type lookup failed: "+te.message+" (partners and synapse points above are unaffected).";
@@ -3545,7 +3557,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+(p.syn_size||0)+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+escHtml(p.cell_type||"—")+'</td></tr>').join("")
             +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the graphs, download, and this table cover every partner/synapse found. Per-synapse size and cortical depth are also shown in Neuroglancer itself \u2014 click/hover a yellow synapse point.</div>'
-            +(typeNote?'<div class="hint" style="margin-top:4px;color:#ffb74d">'+escHtml(typeNote)+'</div>':'');
+            +(typeNote?'<div class="hint" style="margin-top:4px;color:'+(typeNoteWarn?"#ffb74d":"var(--mut)")+'">'+escHtml(typeNote)+'</div>':'');
           const colorByEl=rt.querySelector("#connColorBy");
           const ioEl=rt.querySelector("#"+chartIoId),scatEl=rt.querySelector("#"+chartScatId),distEl=rt.querySelector("#"+chartDistId);
           connRenderAllCharts({io:ioEl,scatter:scatEl,dist:distEl},lastPoints,colorByEl?colorByEl.value:"classification_system");
@@ -3559,8 +3571,27 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
           if(nglBtn)nglBtn.addEventListener("click",()=>{if(lastUrl)window.open(lastUrl,"_blank");});
           const xlsxBtn=rt.querySelector("#connXlsx");
           if(xlsxBtn)xlsxBtn.addEventListener("click",()=>{
-            const data=[["query_root_id","direction","partner_root_id","syn_count","syn_size","cell_type"]];
-            for(const p of rows2)data.push([String(rootId),p.direction,String(p.partner),p.syn_count,p.syn_size,p.cell_type||""]);
+            /* Per-partner average synapse depth (2026-08-05, Søren: "synapse depth and soma
+               depth should also be part of the downloadable excel file") -- built once here from
+               lastPoints (every synapse, not just the shown/topN subset) rather than re-scanning
+               per row, since a hub cell can have thousands of points. Soma depth is already a
+               single per-partner value living on partnerInfo (same object populated during the
+               type/soma lookup above, still in scope via closure). */
+            const depthByPartner=new Map();
+            lastPoints.forEach(function(p){
+              if(p.synDepthUm==null||!isFinite(p.synDepthUm))return;
+              const key=p.partner+"|"+p.direction;
+              const e=depthByPartner.get(key)||{sum:0,n:0};
+              e.sum+=p.synDepthUm;e.n++;depthByPartner.set(key,e);
+            });
+            const data=[["query_root_id","direction","partner_root_id","syn_count","syn_size","cell_type","avg_synapse_depth_um","soma_depth_um"]];
+            for(const p of rows2){
+              const d=depthByPartner.get(p.partner+"|"+p.direction);
+              const avgDepth=(d&&d.n)?Number((d.sum/d.n).toFixed(2)):"";
+              const pi=partnerInfo.get(p.partner);
+              const somaDepth=(pi&&pi.somaDepthUm!=null)?Number(pi.somaDepthUm.toFixed(2)):"";
+              data.push([String(rootId),p.direction,String(p.partner),p.syn_count,p.syn_size,p.cell_type||"",avgDepth,somaDepth]);
+            }
             const ws=XLSX.utils.aoa_to_sheet(data);
             const wb=XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb,ws,"Connections");
