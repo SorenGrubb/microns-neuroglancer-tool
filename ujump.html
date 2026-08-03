@@ -1662,8 +1662,13 @@ function showNucleus(pos){
      panel.querySelectorAll(".idval") below) that reads a data-c attribute this span doesn't have;
      reusing it here would silently "copy" the string "undefined" on click. */
   if(nvStr)h+='<div class="idrow"><span class="k">nucleus volume</span><span style="font-family:monospace" title="From Søren\'s CAVE nucleus_detection_v0 export — precomputed, not an estimate">'+nvStr+'</span></div>';
-  if(root)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span>'+meshDlButtonHtml(root,window.CUR_CELLTYPE_DISPLAY,[NX[i],NY[i],NZ[i]],true,NV[i],nid)+'</div>'+meshVolRowHtml(root);
-  else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">unsegmented &mdash; no cell mesh</span></div>';
+  if(root)h+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span>'+meshDlButtonHtml(root,window.CUR_CELLTYPE_DISPLAY,[NX[i],NY[i],NZ[i]],true,NV[i],nid)+'</div>'+meshVolRowHtml();
+  /* 2026-08-05 (Sören: "when it has no Root ID and a user has reported one, it should be possible
+     to calculate the volume based on all the Root IDs the users have reported") -- an unsegmented
+     nucleus still gets the mesh/volume buttons rendered (hidden by default via meshDlButtonHtml's
+     own rootId="" handling), revealed once decorateMeshVolButtons() confirms at least one
+     community-proposed root ID exists via loadRootIdPanel(nid)'s propose/vote panel below. */
+  else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">unsegmented &mdash; no MICrONS root ID</span>'+meshDlButtonHtml("",window.CUR_CELLTYPE_DISPLAY,[NX[i],NY[i],NZ[i]],true,NV[i],nid)+'</div>'+meshVolRowHtml();
   h+='</div>';
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
   h+='<div id="connPanel" style="margin:6px 0"></div>';
@@ -2689,6 +2694,12 @@ function showSubmitToast(ok,msg){
    handleGoogleExpiry() call below only fires (and only then shows a toast) when GOOGLE_EXP is
    actually set, i.e. a real prior sign-in existed -- a true first-time anonymous user has
    GOOGLE_EXP===0 and stays exactly as silent as before. */
+function computedVolCacheKeys(rootId,nucleusId){
+  const keys=[];
+  if(rootId)keys.push(String(rootId));
+  if(nucleusId)keys.push("nuc:"+String(nucleusId));
+  return keys;
+}
 function maybeSaveComputedVolume(rootId,cellType,info,nucVolUm3,nucleusId){
   if(!REPORT_ENDPOINT)return;
   if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
@@ -2709,7 +2720,10 @@ function maybeSaveComputedVolume(rootId,cellType,info,nucVolUm3,nucleusId){
     reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
   fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
-  if(window._computedVolumesMap)window._computedVolumesMap[String(rootId)]={volumeUm3:info.volumeUm3||0,nucVolumeUm3:nucVolUm3||0,cellType:cellType||"",fragmentCount:info.fragmentCount||1,timestamp:payload.timestamp};
+  if(window._computedVolumesMap){
+    const entry={volumeUm3:info.volumeUm3||0,nucVolumeUm3:nucVolUm3||0,cellType:cellType||"",fragmentCount:info.fragmentCount||1,timestamp:payload.timestamp};
+    computedVolCacheKeys(rootId,nucleusId).forEach(function(key){window._computedVolumesMap[key]=entry;});
+  }
 }
 /* Session-cached map of rootId -> {volumeUm3,nucVolumeUm3,cellType,timestamp}, built from every
    "Compute volume" click ever saved to the shared dashboard sheet (?computedVolumes=1, public
@@ -2733,12 +2747,12 @@ function fetchComputedVolumesMap(){
       const rows=(d&&d.computedVolumes)||[];
       rows.forEach(function(row){
         if(!row||!row.rootId)return;
-        const key=String(row.rootId);
-        const prev=map[key];
-        if(!prev||String(row.timestamp||"")>String(prev.timestamp||"")){
-          map[key]={volumeUm3:Number(row.volumeUm3)||0,nucVolumeUm3:Number(row.nucVolumeUm3)||0,
-            cellType:row.cellType||"",fragmentCount:Number(row.fragmentCount)||1,timestamp:row.timestamp||""};
-        }
+        const entry={volumeUm3:Number(row.volumeUm3)||0,nucVolumeUm3:Number(row.nucVolumeUm3)||0,
+          cellType:row.cellType||"",fragmentCount:Number(row.fragmentCount)||1,timestamp:row.timestamp||""};
+        computedVolCacheKeys(row.rootId,row.nucleusId).forEach(function(key){
+          const prev=map[key];
+          if(!prev||String(entry.timestamp)>String(prev.timestamp||""))map[key]=entry;
+        });
       });
     }catch(e){console.warn("[uJump computed volumes]",e);}
     window._computedVolumesMap=map;
@@ -2777,18 +2791,37 @@ function decorateMeshVolButtons(){
   if(!map)return;
   document.querySelectorAll("#cellPanelCard .meshvol").forEach(function(btn){
     if(btn.disabled)return;
-    const rootId=btn.dataset.root;
-    const known=rootId&&map[String(rootId)];
+    const rootId=btn.dataset.root||"";
+    const nucId=btn.dataset.nucid||"";
+    /* Community-only cells (no MICrONS root ID) are keyed by "nuc:"+nucleusId instead, since
+       they have no real root ID to key on -- see computedVolCacheKeys(). */
+    const lookupKey=rootId||(nucId?("nuc:"+nucId):"");
+    const known=lookupKey&&map[lookupKey];
     const rowEl=btn.closest(".idrow");
     const volEl=(rowEl&&rowEl.nextElementSibling&&rowEl.nextElementSibling.classList&&rowEl.nextElementSibling.classList.contains("volrow"))?rowEl.nextElementSibling:null;
+    const curFragCount=(typeof MeshDL!=="undefined"&&MeshDL.currentFragmentCount)?MeshDL.currentFragmentCount(rootId):(known?known.fragmentCount||1:1);
+    /* Community-only case (rootId==="", see meshDlButtonHtml()'s rootId==="" branch): the 3D
+       model/PowerPoint buttons render hidden because at render time we don't yet know whether
+       any community root IDs have been proposed for this nucleus (loadRootIdPanel(nid)'s fetch
+       is async and happens afterwards). Reveal them permanently -- unlike "Recalculate" they
+       never need to hide again -- the first time curFragCount reaches at least 1. Cells with a
+       real root ID never hit this: rootId is truthy and those buttons are already visible from
+       meshDlButtonHtml()'s render. */
+    if(!rootId&&rowEl&&curFragCount>0){
+      const dlBtn=rowEl.querySelector(".meshdl"),pxBtn=rowEl.querySelector(".pptxdl");
+      if(dlBtn&&dlBtn.style.display!=="")dlBtn.style.display="";
+      if(pxBtn&&pxBtn.style.display!=="")pxBtn.style.display="";
+    }
     if(!known){
       if(volEl&&volEl.style.display!=="none")volEl.style.display="none";
       if(btn.dataset.origLabel!=="Compute volume"){btn.textContent="Compute volume";btn.dataset.origLabel="Compute volume";}
-      if(btn.style.display!=="")btn.style.display="";
+      // Same reveal condition as the meshdl/pptxdl siblings above: stay hidden until there's
+      // at least one usable root ID (a real main one, or >=1 community-reported one).
+      const wantDisplay=(rootId||curFragCount>0)?"":"none";
+      if(btn.style.display!==wantDisplay)btn.style.display=wantDisplay;
       return;
     }
     const savedFragCount=known.fragmentCount||1;
-    const curFragCount=(typeof MeshDL!=="undefined"&&MeshDL.currentFragmentCount)?MeshDL.currentFragmentCount(rootId):savedFragCount;
     const stale=curFragCount>savedFragCount;
     if(volEl){
       const valSpan=volEl.querySelector(".idval");
@@ -4038,9 +4071,10 @@ const MeshDL=(()=>{
      when there are no extras (the common case), preserving the original per-mesh lod/numLods
      info that only makes sense for a single fetch. */
   async function fetchCombinedMesh(mainRootIdStr,onProgress,forceRecheck){
-    const rootIds=[String(mainRootIdStr)].concat(extraImg65RootIds(mainRootIdStr));
+    const rootIds=[String(mainRootIdStr)].concat(extraImg65RootIds(mainRootIdStr)).filter(function(id){return id&&id!=="";});
+    if(!rootIds.length)throw new Error("No root IDs available for this cell yet \u2014 propose one below, then try again.");
     if(rootIds.length===1){
-      const m=await fetchMesh(mainRootIdStr,onProgress,forceRecheck);
+      const m=await fetchMesh(rootIds[0],onProgress,forceRecheck);
       return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds};
     }
     const n=rootIds.length,meshes=[];
@@ -4060,17 +4094,20 @@ const MeshDL=(()=>{
     return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:n,rootIds};
   }
   async function downloadRoot(rootIdStr,onProgress,forceRecheck){
-    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount,rootIds}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
     const {positions,indices}=flipYForGLTF(rawPositions,rawIndices);
+    /* When there's no main root ID (community-only combine), fall back to the first combined ID
+       so the filename is still a real, traceable segmentation ID rather than a blank/underscore. */
+    const idForName=rootIdStr||rootIds[0];
     const tag=fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod;
-    const glb=buildGLB(positions,indices,"microns_"+rootIdStr+tag);
+    const glb=buildGLB(positions,indices,"microns_"+idForName+tag);
     onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+rootIdStr+tag+"_um.glb";
+    const filename="microns_"+idForName+tag+"_um.glb";
     const url=URL.createObjectURL(new Blob([glb],{type:"model/gltf-binary"}));
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {lod,numLods,bytes,vertices:positions.length/3,filename,fragmentCount};
+    return {lod,numLods,bytes,vertices:positions.length/3,filename,fragmentCount,rootIds};
   }
   /* ---------- Mesh volume (on-demand, per Søren's request 2026-07-30) ----------
      Nucleus volume (see NV/nucVolumeStr near the top of the file) is precomputed and free to
@@ -4089,7 +4126,7 @@ const MeshDL=(()=>{
      reported to the user as an ESTIMATE, not an exact figure. Positions are already in this tool's
      usual µm mesh-download units, so no extra scaling is needed. */
   async function computeVolume(rootIdStr,onProgress,forceRecheck){
-    const {positions,indices,fragmentCount}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+    const {positions,indices,fragmentCount,rootIds}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
     onProgress&&onProgress(0.98,"computing volume…");
     let vol6=0;
     for(let t=0;t<indices.length;t+=3){
@@ -4099,7 +4136,7 @@ const MeshDL=(()=>{
       const cx=positions[ic],cy=positions[ic+1],cz=positions[ic+2];
       vol6+=ax*(by*cz-bz*cy)-ay*(bx*cz-bz*cx)+az*(bx*cy-by*cx);
     }
-    return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3,fragmentCount};
+    return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3,fragmentCount,rootIds};
   }
   /* ---------- PowerPoint (.pptx) with a live, auto-spinning 3D model ----------
      PPTXSK is a ~32KB skeleton .pptx -- ONE slide holding a 3D-model placeholder with the
@@ -4276,7 +4313,9 @@ const MeshDL=(()=>{
     return {positions,indices:new Uint32Array(idx),barLenUm};
   }
   async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress,forceRecheck){
-    const [{positions:cellRawPositions,indices:cellRawIndices,fragmentCount},JSZip]=await Promise.all([fetchCombinedMesh(rootIdStr,onProgress,forceRecheck),loadJSZip()]);
+    const [{positions:cellRawPositions,indices:cellRawIndices,fragmentCount,rootIds},JSZip]=await Promise.all([fetchCombinedMesh(rootIdStr,onProgress,forceRecheck),loadJSZip()]);
+    /* Same "no main root ID -- community-only combine" fallback as downloadRoot() above. */
+    const idForName=rootIdStr||rootIds[0];
     onProgress&&onProgress(0.96,"building PowerPoint…");
     /* Cell-only raw bbox -- used to size the scale bar ITSELF (its length stays 28% of the CELL's
        own longest span, not the whole assembly's, so it stays a sensible, comparable size). The
@@ -4329,7 +4368,7 @@ const MeshDL=(()=>{
     const cx=(minX+maxX)/2,cy=(minY+maxY)/2,cz=(minZ+maxZ)/2;
     const n=Math.round(PPTX_FILL_BOOST*1000000/longest),d=1000000;
     const pre=[Math.round(-cx*n*36),Math.round(-cy*n*36),Math.round(-cz*n*36)];
-    const glb=buildGLB(positions,indices,"microns_"+rootIdStr+(fragmentCount>1?"_combined"+fragmentCount:""));
+    const glb=buildGLB(positions,indices,"microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:""));
     const zip=await JSZip.loadAsync(PPTXSK_B64,{base64:true});
     zip.file("ppt/media/model3d1.glb",glb);
     const pngB64=renderThumbnailPNG(positions,minX,maxX,minY,maxY);
@@ -4349,18 +4388,21 @@ const MeshDL=(()=>{
     zip.file("ppt/slides/slide2.xml",slideXml);
     const blob=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation"});
     onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+rootIdStr+(fragmentCount>1?"_combined"+fragmentCount:"")+"_turntable.pptx";
+    const filename="microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:"")+"_turntable.pptx";
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {filename,vertices:positions.length/3,fragmentCount,barLenUm:barLen};
+    return {filename,vertices:positions.length/3,fragmentCount,barLenUm:barLen,rootIds};
   }
   /* 2026-08-05 (Sören: recalculate should only be offered once MORE root IDs exist than the
      saved computation used) -- exposes the exact "main + qualifying extras" count
      fetchCombinedMesh() would use, so decorateMeshVolButtons() can compare against it without
      duplicating extraImg65RootIds()'s own filter logic. */
-  function currentFragmentCount(mainRootIdStr){return 1+extraImg65RootIds(mainRootIdStr).length;}
+  function currentFragmentCount(mainRootIdStr){
+    const n=extraImg65RootIds(mainRootIdStr).length;
+    return mainRootIdStr?1+n:n;
+  }
   return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache,currentFragmentCount};
 })();
 /* Delegated (not re-bound per render) since root ID rows get rebuilt on every jump/reclassify --
@@ -4392,12 +4434,18 @@ document.addEventListener("click",(e)=>{
            there's nothing to recalculate yet. data-vol-fresh="1" stops decorateMeshVolButtons()'s
            own (slightly-stale, map-driven) pass from fighting the state just set here directly
            from this compute's own result. */
+        /* Community-only cells (rootId==="") have no root ID of their own to key on -- resolve
+           the first combined root ID MeshDL actually used (info.rootIds[0]) so the saved/cached
+           entry is traceable, matching computedVolCacheKeys()'s "nuc:"+nucleusId fallback key. */
+        const effectiveRootId=rootId||(info.rootIds&&info.rootIds[0])||"";
         volBtn.dataset.volFresh="1";
         volBtn.dataset.origLabel="Compute volume";
         volBtn.style.display="none";
-        if(window._computedVolumesMap)window._computedVolumesMap[String(rootId)]={
-          volumeUm3:info.volumeUm3||0,nucVolumeUm3:volNucVolUm3||0,cellType:volLiveCellType||"",
-          fragmentCount:info.fragmentCount||1,timestamp:new Date().toISOString()};
+        if(window._computedVolumesMap){
+          const freshEntry={volumeUm3:info.volumeUm3||0,nucVolumeUm3:volNucVolUm3||0,cellType:volLiveCellType||"",
+            fragmentCount:info.fragmentCount||1,timestamp:new Date().toISOString()};
+          computedVolCacheKeys(effectiveRootId,volNucleusId).forEach(function(key){window._computedVolumesMap[key]=freshEntry;});
+        }
         const rowEl=volBtn.closest(".idrow");
         const volEl=(rowEl&&rowEl.nextElementSibling&&rowEl.nextElementSibling.classList&&rowEl.nextElementSibling.classList.contains("volrow"))?rowEl.nextElementSibling:null;
         if(volEl){
@@ -4411,7 +4459,7 @@ document.addEventListener("click",(e)=>{
           volEl.style.display="flex";
         }
         volBtn.disabled=false;
-        maybeSaveComputedVolume(rootId,volLiveCellType,info,volNucVolUm3,volNucleusId);
+        maybeSaveComputedVolume(effectiveRootId,volLiveCellType,info,volNucVolUm3,volNucleusId);
       })
       .catch(err=>{
         console.warn("[uJump mesh volume]",err);
@@ -4483,12 +4531,19 @@ function voxelToPasteStr(v){
    static placeholder markup, always rendered hidden -- decorateMeshVolButtons() is what fills in
    the number and un-hides it, whether that's from a fresh click this session or an existing value
    already saved to the shared dashboard. */
-function meshVolRowHtml(rootId){
-  if(!rootId)return "";
+function meshVolRowHtml(){
   return '<div class="idrow volrow" style="display:none"><span class="k">volume</span><span class="idval" title="click to copy" data-c="">\u2014</span></div>';
 }
+/* rootId may now legitimately be "" (2026-08-05, S\u00f8ren: "when it has no Root ID and a user
+   has reported one, it should be possible to calculate the volume based on all the Root IDs the
+   users have reported") -- meaning "no MICrONS root ID for this cell, but still render the
+   mesh/volume buttons, just start them hidden" rather than not rendering anything at all. The
+   buttons and the MeshDL functions they call fall back to combining ONLY the community-proposed
+   root IDs (CUR_EXTRA_ROOTS, via extraImg65RootIds/fetchCombinedMesh) in that case. Only the main
+   nucleus display call site ever passes "" on purpose; the other two call sites still guard
+   externally (if(ur.rootId)/if(sub.subRootId)) and never reach here with an empty rootId at all. */
 function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive,nucVolUm3,nucleusId){
-  if(!rootId)return "";
+  if(rootId==null)return "";
   const ct=escHtml(cellTypeName||"Unclassified cell"),coords=escHtml(voxelToPasteStr(nucVox));
   /* nucVolUm3 (only ever passed from the main nucleus display, where NV[i] is known) is stashed
      as a data attribute purely so the .meshvol click handler below can send it alongside the
@@ -4500,11 +4555,19 @@ function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive,nucVolUm3,nucleu
      site where a real MICrONS nucleus ID is actually known -- see its own call site's "nid"
      variable) -- stashed the same way as nucvolAttr so the click handler can forward it to
      maybeSaveComputedVolume(), which previously always sent nucleusId:"" regardless of whether one
-     was available (Søren: "the nucleusID is not shown although there is a column for it"). */
+     was available (S\u00f8ren: "the nucleusID is not shown although there is a column for it").
+     Also now doubles as the key decorateMeshVolButtons() uses to look up a saved volume for the
+     "no main root ID" case, where there's no rootId to key on at all. */
   const nucidAttr=nucleusId?' data-nucid="'+escHtml(String(nucleusId))+'"':'';
-  return '<button class="idbtn meshdl" data-root="'+rootId+'" title="Download this cell’s 3D model as a .glb (no CAVE token needed) — automatically combined with any additionally-proposed root IDs for this nucleus, since those are usually fragments of the same cell — runs entirely in your browser. If a root ID isn’t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don’t re-check the network — Shift-click to force a fresh check." style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ 3D model</button>'
-    +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+' data-coords="'+coords+'" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates, plus an embedded scale-bar rod below it that spins along with the model — automatically combined with any additionally-proposed root IDs for this nucleus — the Turntable spin autoplays in the slideshow, no click needed — built entirely in your browser, no CAVE token needed. If a root ID isn’t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don’t re-check the network — Shift-click to force a fresh check." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>'
-    +'<button class="idbtn meshvol" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+nucvolAttr+nucidAttr+' title="Estimate this cell’s mesh volume (µm³) by fetching and decoding its full 3D geometry — not precomputed, so this costs one real mesh fetch, same as the 3D model download — automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries. Saved (root ID, cell type, volume) to the shared µJump dashboard when signed in with Google. If a root ID isn’t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don’t re-check the network — Shift-click to force a fresh check." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
+  /* Hidden until decorateMeshVolButtons() confirms at least one community-proposed root ID exists
+     for this nucleus (see its own comment) -- at initial render time we don't know that yet, since
+     loadRootIdPanel()'s proposal fetch hasn't resolved. Buttons for a REAL rootId stay visible
+     immediately, same as always. */
+  const hideAttr=rootId?'':'display:none;';
+  const noMainNote=rootId?'':' No MICrONS root ID exists for this cell yet \u2014 shown because at least one community-reported root ID does, combining all of them.';
+  return '<button class="idbtn meshdl" data-root="'+rootId+'"'+nucidAttr+' title="Download this cell\u2019s 3D model as a .glb (no CAVE token needed) \u2014 automatically combined with any additionally-proposed root IDs for this nucleus, since those are usually fragments of the same cell \u2014 runs entirely in your browser. If a root ID isn\u2019t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don\u2019t re-check the network \u2014 Shift-click to force a fresh check.'+noMainNote+'" style="'+hideAttr+'padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">\u2b07 3D model</button>'
+    +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+' data-coords="'+coords+'"'+nucidAttr+' title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates, plus an embedded scale-bar rod below it that spins along with the model \u2014 automatically combined with any additionally-proposed root IDs for this nucleus \u2014 the Turntable spin autoplays in the slideshow, no click needed \u2014 built entirely in your browser, no CAVE token needed. If a root ID isn\u2019t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don\u2019t re-check the network \u2014 Shift-click to force a fresh check.'+noMainNote+'" style="'+hideAttr+'padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">\u2b07 PowerPoint</button>'
+    +'<button class="idbtn meshvol" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+nucvolAttr+nucidAttr+' title="Estimate this cell\u2019s mesh volume (\u00b5m\u00b3) by fetching and decoding its full 3D geometry \u2014 not precomputed, so this costs one real mesh fetch, same as the 3D model download \u2014 automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries. Saved (root ID, cell type, volume) to the shared \u00b5Jump dashboard when signed in with Google. If a root ID isn\u2019t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don\u2019t re-check the network \u2014 Shift-click to force a fresh check.'+noMainNote+'" style="'+hideAttr+'padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
 }
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
