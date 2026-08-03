@@ -2498,6 +2498,48 @@ function handleGoogleCred(resp){
     const orgInp=document.getElementById("organReporterInput");if(orgInp)orgInp.value=REPORTER_EMAIL||REPORTER_NAME;
   }catch(_){}
 }
+/* 2026-08-03 (Søren: "sometimes when I have been idle a short while... I am no longer logged in
+   with my Google account. However, there is no warning and I can keep reporting e.g. computed
+   volume without it being registered.") -- the Google ID token behind GOOGLE_VERIFIED expires
+   (usually ~1 hour, GOOGLE_EXP is its JWT "exp" claim) and NOTHING previously re-checked that
+   while the tab just sat there. The only place expiry was ever noticed was postReport(), and only
+   at the moment of an explicit submit -- maybeSaveComputedVolume() deliberately skips it in
+   total silence for anyone who was never signed in (see its own comment), which also meant a
+   PREVIOUSLY signed-in user whose session quietly expired got the exact same silence, with no way
+   to tell their computed volumes had stopped being credited to them.
+
+   handleGoogleExpiry() is the one place that now flips GOOGLE_VERIFIED false, refreshes the
+   account chip (so it visibly reverts to "Sign in to track progress" instead of still claiming a
+   stale signed-in state), shows a toast explaining why, and makes one best-effort silent
+   re-auth attempt via One Tap (google.accounts.id.prompt() -- works when the browser still has an
+   active Google session and this site was already trusted, but browsers increasingly rate-limit
+   repeated prompts (FedCM quotas), so this is a bonus, not something to rely on). Idempotent: it
+   only actually does anything the FIRST time it's called after expiry (GOOGLE_VERIFIED still
+   true) -- every check below can safely call it as often as it likes without spamming the toast
+   or re-prompting on every tick once already flagged. */
+function handleGoogleExpiry(){
+  if(!GOOGLE_VERIFIED)return;
+  GOOGLE_VERIFIED=false;GOOGLE_CREDENTIAL="";
+  Array.prototype.forEach.call(document.querySelectorAll(".gate-note"),function(el){el.textContent="Your Google sign-in expired — sign in again to submit";el.style.color="var(--accent)";});
+  if(typeof renderChip==="function")renderChip();
+  if(typeof showSubmitToast==="function")showSubmitToast(false,"Your Google sign-in expired — sign in again to keep your reports credited.");
+  try{if(window.google&&google.accounts&&google.accounts.id)google.accounts.id.prompt();}catch(_){}
+}
+/* Same 90-second-before-expiry buffer postReport() already used (a fresh token minted 90s from
+   now during a slow multi-step form is still fine) -- shared here so a background/idle check and
+   an explicit submit agree on the exact same cutoff. No-op whenever GOOGLE_VERIFIED is already
+   false (never signed in, or already flagged) -- see handleGoogleExpiry()'s own idempotency note. */
+function checkGoogleExpirySoon(){
+  if(GOOGLE_VERIFIED&&GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
+}
+/* Two triggers, deliberately not just one: a 60s interval catches expiry while the tab stays in
+   the foreground and idle (Søren's "idle a short while" case); the visibilitychange listener
+   catches it the moment the user comes BACK to a tab that was backgrounded for a while, since
+   browsers throttle setInterval in inactive tabs and the timer alone could lag well behind the
+   real expiry time in that case. Between the two, an expired session should never go unnoticed
+   for long, regardless of whether the tab was idle-but-visible or idle-in-the-background. */
+setInterval(checkGoogleExpirySoon,60000);
+document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")checkGoogleExpirySoon();});
 /* targetId defaults to "gsiButton" (the id every OTHER report screen still uses) -- only the
    inline centriole/cilium form passes "organGsiButton" instead, since it now lives alongside
    the result screen's own #gsiButton rather than replacing it (see organelleFormHtml() below). */
@@ -2529,11 +2571,20 @@ function showSubmitToast(ok,msg){
    but wrong here -- computing a volume is primarily something a user does to see the number for
    themselves, and most people trying it won't be signed in. So this only saves when a verified
    sign-in already exists in this session; otherwise it does nothing and the button behaves
-   exactly as if this feature didn't exist. Never shown to the user either way -- no toast, no
-   error -- since a failed save here shouldn't undermine confidence in the volume number itself. */
+   exactly as if this feature didn't exist. Silent for that "never signed in" case -- no toast, no
+   error -- since a failed save here shouldn't undermine confidence in the volume number itself.
+
+   2026-08-03 refinement (Søren: "I am no longer logged in... there is no warning and I can keep
+   reporting e.g. computed volume without it being registered"): a user who WAS verified earlier
+   in the session and quietly expired is a different situation from never having signed in at all
+   -- they opted in, and silently dropping their contribution is misleading, not considerate. The
+   handleGoogleExpiry() call below only fires (and only then shows a toast) when GOOGLE_EXP is
+   actually set, i.e. a real prior sign-in existed -- a true first-time anonymous user has
+   GOOGLE_EXP===0 and stays exactly as silent as before. */
 function maybeSaveComputedVolume(rootId,cellType,info,nucVolUm3,nucleusId){
-  if(!REPORT_ENDPOINT||!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
-  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)return;
+  if(!REPORT_ENDPOINT)return;
+  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
+  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
   /* nucVolUm3, when known (only from the main nucleus display -- see meshDlButtonHtml's comment),
      is the PRECOMPUTED nucleus volume for this exact same cell, sent alongside the freshly
      computed mesh volume so the dashboard can plot nucleus-volume-as-a-share-of-the-whole-cell
@@ -2643,7 +2694,7 @@ function postReport(payload,okMsg){
     alert("Please sign in with Google before submitting \u2014 use the account button in the top-right corner, then try again.\n\nContributions require a verified Google account so they can be attributed.");
     return false;
   }
-  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90){GOOGLE_VERIFIED=false;GOOGLE_CREDENTIAL="";Array.prototype.forEach.call(document.querySelectorAll(".gate-note"),function(el){el.textContent="Your Google sign-in expired — sign in again to submit";el.style.color="var(--accent)";});alert("Your Google sign-in has expired. Please sign in with Google again, then resubmit.");return false;}
+  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90){handleGoogleExpiry();alert("Your Google sign-in has expired. Please sign in with Google again, then resubmit.");return false;}
   payload.reporterName=REPORTER_NAME||"";payload.reporterEmail=REPORTER_EMAIL||"";
   payload.credential=GOOGLE_CREDENTIAL;
   fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).then(function(){showSubmitToast(true,okMsg||"Submitted — thank you. Your identification was sent.");}).catch(function(){showSubmitToast(false,"Could not reach the server — your report was NOT submitted. Check your connection and try again.");});
