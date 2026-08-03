@@ -3680,6 +3680,30 @@ const MeshDL=(()=>{
   }
   let useAlt=false;
   function shardUrl(shard){return useAlt?(CFG.meshBaseAlt+shard+CFG.meshBaseAltSuffix):(CFG.meshBase+shard+".shard");}
+  /* seg_m1300 is a FROZEN precomputed snapshot (see the CAVE_SEG_SOURCE comment near
+     loadConnectivityPanel) -- a root ID that isn't in its shard index today will never suddenly
+     appear there, so there's no point re-running the same network round-trip on every click. Most
+     common cause: the ID came from a CAVE query at a version other than 1300, or the cell has
+     since been further proofread (see findManifest()'s own error text). Cache is keyed by root ID
+     string, persisted to localStorage so it survives reloads; Shift-click on the download/compute
+     button bypasses it for one attempt (genuine recheck, not a fake "click again"). */
+  const MESH_NOT_FOUND_KEY="microns_mesh_notfound_roots_v1";
+  let notFoundCache=null;
+  function loadNotFoundCache(){
+    if(notFoundCache)return notFoundCache;
+    try{notFoundCache=new Map(JSON.parse(localStorage.getItem(MESH_NOT_FOUND_KEY)||"[]"));}
+    catch(_e){notFoundCache=new Map();}
+    return notFoundCache;
+  }
+  function saveNotFoundCache(){
+    try{localStorage.setItem(MESH_NOT_FOUND_KEY,JSON.stringify([...loadNotFoundCache().entries()]));}catch(_e){}
+  }
+  function markRootNotFound(rootIdStr){loadNotFoundCache().set(String(rootIdStr),Date.now());saveNotFoundCache();}
+  function isRootKnownNotFound(rootIdStr){return loadNotFoundCache().has(String(rootIdStr));}
+  /* Exposed for manual use from the browser console if the cache ever needs a full reset (e.g. if
+     this tool later adds a fallback source for non-v1300 IDs and old "not found" entries should
+     be re-checked) -- not wired to any UI button since that's not something Søren asked for. */
+  function clearMeshNotFoundCache(){notFoundCache=new Map();try{localStorage.removeItem(MESH_NOT_FOUND_KEY);}catch(_e){}}
   async function rangeGet(url,start,end,onProgress){
     const res=await fetch(url,{headers:{Range:"bytes="+start+"-"+end}});
     if(res.status!==206)throw new Error("expected HTTP 206 for byte range, got "+res.status);
@@ -3717,7 +3741,12 @@ const MeshDL=(()=>{
     if(sh.hash&&sh.hash!=="murmurhash3_x86_128")throw new Error('unsupported sharding hash "'+sh.hash+'"');
     infoLoaded=true;
   }
-  async function findManifest(rootIdBig){
+  async function findManifest(rootIdBig,forceRecheck){
+    const rootIdStr=String(rootIdBig);
+    if(!forceRecheck&&isRootKnownNotFound(rootIdStr)){
+      const err=new Error("root ID "+rootIdStr+" is cached as unavailable in the seg_m1300 mesh snapshot (an earlier lookup found it wasn't indexed there) \u2014 skipped the network check. Shift-click to force a fresh check.");
+      err.meshCached=true;throw err;
+    }
     const {shard,minishard}=shardAndMinishard(rootIdBig);
     let url=shardUrl(shard);
     const shardIndexSize=(1<<CFG.minishardBits)*16;
@@ -3730,7 +3759,10 @@ const MeshDL=(()=>{
     }
     const ev=new DataView(entry.buffer,entry.byteOffset,entry.byteLength);
     const startOffset=ev.getBigUint64(0,true),endOffset=ev.getBigUint64(8,true);
-    if(startOffset===endOffset)throw new Error("minishard "+minishard+" is empty — root ID not in this dataset (or was later merged/split away)?");
+    if(startOffset===endOffset){
+      markRootNotFound(rootIdStr);
+      throw new Error("minishard "+minishard+" is empty — root ID not in this dataset (or was later merged/split away)? Cached — future attempts will skip the network check; Shift-click to force a recheck.");
+    }
     const msStart=BigInt(shardIndexSize)+startOffset,msEnd=BigInt(shardIndexSize)+endOffset;
     const idxRaw=await gunzip(await rangeGet(url,Number(msStart),Number(msEnd-1n)));
     const aligned=new Uint8Array(idxRaw.length);aligned.set(idxRaw);
@@ -3742,7 +3774,10 @@ const MeshDL=(()=>{
     for(let i=0;i<n;i++){starts[i]+=prev;prev=starts[i]+sizes[i];}
     let idx=-1;
     for(let i=0;i<n;i++)if(ids[i]===rootIdBig){idx=i;break;}
-    if(idx<0)throw new Error("root ID "+rootIdBig+" not found in minishard "+minishard+" ("+n+" entries) — wrong dataset, or this ID predates/postdates the seg_m1300 snapshot?");
+    if(idx<0){
+      markRootNotFound(rootIdStr);
+      throw new Error("root ID "+rootIdStr+" not found in minishard "+minishard+" ("+n+" entries) — wrong dataset, or this ID predates/postdates the seg_m1300 snapshot? Cached — future attempts will skip the network check; Shift-click to force a recheck.");
+    }
     return {shard,minishard,manifestStart:Number(starts[idx]),manifestSize:Number(sizes[idx]),url};
   }
   function parseManifest(u8){
@@ -3884,11 +3919,11 @@ const MeshDL=(()=>{
      coordinates in micrometres so multiple downloaded meshes stay spatially aligned with each
      other and with Neuroglancer/Blender imports of MICrONS data -- same default as
      mesh_download_prototype.html's LOD table. */
-  async function fetchMesh(rootIdStr,onProgress){
+  async function fetchMesh(rootIdStr,onProgress,forceRecheck){
     const rootId=BigInt(rootIdStr);
     onProgress&&onProgress(0,"reading manifest…");
     await loadInfo();
-    const info=await findManifest(rootId);
+    const info=await findManifest(rootId,forceRecheck);
     const manifest=await gunzip(await rangeGet(info.url,info.manifestStart,info.manifestStart+info.manifestSize-1));
     const parsed=parseManifest(manifest);
     const layout=fragmentLayout(parsed,info.manifestStart);
@@ -3965,16 +4000,16 @@ const MeshDL=(()=>{
      not stacked on top of one another. Falls back to a single, unmodified fetchMesh() result
      when there are no extras (the common case), preserving the original per-mesh lod/numLods
      info that only makes sense for a single fetch. */
-  async function fetchCombinedMesh(mainRootIdStr,onProgress){
+  async function fetchCombinedMesh(mainRootIdStr,onProgress,forceRecheck){
     const rootIds=[String(mainRootIdStr)].concat(extraImg65RootIds(mainRootIdStr));
     if(rootIds.length===1){
-      const m=await fetchMesh(mainRootIdStr,onProgress);
+      const m=await fetchMesh(mainRootIdStr,onProgress,forceRecheck);
       return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds};
     }
     const n=rootIds.length,meshes=[];
     for(let i=0;i<n;i++){
       const idx=i;
-      meshes.push(await fetchMesh(rootIds[i],(frac,msg)=>onProgress&&onProgress((idx+frac)/n,(msg||"")+" (fragment "+(idx+1)+"/"+n+")")));
+      meshes.push(await fetchMesh(rootIds[i],(frac,msg)=>onProgress&&onProgress((idx+frac)/n,(msg||"")+" (fragment "+(idx+1)+"/"+n+")"),forceRecheck));
     }
     let totalV=0,totalI=0,bytes=0;
     meshes.forEach(m=>{totalV+=m.positions.length;totalI+=m.indices.length;bytes+=m.bytes||0;});
@@ -3987,8 +4022,8 @@ const MeshDL=(()=>{
     });
     return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:n,rootIds};
   }
-  async function downloadRoot(rootIdStr,onProgress){
-    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount}=await fetchCombinedMesh(rootIdStr,onProgress);
+  async function downloadRoot(rootIdStr,onProgress,forceRecheck){
+    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
     const {positions,indices}=flipYForGLTF(rawPositions,rawIndices);
     const tag=fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod;
     const glb=buildGLB(positions,indices,"microns_"+rootIdStr+tag);
@@ -4016,8 +4051,8 @@ const MeshDL=(()=>{
      are combined) -- small gaps mostly cancel out in this sum but aren't corrected for, so this is
      reported to the user as an ESTIMATE, not an exact figure. Positions are already in this tool's
      usual µm mesh-download units, so no extra scaling is needed. */
-  async function computeVolume(rootIdStr,onProgress){
-    const {positions,indices,fragmentCount}=await fetchCombinedMesh(rootIdStr,onProgress);
+  async function computeVolume(rootIdStr,onProgress,forceRecheck){
+    const {positions,indices,fragmentCount}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
     onProgress&&onProgress(0.98,"computing volume…");
     let vol6=0;
     for(let t=0;t<indices.length;t+=3){
@@ -4203,8 +4238,8 @@ const MeshDL=(()=>{
     const idx=[0,1,3,0,3,2,4,6,7,4,7,5,0,4,5,0,5,1,2,3,7,2,7,6,0,2,6,0,6,4,1,5,7,1,7,3];
     return {positions,indices:new Uint32Array(idx),barLenUm};
   }
-  async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress){
-    const [{positions:cellRawPositions,indices:cellRawIndices,fragmentCount},JSZip]=await Promise.all([fetchCombinedMesh(rootIdStr,onProgress),loadJSZip()]);
+  async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress,forceRecheck){
+    const [{positions:cellRawPositions,indices:cellRawIndices,fragmentCount},JSZip]=await Promise.all([fetchCombinedMesh(rootIdStr,onProgress,forceRecheck),loadJSZip()]);
     onProgress&&onProgress(0.96,"building PowerPoint…");
     /* Cell-only raw bbox -- used to size the scale bar ITSELF (its length stays 28% of the CELL's
        own longest span, not the whole assembly's, so it stays a sensible, comparable size). The
@@ -4284,7 +4319,7 @@ const MeshDL=(()=>{
     setTimeout(()=>URL.revokeObjectURL(url),30000);
     return {filename,vertices:positions.length/3,fragmentCount,barLenUm:barLen};
   }
-  return {downloadRoot,downloadRootPptx,computeVolume};
+  return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache};
 })();
 /* Delegated (not re-bound per render) since root ID rows get rebuilt on every jump/reclassify --
    a single document-level listener means every ".meshdl"/".pptxdl" button works regardless of
@@ -4307,7 +4342,7 @@ document.addEventListener("click",(e)=>{
     const volLiveCellType=(volBtn.dataset.followLive==="1"&&typeof CUR_CELLTYPE_DISPLAY!=="undefined"&&CUR_CELLTYPE_DISPLAY)?CUR_CELLTYPE_DISPLAY:volBtn.dataset.celltype;
     const volNucVolUm3=volBtn.dataset.nucvol?parseFloat(volBtn.dataset.nucvol):null;
     const volNucleusId=volBtn.dataset.nucid||"";
-    MeshDL.computeVolume(rootId,(frac,msg)=>{volBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";})
+    MeshDL.computeVolume(rootId,(frac,msg)=>{volBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey)
       .then(info=>{
         const combinedStr=info.fragmentCount>1?" ("+info.fragmentCount+" fragments combined)":"";
         const label="Recalculate (≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"+combinedStr+")";
@@ -4320,7 +4355,11 @@ document.addEventListener("click",(e)=>{
       })
       .catch(err=>{
         console.warn("[uJump mesh volume]",err);
-        volBtn.textContent="✗ failed: "+err.message;
+        /* meshCached (2026-08-05, Søren: avoid recomputing root IDs known not to exist in the
+           seg_m1300 mesh snapshot) -- distinguishes "we already know this fails" from a fresh
+           failure, and the label tells him how to force a real recheck instead of clicking
+           uselessly again. */
+        volBtn.textContent=(err.meshCached?"⊘ cached unavailable":"✗ failed: "+err.message);
         volBtn.title=String(err.message);
         setTimeout(()=>{volBtn.textContent=origVolLabel;volBtn.disabled=false;},5000);
       });
@@ -4339,8 +4378,8 @@ document.addEventListener("click",(e)=>{
      button is marked data-follow-live -- see the comment on meshDlButtonHtml() for why the
      baked-in attribute alone goes stale after a community report resolves. */
   const liveCellType=(btn.dataset.followLive==="1"&&typeof CUR_CELLTYPE_DISPLAY!=="undefined"&&CUR_CELLTYPE_DISPLAY)?CUR_CELLTYPE_DISPLAY:btn.dataset.celltype;
-  const task=isPptx?MeshDL.downloadRootPptx(rootId,liveCellType,btn.dataset.coords,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";})
-                   :MeshDL.downloadRoot(rootId,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";});
+  const task=isPptx?MeshDL.downloadRootPptx(rootId,liveCellType,btn.dataset.coords,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey)
+                   :MeshDL.downloadRoot(rootId,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey);
   task.then(info=>{
       const vertStr=(info.vertices>=1000?(info.vertices/1000).toFixed(0)+"k":info.vertices)+" verts";
       const combinedStr=info.fragmentCount>1?info.fragmentCount+" fragments combined, ":"";
@@ -4351,7 +4390,10 @@ document.addEventListener("click",(e)=>{
     })
     .catch(err=>{
       console.warn("[uJump "+(isPptx?"pptx":"mesh")+" download]",err);
-      btn.textContent="✗ failed: "+err.message;
+      /* meshCached: same distinction as the .meshvol handler above -- this root ID is known from
+         an earlier attempt to be absent from the seg_m1300 shard index, so no network round-trip
+         was even attempted this time. Shift-click forces a real recheck. */
+      btn.textContent=(err.meshCached?"⊘ cached unavailable":"✗ failed: "+err.message);
       btn.title=String(err.message);
       setTimeout(()=>{btn.textContent=orig;btn.disabled=false;},5000);
     });
@@ -4392,9 +4434,9 @@ function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive,nucVolUm3,nucleu
      maybeSaveComputedVolume(), which previously always sent nucleusId:"" regardless of whether one
      was available (Søren: "the nucleusID is not shown although there is a column for it"). */
   const nucidAttr=nucleusId?' data-nucid="'+escHtml(String(nucleusId))+'"':'';
-  return '<button class="idbtn meshdl" data-root="'+rootId+'" title="Download this cell’s 3D model as a .glb (no CAVE token needed) — automatically combined with any additionally-proposed root IDs for this nucleus, since those are usually fragments of the same cell — runs entirely in your browser" style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ 3D model</button>'
-    +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+' data-coords="'+coords+'" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates, plus an embedded scale-bar rod below it that spins along with the model — automatically combined with any additionally-proposed root IDs for this nucleus — the Turntable spin autoplays in the slideshow, no click needed — built entirely in your browser, no CAVE token needed" style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>'
-    +'<button class="idbtn meshvol" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+nucvolAttr+nucidAttr+' title="Estimate this cell’s mesh volume (µm³) by fetching and decoding its full 3D geometry — not precomputed, so this costs one real mesh fetch, same as the 3D model download — automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries. Saved (root ID, cell type, volume) to the shared µJump dashboard when signed in with Google." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
+  return '<button class="idbtn meshdl" data-root="'+rootId+'" title="Download this cell’s 3D model as a .glb (no CAVE token needed) — automatically combined with any additionally-proposed root IDs for this nucleus, since those are usually fragments of the same cell — runs entirely in your browser. If a root ID isn’t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don’t re-check the network — Shift-click to force a fresh check." style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ 3D model</button>'
+    +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+' data-coords="'+coords+'" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates, plus an embedded scale-bar rod below it that spins along with the model — automatically combined with any additionally-proposed root IDs for this nucleus — the Turntable spin autoplays in the slideshow, no click needed — built entirely in your browser, no CAVE token needed. If a root ID isn’t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don’t re-check the network — Shift-click to force a fresh check." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>'
+    +'<button class="idbtn meshvol" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+nucvolAttr+nucidAttr+' title="Estimate this cell’s mesh volume (µm³) by fetching and decoding its full 3D geometry — not precomputed, so this costs one real mesh fetch, same as the 3D model download — automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries. Saved (root ID, cell type, volume) to the shared µJump dashboard when signed in with Google. If a root ID isn’t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don’t re-check the network — Shift-click to force a fresh check." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
 }
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
