@@ -3275,7 +3275,7 @@ function connRenderIODepthChart(divId,points){
     title:{text:"Input/Output Depth",font:CONN_AXIS_FONT},
     violingap:0,violingroupgap:0,violinmode:"overlay",
     showlegend:true,legend:{orientation:"h",y:1.14,font:{size:10}},
-    xaxis:{type:"category",visible:false,fixedrange:true},
+    xaxis:{type:"category",visible:false,fixedrange:true,range:[-0.5,0.5]},
     yaxis:{autorange:"reversed",tickvals:ticks.tickvals,ticktext:ticks.ticktext,
       gridcolor:"transparent",zeroline:false,title:"Synapse Depth",automargin:true},
     shapes:connLayerShapes("y")
@@ -3333,13 +3333,14 @@ function connRenderDistChart(divId,points,colorField){
     Plotly.newPlot(divId,[],{annotations:[{text:"No data",showarrow:false,font:CONN_AXIS_FONT}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
     return;
   }
+  const maxCount=Math.max.apply(null,keys.map(function(k){return counts[k];}));
   Plotly.newPlot(divId,[{
     type:"bar",x:keys,y:keys.map(function(k){return counts[k];}),
-    text:keys.map(function(k){return String(counts[k]);}),textposition:"outside",
+    text:keys.map(function(k){return String(counts[k]);}),textposition:"outside",cliponaxis:false,
     marker:{color:keys.map(function(k){return k==="No Type"?"#5a6169":connColorFor(k);})}
   }],Object.assign({},CONN_BASE_LAYOUT,{
     title:{text:"Target Distribution",font:CONN_AXIS_FONT},
-    yaxis:Object.assign({},CONN_BASE_LAYOUT.yaxis,{title:"# of synapses"})
+    yaxis:Object.assign({},CONN_BASE_LAYOUT.yaxis,{title:"# of synapses",range:[0,maxCount*1.18]})
   }),CONN_PLOTLY_CFG);
 }
 /* Draws all three graphs together -- called once right after a successful query (Søren: "The
