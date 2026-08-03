@@ -704,9 +704,117 @@ function estimateLayer(vx,vy,vz){
   for(const b of bounds){if(depthUm>=b[1]&&depthUm<b[2])return{region:"cortex",label:b[0],depthText:depthUm.toFixed(0)+" \u00b5m from pia (\u00b1"+thickUm.toFixed(0)+" \u00b5m cortex here)",depthUm,thickUm,bounds};}
   return{region:"cortex",label:"Layer 6b",depthText:depthUm.toFixed(0)+" \u00b5m from pia",depthUm,thickUm,bounds};
 }
+/* Grid-accelerated depth/layer estimate, same underlying math as estimateLayer() above (same
+   PIA/WM point clouds, same Ledderose-scaled layerBoundsForThickness()) but O(1)-amortized per
+   call via a lazily-built spatial grid instead of an O(PIA_N+WM_N) linear scan -- estimateLayer()
+   itself is deliberately left untouched as the exact per-click reference (see its own comment on
+   the CAVE_MAX_SYN_POINTS=400 cap elsewhere), but a connectivity query's synapse graphs (2026-08-04,
+   Soren: "the graphs should be showing the results of all of the synapses, not just the 50...
+   the query is limited to") need a depth for potentially thousands of points per query, where an
+   O(N) scan per point would multiply out to something genuinely slow. Kept top-level/global
+   (rather than reusing the structurally-identical grid helpers already private to the "Filter and
+   show" tab's own bulk layer scan) so the connectivity panel doesn't depend on that other
+   feature's internal scope. Returns {depthUm,label} or null when no local pia/WM trace exists. */
+let CONN_PIA_GRID=null,CONN_WM_GRID=null;
+function connBuildDepthGrid(PX,PZ,PN){
+  let xmin=Infinity,xmax=-Infinity,zmin=Infinity,zmax=-Infinity;
+  for(let i=0;i<PN;i++){
+    if(PX[i]<xmin)xmin=PX[i];if(PX[i]>xmax)xmax=PX[i];
+    if(PZ[i]<zmin)zmin=PZ[i];if(PZ[i]>zmax)zmax=PZ[i];
+  }
+  const targetPerCell=4,cells=Math.max(1,Math.round(PN/targetPerCell));
+  const spanX=Math.max(1,xmax-xmin),spanZ=Math.max(1,zmax-zmin);
+  const nx=Math.max(1,Math.round(Math.sqrt(cells*(spanX/spanZ))));
+  const nz=Math.max(1,Math.round(cells/nx));
+  const cw=spanX/nx,ch=spanZ/nz;
+  const buckets=new Map();
+  function cellOf(x,z){
+    let cx=Math.floor((x-xmin)/cw);if(cx<0)cx=0;if(cx>=nx)cx=nx-1;
+    let cz=Math.floor((z-zmin)/ch);if(cz<0)cz=0;if(cz>=nz)cz=nz-1;
+    return[cx,cz];
+  }
+  for(let i=0;i<PN;i++){
+    const[cx,cz]=cellOf(PX[i],PZ[i]),key=cx+","+cz;
+    let arr=buckets.get(key);if(!arr){arr=[];buckets.set(key,arr);}
+    arr.push(i);
+  }
+  return{xmin,xmax,zmin,zmax,nx,nz,cw,ch,buckets,cellOf};
+}
+function connIdwSurfaceYGrid(qx,qz,PX,PY,PZ,grid,k){
+  const[cx0,cz0]=grid.cellOf(qx,qz);
+  function gather(ring){
+    const out=[];
+    for(let dx=-ring;dx<=ring;dx++)for(let dz=-ring;dz<=ring;dz++){
+      const cx=cx0+dx,cz=cz0+dz;
+      if(cx<0||cx>=grid.nx||cz<0||cz>=grid.nz)continue;
+      const arr=grid.buckets.get(cx+","+cz);
+      if(arr)for(const idx of arr)out.push(idx);
+    }
+    return out;
+  }
+  let ring=1,cand=gather(ring);const maxRing=Math.max(grid.nx,grid.nz);
+  while(cand.length<k*2&&ring<maxRing){ring++;cand=gather(ring);}
+  const best=[];
+  for(const i of cand){
+    const dx=qx-PX[i],dz=qz-PZ[i],d2=dx*dx+dz*dz;
+    if(best.length<k){best.push({d2,y:PY[i]});best.sort((a,b)=>a.d2-b.d2);}
+    else if(d2<best[k-1].d2){best[k-1]={d2,y:PY[i]};best.sort((a,b)=>a.d2-b.d2);}
+  }
+  if(!best.length)return null;
+  if(best[0].d2<1)return best[0].y;
+  let wsum=0,ysum=0;
+  for(const b of best){const w=1/(b.d2+1);wsum+=w;ysum+=w*b.y;}
+  return ysum/wsum;
+}
+function estimateDepthGridded(vx,vy,vz){
+  if(!CONN_PIA_GRID)CONN_PIA_GRID=connBuildDepthGrid(PIA_X,PIA_Z,PIA_N);
+  if(!CONN_WM_GRID)CONN_WM_GRID=connBuildDepthGrid(WM_X,WM_Z,WM_N);
+  const qx=vx*4,qy=vy*4,qz=vz*40;
+  const piaY=connIdwSurfaceYGrid(qx,qz,PIA_X,PIA_Y,PIA_Z,CONN_PIA_GRID,8);
+  const wmY=connIdwSurfaceYGrid(qx,qz,WM_X,WM_Y,WM_Z,CONN_WM_GRID,8);
+  if(piaY==null||wmY==null)return null;
+  const depth=qy-piaY,thickness=wmY-piaY;
+  const depthUm=depth/1000,thickUm=thickness/1000;
+  if(!(thickness>0))return null;
+  if(depth<0)return{depthUm,label:"Leptomeninges"};
+  if(depth>thickness)return{depthUm,label:"White matter"};
+  const bounds=layerBoundsForThickness(thickUm);
+  for(const b of bounds){if(depthUm>=b[1]&&depthUm<b[2])return{depthUm,label:b[0]};}
+  return{depthUm,label:"Layer 6b"};
+}
 /* Simple SVG cross-section of the cortical column (not a rotatable 3D model — kept dependency-free)
    showing labeled, coloured layer bands and a yellow dot at the query's estimated depth. */
 const LAYER_COLORS={"Layer 1":"#8ecae6","Layer 2/3":"#219ebc","Layer 4":"#2a9d8f","Layer 5a":"#fb8500","Layer 5b":"#d62828","Layer 6a":"#6a4c93","Layer 6b":"#4d3579"};
+/* Canonical (fixed-thickness) layer boundaries for the connectivity graphs' depth axes (2026-08-04)
+   -- every REAL synapse/soma depth used as a data value is still computed per-point from its own
+   true local pia/WM surfaces via estimateDepthGridded() above, but a scatter of points spread
+   across many different (x,z) locations can't each carry their own axis, so the GRIDLINES/tick
+   labels use one shared reference: layerBoundsForThickness(LEDDEROSE_REF_THICK_UM) is exactly the
+   un-scaled Ledderose boundary set (thickness==reference, so scaling is a no-op) already used
+   elsewhere in this file. Leptomeninges/White-matter bands use the same 150um nominal depth
+   renderLayerDiagram() already draws above/below the cortex proper. Covers the FULL layer set
+   (Leptomeninges + Layer 1/2-3/4/5a/5b/6a/6b + White matter) -- deliberately NOT the simplified
+   L1/L2-3/L4/L5/L6/WM set the public MICrONS connectivity viewer itself uses, since this project's
+   own layer classification is already finer than that everywhere else (Soren: "I also want all
+   the layers that we have identified, not just the simplified version that MICrONS made"). */
+const CONN_LAYER_AXIS_BOUNDS=(function(){
+  const LEP=150,WMH=150;
+  const b=[["Leptomeninges",-LEP,0]];
+  layerBoundsForThickness(LEDDEROSE_REF_THICK_UM).forEach(function(x){b.push(x);});
+  b.push(["White matter",LEDDEROSE_REF_THICK_UM,LEDDEROSE_REF_THICK_UM+WMH]);
+  return b;
+})();
+/* Border-only layer colours for the connectivity graphs (2026-08-04, Soren: "I want the layers to
+   have a similar color code to the one we have already done for layers, but just with the borders
+   colored not filled, so that the light blue and pink is on a dark background") -- reuses the
+   existing 7-colour LAYER_COLORS above verbatim (same hues as the cortical-column SVG diagram),
+   extended with Leptomeninges/White matter using the SAME two colours ujump_dashboard.html's own
+   10-colour LAYER_COLORS already assigned them, so this stays visually consistent with both
+   existing layer-colour schemes in the project rather than inventing a third. Drawn as thin
+   horizontal/vertical gridlines (Plotly shapes), never a filled band, specifically so they read as
+   reference lines behind the input(light blue)/output(pink) synapse-depth traces rather than
+   competing with them for attention on the dark panel background. */
+const CONN_LAYER_BORDER_COLORS=Object.assign({"Leptomeninges":"#c9c2b4","White matter":"#8a8a8a"},LAYER_COLORS);
 function renderLayerDiagram(layer){
   if(!layer||!(layer.thickUm>0))return "";
   const LEP=150,WMH=150,total=LEP+layer.thickUm+WMH,W=260,H=320,pad=8,usableH=H-2*pad;
@@ -3071,6 +3179,180 @@ function computeConnSpanNm(centerPos,shown,points){
   }
   return Math.max(xmax-xmin,ymax-ymin,zmax-zmin,20000);
 }
+/* Connectivity-panel synapse graphs (2026-08-04) -- Søren: "I want the input and output results
+   to be shown in a graph like the MICrONS connectivity viewer", plus a soma-depth scatter and a
+   target-distribution bar chart, colourable by cell_type or classification_system, styled to
+   match ujump_dashboard.html. Plotly isn't loaded anywhere else in this already-huge file, so it's
+   fetched from the CDN lazily, only the first time this panel actually needs to draw a chart --
+   never on a plain page load. Style constants below are DELIBERATE byte-for-byte copies of
+   ujump_dashboard.html's own PALETTE/colorFor/AXIS_FONT/BASE_LAYOUT/PLOTLY_CFG (prefixed CONN_ to
+   avoid any collision with anything else already global in this file), so these graphs read as
+   the same app as the dashboard rather than a visually distinct add-on -- if the dashboard's
+   palette ever changes, update both copies (same manual-sync convention that file's own comment
+   already documents against ujump.html's :root). */
+let _connPlotlyLoadPromise=null;
+function ensureConnPlotly(){
+  if(window.Plotly)return Promise.resolve();
+  if(_connPlotlyLoadPromise)return _connPlotlyLoadPromise;
+  _connPlotlyLoadPromise=new Promise(function(resolve,reject){
+    const s=document.createElement("script");
+    s.src="https://cdn.plot.ly/plotly-2.35.2.min.js";
+    s.onload=function(){resolve();};
+    s.onerror=function(){reject(new Error("Failed to load Plotly from cdn.plot.ly"));};
+    document.head.appendChild(s);
+  });
+  return _connPlotlyLoadPromise;
+}
+const CONN_PALETTE=["#8a3b2a","#5a4a7a","#3a6b5a","#a37a3a","#4a6b8a","#7a3a5a","#6b7a3a","#3a5a6b",
+               "#8a5a3a","#5a3a6b","#3a7a6b","#7a5a3a","#4a3a6b","#6b3a4a","#3a4a6b","#7a6b3a",
+               "#4a7a3a","#8a4a5a","#3a6b8a","#6b4a3a","#5a6b3a","#3a4a5a","#8a6b4a","#4a5a3a",
+               "#6b3a6b","#3a8a6b","#8a3a3a","#3a3a6b","#6b8a3a","#8a6b3a"];
+const connColorFor=(function(){
+  const map={};let next=0;
+  return function(name){
+    if(!(name in map)){map[name]=CONN_PALETTE[next%CONN_PALETTE.length];next++;}
+    return map[name];
+  };
+})();
+const CONN_AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:"#e6edf3"};
+const CONN_BASE_LAYOUT={
+  margin:{l:56,r:16,t:36,b:70},
+  font:CONN_AXIS_FONT,
+  paper_bgcolor:"rgba(0,0,0,0)",
+  plot_bgcolor:"rgba(0,0,0,0)",
+  showlegend:false,
+  xaxis:{tickangle:-45,automargin:true,gridcolor:"#2a313c"},
+  yaxis:{gridcolor:"#2a313c",zeroline:false}
+};
+const CONN_PLOTLY_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d"]};
+const CONN_INPUT_COLOR="#5fd0ff",CONN_OUTPUT_COLOR="#ff8fc4";
+/* Shared depth-axis dressing for both the violin (y only) and scatter (x and/or y) charts --
+   border-only layer gridlines (Plotly line shapes, never a filled rect) plus tick labels centred
+   on each layer band, from the canonical CONN_LAYER_AXIS_BOUNDS/CONN_LAYER_BORDER_COLORS defined
+   near estimateDepthGridded() above. axisRef "y" draws horizontal lines spanning the full plot
+   width; "x" draws vertical lines spanning the full plot height. */
+function connLayerShapes(axisRef){
+  return CONN_LAYER_AXIS_BOUNDS.map(function(b){
+    const color=CONN_LAYER_BORDER_COLORS[b[0]]||"#888";
+    if(axisRef==="y")return{type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:b[1],y1:b[1],line:{color:color,width:1,dash:"dot"}};
+    return{type:"line",yref:"paper",y0:0,y1:1,xref:"x",x0:b[1],x1:b[1],line:{color:color,width:1,dash:"dot"}};
+  });
+}
+function connLayerTicks(){
+  return{
+    tickvals:CONN_LAYER_AXIS_BOUNDS.map(function(b){return(b[1]+b[2])/2;}),
+    ticktext:CONN_LAYER_AXIS_BOUNDS.map(function(b){return b[0];})
+  };
+}
+/* "Input/Output Depth" -- a split violin (input bulging one side, output the other, mirrored
+   around a single shared position) styled after the reference MICrONS connectivity-viewer graph
+   Søren shared, but using this project's own already-established input=light-blue/output=pink
+   convention (same as the direction dot legend already in this panel's intro text and the
+   Neuroglancer segment colours) rather than inventing new colours. Uses EVERY synapse with a
+   resolvable depth (Søren: "not just the 50... the query is limited to"), not just the partners
+   whose meshes get loaded into Neuroglancer. */
+function connRenderIODepthChart(divId,points){
+  const valid=points.filter(function(p){return p.synDepthUm!=null&&isFinite(p.synDepthUm);});
+  const inD=valid.filter(function(p){return p.direction==="input";}).map(function(p){return p.synDepthUm;});
+  const outD=valid.filter(function(p){return p.direction==="output";}).map(function(p){return p.synDepthUm;});
+  const traces=[];
+  if(inD.length)traces.push({type:"violin",y:inD,x0:"",side:"positive",orientation:"v",
+    name:"input ("+inD.length+")",line:{color:CONN_INPUT_COLOR,width:1.5},
+    fillcolor:"rgba(95,208,255,0.35)",points:false,meanline:{visible:false},hoverinfo:"y+name"});
+  if(outD.length)traces.push({type:"violin",y:outD,x0:"",side:"negative",orientation:"v",
+    name:"output ("+outD.length+")",line:{color:CONN_OUTPUT_COLOR,width:1.5},
+    fillcolor:"rgba(255,143,196,0.35)",points:false,meanline:{visible:false},hoverinfo:"y+name"});
+  const ticks=connLayerTicks();
+  if(!traces.length){
+    Plotly.newPlot(divId,[],{annotations:[{text:"No synapse depth data",showarrow:false,font:CONN_AXIS_FONT}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
+    return;
+  }
+  Plotly.newPlot(divId,traces,Object.assign({},CONN_BASE_LAYOUT,{
+    title:{text:"Input/Output Depth",font:CONN_AXIS_FONT},
+    violingap:0,violingroupgap:0,violinmode:"overlay",
+    showlegend:true,legend:{orientation:"h",y:1.14,font:{size:10}},
+    xaxis:{visible:false,range:[-1,1],fixedrange:true},
+    yaxis:{autorange:"reversed",tickvals:ticks.tickvals,ticktext:ticks.ticktext,
+      gridcolor:"transparent",zeroline:false,title:"Synapse Depth"},
+    shapes:connLayerShapes("y")
+  }),CONN_PLOTLY_CFG);
+}
+/* "Synapse/Target Soma Depth" -- one dot per synapse, x = that synapse's PARTNER's own soma depth
+   (varies per partner), y = the synapse's own depth. colorField is "cell_type" or
+   "classification_system" (the "Color by value" dropdown); points with no resolvable type fall
+   into a fixed grey "No Type" bucket, matching the reference viewer's own "No Type" legend entry. */
+function connRenderScatterChart(divId,points,colorField){
+  const groups=new Map();
+  points.forEach(function(p){
+    if(p.somaDepthUm==null||p.synDepthUm==null||!isFinite(p.somaDepthUm)||!isFinite(p.synDepthUm))return;
+    const key=p[colorField]||"No Type";
+    if(!groups.has(key))groups.set(key,{x:[],y:[]});
+    const g=groups.get(key);g.x.push(p.somaDepthUm);g.y.push(p.synDepthUm);
+  });
+  if(!groups.size){
+    Plotly.newPlot(divId,[],{annotations:[{text:"No soma-depth data (partner types/positions unavailable)",showarrow:false,font:CONN_AXIS_FONT}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
+    return;
+  }
+  const keys=Array.from(groups.keys()).sort(function(a,b){
+    if(a==="No Type")return 1;if(b==="No Type")return -1;return String(a).localeCompare(String(b));
+  });
+  const traces=keys.map(function(k){
+    const g=groups.get(k);
+    return{type:"scattergl",mode:"markers",name:k,x:g.x,y:g.y,
+      marker:{color:k==="No Type"?"#5a6169":connColorFor(k),size:5,opacity:0.75},
+      hoverinfo:"x+y+name"};
+  });
+  const ticks=connLayerTicks();
+  Plotly.newPlot(divId,traces,Object.assign({},CONN_BASE_LAYOUT,{
+    title:{text:"Synapse/Target Soma Depth",font:CONN_AXIS_FONT},
+    showlegend:true,legend:{font:{size:9},x:1.02,y:1},
+    xaxis:{tickvals:ticks.tickvals,ticktext:ticks.ticktext,gridcolor:"transparent",
+      zeroline:false,title:"Soma Depth",automargin:true},
+    yaxis:{autorange:"reversed",tickvals:ticks.tickvals,ticktext:ticks.ticktext,
+      gridcolor:"transparent",zeroline:false,title:"Synapse Depth"},
+    shapes:connLayerShapes("y").concat(connLayerShapes("x"))
+  }),CONN_PLOTLY_CFG);
+}
+/* "Target Distribution" -- count of SYNAPSES (not unique partner cells) per category, consistent
+   with the other two charts using synapse-level data throughout rather than mixing counting
+   units. Points whose partner has no resolvable type are still counted, under "No Type". */
+function connRenderDistChart(divId,points,colorField){
+  const counts={};
+  points.forEach(function(p){
+    const key=p[colorField]||"No Type";
+    counts[key]=(counts[key]||0)+1;
+  });
+  const keys=Object.keys(counts).sort(function(a,b){
+    if(a==="No Type")return 1;if(b==="No Type")return -1;return counts[b]-counts[a];
+  });
+  if(!keys.length){
+    Plotly.newPlot(divId,[],{annotations:[{text:"No data",showarrow:false,font:CONN_AXIS_FONT}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
+    return;
+  }
+  Plotly.newPlot(divId,[{
+    type:"bar",x:keys,y:keys.map(function(k){return counts[k];}),
+    text:keys.map(function(k){return String(counts[k]);}),textposition:"outside",
+    marker:{color:keys.map(function(k){return k==="No Type"?"#5a6169":connColorFor(k);})}
+  }],Object.assign({},CONN_BASE_LAYOUT,{
+    title:{text:"Target Distribution",font:CONN_AXIS_FONT},
+    yaxis:Object.assign({},CONN_BASE_LAYOUT.yaxis,{title:"# of synapses"})
+  }),CONN_PLOTLY_CFG);
+}
+/* Draws all three graphs together -- called once right after a successful query (Søren: "The
+   graphs should be made when pressing query") and again whenever the colour-by dropdown changes
+   (cheap: no re-query, just re-groups/re-colours the already-fetched points in memory). */
+function connRenderAllCharts(ids,points,colorField){
+  ensureConnPlotly().then(function(){
+    connRenderIODepthChart(ids.io,points);
+    connRenderScatterChart(ids.scatter,points,colorField);
+    connRenderDistChart(ids.dist,points,colorField);
+  }).catch(function(err){
+    [ids.io,ids.scatter,ids.dist].forEach(function(elOrId){
+      const el=(typeof elOrId==="string")?document.getElementById(elOrId):elOrId;
+      if(el)el.innerHTML='<div style="color:var(--mut);font-size:12px;padding:12px">Charts unavailable: '+escHtml(err.message)+'</div>';
+    });
+  });
+}
 /* Collapsible "Connectivity" panel under a cell's root ID -- closed by default per Sören
    ("should only be unfolded if clicked"); the token guide/form is only built the first time it's
    expanded, so a plain cell view stays lightweight. containerId is the empty <div> showNucleus()
@@ -3085,6 +3367,13 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
   const label=()=>"Connectivity (synaptic partners)";
   el.innerHTML='<a href="#" id="connToggle" class="nsub" style="font-size:12px;cursor:pointer;text-decoration:underline">+ '+label()+'</a><div id="connBody" style="display:none;margin:6px 0 2px"></div>';
   const tog=el.querySelector("#connToggle"),bod=el.querySelector("#connBody");
+  /* Unique per-panel chart div ids (2026-08-04) -- Plotly.newPlot is given the actual DOM element
+     (see connRenderAllCharts() call below), not a bare id string, so this isn't strictly required
+     for correctness, but keeping ids unique per containerId still avoids any possible collision if
+     more than one connectivity panel is ever open on screen at once (e.g. two different cells'
+     result panels), same defensive habit as every other per-cell id in this file. */
+  const chartIoId="connChartIO_"+containerId,chartScatId="connChartScatter_"+containerId,chartDistId="connChartDist_"+containerId;
+  let lastUrl="",lastPoints=[];
   function buildForm(){
     if(built)return;built=true;
     let savedToken="";try{savedToken=localStorage.getItem("cave_token")||"";}catch(_lse){}
@@ -3111,7 +3400,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
       +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connOut" checked> outputs</label>'
       +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connSyn" checked> show synapse points</label>'
       +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="connRemember"'+(savedToken?" checked":"")+'> remember token in this browser</label></div>'
-      +'<button class="idbtn" id="connGo">Query &amp; open in Neuroglancer</button>'
+      +'<button class="idbtn" id="connGo">Query</button>'
       +'<span id="connStatus" style="margin-left:8px;font-size:12px"></span>'
       +'<div id="connResults" style="margin-top:8px"></div>';
     bod.innerHTML=h;
@@ -3140,28 +3429,60 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
         }
         const shown=dirs.flatMap(d=>allPartners.filter(p=>p.direction===d&&p.syn_count>=minSyn).slice(0,topN));
         let typeNote="";
-        if(shown.length){
+        /* 2026-08-04 (Soren: "the graphs should be showing the results of all of the synapses,
+           not just the 50 neurons that the query is limited to") -- this cell-type/classification/
+           soma-position lookup now covers EVERY unique partner in allPartners, not just the
+           topN/dir "shown" subset that gets loaded as meshes in Neuroglancer. shown/topN still
+           controls the Neuroglancer mesh limit below (loading thousands of meshes isn't feasible),
+           but the three synapse graphs (built further down from allPoints) need every partner's
+           type/soma-depth info, however many that is. */
+        const uniquePartners=[...new Set(allPartners.map(p=>p.partner))];
+        const partnerInfo=new Map();
+        if(uniquePartners.length){
           setStatus("Fetching cell types\u2026");
           try{
-            const ids=shown.map(p=>p.partner).join(",");
+            const ids=uniquePartners.join(",");
             /* Two-step join (see comment above CAVE_NUCLEUS_TABLE): root id -> nucleus id via
-               nucleus_detection_v0, then nucleus id -> cell_type via the mtypes reference table. */
+               nucleus_detection_v0, then nucleus id -> cell_type/classification_system via the
+               mtypes reference table. nucRows also carries pt_position_x/_y/_z (same _x/_y/_z-only
+               split behaviour as ctr_pt_position on the synapse table, see CAVE_NUCLEUS_TABLE's own
+               comment) -- that's each partner's own SOMA position, used for the "Synapse/Target
+               Soma Depth" scatter's x-axis below. Some CAVE table configurations return a combined
+               "pt_position" array instead; checked as a fallback for robustness, though the _x/_y/_z
+               split is the confirmed-real shape here. */
             const nucRows=await caveApiQuery(CAVE_NUCLEUS_TABLE,'{"filter_in_dict":{"'+CAVE_NUCLEUS_TABLE+'":{"pt_root_id":['+ids+']}}}',token,version);
             const rootToNuc=new Map(nucRows.map(r=>[String(r.pt_root_id),String(r.id)]));
+            const somaPosByNuc=new Map();
+            nucRows.forEach(r=>{
+              const nid=String(r.id);
+              if(r.pt_position_x!=null&&r.pt_position_y!=null&&r.pt_position_z!=null)somaPosByNuc.set(nid,[r.pt_position_x,r.pt_position_y,r.pt_position_z]);
+              else if(Array.isArray(r.pt_position)&&r.pt_position.length===3)somaPosByNuc.set(nid,r.pt_position.map(Number));
+            });
             let lut=new Map();
             if(rootToNuc.size){
               const nucIds=[...new Set(rootToNuc.values())].join(",");
               const typeRows=await caveApiQuery(CAVE_TYPE_TABLE,'{"filter_in_dict":{"'+CAVE_TYPE_TABLE+'":{"target_id":['+nucIds+']}}}',token,version);
-              lut=new Map(typeRows.map(r=>[String(r.target_id),r.cell_type]));
+              lut=new Map(typeRows.map(r=>[String(r.target_id),{cell_type:r.cell_type,classification_system:r.classification_system}]));
             }
-            allPartners.forEach(p=>{const nid=rootToNuc.get(p.partner);p.cell_type=(nid&&lut.get(nid))||"";});
+            uniquePartners.forEach(pid=>{
+              const nid=rootToNuc.get(pid);
+              const info=nid&&lut.get(nid);
+              const somaPos=nid&&somaPosByNuc.get(nid);
+              const somaDepth=somaPos?estimateDepthGridded(somaPos[0],somaPos[1],somaPos[2]):null;
+              partnerInfo.set(pid,{
+                cell_type:(info&&info.cell_type)||"",
+                classification_system:(info&&info.classification_system)||"",
+                somaDepthUm:somaDepth?somaDepth.depthUm:null
+              });
+            });
+            allPartners.forEach(p=>{const pi=partnerInfo.get(p.partner);p.cell_type=(pi&&pi.cell_type)||"";});
             /* Not every partner has a nucleus detection at all (axon fragments, glial processes,
                and other non-somatic partner IDs simply aren't in nucleus_detection_v0), and not
                every nucleus has a type call, so some blanks are expected. But zero matches across
-               every shown partner usually means something went wrong with the query rather than
-               these specific cells lacking a type -- flag that instead of quietly showing dashes. */
-            if(shown.length&&![...lut.values()].some(v=>v)){
-              typeNote="Cell type lookup returned no matches for any partner (nucleus matches: "+rootToNuc.size+"/"+shown.length+", version "+version+") \u2014 open the browser console for details.";
+               every partner usually means something went wrong with the query rather than these
+               specific cells lacking a type -- flag that instead of quietly showing dashes. */
+            if(uniquePartners.length&&![...lut.values()].some(v=>v&&v.cell_type)){
+              typeNote="Cell type lookup returned no matches for any partner (nucleus matches: "+rootToNuc.size+"/"+uniquePartners.length+", version "+version+") \u2014 open the browser console for details.";
               console.warn("[uJump connectivity] cell-type lookup returned 0 type matches",{nucleusTable:CAVE_NUCLEUS_TABLE,typeTable:CAVE_TYPE_TABLE,version,ids,nucMatches:rootToNuc.size});
             }
           }catch(te){
@@ -3169,26 +3490,49 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
             console.warn("[uJump connectivity] cell-type lookup error",te);
           }
         }
+        /* Per-synapse depth + partner type/soma-depth, attached to EVERY point in allPoints (every
+           synapse the query returned) -- this is what the three graphs are built from below.
+           estimateDepthGridded() is the grid-accelerated sibling of estimateLayer() (see its own
+           comment), fast enough to run over potentially thousands of points from a single click. */
+        allPoints.forEach(p=>{
+          const d=estimateDepthGridded(Number(p.pos[0]),Number(p.pos[1]),Number(p.pos[2]));
+          p.synDepthUm=d?d.depthUm:null;
+          p.synLabel=d?d.label:"";
+          const pi=partnerInfo.get(p.partner);
+          p.cell_type=(pi&&pi.cell_type)||"";
+          p.classification_system=(pi&&pi.classification_system)||"";
+          p.somaDepthUm=(pi&&pi.somaDepthUm!=null)?pi.somaDepthUm:null;
+        });
+        lastPoints=allPoints;
         const shownIds=new Set(shown.map(p=>p.partner));
         const points=doSyn?allPoints.filter(p=>shownIds.has(p.partner)):[];
         const state=buildConnectivityState(centerPos,rootId,shown,points);
         const viewerEl=document.getElementById("viewer");
         const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
         const url=base+"#!"+encodeURIComponent(JSON.stringify(state));
-        setStatus(shown.length+" of "+allPartners.length+" partners"+(points.length?", "+Math.min(points.length,CAVE_MAX_SYN_POINTS)+" synapse points":"")+" \u2014 opening Neuroglancer\u2026","ok");
-        window.open(url,"_blank");
+        lastUrl=url;
+        setStatus(shown.length+" of "+allPartners.length+" partners"+(points.length?", "+Math.min(points.length,CAVE_MAX_SYN_POINTS)+" synapse points":"")+" loaded"+(allPoints.length?" ("+allPoints.length+" total synapses in the graphs below)":"")+".","ok");
         const rt=bod.querySelector("#connResults");
         if(rt){
           const rows2=[...allPartners].sort((a,b)=>b.syn_count-a.syn_count);
-          /* A real .xlsx (same SheetJS pattern as the bulk-filter export elsewhere in this file)
-             instead of a delimited text file -- a plain CSV depends on Excel guessing the right
-             list separator for the reader's regional settings before it splits into columns at
-             all, which is exactly what went wrong for Søren; writing true cells sidesteps
-             that entirely. Exports EVERY partner found, not just the top-N per direction
-             rendered in Neuroglancer. Root IDs stay as strings (not numbers) so SheetJS writes
-             them as text cells -- as plain numbers they'd exceed the 53-bit precision Excel's
-             floating-point numeric type can hold and get silently rounded/mangled. */
-          rt.innerHTML='<div style="margin-bottom:6px"><button class="idbtn" id="connXlsx" type="button">Download all connections (Excel)</button></div>'
+          /* Graphs + "Color by value" dropdown + the (now separate) Open in Neuroglancer button
+             are all rebuilt fresh here, same "only exists once results exist" lifecycle the Excel
+             download button already used (2026-08-04, Soren: split "Query & open in Neuroglancer"
+             into two buttons so Neuroglancer doesn't open automatically on every query -- the
+             Neuroglancer button below now behaves exactly like the Download button already did). */
+          rt.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+            +'<label style="font-size:11px;color:var(--mut)">Color by value</label>'
+            +'<select id="connColorBy" style="padding:4px 6px;font-size:12px">'
+            +'<option value="classification_system" selected>classification_system</option>'
+            +'<option value="cell_type">cell_type</option></select></div>'
+            +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-bottom:10px">'
+            +'<div id="'+chartIoId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:260px"></div>'
+            +'<div id="'+chartScatId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:260px"></div>'
+            +'<div id="'+chartDistId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:260px"></div>'
+            +'</div>'
+            +'<div style="margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap">'
+            +'<button class="idbtn" id="connNgl" type="button">Open in Neuroglancer</button>'
+            +'<button class="idbtn" id="connXlsx" type="button">Download all connections (Excel)</button></div>'
             +'<div class="scroll" style="max-height:260px;overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">dir</th>'
             +'<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)">partner root id</th>'
@@ -3200,8 +3544,19 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+p.syn_count+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+(p.syn_size||0)+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+escHtml(p.cell_type||"—")+'</td></tr>').join("")
-            +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the download and this table list every partner found. Per-synapse size and cortical depth are shown in Neuroglancer itself -- click/hover a yellow synapse point.</div>'
+            +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the graphs, download, and this table cover every partner/synapse found. Per-synapse size and cortical depth are also shown in Neuroglancer itself \u2014 click/hover a yellow synapse point.</div>'
             +(typeNote?'<div class="hint" style="margin-top:4px;color:#ffb74d">'+escHtml(typeNote)+'</div>':'');
+          const colorByEl=rt.querySelector("#connColorBy");
+          const ioEl=rt.querySelector("#"+chartIoId),scatEl=rt.querySelector("#"+chartScatId),distEl=rt.querySelector("#"+chartDistId);
+          connRenderAllCharts({io:ioEl,scatter:scatEl,dist:distEl},lastPoints,colorByEl?colorByEl.value:"classification_system");
+          if(colorByEl)colorByEl.addEventListener("change",()=>{
+            ensureConnPlotly().then(()=>{
+              connRenderScatterChart(scatEl,lastPoints,colorByEl.value);
+              connRenderDistChart(distEl,lastPoints,colorByEl.value);
+            });
+          });
+          const nglBtn=rt.querySelector("#connNgl");
+          if(nglBtn)nglBtn.addEventListener("click",()=>{if(lastUrl)window.open(lastUrl,"_blank");});
           const xlsxBtn=rt.querySelector("#connXlsx");
           if(xlsxBtn)xlsxBtn.addEventListener("click",()=>{
             const data=[["query_root_id","direction","partner_root_id","syn_count","syn_size","cell_type"]];
