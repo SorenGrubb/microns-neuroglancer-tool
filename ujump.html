@@ -2603,6 +2603,17 @@ function decorateMeshVolButtons(){
     const known=rootId&&map[String(rootId)];
     if(!known)return;
     const label="Recalculate (≈ "+Math.round(known.volumeUm3).toLocaleString()+" µm³)";
+    /* 2026-08-03 fix (Søren: "if I input a coordinate of a cell that has its computed volume...
+       µJump freezes"). `btn.textContent=label` ALWAYS replaces the button's child text node, even
+       when the string is byte-for-byte identical to what's already there -- that's still a
+       childList mutation. This function is invoked by the MutationObserver below watching
+       #cellPanelCard with {childList:true,subtree:true}, so writing textContent here re-triggers
+       that same observer, which calls decorateMeshVolButtons() again, which writes textContent
+       again... an infinite microtask loop that pegs the JS thread and hangs the tab. It only bit
+       once enough cells had a saved volume that navigating to one (map already "known" from a
+       PRIOR session, not data-vol-fresh from this click) became routine -- the guard below makes
+       the function idempotent: skip the DOM write entirely once the label already matches. */
+    if(btn.dataset.origLabel===label)return;
     btn.textContent=label;
     btn.dataset.origLabel=label;
     btn.title="A volume for this root ID was already computed and saved to the shared dashboard"+(known.timestamp?" on "+String(known.timestamp).slice(0,10):"")+". Click to recalculate (e.g. after a re-proofread mesh) -- this replaces the saved value rather than adding a duplicate.";
