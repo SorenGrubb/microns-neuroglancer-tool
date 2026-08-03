@@ -3277,7 +3277,7 @@ function connRenderIODepthChart(divId,points){
     showlegend:true,legend:{orientation:"h",y:1.14,font:{size:10}},
     xaxis:{type:"category",visible:false,fixedrange:true},
     yaxis:{autorange:"reversed",tickvals:ticks.tickvals,ticktext:ticks.ticktext,
-      gridcolor:"transparent",zeroline:false,title:"Synapse Depth"},
+      gridcolor:"transparent",zeroline:false,title:"Synapse Depth",automargin:true},
     shapes:connLayerShapes("y")
   }),CONN_PLOTLY_CFG);
 }
@@ -3313,7 +3313,7 @@ function connRenderScatterChart(divId,points,colorField){
     xaxis:{tickvals:ticks.tickvals,ticktext:ticks.ticktext,gridcolor:"transparent",
       zeroline:false,title:"Soma Depth",automargin:true},
     yaxis:{autorange:"reversed",tickvals:ticks.tickvals,ticktext:ticks.ticktext,
-      gridcolor:"transparent",zeroline:false,title:"Synapse Depth"},
+      gridcolor:"transparent",zeroline:false,title:"Synapse Depth",automargin:true},
     shapes:connLayerShapes("y").concat(connLayerShapes("x"))
   }),CONN_PLOTLY_CFG);
 }
@@ -3345,11 +3345,12 @@ function connRenderDistChart(divId,points,colorField){
 /* Draws all three graphs together -- called once right after a successful query (Søren: "The
    graphs should be made when pressing query") and again whenever the colour-by dropdown changes
    (cheap: no re-query, just re-groups/re-colours the already-fetched points in memory). */
-function connRenderAllCharts(ids,points,colorField){
+function connRenderAllCharts(ids,points,colorField,showNoType){
   ensureConnPlotly().then(function(){
     connRenderIODepthChart(ids.io,points);
-    connRenderScatterChart(ids.scatter,points,colorField);
-    connRenderDistChart(ids.dist,points,colorField);
+    const typed=showNoType?points:points.filter(function(p){return !!p[colorField];});
+    connRenderScatterChart(ids.scatter,typed,colorField);
+    connRenderDistChart(ids.dist,typed,colorField);
   }).catch(function(err){
     [ids.io,ids.scatter,ids.dist].forEach(function(elOrId){
       const el=(typeof elOrId==="string")?document.getElementById(elOrId):elOrId;
@@ -3532,15 +3533,17 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
              download button already used (2026-08-04, Soren: split "Query & open in Neuroglancer"
              into two buttons so Neuroglancer doesn't open automatically on every query -- the
              Neuroglancer button below now behaves exactly like the Download button already did). */
-          rt.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
-            +'<label style="font-size:11px;color:var(--mut)">Color by value</label>'
+          rt.innerHTML='<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px">'
+            +'<div style="display:flex;align-items:center;gap:8px"><label style="font-size:11px;color:var(--mut)">Color by value</label>'
             +'<select id="connColorBy" style="padding:4px 6px;font-size:12px">'
             +'<option value="classification_system" selected>classification_system</option>'
             +'<option value="cell_type">cell_type</option></select></div>'
-            +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-bottom:10px">'
-            +'<div id="'+chartIoId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:260px"></div>'
-            +'<div id="'+chartScatId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:260px"></div>'
-            +'<div id="'+chartDistId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:260px"></div>'
+            +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer;font-size:11px;color:var(--mut)"><input type="checkbox" id="connShowNoType"> show unmatched (No Type)</label>'
+            +'</div>'
+            +'<div style="margin-bottom:10px"><div id="'+chartIoId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:280px"></div></div>'
+            +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;margin-bottom:10px">'
+            +'<div id="'+chartScatId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:280px"></div>'
+            +'<div id="'+chartDistId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:280px"></div>'
             +'</div>'
             +'<div style="margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap">'
             +'<button class="idbtn" id="connNgl" type="button">Open in Neuroglancer</button>'
@@ -3559,14 +3562,23 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
             +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the graphs, download, and this table cover every partner/synapse found. Per-synapse size and cortical depth are also shown in Neuroglancer itself \u2014 click/hover a yellow synapse point.</div>'
             +(typeNote?'<div class="hint" style="margin-top:4px;color:'+(typeNoteWarn?"#ffb74d":"var(--mut)")+'">'+escHtml(typeNote)+'</div>':'');
           const colorByEl=rt.querySelector("#connColorBy");
+          const noTypeEl=rt.querySelector("#connShowNoType");
           const ioEl=rt.querySelector("#"+chartIoId),scatEl=rt.querySelector("#"+chartScatId),distEl=rt.querySelector("#"+chartDistId);
-          connRenderAllCharts({io:ioEl,scatter:scatEl,dist:distEl},lastPoints,colorByEl?colorByEl.value:"classification_system");
-          if(colorByEl)colorByEl.addEventListener("change",()=>{
+          connRenderAllCharts({io:ioEl,scatter:scatEl,dist:distEl},lastPoints,colorByEl?colorByEl.value:"classification_system",noTypeEl?noTypeEl.checked:false);
+          /* Shared by both the "Color by value" dropdown and the "show unmatched" checkbox --
+             neither needs a re-query, just a re-group/re-filter/re-colour of the already-fetched
+             lastPoints (2026-08-05, Søren: opt-in No Type toggle, off by default). */
+          const rerenderColorCharts=()=>{
             ensureConnPlotly().then(()=>{
-              connRenderScatterChart(scatEl,lastPoints,colorByEl.value);
-              connRenderDistChart(distEl,lastPoints,colorByEl.value);
+              const cf=colorByEl?colorByEl.value:"classification_system";
+              const showNoType=noTypeEl?noTypeEl.checked:false;
+              const typed=showNoType?lastPoints:lastPoints.filter(function(p){return !!p[cf];});
+              connRenderScatterChart(scatEl,typed,cf);
+              connRenderDistChart(distEl,typed,cf);
             });
-          });
+          };
+          if(colorByEl)colorByEl.addEventListener("change",rerenderColorCharts);
+          if(noTypeEl)noTypeEl.addEventListener("change",rerenderColorCharts);
           const nglBtn=rt.querySelector("#connNgl");
           if(nglBtn)nglBtn.addEventListener("click",()=>{if(lastUrl)window.open(lastUrl,"_blank");});
           const xlsxBtn=rt.querySelector("#connXlsx");
