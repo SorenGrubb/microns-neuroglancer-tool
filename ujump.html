@@ -286,16 +286,35 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <label style="font-size:12px"><input type="checkbox" id="fvt_pial_venules" class="fvasctrace" value="pial_venules"> Pial venules</label>
 </div>
 </div>
-<div style="margin-top:10px">
-<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell's nucleus centre to its centriole, or from cilium base to tip, for cells that carry one in the verified dataset. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCentVec" style="width:auto"> Include nucleus-to-centriole vectors</label>
-<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell's nucleus centre to its centriole, or from cilium base to tip, for cells that carry one in the verified dataset. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCilVec" style="width:auto"> Include primary cilia base-to-tip vectors</label>
+<div style="margin-top:14px">
+<label style="font-size:12px" title="Draws organelle/structure point annotations for the cells matched above — one independently-toggleable layer per kind you check here, colour-coded per kind. Sourced from the community 'report an organelle' data; centriole and primary cilium also draw from Søren's own-verified dataset. No point for a given cell just means nobody has logged one there yet, not a confirmed biological absence. The two vector checkboxes below draw an additional 3D arrow on top of the plain points — check a point checkbox on its own to show the organelle's location without the vector.">Include organelles</label>
+<div class="toggles" style="margin-top:4px">
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="centriole"> Centriole / centrosome</label>
+<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell's nucleus centre to its centriole, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCentVec"> Nucleus-to-centriole vector</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="cilium"> Primary cilium (base + tip)</label>
+<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from cilium base to tip, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCilVec"> Primary cilia base-to-tip vector</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="lysosome"> Lysosome</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="peroxisome"> Peroxisome</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="golgi"> Golgi apparatus</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="er"> Endoplasmic reticulum</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="mitochondria"> Mitochondria</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="mvb"> Multivesicular body</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="lipid_droplet"> Lipid droplet</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="phagosome"> Phagosome</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="glycogen"> Glycogen</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="adherens_junction"> Adherens junction</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="gap_junction"> Gap junction</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="tight_junction"> Tight junction</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="gfap"> GFAP</label>
+<label style="font-size:12px"><input type="checkbox" class="forgpt" value="synapse"> Synapse</label>
+</div>
 </div>
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
 <button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
 </div>
 <div class="row" style="margin-top:8px;gap:10px">
-<button class="idbtn" id="filterViewerAll" disabled title="Click &quot;Preview matches&quot; first — opens a zoomed-out 3D view sized to fit every matching cell, one colour-coded layer per cell type plus its own nuclei layer; any &quot;Add to the Neuroglancer view&quot; options checked above (vasculature outline, EM imagery, V1 column boundary, traced vessel lines, centriole/cilia vectors) are added as extra toggleable layers, but never change which cells matched or what's in the Excel export." style="flex:1">Open all matches in Neuroglancer (3D)</button>
+<button class="idbtn" id="filterViewerAll" disabled title="Click &quot;Preview matches&quot; first — opens a zoomed-out 3D view sized to fit every matching cell, one colour-coded layer per cell type plus its own nuclei layer; any &quot;Add to the Neuroglancer view&quot; options checked above (vasculature outline, EM imagery, V1 column boundary, traced vessel lines, organelle points, centriole/cilia vectors) are added as extra toggleable layers, but never change which cells matched or what's in the Excel export." style="flex:1">Open all matches in Neuroglancer (3D)</button>
 </div>
 <div class="card" id="stepThroughCard" style="margin-top:14px;background:#0f1420;display:none">
 <label style="font-size:12px" title="Visits every matched cell exactly once, in a fixed order — unlike the random buttons on the Jump tab, nothing is skipped or repeated. Each step loads the cell into the Jump tab's identification panel, same as clicking there directly. Progress (current position + how many you've checked) is remembered in this browser for this exact set of matched cells, so closing the tab and coming back later resumes where you left off — changing the filters above and re-previewing starts a fresh count.">Systematically step through matches</label>
@@ -8087,7 +8106,30 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       return map;
     }catch(_){return{};}
   }
-  function buildFilterViewerState(matches,includeVasc,includeEM,includeV1Col,includeVascTrace,includeCentVec,includeCilVec){
+  /* Colour per organelle kind for the "Include organelles" point layers (2026-08-06, Søren:
+     "I want to include all the organelles as an addon to the Neuroglancer view ... the nucleus
+     and centrioles can also be shown without the vector"). Local to this script block rather than
+     reusing ORGANELLE_KINDS (defined in an earlier <script> tag -- top-level const/let bindings
+     don't cross <script> tag boundaries in a browser, only `var`/`window.x` do) -- kept in the
+     same value-string order as ORGANELLE_KINDS purely for readability, not a hard dependency.
+     Centriole/cilium reuse their own vector colours for a natural pairing; the other 14 get a
+     distinct, readable-on-dark-background palette. */
+  const ORG_POINT_COLORS={
+    centriole:"#ffd21a",cilium:"#ff5bd0",lysosome:"#ff6b6b",peroxisome:"#ffa94d",
+    golgi:"#69db7c",er:"#4dabf7",mitochondria:"#e64980",mvb:"#9775fa",
+    lipid_droplet:"#fab005",phagosome:"#20c997",glycogen:"#f783ac",
+    adherens_junction:"#74c0fc",gap_junction:"#63e6be",tight_junction:"#ffa8a8",
+    gfap:"#b197fc",synapse:"#dee2e6"
+  };
+  const ORG_POINT_LABELS={
+    centriole:"Centriole / centrosome",cilium:"Primary cilium (base + tip)",lysosome:"Lysosome",
+    peroxisome:"Peroxisome",golgi:"Golgi apparatus",er:"Endoplasmic reticulum",
+    mitochondria:"Mitochondria",mvb:"Multivesicular body",lipid_droplet:"Lipid droplet",
+    phagosome:"Phagosome",glycogen:"Glycogen",adherens_junction:"Adherens junction",
+    gap_junction:"Gap junction",tight_junction:"Tight junction",gfap:"GFAP",synapse:"Synapse"
+  };
+  function buildFilterViewerState(matches,includeVasc,includeEM,includeV1Col,includeVascTrace,includeCentVec,includeCilVec,includeOrgPoints){
+    includeOrgPoints=includeOrgPoints||[];
     /* "position" in a Neuroglancer state is in VOXEL units of the declared per-axis scale
        (matching how buildState/buildExampleState use it elsewhere in this file) -- NOT
        physical nanometres. The first version of this function centred on the nm-averaged
@@ -8187,31 +8229,58 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       layers.push({type:"segmentation",source:SRC.seg,tab:"source",name:"Vasculature (Img65)",segments:[VASC_ID_IMG65],segmentColors:{[VASC_ID_IMG65]:VASC_COLOR},objectAlpha:0.3});
       layers.push({type:"segmentation",source:SRC.seg35,tab:"source",name:"Vasculature (Img35)",segments:[VASC_ID_IMG35],segmentColors:{[VASC_ID_IMG35]:VASC_COLOR},objectAlpha:0.3});
     }
-    if(includeCentVec||includeCilVec){
+    if(includeCentVec||includeCilVec||includeOrgPoints.length){
       var centAnns=[],cilAnns=[],ORG=window.ORG_MAP||{};
+      /* 2026-08-06 (Søren: "include all the organelles as an addon ... nucleus and centrioles can
+         also be shown without the vector") -- ptAnnsByKind collects plain point markers (no arrow/
+         line) per organelle kind, independent of the two vector checkboxes above. addPt() is a
+         no-op unless that kind's checkbox is actually ticked, so this costs nothing when only the
+         vectors (or nothing) are requested. Centriole/cilium points draw from the SAME two sources
+         as their vectors (own-verified dataset + community ORG_MAP reports); the other 14 kinds
+         only ever come from ORG_MAP, since the OWN_ / ST_ arrays never carried anything but
+         centriole and cilium. */
+      var ptAnnsByKind={};
+      function addPt(kind,pt,id){
+        if(includeOrgPoints.indexOf(kind)<0)return;
+        (ptAnnsByKind[kind]=ptAnnsByKind[kind]||[]).push({type:"point",id:id,point:pt});
+      }
       for(var mi=0;mi<matches.length;mi++){
         var mr=matches[mi].row; if(!mr)continue;
         if(mr.space==="N"){
           var nvox=[NX[mr.i],NY[mr.i],NZ[mr.i]],own=ownOverride(mr.i);
           if(own&&includeCentVec&&own.centriole)centAnns=centAnns.concat(vecArrowAnns(nvox,own.centriole,"#ffd21a","cv"+mr.i));
           if(own&&includeCilVec&&own.cilium)cilAnns=cilAnns.concat(vecArrowAnns(own.cilium[0],own.cilium[1],"#ff5bd0","clv"+mr.i));
+          if(own&&own.centriole)addPt("centriole",own.centriole,"cvpt"+mr.i);
+          if(own&&own.cilium){addPt("cilium",own.cilium[0],"clvptA"+mr.i);addPt("cilium",own.cilium[1],"clvptB"+mr.i);}
           var reps=ORG[String(NID[mr.i])];
           if(reps)for(var ri=0;ri<reps.length;ri++){var o=reps[ri];
             if(includeCentVec&&o.kind==="centriole"&&o.a)centAnns=centAnns.concat(vecArrowAnns(nvox,o.a,"#ffd21a","cvc"+mr.i+"_"+ri));
             if(includeCilVec&&o.kind==="cilium"&&o.a&&o.b)cilAnns=cilAnns.concat(vecArrowAnns(o.a,o.b,"#ff5bd0","clvc"+mr.i+"_"+ri));
+            if(o.a)addPt(o.kind,o.a,"orgptA"+mr.i+"_"+ri);
+            if(o.b)addPt(o.kind,o.b,"orgptB"+mr.i+"_"+ri);
           }
         } else if(mr.space==="ST"){
           /* Standalone (out-of-region / Img35) verified points carry their own centriole (ST_CENT*)
              and primary-cilium (ST_CIL*) coordinates -- these were being skipped entirely, so the
              vectors never appeared in Img35 territory. Draw them the same way as the N-space nuclei,
-             just sourced from the ST_* arrays and anchored on the standalone point's own coordinate. */
+             just sourced from the ST_* arrays and anchored on the standalone point's own coordinate.
+             ST-space rows have no community ORG_MAP entry of their own (that cache is keyed by
+             nucleusId), so their organelle data is limited to centriole/cilium, same as before. */
           var svox=[ST_X[mr.i],ST_Y[mr.i],ST_Z[mr.i]];
           if(includeCentVec&&ST_HASCENT[mr.i])centAnns=centAnns.concat(vecArrowAnns(svox,[ST_CENTX[mr.i],ST_CENTY[mr.i],ST_CENTZ[mr.i]],"#ffd21a","stcv"+mr.i));
           if(includeCilVec&&ST_HASCIL[mr.i])cilAnns=cilAnns.concat(vecArrowAnns([ST_CILSX[mr.i],ST_CILSY[mr.i],ST_CILSZ[mr.i]],[ST_CILEX[mr.i],ST_CILEY[mr.i],ST_CILEZ[mr.i]],"#ff5bd0","stclv"+mr.i));
+          if(ST_HASCENT[mr.i])addPt("centriole",[ST_CENTX[mr.i],ST_CENTY[mr.i],ST_CENTZ[mr.i]],"stcvpt"+mr.i);
+          if(ST_HASCIL[mr.i]){addPt("cilium",[ST_CILSX[mr.i],ST_CILSY[mr.i],ST_CILSZ[mr.i]],"stclvptA"+mr.i);addPt("cilium",[ST_CILEX[mr.i],ST_CILEY[mr.i],ST_CILEZ[mr.i]],"stclvptB"+mr.i);}
         }
       }
       if(centAnns.length)layers.push({type:"annotation",source:"local://annotations",annotations:centAnns,annotationProperties:[{id:"color",type:"rgb",default:"#ffd21a"}],shader:"void main() { setColor(prop_color()); }",name:"Nucleus→centriole vectors"});
       if(cilAnns.length)layers.push({type:"annotation",source:"local://annotations",annotations:cilAnns,annotationProperties:[{id:"color",type:"rgb",default:"#ff5bd0"}],shader:"void main() { setColor(prop_color()); }",name:"Cilium base→tip vectors"});
+      includeOrgPoints.forEach(function(kind){
+        var anns=ptAnnsByKind[kind];
+        if(!anns||!anns.length)return;
+        var color=ORG_POINT_COLORS[kind]||"#ffffff",label=ORG_POINT_LABELS[kind]||kind;
+        layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:color,name:label+" (points)"});
+      });
     }
     /* Each active region box gets its own local annotation layer so it's drawn as an outline
        in the 3D view too -- one layer per box (rather than one shared layer with N boxes
@@ -8333,11 +8402,19 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     await new Promise(r=>setTimeout(r,10)); // let "Building view…" repaint before the work below
     if(vascTraceSlugs.length)viewAllBtn.textContent="Fetching vasculature tracings…";
     const vascTraceLayers=await buildVascTraceLayers(vascTraceSlugs); // [] if none checked or all failed
-    if((document.getElementById("filterCentVec")&&document.getElementById("filterCentVec").checked)||(document.getElementById("filterCilVec")&&document.getElementById("filterCilVec").checked)){viewAllBtn.textContent="Fetching organelle reports…";window.ORG_MAP=await fetchAllOrganelles();}else{window.ORG_MAP={};}
+    /* 2026-08-06: the organelle-points checkboxes (.forgpt) need the SAME ORG_MAP fetch as the two
+       vector checkboxes -- all 16 kinds live in the one "?allOrganelles=1" response (see
+       fetchAllOrganelles() above), so no separate endpoint call is needed, just a broader trigger
+       condition covering whichever of the 18 organelle-related checkboxes (2 vectors + 16 point
+       kinds) is actually checked. */
+    const orgPointKinds=Array.from(document.querySelectorAll(".forgpt:checked")).map(el=>el.value);
+    const centVecOn=document.getElementById("filterCentVec")&&document.getElementById("filterCentVec").checked;
+    const cilVecOn=document.getElementById("filterCilVec")&&document.getElementById("filterCilVec").checked;
+    if(centVecOn||cilVecOn||orgPointKinds.length){viewAllBtn.textContent="Fetching organelle reports…";window.ORG_MAP=await fetchAllOrganelles();}else{window.ORG_MAP={};}
     viewAllBtn.textContent="Fetching proposed segmentation IDs…";
     window.ALL_ROOTID_PROPOSALS=await fetchAllRootIdProposals();
     viewAllBtn.textContent="Building view…";
-    const state=buildFilterViewerState(lastResult.matches,vascChk&&vascChk.checked,emChk&&emChk.checked,v1ColChk&&v1ColChk.checked,vascTraceSlugs.length>0,document.getElementById("filterCentVec")&&document.getElementById("filterCentVec").checked,document.getElementById("filterCilVec")&&document.getElementById("filterCilVec").checked);
+    const state=buildFilterViewerState(lastResult.matches,vascChk&&vascChk.checked,emChk&&emChk.checked,v1ColChk&&v1ColChk.checked,vascTraceSlugs.length>0,centVecOn,cilVecOn,orgPointKinds);
     viewAllBtn.disabled=false;viewAllBtn.textContent=orig;
     if(!state)return;
     if(vascTraceLayers.length)state.layers.push(...vascTraceLayers);
@@ -8346,8 +8423,9 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const mb=(url.length/1024/1024).toFixed(1);
       const proceed=confirm(
         "This view is large ("+mb+" MB, "+url.length.toLocaleString()+" characters) and may fail to open "+
-        "or load slowly in Neuroglancer.\n\nTo shrink it: uncheck some traced vasculature categories, "+
-        "turn off EM imagery, narrow your match filters, or reduce the number of region boxes.\n\n"+
+        "or load slowly in Neuroglancer.\n\nTo shrink it: uncheck some traced vasculature categories or "+
+        "organelle points, turn off EM imagery, narrow your match filters, or reduce the number of "+
+        "region boxes.\n\n"+
         "Open it anyway?"
       );
       if(!proceed)return;
