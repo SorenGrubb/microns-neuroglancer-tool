@@ -19,6 +19,15 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}
   .topwrap{max-width:1400px;margin:0 auto;padding:24px 24px 0}
+  /* 2026-08 (Søren: embedded inside ujump.html's own new "Statistics dashboard" tab -- see
+     [[ujump-dashboard-embed]] -- the logo and Jump/Filter/References/Statistics-dashboard tab bar
+     right below it now duplicate the SAME logo+tab bar already showing in the parent page above the
+     iframe). Hidden only when this page detects it's actually framed (embedded.js below); a direct,
+     standalone visit to ujump_dashboard.html is completely unaffected and still shows both. The
+     subhead paragraph + "Refresh live data" toolbar are NOT duplicated by the parent page, so those
+     stay either way. */
+  .embedded .dashlogo,.embedded .tabbar{display:none}
+  .embedded .topwrap{padding-top:8px}
   .logo{font:800 36px/1 "Segoe UI",system-ui,-apple-system,sans-serif;letter-spacing:-.03em;margin:0 0 6px;display:inline-flex;align-items:baseline}
   .logo .mu{color:var(--accent);font-style:italic;transform:translateY(1px)}
   .logo .jm{color:var(--ink)}
@@ -48,8 +57,13 @@
 </style>
 </head>
 <body>
+<!-- Same-origin frame check, run synchronously (blocks parsing) before the logo/tab bar below are
+     ever painted, so there's no flash-of-duplicated-chrome on load. window.top throws instead of
+     just differing if the parent is ever cross-origin -- caught defensively, though in practice
+     ujump.html and ujump_dashboard.html are always same-origin (both served from grubblab.com). -->
+<script>try{if(window.self!==window.top)document.documentElement.classList.add("embedded");}catch(e){}</script>
 <div class="topwrap">
-<a href="ujump.html" target="_top" style="text-decoration:none;color:inherit;display:inline-block" title="Back to µJump"><h1 class="logo"><span class="mu">µ</span><span class="jm">Jump</span><span class="dash">Statistics dashboard</span></h1></a>
+<a href="ujump.html" target="_top" class="dashlogo" style="text-decoration:none;color:inherit;display:inline-block" title="Back to µJump"><h1 class="logo"><span class="mu">µ</span><span class="jm">Jump</span><span class="dash">Statistics dashboard</span></h1></a>
 <div class="tabbar" id="mainTabs" role="tablist">
 <a href="ujump.html?tab=jump" target="_top" class="tabbtn">🔍 Jump</a>
 <a href="ujump.html?tab=filter" target="_top" class="tabbtn">📥 Filter and show</a>
