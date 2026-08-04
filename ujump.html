@@ -14,6 +14,16 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
 .tabbtn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
 .tabpanel{display:none}
 .tabpanel.active{display:block}
+/* 2026-08 (Søren: opening the dashboard used to mean leaving ujump.html entirely -- a target=_blank
+   link to ujump_dashboard.html -- "not nice that you have to exit the url and lose the Google
+   login"). Now a 4th tab like the others, showing the SAME unmodified ujump_dashboard.html inline
+   via an iframe -- the page is never actually left, so there's nothing to lose. Kept as a separate
+   file (not inlined) specifically so this doesn't grow ujump.html itself; only a few lines of
+   wiring live here. Breaks out of .wrap's 760px column (full-bleed, standard vw/negative-margin
+   trick) since the dashboard's own multi-column Plotly grid wants real width -- squeezing it into
+   the narrow Jump/Filter column would work but cram every chart into one skinny stack. */
+.tabpanel[data-tabpanel="dashboard"]{max-width:none;width:100vw;position:relative;left:50%;margin-left:-50vw}
+.dash-iframe{display:block;width:100%;height:calc(100vh - 170px);min-height:640px;border:none;background:var(--bg)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
 label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:6px}
 .row{display:flex;gap:10px;flex-wrap:wrap}.coord{flex:1;min-width:90px}
@@ -137,7 +147,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
 <button type="button" class="tabbtn" data-tab="refs" role="tab" aria-selected="false">📚 References</button>
-<a href="ujump_dashboard.html" target="_blank" rel="noopener" class="tabbtn" title="Live/static statistics dashboard built from this dataset + the community-reporting backend">📊 Statistics dashboard</a>
+<button type="button" class="tabbtn" data-tab="dashboard" role="tab" aria-selected="false" title="Live/static statistics dashboard built from this dataset + the community-reporting backend — opens inline, no separate tab or re-login">📊 Statistics dashboard</button>
 </div>
 <script>
 (function(){
@@ -148,6 +158,15 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
     btns.forEach(function(b){var on=b.dataset.tab===name;b.classList.toggle("active",on);b.setAttribute("aria-selected",on?"true":"false");});
     document.querySelectorAll(".tabpanel").forEach(function(p){p.classList.toggle("active",p.dataset.tabpanel===name);});
     try{localStorage.setItem("ujump_active_tab",name);}catch(e){}
+    /* Lazy-load the dashboard iframe: its src is left blank in the markup so a normal Jump/Filter
+       session never pays for ujump_dashboard.html's own Plotly CDN fetch + live-data request,
+       only whoever actually opens that tab does -- set once, first time, then left alone (so
+       re-clicking the tab doesn't reload/lose the dashboard's own scroll position or its
+       "Refresh live data" state). */
+    if(name==="dashboard"){
+      var f=document.getElementById("dashFrame");
+      if(f&&!f.getAttribute("src"))f.setAttribute("src",f.dataset.src);
+    }
   }
   btns.forEach(function(b){b.addEventListener("click",function(){activate(b.dataset.tab);});});
   window.__ujumpActivateTab=activate;
@@ -340,6 +359,14 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <p class="hint">White matter function: <a class="ref" href="https://doi.org/10.1016/j.tins.2008.04.001" target="_blank" rel="noopener">Fields, &ldquo;White matter in learning, cognition and psychiatric disorders,&rdquo; Trends in Neurosciences 31, 361&ndash;370 (2008)</a>.</p>
 <p class="hint">Nearest-nucleus, IDs &amp; predictions from <a class="ref" href="https://minnie.microns-daf.com/dash/datastack/minnie65_public/apps/table_viewer/?datastack=%22minnie65_public%22" target="_blank" rel="noopener" title="Opens the CAVE Table Viewer &mdash; choose this table from the dropdown"><code>nucleus_detection_v0</code></a> and <a class="ref" href="https://minnie.microns-daf.com/dash/datastack/minnie65_public/apps/table_viewer/?datastack=%22minnie65_public%22" target="_blank" rel="noopener" title="Opens the CAVE Table Viewer &mdash; choose this table from the dropdown"><code>aibs_metamodel_celltypes_V661</code></a> (minnie65 only).</p>
 </div>
+</div>
+<div class="tabpanel" data-tabpanel="dashboard">
+<!-- src is set on first activation by activate() above (see its comment) -- ujump_dashboard.html
+     itself is unchanged/unmoved, still a normal standalone page when visited directly; its own
+     nav links (logo + Jump/Filter/References) now carry target="_top" specifically so clicking
+     them from in here navigates THIS page instead of trying to load ujump.html a second time
+     inside the iframe. -->
+<iframe id="dashFrame" class="dash-iframe" data-src="ujump_dashboard.html" title="µJump statistics dashboard" loading="lazy"></iframe>
 </div>
 <div class="card" id="cellPanelCard">
 <p class="err" id="err"></p>
