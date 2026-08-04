@@ -23,7 +23,37 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
    trick) since the dashboard's own multi-column Plotly grid wants real width -- squeezing it into
    the narrow Jump/Filter column would work but cram every chart into one skinny stack. */
 .tabpanel[data-tabpanel="dashboard"]{max-width:none;width:100vw;position:relative;left:50%;margin-left:-50vw}
-.dash-iframe{display:block;width:100%;height:calc(100vh - 170px);min-height:640px;border:none;background:var(--bg)}
+/* 2026-08 (Søren, after finding out ujump_dashboard.html is only ~55KB against ujump.html's own
+   multi-MB embedded-data footprint: "I think we should incorporate it fully into the µJump file")
+   -- superseded the iframe embed ([[ujump-dashboard-embed]]) with the dashboard's REAL markup/CSS/
+   JS pasted directly in. Scoped under #dashPanel (the tabpanel div itself) rather than trusting
+   cascade order, since several of the dashboard's own selector names collide EXACTLY with rules
+   ujump.html already has for its own unrelated UI (.card padding/margin differ; .logo/.tabbar/
+   .tabbtn are dropped outright below since that markup no longer exists at all here -- no more
+   duplicate-chrome problem to hide, there's simply only one). REPORT_ENDPOINT/LAYER_COLORS (the
+   dashboard script's own internal names) do NOT need renaming despite ALSO colliding by name with
+   ujump.html's own top-level `const`s of the same name -- the dashboard's entire script stays
+   wrapped in its own function scope (`initDashboardTab()`, see its own comment below), so its
+   internal REPORT_ENDPOINT/LAYER_COLORS shadow rather than collide with ujump.html's outer ones. */
+#dashPanel header{padding:0 0 10px;border-bottom:1px solid var(--line)}
+#dashPanel .subhead{color:var(--mut);font-size:13px;margin:0 0 16px;max-width:900px}
+#dashPanel .toolbar{display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap}
+#dashPanel button.refresh{background:var(--accent);color:#06231c;border:none;border-radius:7px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
+#dashPanel button.refresh:hover{opacity:.9}
+#dashPanel button.refresh:disabled{background:#21262d;color:var(--mut);cursor:not-allowed}
+#dashPanel .status{font-size:12px;color:var(--mut)}
+#dashPanel .grid{max-width:1400px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:18px;padding:20px 24px 60px}
+#dashPanel .card{padding:14px 16px 6px;margin-bottom:0;min-width:0}
+#dashPanel .card.wide{grid-column:1/-1}
+#dashPanel .card h2{font-size:14px;margin:0 0 2px;font-weight:700;color:var(--ink)}
+#dashPanel .card .sub{font-size:11.5px;color:var(--mut);margin:0 0 8px;line-height:1.4}
+#dashPanel .plot{width:100%;height:360px}
+#dashPanel .plot.tall{height:430px}
+#dashPanel select.picker{font-size:12px;padding:3px 6px;border-radius:5px;border:1px solid var(--line);background:#0b0f14;color:var(--ink);margin-left:6px}
+#dashPanel .placeholder{display:flex;align-items:center;justify-content:center;height:360px;color:var(--mut);font-size:13px;text-align:center;padding:0 30px;line-height:1.5}
+#dashPanel .footnote{font-size:10.5px;color:var(--mut);margin:4px 0 10px;line-height:1.4}
+#dashPanel a{color:var(--accent)}
+#dashPanel .topwrap{max-width:1400px;margin:0 auto;padding:8px 24px 0}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
 label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:6px}
 .row{display:flex;gap:10px;flex-wrap:wrap}.coord{flex:1;min-width:90px}
@@ -158,14 +188,21 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
     btns.forEach(function(b){var on=b.dataset.tab===name;b.classList.toggle("active",on);b.setAttribute("aria-selected",on?"true":"false");});
     document.querySelectorAll(".tabpanel").forEach(function(p){p.classList.toggle("active",p.dataset.tabpanel===name);});
     try{localStorage.setItem("ujump_active_tab",name);}catch(e){}
-    /* Lazy-load the dashboard iframe: its src is left blank in the markup so a normal Jump/Filter
-       session never pays for ujump_dashboard.html's own Plotly CDN fetch + live-data request,
-       only whoever actually opens that tab does -- set once, first time, then left alone (so
-       re-clicking the tab doesn't reload/lose the dashboard's own scroll position or its
-       "Refresh live data" state). */
-    if(name==="dashboard"){
-      var f=document.getElementById("dashFrame");
-      if(f&&!f.getAttribute("src"))f.setAttribute("src",f.dataset.src);
+    /* Lazy-init the dashboard: initDashboardTab() (defined near the dashboard's own markup further
+       down, see #dashPanel) is a real ~43KB chunk of chart-rendering code plus a live network
+       fetch -- a normal Jump/Filter session should never pay for either, only whoever actually
+       opens this tab does. ensureConnPlotly() (defined later in the file, next to the
+       connectivity-panel charts that already share it) lazily fetches the Plotly CDN bundle only
+       once, the first time ANY chart anywhere in this page is needed -- reused here rather than a
+       second independent Plotly load. Guarded by window.__dashTabInited so re-clicking an
+       already-open dashboard tab doesn't re-run initDashboardTab() and reset its own "Refresh live
+       data" state. */
+    if(name==="dashboard"&&!window.__dashTabInited){
+      window.__dashTabInited=true;
+      var statusEl=document.getElementById("statusLine");
+      ensureConnPlotly().then(function(){initDashboardTab();}).catch(function(err){
+        if(statusEl)statusEl.textContent="Failed to load the charting library — "+err.message;
+      });
     }
   }
   btns.forEach(function(b){b.addEventListener("click",function(){activate(b.dataset.tab);});});
@@ -360,13 +397,847 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <p class="hint">Nearest-nucleus, IDs &amp; predictions from <a class="ref" href="https://minnie.microns-daf.com/dash/datastack/minnie65_public/apps/table_viewer/?datastack=%22minnie65_public%22" target="_blank" rel="noopener" title="Opens the CAVE Table Viewer &mdash; choose this table from the dropdown"><code>nucleus_detection_v0</code></a> and <a class="ref" href="https://minnie.microns-daf.com/dash/datastack/minnie65_public/apps/table_viewer/?datastack=%22minnie65_public%22" target="_blank" rel="noopener" title="Opens the CAVE Table Viewer &mdash; choose this table from the dropdown"><code>aibs_metamodel_celltypes_V661</code></a> (minnie65 only).</p>
 </div>
 </div>
-<div class="tabpanel" data-tabpanel="dashboard">
-<!-- src is set on first activation by activate() above (see its comment) -- ujump_dashboard.html
-     itself is unchanged/unmoved, still a normal standalone page when visited directly; its own
-     nav links (logo + Jump/Filter/References) now carry target="_top" specifically so clicking
-     them from in here navigates THIS page instead of trying to load ujump.html a second time
-     inside the iframe. -->
-<iframe id="dashFrame" class="dash-iframe" data-src="ujump_dashboard.html" title="µJump statistics dashboard" loading="lazy"></iframe>
+<div class="tabpanel" data-tabpanel="dashboard" id="dashPanel">
+<!-- 2026-08: fully inlined (was an iframe to the separate ujump_dashboard.html -- see
+     [[ujump-dashboard-embed]] -- Søren: "I didn't realize that the dashboard is only 55kb,
+     I think we should incorporate it fully into the µJump file"). The markup below and
+     initDashboardTab() further down are the SAME dashboard content, pasted in directly --
+     see the big comment on the #dashPanel CSS rules above for the collision-avoidance
+     reasoning (scoped selectors + initDashboardTab()'s own function scope). -->
+<div class="topwrap">
+<header>
+  <p class="subhead">Live statistics from the MICrONS cell classifier / µJump project — every chart is computed fresh from the current "Master cell list" (and community reports) each time you load or refresh this page, so a correction submitted through µJump shows up here too. The physical geometry behind a cell (its cortical layer, its nearest neighbours) can't change from a report and stays fixed, but which cell TYPE that geometry counts toward always reflects the latest identification (see each panel's note).</p>
+  <div class="toolbar">
+    <button class="refresh" id="refreshBtn">↻ Refresh live data</button>
+    <span class="status" id="statusLine">Loading…</span>
+  </div>
+</header>
+</div>
+
+<div class="grid">
+
+  <div class="card wide">
+    <h2>Cells per cell type (whole dataset)</h2>
+    <p class="sub">Every identified cell, best-available identity (own-verified &gt; community majority vote &gt; MICrONS prediction). Unclassified cells excluded — see the pie chart and per-layer breakdown for those. Cell types grouped and ordered as Excitatory neurons → Inhibitory neurons → Glia → Vascular cells → Immune &amp; perivascular cells → Leptomeninges, same as µJump's own dropdown. LIVE — recomputed from "Master cell list" on every load/refresh.</p>
+    <div class="plot" id="plotCellsPerType"></div>
+  </div>
+
+  <div class="card">
+    <h2>Identified vs. unclassified</h2>
+    <p class="sub">Main-nucleus population only. LIVE.</p>
+    <div class="plot" id="plotIdentifiedUnclassified"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Cells per cell type, per cortical layer</h2>
+    <p class="sub" title="The layer itself is a fixed geometric estimate (a cell's position doesn't change), but WHICH CELL TYPE counts in each layer is looked up fresh from the current identity every time.">Layer estimated by inverse-distance-weighted interpolation of hand-traced pia / white-matter surfaces (Ledderose et al. 2023 boundaries, rescaled to local cortical thickness). Unclassified cells excluded — see the chart below for those. Layer is fixed geometry; cell-type counts are LIVE.</p>
+    <div class="plot tall" id="plotCellsPerLayer"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Unclassified cells per cortical layer</h2>
+    <p class="sub">Split out from the chart above so identified cell types aren't crowded by the (much larger) unclassified population. Same layer-estimation method. LIVE.</p>
+    <div class="plot" id="plotUnclassifiedPerLayer"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Primary cilia: % of cells with a cilium, by cell type</h2>
+    <p class="sub">Only computable where a cell has been specifically checked for a cilium — MICrONS publishes no organelle-level data, so "checked" is that subset, not the whole dataset (this denominator can't grow from an ordinary identification report; only an explicit organelle check adds to it). Which TYPE each check counts toward is LIVE.</p>
+    <div class="plot" id="plotCiliaPercent"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Primary cilium length, by cell type</h2>
+    <p class="sub">Base-to-tip Euclidean distance, µm. Gray dots = individual cells (jittered); coloured bar = median. LIVE — each measurement's cell-type bucket reflects the current identity, and any organelle report not yet folded into "Master cell list" is included too.</p>
+    <div class="plot" id="plotCiliaLength"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Nucleus-to-centriole distance, by cell type</h2>
+    <p class="sub">Gray dots = individual cells (jittered); coloured bar = median. LIVE — same as the cilium-length chart above.</p>
+    <div class="plot tall" id="plotNucCentriole"></div>
+  </div>
+
+  <div class="card">
+    <h2>MICrONS-predicted vs. verified by Grubb et al. vs. community-identified</h2>
+    <p class="sub">All 4 bars LIVE from "Master cell list"'s current identity source, main nuclei only.</p>
+    <div class="plot" id="plotIdentitySource"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Nucleus volume as a share of whole-cell (mesh) volume, by cell type</h2>
+    <p class="sub" title="Always a dot plot. Once same-cell nucleus+mesh pairs exist: one dot per paired cell = nucleus volume ÷ whole-cell volume for that same cell, %, with physically-impossible (&gt;100%) and statistically outlying (Tukey 1.5×IQR) ratios excluded. Until then: nucleus and whole-cell volumes shown as two independent per-type distributions, clearly labelled as not the same cells. Merged-nucleus-blob detections (not yet split into individual cells) are excluded throughout.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click. Compare within one category:
+      <select class="picker" id="volumeCategoryPicker"></select>
+    </p>
+    <div class="plot" id="plotVolumes"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>5 nearest physical neighbours — composition by cell type</h2>
+    <p class="sub" title="The SET of which 10 cells are geometrically nearest a given cell is fixed (positions don't change from a report), but which CELL TYPE each of those neighbours currently resolves to is looked up live every time -- so correcting a neighbour's identity moves it to its new bucket here immediately.">Which identified cell types most often appear among the 5 nearest physical neighbours of the selected type. Neighbour geometry is fixed; neighbour cell types are LIVE.
+      <select class="picker" id="neighborTypePicker"></select>
+    </p>
+    <div class="plot" id="plotNeighborComposition"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>3 cell types with the most synaptic connections</h2>
+    <p class="sub">Real synaptic partner types (MICrONS connectomic synapse data), sampled per source cell type. This is a SEPARATE, occasional offline step (not something µJump computes live) — see the note below if it hasn't been generated yet.
+      <select class="picker" id="connectivityTypePicker" style="display:none"></select>
+    </p>
+    <div id="connectivityArea"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Input vs. output synapses per cell type</h2>
+    <p class="sub" title="Average synapse count per sampled cell (not a whole-dataset total) -- normalizes for the very different sample sizes per type in connectivity_aggregate.json. Input = synapses this cell type receives; output = synapses it makes. Same offline CAVE step and same file as the connectivity chart above.">Average per sampled cell — same offline data as the connectivity chart above.</p>
+    <div id="synapseIoArea"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Cumulative community reports over time</h2>
+    <p class="sub">Every report type (identifications, discrepancies, merged-nucleus splits, organelle reports, root-ID proposals/votes, computed volumes), cumulative by day. LIVE.</p>
+    <div class="plot tall" id="plotReportsOverTime"></div>
+  </div>
+
+</div>
+<script>
+function initDashboardTab(){
+"use strict";
+
+/* ---------------------------------------------------------------------------------------
+   Configuration. REPORT_ENDPOINT is the SAME Apps Script backend µJump itself posts to --
+   this page only ever does GET reads against it, never a write, so no Google sign-in is
+   needed here at all.
+
+   2026-08-02 REWRITE: Søren -- "none of them should be static. They should all be changed
+   by user reports." Every chart that used to come from a one-time dashboard_data.json
+   snapshot (baked into this file at build time) now comes from a single live endpoint,
+   ?dashboardLive=1, which Code.gs's dashboardLive() computes fresh from the "Master cell
+   list" sheet's CURRENT contents (+ a live top-up from "Organelle locations") on every
+   call -- see that function's own doc comment in Code.gs.txt for the full design and for
+   which two things genuinely can't be "live" (WHERE a cell is, and therefore which layer/
+   neighbours it has -- geometry doesn't change from a report) vs. which type bucket that
+   geometry currently counts toward (which IS always current). There is no more static data
+   embed in this file at all -- this HTML no longer needs to be re-generated/re-spliced when
+   the dataset changes; it's just a normal static file that always asks the backend fresh. */
+const REPORT_ENDPOINT="https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec";
+/* Optional: if a connectivity_aggregate.json (from the synaptic-connectivity Colab script)
+   is placed next to this HTML file, it's picked up automatically -- otherwise that one panel
+   shows a "not generated yet" note instead of failing. This one stays a separate, occasional
+   offline artifact on purpose (querying real MICrONS synapse data needs Søren's own personal
+   CAVE token, which can't run inside Apps Script or a visitor's browser) -- already clearly
+   labelled as such in its own card, unchanged by this rewrite. */
+const CONNECTIVITY_URL="connectivity_aggregate.json";
+
+/* Cell-type category grouping, matching µJump's own random-picker dropdown order exactly
+   (Excitatory neurons -> Inhibitory neurons -> Glia -> Vascular cells -> Immune & perivascular
+   cells -> Leptomeninges). Previously computed once by precompute_dashboard.py and shipped
+   inside the static data embed; now hardcoded here instead, since this fixed taxonomy never
+   changes with reports and the static embed is gone -- copied verbatim from that script's own
+   CATEGORY_ORDER/TYPE_CATEGORY (keep both in sync by hand if a new cell type is ever added).
+   Any type name not listed here (e.g. an unexpected string from a live report) falls into an
+   implicit "Other" bucket sorted after everything else, rather than erroring. */
+const CATEGORY_ORDER=["Excitatory neurons","Inhibitory neurons","Glia","Vascular cells",
+  "Immune & perivascular cells","Leptomeninges"];
+const TYPE_CATEGORY={};
+["L2/3 pyramidal neuron (23P)","Layer 4 pyramidal / spiny-stellate neuron (4P)",
+ "Layer 5 ET thick-tufted pyramidal neuron (5P-ET)","Layer 5 IT pyramidal neuron (5P-IT)",
+ "Layer 5 near-projecting neuron (5P-NP)","Layer 6 CT pyramidal neuron (6P-CT)",
+ "Layer 6 IT pyramidal neuron (6P-IT)"].forEach(t=>TYPE_CATEGORY[t]="Excitatory neurons");
+["Basket cell — PV / perisomatic-targeting (BC)","Martinotti cell — SST / distal-targeting (MC)",
+ "Bipolar cell — VIP / inhibitory-targeting (BPC)","Neurogliaform cell — sparsely-targeting (NGC)"
+].forEach(t=>TYPE_CATEGORY[t]="Inhibitory neurons");
+["Astrocyte","Microglia","Oligodendrocyte","OPC"].forEach(t=>TYPE_CATEGORY[t]="Glia");
+["Pericyte","Smooth muscle cell","Venular smooth muscle cell","High order pericyte",
+ "Endothelial cell"].forEach(t=>TYPE_CATEGORY[t]="Vascular cells");
+["Dendritic cell","Lymphocyte","Macrophage","Perivascular Fibroblast"
+].forEach(t=>TYPE_CATEGORY[t]="Immune & perivascular cells");
+["Arachnoid barrier cell","Dural border cell","Fibroblast reticular cell",
+ "Inner arachnoid fibroblast","Pia mater Fibroblast","Pial sheath Fibroblast"
+].forEach(t=>TYPE_CATEGORY[t]="Leptomeninges");
+/* SHORT-NAME aliases (2026-08-02): microns_connectivity_colab.py/.ipynb's ROOT_IDS_BY_TYPE (and
+   therefore connectivity_aggregate.json's by_synapse_count/synapse_io keys) uses shorter type
+   names ("L6 IT pyramidal neuron", "Basket cell") than the long coded names above ("Layer 6 IT
+   pyramidal neuron (6P-IT)", "Basket cell — PV / perisomatic-targeting (BC)"). Without these
+   aliases every neuron type in that dataset fell into the implicit "Other" category (same rank
+   for all of them), so sortByCategory's category-grouping did nothing and the input/output-
+   synapses chart came out ordered only by synapse count -- Søren: "the excitatory neuronal types
+   should come first, then the inhibitory neuronal types, etc. like on the other graphs." The
+   vascular/glia/immune short names already happen to equal their long-name counterparts
+   (Pericyte, Astrocyte, Endothelial cell, etc.), so only the neuron short names needed adding. */
+["L2/3 pyramidal neuron","L4 pyramidal neuron","L5 IT pyramidal neuron","L5 ET pyramidal neuron",
+ "L5 NP pyramidal neuron","L6 CT pyramidal neuron","L6 IT pyramidal neuron"
+].forEach(t=>TYPE_CATEGORY[t]="Excitatory neurons");
+["Basket cell","Martinotti cell","Bipolar cell","Neurogliaform cell"
+].forEach(t=>TYPE_CATEGORY[t]="Inhibitory neurons");
+
+/* Explicit WITHIN-CATEGORY order (2026-08-02), used only where Søren asked for a specific
+   biological order rather than the default "most samples first" tie-break: excitatory neurons
+   ordered by cortical layer (L2/3 -> L4 -> L5 -> L6; the three L5 subtypes and two L6 subtypes
+   don't have a further Søren-specified order, so IT/ET/NP and IT/CT are just kept in a fixed,
+   stable order among themselves), and vascular cells with Endothelial cell first. Both the long
+   coded name and the short connectivity-aggregate name map to the same rank, so this applies
+   consistently everywhere a type name might appear. Types not listed here have no explicit rank
+   (typeRank() returns Infinity for them) and keep falling back to whatever secondary sort the
+   caller already used (e.g. sample count) -- see sortByCategoryAndRank(). */
+const TYPE_RANK={};
+[["L2/3 pyramidal neuron (23P)",0],["L2/3 pyramidal neuron",0],
+ ["Layer 4 pyramidal / spiny-stellate neuron (4P)",1],["L4 pyramidal neuron",1],
+ ["Layer 5 IT pyramidal neuron (5P-IT)",2],["L5 IT pyramidal neuron",2],
+ ["Layer 5 ET thick-tufted pyramidal neuron (5P-ET)",3],["L5 ET pyramidal neuron",3],
+ ["Layer 5 near-projecting neuron (5P-NP)",4],["L5 NP pyramidal neuron",4],
+ ["Layer 6 IT pyramidal neuron (6P-IT)",5],["L6 IT pyramidal neuron",5],
+ ["Layer 6 CT pyramidal neuron (6P-CT)",6],["L6 CT pyramidal neuron",6],
+ ["Endothelial cell",0],["Pericyte",1],["Smooth muscle cell",2],
+ ["Venular smooth muscle cell",3],["High order pericyte",4]
+].forEach(([t,r])=>TYPE_RANK[t]=r);
+function typeRank(t){return TYPE_RANK[t]!==undefined?TYPE_RANK[t]:Infinity;}
+
+/* One consistent colour per cell type across every chart on the page, so "Pericyte" is
+   always the same colour whichever panel you're looking at. Palette chosen to sit close to
+   the muted, desaturated look of the reference SuperPlot/bar-chart images Søren shared
+   (browns/greens/purples/greys rather than saturated primary colours). */
+const PALETTE=["#8a3b2a","#5a4a7a","#3a6b5a","#a37a3a","#4a6b8a","#7a3a5a","#6b7a3a","#3a5a6b",
+               "#8a5a3a","#5a3a6b","#3a7a6b","#7a5a3a","#4a3a6b","#6b3a4a","#3a4a6b","#7a6b3a",
+               "#4a7a3a","#8a4a5a","#3a6b8a","#6b4a3a","#5a6b3a","#3a4a5a","#8a6b4a","#4a5a3a",
+               "#6b3a6b","#3a8a6b","#8a3a3a","#3a3a6b","#6b8a3a","#8a6b3a"];
+const colorFor=(function(){
+  const map={}; let next=0;
+  return function(name){
+    if(!(name in map)){map[name]=PALETTE[next%PALETTE.length];next++;}
+    return map[name];
+  };
+})();
+
+/* Dark-theme chart colors (2026-08-02) -- Plotly can't read CSS custom properties, so these are
+   hardcoded copies of the :root --ink/--mut/--line values above; keep them in sync manually if
+   the page's palette ever changes. */
+const AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:"#e6edf3"};
+const BASE_LAYOUT={
+  margin:{l:56,r:16,t:8,b:110},
+  font:AXIS_FONT,
+  paper_bgcolor:"rgba(0,0,0,0)",
+  plot_bgcolor:"rgba(0,0,0,0)",
+  showlegend:false,
+  xaxis:{tickangle:-45,automargin:true,gridcolor:"#2a313c"},
+  yaxis:{gridcolor:"#2a313c",zeroline:false}
+};
+const PLOTLY_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d"]};
+
+function sortedEntries(obj){
+  return Object.entries(obj).sort((a,b)=>b[1]-a[1]);
+}
+
+function categoryOf(t){return TYPE_CATEGORY[t]||"Other";}
+function catRank(t){const i=CATEGORY_ORDER.indexOf(categoryOf(t));return i<0?CATEGORY_ORDER.length:i;}
+/* Stable sort: primarily by category rank (in CATEGORY_ORDER), then by a caller-supplied
+   descending secondary key (e.g. count, or sample size) within each category. */
+function sortByCategory(types,secondaryFn){
+  return types.slice().sort(function(a,b){
+    const ra=catRank(a),rb=catRank(b);
+    if(ra!==rb)return ra-rb;
+    if(secondaryFn)return secondaryFn(b)-secondaryFn(a);
+    return String(a).localeCompare(String(b));
+  });
+}
+/* Like sortByCategory, but for charts where Søren wants a specific WITHIN-category order
+   (nucleus-volume dot charts: excitatory neurons by cortical layer, vascular cells with
+   Endothelial cell first -- see TYPE_RANK above) rather than "most samples first". Explicit
+   ranks win when either type has one; unranked types (both Infinity) fall through to the same
+   count-descending/alphabetical tie-break sortByCategory always used, so charts/categories Søren
+   didn't ask to reorder (inhibitory neurons, glia, immune & perivascular, leptomeninges) are
+   unaffected. */
+function sortByCategoryAndRank(types,fallbackSecondaryFn){
+  return types.slice().sort(function(a,b){
+    const ra=catRank(a),rb=catRank(b);
+    if(ra!==rb)return ra-rb;
+    const rka=typeRank(a),rkb=typeRank(b);
+    if(rka!==rkb&&(rka!==Infinity||rkb!==Infinity))return rka-rkb;
+    if(fallbackSecondaryFn){const d=fallbackSecondaryFn(b)-fallbackSecondaryFn(a);if(d)return d;}
+    return String(a).localeCompare(String(b));
+  });
+}
+/* Two earlier attempts at showing the category grouping ON the chart both failed in real
+   rendering (only caught once Søren looked at actual screenshots -- jsdom stubs Plotly.newPlot
+   and never renders, so neither attempt was visible to any smoke test):
+   1) Plotly's built-in "multicategory" xaxis type -- works for one trace, but dotMedianChart
+      draws one BOX trace per cell type, and multicategory positioning breaks down across many
+      independent traces (category names leaked in as if they were their own data points).
+   2) Dotted divider lines + a small centered text label per group, drawn as ordinary
+      shapes/annotations below the axis (yshift:-92) -- this avoided the multicategory bug, but
+      the tick labels themselves are long names rendered at tickangle:-45 (automargin:true makes
+      Plotly grow the bottom margin to fit them, and how far down that is varies chart-to-chart
+      with the longest label), so a fixed yshift landed the category text and divider lines
+      right on top of/through the rotated tick labels rather than below them.
+   Given two rendering-only failures in a row that this sandbox can't visually pre-check, the
+   category grouping is now ORDER-ONLY: types are still sorted Excitatory->Inhibitory->Glia->
+   Vascular->Immune & perivascular->Leptomeninges (via sortByCategory/categoryorder:"array"), so
+   related cell types still sit next to each other on every chart, but nothing is drawn on the
+   chart itself to mark the boundaries -- eliminates the overlap risk entirely rather than
+   trying a third positioning heuristic with no way to confirm it renders correctly. */
+function categorizedLayout(types,extra){
+  return Object.assign({},BASE_LAYOUT,{
+    xaxis:Object.assign({},BASE_LAYOUT.xaxis,{categoryorder:"array",categoryarray:types})
+  },extra||{});
+}
+/* boxgap/boxgroupgap are Plotly's box-trace equivalent of bar charts' bargap/bargroupgap --
+   smaller values shrink the empty space Plotly otherwise reserves between adjacent category
+   slots. Plotly's own defaults (~0.3/0.3) are what Søren called "much too big" a gap on the
+   volume-share chart specifically; kept as an opt-in (tight=true) rather than a global change so
+   the cilium-length/nucleus-centriole charts (whose spacing nobody complained about) are
+   untouched. */
+const TIGHT_BOX_LAYOUT={boxgap:0.15,boxgroupgap:0.05};
+
+function barChart(divId,dataObj,yTitle,byCategory){
+  let types=Object.keys(dataObj);
+  types=byCategory?sortByCategory(types,t=>dataObj[t]):types.sort((a,b)=>dataObj[b]-dataObj[a]);
+  const y=types.map(t=>dataObj[t]);
+  const layout=byCategory
+    ?categorizedLayout(types,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle})})
+    :Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle})});
+  Plotly.newPlot(divId,[{type:"bar",x:types,y,marker:{color:types.map(colorFor)}}],layout,PLOTLY_CFG);
+}
+
+/* "SuperPlot"-style dot plot: jittered individual points (grey) + a coloured horizontal
+   median bar per category, approximating the style in Søren's reference images. Built from
+   a box trace with the box/whiskers hidden (width:0, transparent fill) so only points +
+   median line remain, rather than a full box-and-whisker chart. */
+function dotMedianChart(divId,dataObj,yTitle,tight,useRank){
+  let types=Object.keys(dataObj).filter(t=>dataObj[t]&&dataObj[t].length>=3);
+  types=(useRank?sortByCategoryAndRank:sortByCategory)(types,t=>dataObj[t].length);
+  const traces=types.map(function(t){
+    return {
+      type:"box", name:t, y:dataObj[t], x0:t,
+      boxpoints:"all", jitter:0.55, pointpos:0,
+      marker:{color:"#8a8a8a",size:3,opacity:0.45},
+      line:{color:colorFor(t),width:3},
+      fillcolor:"rgba(0,0,0,0)",
+      whiskerwidth:0, quartilemethod:"linear",
+      hoverinfo:"y+name"
+    };
+  });
+  Plotly.newPlot(divId,traces,categorizedLayout(types,Object.assign({
+    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle}),
+    showlegend:false
+  },tight?TIGHT_BOX_LAYOUT:{})),PLOTLY_CFG);
+}
+
+/* ujump.html shows an unresolved merged-nucleus-blob detection (MICrONS's automatic detector
+   merged several real nuclei into one) as a joined summary string, e.g. "Astrocyte + Perivascular
+   Fibroblast" or "2 × Astrocyte + Endothelial cell" (see the longName()-based _sum builder around
+   line 1401 of ujump.html). That's a placeholder for "not yet individually identified," never a
+   real single cell type -- if someone clicks "Compute volume" or logs a centriole/cilium while
+   looking at such a blob, that joined string can leak into live report data. Filter it out
+   everywhere the dashboard reads a live cellType/identified string, so it never appears as if it
+   were its own cell type in any chart. */
+function isMergedBlobType(name){
+  return /[+×]/.test(String(name||""));
+}
+
+/* Grouped dot-plot: multiple independent per-type distributions (e.g. nucleus volume vs. mesh
+   volume, NOT necessarily the same cells) shown side by side per category via Plotly's standard
+   boxmode:"group" behavior -- ordinary, well-documented grouping of box traces sharing an x
+   category, unlike the earlier multicategory-axis experiment. seriesList: [{name,color,dataObj}]. */
+function groupedDotChart(divId,seriesList,yTitle,tight,useRank){
+  const allTypes=new Set();
+  seriesList.forEach(function(s){
+    Object.keys(s.dataObj).forEach(function(t){
+      if(s.dataObj[t]&&s.dataObj[t].length>=3)allTypes.add(t);
+    });
+  });
+  const types=(useRank?sortByCategoryAndRank:sortByCategory)(Array.from(allTypes),function(t){
+    return Math.max.apply(null,seriesList.map(function(s){return (s.dataObj[t]||[]).length;}));
+  });
+  const traces=[];
+  seriesList.forEach(function(s){
+    let legendShown=false;
+    types.forEach(function(t){
+      const arr=s.dataObj[t];
+      if(!arr||arr.length<3)return;
+      traces.push({
+        type:"box", name:s.name, x0:t, y:arr,
+        boxpoints:"all", jitter:0.55, pointpos:0,
+        marker:{color:"#8a8a8a",size:3,opacity:0.4},
+        line:{color:s.color,width:2.5},
+        fillcolor:"rgba(0,0,0,0)",
+        whiskerwidth:0, quartilemethod:"linear",
+        showlegend:!legendShown,
+        hoverinfo:"y+name"
+      });
+      legendShown=true;
+    });
+  });
+  Plotly.newPlot(divId,traces,categorizedLayout(types,Object.assign({
+    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle}),
+    boxmode:"group",
+    showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
+  },tight?TIGHT_BOX_LAYOUT:{})),PLOTLY_CFG);
+}
+
+const LAYER_COLORS={"Leptomeninges":"#c9c2b4","Layer 1":"#e8d9b5","Layer 2/3":"#d9b56a","Layer 4":"#b5883a",
+  "Layer 5a":"#8a6b3a","Layer 5b":"#6b4a2a","Layer 6a":"#4a5a3a","Layer 6b":"#3a4a2a",
+  "White matter":"#8a8a8a","Unknown":"#e0e0e0"};
+
+/* Shows a placeholder in every chart that depends on the live "Master cell list" aggregate,
+   with the backend's own explanation of what's missing (sheet not imported yet, or its header
+   row doesn't match). Used when live.ready is false instead of throwing/rendering empty charts. */
+function showLiveNotReady(note){
+  ["plotCellsPerType","plotCellsPerLayer","plotUnclassifiedPerLayer","plotCiliaPercent",
+   "plotCiliaLength","plotNucCentriole","plotNeighborComposition"].forEach(function(id){
+    const el=document.getElementById(id);
+    if(el)el.innerHTML="<div class='placeholder'>"+(note||"Live data not available yet.")+"</div>";
+  });
+  Plotly.newPlot("plotIdentifiedUnclassified",[],{annotations:[{text:"Not available yet",showarrow:false,font:AXIS_FONT}],paper_bgcolor:"rgba(0,0,0,0)"},PLOTLY_CFG);
+  /* renderPredictedVerified is NOT called here -- applyLiveData() always calls it right after
+     renderLiveCoreCharts() regardless of live.ready, so calling it here too just double-renders
+     the same "(loading...)" bars. */
+}
+
+/* Renders every chart driven by the new ?dashboardLive=1 aggregate (cells_per_type,
+   cells_per_type_per_layer, unclassified_per_layer, identified_vs_unclassified, primary_cilia
+   [already live-merged with any not-yet-reseeded Organelle-locations report -- see
+   dashboardLive()'s own doc comment in Code.gs.txt], nucleus_to_centriole_um, neighbor_composition).
+   Replaces the old renderStaticCharts(), which read these same shapes from a frozen
+   dashboard_data.json snapshot -- Søren: "none of them should be static... changed by user
+   reports." Safe to call again on every refresh (rebuilds the neighbour picker's options fresh
+   each time rather than assuming they're stable, since a brand-new cell type could in principle
+   appear after a correction). */
+let _neighborPickerWired=false;
+function renderLiveCoreCharts(live){
+  if(!live||!live.ready){
+    showLiveNotReady(live&&live.note);
+    return;
+  }
+  barChart("plotCellsPerType",live.cells_per_type.combined_best_identity,"# of cells",true);
+
+  const iu=live.identified_vs_unclassified;
+  Plotly.newPlot("plotIdentifiedUnclassified",[{
+    type:"pie",
+    labels:["Identified","Unclassified"],
+    values:[iu.identified,iu.unclassified],
+    marker:{colors:["#3a6b5a","#c9c2b4"]},
+    textinfo:"label+percent",
+    hole:0.45
+  }],{margin:{l:10,r:10,t:10,b:10},font:AXIS_FONT,paper_bgcolor:"rgba(0,0,0,0)"},PLOTLY_CFG);
+
+  // Cells per type per layer -- grouped bar, one trace per layer, x = cell type (Unclassified
+  // already excluded server-side; see the dedicated plotUnclassifiedPerLayer chart for those).
+  const layerOrder=live.cells_per_type_per_layer.layer_order;
+  const perLayer=live.cells_per_type_per_layer.data;
+  const types=sortByCategory(Object.keys(perLayer),
+    t=>Object.values(perLayer[t]).reduce((s,v)=>s+v,0)).slice(0,20);
+  const layerTraces=layerOrder.map(function(layer){
+    return {type:"bar",name:layer,x:types,y:types.map(t=>(perLayer[t]&&perLayer[t][layer])||0),
+      marker:{color:LAYER_COLORS[layer]||"#999"}};
+  });
+  Plotly.newPlot("plotCellsPerLayer",layerTraces,categorizedLayout(types,{
+    barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
+    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"# of cells"})
+  }),PLOTLY_CFG);
+
+  // Unclassified cells per layer -- its own simple chart, x = cortical layer (not cell type,
+  // so no category grouping here), in the same layer_order used everywhere else.
+  const ul=live.unclassified_per_layer;
+  if(ul&&ul.counts){
+    const ulLayers=ul.layer_order.filter(l=>ul.counts[l]!=null);
+    Plotly.newPlot("plotUnclassifiedPerLayer",[{
+      type:"bar",x:ulLayers,y:ulLayers.map(l=>ul.counts[l]||0),
+      marker:{color:ulLayers.map(l=>LAYER_COLORS[l]||"#999")}
+    }],Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"# of unclassified cells"})}),PLOTLY_CFG);
+  }
+
+  // Primary cilia % -- category-ordered instead of sorted by percent.
+  const pc=live.primary_cilia.percent_with_cilium_by_type;
+  const pcTypes=sortByCategory(Object.keys(pc),t=>pc[t].percent);
+  Plotly.newPlot("plotCiliaPercent",[{
+    type:"bar",
+    x:pcTypes, y:pcTypes.map(t=>pc[t].percent),
+    text:pcTypes.map(t=>pc[t].with_cilium+"/"+pc[t].checked),
+    textposition:"outside",
+    marker:{color:pcTypes.map(colorFor)}
+  }],categorizedLayout(pcTypes,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"% with primary cilium",range:[0,105]})}),PLOTLY_CFG);
+
+  // Cilium length / nucleus-to-centriole distance -- already live-merged server-side (any
+  // Organelle-locations report not yet folded into the sheet is included by dashboardLive()
+  // itself), so this is a direct render, no client-side merge step needed any more.
+  dotMedianChart("plotCiliaLength",live.primary_cilia.length_um_by_type,"Cilium length (µm)");
+  dotMedianChart("plotNucCentriole",live.nucleus_to_centriole_um,"Nucleus-to-centriole distance (µm)");
+
+  // Neighbor composition picker -- top 8 by occurrence, then re-ordered by category. Options are
+  // rebuilt fresh every call (cheap, ~30 types) rather than assumed stable across refreshes.
+  const nc=live.neighbor_composition;
+  const ncTypes=Object.keys(nc).sort();
+  const picker=document.getElementById("neighborTypePicker");
+  const prevValue=picker.value;
+  picker.innerHTML="";
+  ncTypes.forEach(function(t){const o=document.createElement("option");o.value=t;o.textContent=t;picker.appendChild(o);});
+  function renderNeighbor(){
+    const t=picker.value||ncTypes[0];
+    const top8=sortedEntries(nc[t]||{}).slice(0,8).map(e=>e[0]);
+    const ordered=sortByCategory(top8,nt=>(nc[t]||{})[nt]||0);
+    Plotly.newPlot("plotNeighborComposition",[{
+      type:"bar",x:ordered,y:ordered.map(nt=>(nc[t]||{})[nt]||0),
+      marker:{color:ordered.map(colorFor)}
+    }],categorizedLayout(ordered,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"neighbour occurrences (×5 per "+t+" cell)"})}),PLOTLY_CFG);
+  }
+  if(!_neighborPickerWired){picker.addEventListener("change",renderNeighbor);_neighborPickerWired=true;}
+  if(ncTypes.length){
+    picker.value=ncTypes.includes(prevValue)?prevValue:(ncTypes.includes("Pericyte")?"Pericyte":ncTypes[0]);
+    renderNeighbor();
+  }
+}
+
+/* Fully live now (2026-08-02): all 4 bars come straight from live.predicted_vs_verified_live
+   (Code.gs's dashboardLive(), tallied fresh from "Master cell list"'s current identity_source
+   column) -- previously "MICrONS-predicted"/"Verified by us" were a static baseline and only
+   "User-identified" came from a separate live ?allIds= fetch. That extra fetch is gone; the
+   community-identified count is now identity_source==="community_majority", which is more
+   precise than the old "distinct nuclei with >=1 report" metric (it reflects the WINNING
+   consensus identity, same precedence used everywhere else in this project). null (not yet
+   loaded / not ready) shows a "(loading…)" label instead of a zero bar. */
+function renderPredictedVerified(live){
+  const s=live&&live.ready?live.predicted_vs_verified_live:null;
+  const labels=["MICrONS-predicted only","Verified by Grubb et al.","Community-identified (majority vote)","Unclassified"];
+  const values=s?[s.microns_predicted_no_override,s.own_verified,s.community_majority,s.unclassified]:[0,0,0,0];
+  const colors=["#8a6b3a","#3a6b5a","#5a4a7a","#c9c2b4"];
+  Plotly.newPlot("plotIdentitySource",[{
+    type:"bar",x:labels,y:values,marker:{color:colors},
+    text:s?["","","",""]:["(loading…)","(loading…)","(loading…)","(loading…)"],textposition:"outside"
+  }],Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"# of nuclei"})}),PLOTLY_CFG);
+}
+
+/* renderVolumes(): always a dot plot, never a bar -- three tiers depending on what data is
+   actually available right now, each strictly better than the last as more real pairing data
+   accumulates. Merged-nucleus-blob rows (see isMergedBlobType()) are stripped before any of
+   the three tiers see them, so a composite "X + Y" string can never appear as its own category.
+   2026-08-02: added a category picker (Søren -- "overcrowded... you would normally only compare
+   among the different categories") -- the raw rows are cached in _lastVolumeRows so the picker's
+   change handler can re-filter and redraw without needing a fresh network fetch, and every dot
+   chart on this panel now passes tight=true (see TIGHT_BOX_LAYOUT) to close up the "much too big"
+   gap between adjacent cell-type slots. */
+let _lastVolumeRows=null;
+/* Nucleus-volume-by-type is now part of the live ?dashboardLive=1 payload (see
+   renderLiveCoreCharts/applyLiveData) rather than a static embed -- stashed here so
+   renderVolumes() and the category picker's redraw (no network round-trip) can both read it
+   without threading it through every call site. */
+let _liveNucleusVolumeByType={};
+function renderVolumes(rows){
+  if(rows)_lastVolumeRows=rows; // keep the latest real data; picker re-renders reuse it
+  rows=_lastVolumeRows;
+  const area=document.getElementById("plotVolumes");
+  area.innerHTML="";
+  const oldFallback=document.getElementById("plotVolumesFallback");
+  if(oldFallback)oldFallback.remove();
+  area.parentNode.querySelectorAll(".footnote").forEach(function(n){n.remove();});
+
+  const picker=document.getElementById("volumeCategoryPicker");
+  const selectedCategory=picker?picker.value:"";
+  const inSelectedCategory=t=>!selectedCategory||selectedCategory==="__all__"||categoryOf(t)===selectedCategory;
+
+  const nucByType={};
+  Object.keys(_liveNucleusVolumeByType||{}).forEach(function(t){
+    if(inSelectedCategory(t))nucByType[t]=_liveNucleusVolumeByType[t];
+  });
+  const allRows=(rows||[]).filter(r=>r.cellType&&r.volumeUm3&&!isMergedBlobType(r.cellType)&&inSelectedCategory(r.cellType));
+  /* PAIRED rows: the nucleus volume and mesh volume were measured on the exact same cell (the
+     "Compute volume" click happened from the main nucleus display, where NV[i] -- the
+     precomputed nucleus volume -- was already known; see meshDlButtonHtml()'s comment in the
+     HTML). Only these can honestly show nucleus volume as a real physical PORTION of the whole
+     cell -- older rows (recorded before nucVolumeUm3 existed) or clicks from a community/
+     standalone/merged-sub cell panel have no paired nucleus number and fall into Tier 2 below. */
+  const paired=allRows.filter(r=>r.nucVolumeUm3>0);
+  const unpaired=allRows.filter(r=>!(r.nucVolumeUm3>0));
+
+  // ---- Tier 1: real same-cell pairs exist -- the gold-standard metric: nucleus volume as a %
+  // of that SAME cell's whole-cell volume, one dot per paired cell (SuperPlot-style, same
+  // dotMedianChart convention as the cilium-length/nucleus-centriole charts). Two-stage
+  // filtering before plotting: (1) hard sanity filter -- a nucleus cannot physically exceed its
+  // own cell's volume, so any pct outside (0,100] is a bad pairing/segmentation artifact, not a
+  // real measurement, dropped unconditionally; (2) Tukey 1.5x-IQR fences on the POOLED set of
+  // valid percentages across all types (per-type n is often too small for a stable per-type
+  // IQR) -- a standard descriptive-stats convention, not a paper-backed claim needing citation.
+  if(paired.length){
+    const byType={};
+    let droppedImpossible=0;
+    paired.forEach(function(r){
+      if(!(r.volumeUm3>0))return;
+      const pct=100*r.nucVolumeUm3/r.volumeUm3;
+      if(!(pct>0&&pct<=100)){droppedImpossible++;return;}
+      (byType[r.cellType]=byType[r.cellType]||[]).push(pct);
+    });
+    const pooled=Object.values(byType).reduce((a,b)=>a.concat(b),[]).sort((a,b)=>a-b);
+    let loFence=-Infinity,hiFence=Infinity;
+    if(pooled.length>=4){
+      const q=function(p){const idx=(pooled.length-1)*p,lo=Math.floor(idx),hi=Math.ceil(idx);
+        return pooled[lo]+(pooled[hi]-pooled[lo])*(idx-lo);};
+      const q1=q(0.25),q3=q(0.75),iqr=q3-q1;
+      loFence=q1-1.5*iqr;hiFence=q3+1.5*iqr;
+    }
+    let droppedIqr=0;
+    const filteredByType={};
+    Object.keys(byType).forEach(function(t){
+      filteredByType[t]=byType[t].filter(function(v){
+        const keep=v>=loFence&&v<=hiFence;
+        if(!keep)droppedIqr++;
+        return keep;
+      });
+    });
+
+    if(!Object.keys(filteredByType).length){
+      area.innerHTML="<div class='placeholder'>No paired measurements in this category yet.</div>";
+      return;
+    }
+    dotMedianChart(area.id,filteredByType,"Nucleus volume (% of whole-cell mesh volume)",true,true);
+
+    const bits=["n="+paired.length+" pairs"];
+    if(droppedImpossible)bits.push(droppedImpossible+" impossible excluded");
+    if(droppedIqr)bits.push(droppedIqr+" outliers excluded");
+    if(unpaired.length)bits.push(unpaired.length+" unpaired not shown");
+    const note=document.createElement("p");note.className="footnote";
+    note.title="Physically-impossible (nucleus > whole cell) and statistically outlying (Tukey 1.5×IQR) ratios are excluded; unpaired mesh-volume measurements (no matching nucleus volume for the same cell) aren't shown here.";
+    note.textContent=bits.join(" · ");
+    area.parentNode.insertBefore(note,area.nextSibling);
+    return;
+  }
+
+  // ---- Tier 2: no same-cell pairs yet, but SOME volume data exists (live "Compute volume"
+  // clicks and/or the live nucleus-volume sample from Master cell list) -- show nucleus and
+  // mesh volumes as two independent per-type dot-plot distributions, grouped side by side
+  // (Plotly's standard boxmode:"group", not the earlier broken multicategory axis), rather
+  // than pretending they form a ratio. Still a dot plot, still linear scale, never a bar.
+  const meshByType={};
+  unpaired.forEach(r=>{(meshByType[r.cellType]=meshByType[r.cellType]||[]).push(r.volumeUm3);});
+  const hasNuc=Object.values(nucByType).some(a=>a&&a.length);
+  const hasMesh=Object.values(meshByType).some(a=>a&&a.length);
+  if(hasNuc||hasMesh){
+    const series=[];
+    if(hasNuc)series.push({name:"Nucleus volume (live, independent sample)",color:"#3a6b5a",dataObj:nucByType});
+    if(hasMesh)series.push({name:"Whole-cell mesh volume (live, independent sample)",color:"#8a3b2a",dataObj:meshByType});
+    groupedDotChart(area.id,series,"volume (µm³)",true,true);
+    const note=document.createElement("p");note.className="footnote";
+    note.title="No same-cell nucleus+mesh pairs recorded yet, so nucleus and whole-cell volumes are shown as independent distributions (not the same individual cells) rather than a per-cell share. The paired % chart above will replace this automatically once “Compute volume” clicks from a nucleus's main panel start recording both numbers together.";
+    note.textContent="Independent samples, not paired"+(unpaired.length?" · "+unpaired.length+" live mesh measurements so far":"");
+    area.parentNode.insertBefore(note,area.nextSibling);
+    return;
+  }
+
+  // ---- Tier 3: no volume data of any kind yet (in the selected category, if one is picked).
+  area.innerHTML=selectedCategory&&selectedCategory!=="__all__"
+    ?"<div class='placeholder'>No volume data yet for "+selectedCategory+" — try &ldquo;All categories&rdquo;, or check back once someone clicks &ldquo;Compute volume&rdquo; on a cell in this category.</div>"
+    :"<div class='placeholder'>No volume data yet — this graph grows every time someone clicks &ldquo;Compute volume&rdquo; in µJump while signed in with Google.</div>";
+}
+
+/* Populates the volume chart's category picker once (options never change) and wires its change
+   handler to redraw from the cached rows without a network round-trip. Called once at setup,
+   safe to call before any live data has loaded -- the picker just sits inert until then. */
+function setupVolumeCategoryPicker(){
+  const picker=document.getElementById("volumeCategoryPicker");
+  if(!picker)return;
+  const allOpt=document.createElement("option");
+  allOpt.value="__all__";allOpt.textContent="All categories";
+  picker.appendChild(allOpt);
+  (CATEGORY_ORDER||[]).forEach(function(c){
+    const o=document.createElement("option");o.value=c;o.textContent=c;picker.appendChild(o);
+  });
+  // Default to the first real category (not "All") -- an unfiltered view across 20-30+ cell
+  // types is exactly the overcrowding Søren asked to fix, so "All categories" is available as an
+  // explicit opt-in rather than the default.
+  if(CATEGORY_ORDER&&CATEGORY_ORDER.length)picker.value=CATEGORY_ORDER[0];
+  picker.addEventListener("change",function(){renderVolumes();});
+}
+
+function renderReportsOverTime(daily){
+  const area=document.getElementById("plotReportsOverTime");
+  if(!daily||!daily.length){
+    area.innerHTML="<div class='placeholder'>No live report data yet, or the backend isn't reachable right now.</div>";
+    return;
+  }
+  const allTypes=new Set();
+  daily.forEach(d=>Object.keys(d.counts).forEach(k=>allTypes.add(k)));
+  const dates=daily.map(d=>d.date);
+  const cumByType={};
+  allTypes.forEach(function(t){
+    let running=0;
+    cumByType[t]=daily.map(function(d){running+=(d.counts[t]||0);return running;});
+  });
+  const traces=Array.from(allTypes).map(function(t){
+    return {type:"scatter",mode:"lines",name:t,x:dates,y:cumByType[t],
+      line:{color:colorFor(t),width:2},stackgroup:"one"};
+  });
+  Plotly.newPlot(area.id,traces,Object.assign({},BASE_LAYOUT,{
+    showlegend:true,legend:{orientation:"h",y:1.12,font:{size:10}},
+    xaxis:Object.assign({},BASE_LAYOUT.xaxis,{tickangle:-30}),
+    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"cumulative reports"})
+  }),PLOTLY_CFG);
+}
+
+function renderConnectivity(conn){
+  const area=document.getElementById("connectivityArea");
+  const picker=document.getElementById("connectivityTypePicker");
+  if(!conn||!conn.by_synapse_count||!Object.keys(conn.by_synapse_count).length){
+    area.innerHTML="<div class='placeholder'>Not generated yet — this graph needs a separate, "+
+      "occasional offline step (querying real MICrONS synapse data with a personal CAVE token; "+
+      "see microns_connectivity_colab.py). Once connectivity_aggregate.json is placed next to "+
+      "this dashboard file, this panel fills in automatically on the next refresh.</div>";
+    return;
+  }
+  area.innerHTML='<div class="plot" id="plotConnectivity"></div>';
+  picker.style.display="inline-block";
+  picker.innerHTML="";
+  const types=Object.keys(conn.by_synapse_count).sort();
+  types.forEach(function(t){const o=document.createElement("option");o.value=t;o.textContent=t;picker.appendChild(o);});
+  function renderOne(){
+    const t=picker.value||types[0];
+    const entries=sortedEntries(conn.by_synapse_count[t]||{}).slice(0,8);
+    Plotly.newPlot("plotConnectivity",[{
+      type:"bar",x:entries.map(e=>e[0]),y:entries.map(e=>e[1]),
+      marker:{color:entries.map(e=>colorFor(e[0]))}
+    }],Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"synapse count, "+t+" ↔ partner"})}),PLOTLY_CFG);
+  }
+  picker.addEventListener("change",renderOne);
+  picker.value=types[0];
+  renderOne();
+}
+
+/* Input vs output synapses per cell type (2026-08-02, Søren's request) -- reads conn.synapse_io,
+   the new field microns_connectivity_colab.py/.ipynb adds alongside by_synapse_count/
+   by_distinct_partner_cells in the SAME connectivity_aggregate.json (no separate fetch or offline
+   step). Shows the PER-SAMPLED-CELL AVERAGE, not a whole-dataset total -- sample sizes vary a lot
+   per type (up to 40 cells, fewer for rare types), so a raw total would just track sample size
+   rather than anything biological. Grouped bar (not a dot plot): this is one aggregate number per
+   type per direction, not a distribution of individual measurements, so there's nothing to jitter. */
+function renderSynapseIO(conn){
+  const area=document.getElementById("synapseIoArea");
+  if(!conn||!conn.synapse_io||!Object.keys(conn.synapse_io).length){
+    area.innerHTML="<div class='placeholder'>Not generated yet — comes from the same connectivity_aggregate.json as the chart above (re-run microns_connectivity_colab.py/.ipynb to add it).</div>";
+    return;
+  }
+  area.innerHTML='<div class="plot" id="plotSynapseIo"></div>';
+  const types=sortByCategory(Object.keys(conn.synapse_io),t=>conn.synapse_io[t].avg_input_synapses_per_cell+conn.synapse_io[t].avg_output_synapses_per_cell);
+  const inputVals=types.map(t=>conn.synapse_io[t].avg_input_synapses_per_cell||0);
+  const outputVals=types.map(t=>conn.synapse_io[t].avg_output_synapses_per_cell||0);
+  Plotly.newPlot("plotSynapseIo",[
+    {type:"bar",name:"Input (received)",x:types,y:inputVals,marker:{color:"#00b7ff"}},
+    {type:"bar",name:"Output (made)",x:types,y:outputVals,marker:{color:"#ff4fa3"}}
+  ],categorizedLayout(types,{
+    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"avg. synapses per sampled cell"}),
+    barmode:"group",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
+  }),PLOTLY_CFG);
+}
+
+function setStatus(msg){document.getElementById("statusLine").textContent=msg;}
+
+/* On-demand live refresh (2026-08-02) -- Soren: "All of the graphs should live update with user
+   reports, but we can apply the live update more rarely and the user can request a live update
+   but it does not have to be live updated every time a user looks." Previously loadLiveData() ran
+   an unconditional network round-trip (5 fetches) on EVERY page view, even for someone just
+   glancing at the dashboard for the tenth time in an hour. Now the result of the last real fetch
+   is cached in localStorage with a timestamp; a fresh-enough cache is rendered instantly with NO
+   network calls at all, and the "Refresh live data" button always forces a real fetch regardless
+   of cache age. LIVE_CACHE_MAX_AGE_MS controls how "rare" automatic refreshing is -- currently a
+   day, which was chosen as a reasonable default for a low-traffic community tool, not a specific
+   number Soren asked for; safe to change to whatever cadence feels right. */
+const LIVE_CACHE_KEY="ujump_dashboard_live_cache_v1";
+const LIVE_CACHE_MAX_AGE_MS=24*60*60*1000; // 1 day -- tune freely, see comment above
+
+function readLiveCache(){
+  try{
+    const raw=localStorage.getItem(LIVE_CACHE_KEY);
+    if(!raw)return null;
+    const parsed=JSON.parse(raw);
+    if(!parsed||typeof parsed.ts!=="number"||!parsed.data)return null;
+    return parsed;
+  }catch(e){return null;}
+}
+function writeLiveCache(data){
+  try{localStorage.setItem(LIVE_CACHE_KEY,JSON.stringify({ts:Date.now(),data:data}));}catch(e){/* localStorage unavailable/full -- caching is an optimization only, safe to skip */}
+}
+
+/* The actual network round-trip -- always does all fetches fresh, independent of caching.
+   Returns a plain data bundle; does not touch the DOM (see applyLiveData below), so this can be
+   awaited once and either rendered immediately or (in principle) reused/diffed later.
+   2026-08-02: ?allIds=1 and ?allOrganelles=1 are gone -- both are superseded by the new
+   ?dashboardLive=1 aggregate (community-identified count now comes from Master cell list's
+   identity_source==="community_majority", and organelle top-up happens server-side inside
+   dashboardLive() itself). ?computedVolumes=1 (root-ID MESH volume, a different measurement
+   from the nucleus volume dashboardLive() now supplies) and ?reportsOverTime=1 (the report
+   EVENT timeline, not a per-cell current-state view) are unrelated to Master cell list and
+   still fetched directly, same as before. */
+async function fetchLiveData(){
+  let live={ready:false,note:"Could not reach the backend."}, computedVolumes=[], reportsDaily=[], connectivity=null;
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?dashboardLive=1");
+    live=await r.json();
+  }catch(e){console.warn("[dashboard] dashboardLive fetch failed",e);}
+
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?computedVolumes=1");
+    const d=await r.json();
+    computedVolumes=(d&&d.computedVolumes)||[];
+  }catch(e){console.warn("[dashboard] computedVolumes fetch failed",e);}
+
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?reportsOverTime=1");
+    const d=await r.json();
+    reportsDaily=(d&&d.daily)||[];
+  }catch(e){console.warn("[dashboard] reportsOverTime fetch failed",e);}
+
+  try{
+    const r=await fetch(CONNECTIVITY_URL,{cache:"no-store"});
+    if(r.ok)connectivity=await r.json();
+  }catch(e){/* file not present -- fine, handled as "not generated yet" */}
+
+  return {live,computedVolumes,reportsDaily,connectivity};
+}
+
+/* Renders every live-fed chart from an already-fetched (or cached) data bundle -- no network
+   calls in here, so this is safe/instant to call from the cache path. */
+function applyLiveData(d){
+  const live=d.live||{ready:false};
+  _liveNucleusVolumeByType=live.ready?(live.nucleus_volume_um3||{}):{};
+  renderLiveCoreCharts(live);
+  renderPredictedVerified(live);
+  renderVolumes(d.computedVolumes||[]);
+  renderReportsOverTime(d.reportsDaily||[]);
+  renderConnectivity(d.connectivity);
+  renderSynapseIO(d.connectivity);
+}
+
+/* force=true (the Refresh button) always hits the network, no matter how fresh the cache is.
+   Otherwise: a fresh-enough cache renders instantly with zero fetches; a missing or stale cache
+   falls through to a real fetch (so the dashboard is never stuck showing arbitrarily old data
+   just because nobody happened to click Refresh -- it self-refreshes at most once per
+   LIVE_CACHE_MAX_AGE_MS per visitor). */
+async function loadLiveData(force){
+  if(!force){
+    const cached=readLiveCache();
+    if(cached){
+      const ageMs=Date.now()-cached.ts;
+      applyLiveData(cached.data);
+      if(ageMs<LIVE_CACHE_MAX_AGE_MS){
+        setStatus("Live data as of "+new Date(cached.ts).toLocaleString()+" (cached — click Refresh for the latest)");
+        return;
+      }
+      setStatus("Refreshing stale live data (last was "+new Date(cached.ts).toLocaleString()+")…");
+    } else {
+      setStatus("Loading live data…");
+    }
+  } else {
+    setStatus("Refreshing live data…");
+  }
+  const data=await fetchLiveData();
+  applyLiveData(data);
+  writeLiveCache(data);
+  setStatus("Last refreshed "+new Date().toLocaleString());
+}
+
+setupVolumeCategoryPicker();
+loadLiveData(false);
+document.getElementById("refreshBtn").addEventListener("click",function(){loadLiveData(true);});
+
+}
+</script>
 </div>
 <div class="card" id="cellPanelCard">
 <p class="err" id="err"></p>
