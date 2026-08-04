@@ -464,12 +464,6 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
     <div class="plot tall" id="plotNucCentriole"></div>
   </div>
 
-  <div class="card wide">
-    <h2>Microglia plugs &amp; astrocyte holes (NR type II)</h2>
-    <p class="sub">% of Søren's own-verified microglia with at least one reported plug, and own-verified astrocytes with at least one reported hole. EMBEDDED — a static snapshot from &quot;All own data.xlsx&quot; built directly into this file (2026-08-07), not fetched from Google Sheets, so it renders even if the backend is unreachable. Denominator is Søren's own-verified cells specifically, not the whole MICrONS-predicted population — these facts only exist for cells he personally examined.</p>
-    <div class="plot" id="plotPlugHolePercent"></div>
-  </div>
-
   <div class="card">
     <h2>MICrONS-predicted vs. verified by Grubb et al. vs. community-identified</h2>
     <p class="sub">All 4 bars LIVE from "Master cell list"'s current identity source, main nuclei only.</p>
@@ -1329,7 +1323,6 @@ function applyLiveData(d){
   const live=d.live||{ready:false};
   _liveNucleusVolumeByType=live.ready?(live.nucleus_volume_um3||{}):{};
   renderLiveCoreCharts(live);
-  renderPlugHoleChart(); // static/embedded, independent of live.ready -- see its own comment above
   renderPredictedVerified(live);
   renderVolumes(d.computedVolumes||[]);
   renderNucleusVolumeChart();
@@ -1371,56 +1364,6 @@ setupVolumeCategoryPicker();
 loadLiveData(false);
 document.getElementById("refreshBtn").addEventListener("click",function(){loadLiveData(true);});
 
-/* Microglia-plug / astrocyte-hole (NR type II) prevalence chart -- computed from the embedded
-   "organelledata"/"owndata" JSON blocks (see organelledata's own comment further up in the file),
-   NOT from ?dashboardLive=1, so it renders even with the backend unreachable. Deliberately
-   SELF-CONTAINED: re-parses organelledata + owndata's OVERRIDE.TYPE fresh from their own DOM
-   script tags via the globally available b64() helper (a top-level `function` in another <script>
-   tag DOES attach to window, so it's safely callable here) rather than referencing the OTHER
-   script tag's top-level `const ORGANDATA`/`OWN_TYPE`/`N` bindings directly -- those are scoped to
-   THAT <script> block only (top-level let/const in one classic <script> element is invisible from
-   another, even though they share one window). A first version of this function lived in that
-   OTHER script tag and referenced this one's local BASE_LAYOUT/colorFor/PLOTLY_CFG the same wrong
-   way -- threw "colorFor is not defined" the moment applyLiveData() called it, which silently
-   aborted the rest of applyLiveData() (renderPredictedVerified/renderVolumes/renderReportsOverTime/
-   etc. never ran), leaving the WHOLE dashboard stuck on "Loading..." forever (Søren: "Now, the
-   Dashboard just says 'Loading...' and nothing happens. Something is broken"). Living entirely
-   inside initDashboardTab(), self-contained, is what fixes that. */
-function computePlugHoleStats(){
-  const od2=JSON.parse(document.getElementById("owndata").textContent);
-  const typeNames2=od2.TYPE_NAMES;
-  const type2=b64(od2.OVERRIDE.TYPE);
-  const organ2=JSON.parse(document.getElementById("organelledata").textContent);
-  let microgliaTotal=0,microgliaWithPlug=0,astroTotal=0,astroWithHole=0;
-  for(let i=0;i<type2.length;i++){
-    if(type2[i]===255)continue;
-    const t=typeNames2[type2[i]];
-    if(t==="Microglia"){microgliaTotal++;if(organ2.PLUGS[String(i)])microgliaWithPlug++;}
-    else if(t==="Astrocyte"){astroTotal++;if(organ2.HOLES[String(i)])astroWithHole++;}
-  }
-  return {microgliaTotal,microgliaWithPlug,astroTotal,astroWithHole};
-}
-function renderPlugHoleChart(){
-  const el=document.getElementById("plotPlugHolePercent");
-  if(!el)return;
-  const s=computePlugHoleStats();
-  const rows=[
-    {label:"Microglia — has ≥1 plug",n:s.microgliaWithPlug,total:s.microgliaTotal,color:colorFor("Microglia")},
-    {label:"Astrocyte — has ≥1 hole (NR type II)",n:s.astroWithHole,total:s.astroTotal,color:colorFor("Astrocyte")}
-  ];
-  const labels=rows.map(r=>r.label);
-  const pct=rows.map(r=>r.total?Math.round(r.n/r.total*1000)/10:0);
-  Plotly.newPlot("plotPlugHolePercent",[{
-    type:"bar",
-    x:labels,y:pct,
-    text:rows.map(r=>r.n+"/"+r.total),
-    textposition:"outside",
-    marker:{color:rows.map(r=>r.color)}
-  }],Object.assign({},BASE_LAYOUT,{
-    margin:Object.assign({},BASE_LAYOUT.margin,{t:32}),
-    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"% of Søren's own-verified cells",range:[0,118]})
-  }),PLOTLY_CFG);
-}
 }
 </script>
 </div>
@@ -1637,11 +1580,6 @@ function mergedInfo(i){var m=MERGED[String(i)]||null;if(m)for(var _j=0;_j<m.leng
 const ORGANDATA=JSON.parse(document.getElementById("organelledata").textContent);
 function plugsForNucIdx(i){return ORGANDATA.PLUGS[String(i)]||null;}
 function holesForNucIdx(i){return ORGANDATA.HOLES[String(i)]||null;}
-/* NOTE: the dashboard chart computed from this same data (renderPlugHoleChart) lives INSIDE
-   initDashboardTab() further up the file (a SEPARATE <script> tag/function scope from this one --
-   see that function's own comment for why: it needs BASE_LAYOUT/colorFor/PLOTLY_CFG/Plotly, all
-   local to that function, not visible here) and re-parses organelledata+owndata independently
-   rather than reaching across the scope boundary for these bindings. */
 function ownOverride(i){
   const t=OWN_TYPE[i];
   if(t===255)return null;
