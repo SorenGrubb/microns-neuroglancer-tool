@@ -22,9 +22,11 @@
 #  2. You'll see one empty grey box ("cell"). Click into it.
 #  3. Copy this ENTIRE file's contents and paste it into that box.
 #  4. On the LEFT side of the Colab window, click the folder icon (Files). Click the
-#     upload icon (a page with an up-arrow) and upload "root_id_to_type.json" --
-#     it was generated alongside this script, ask Claude for it if you don't have it.
-#     (It's about 5 MB, so the upload takes a few seconds.)
+#     upload icon (a page with an up-arrow) and upload "root_id_to_type.json" AND
+#     "root_id_to_layer.json" (2026-08: the second one is new, for the layer picker on
+#     the "Input vs. output synapses per cell type" chart) -- both are generated alongside
+#     this script, ask Claude for them if you don't have them. (A few MB each, so the
+#     upload takes a few seconds.)
 #  5. Click the "play" triangle button next to the code box (or press Shift+Enter).
 #     The first run will pause partway through and ask you to paste your CAVE token --
 #     see STEP 2 below for how to get one if you don't already have one.
@@ -61,18 +63,34 @@ auth_client.auth.save_token(token=TOKEN, overwrite=True)
 client = CAVEclient(DATASTACK)
 print("Connected to", DATASTACK)
 
-# ---- STEP 3: upload root_id_to_type.json (see the upload step above), then load it ----
+# ---- STEP 3: upload root_id_to_type.json and root_id_to_layer.json (see the upload step
+# above), then load them ----
 try:
     from google.colab import files
-    if "root_id_to_type.json" not in __import__("os").listdir("."):
-        print("Please upload root_id_to_type.json now (Files panel, upload icon) ...")
+    missing = [n for n in ("root_id_to_type.json", "root_id_to_layer.json")
+               if n not in __import__("os").listdir(".")]
+    if missing:
+        print("Please upload now (Files panel, upload icon):", ", ".join(missing))
         files.upload()
 except ImportError:
-    pass  # not running in Colab -- assume the file is already next to this script
+    pass  # not running in Colab -- assume the files are already next to this script
 
 with open("root_id_to_type.json") as f:
     ROOT_TO_TYPE = json.load(f)
 print("Loaded", len(ROOT_TO_TYPE), "known cell identities.")
+
+# root_id_to_layer.json (added 2026-08 for the dashboard's cortical-layer picker on the
+# "Input vs. output synapses per cell type" chart) -- optional-ish: if it's missing, everything
+# still runs, synapse_io_by_layer just comes out empty and the dashboard falls back to the
+# flat, non-layer-filtered chart (its existing default/only behavior before this change).
+try:
+    with open("root_id_to_layer.json") as f:
+        ROOT_TO_LAYER = json.load(f)
+    print("Loaded", len(ROOT_TO_LAYER), "cell layer estimates.")
+except FileNotFoundError:
+    ROOT_TO_LAYER = {}
+    print("root_id_to_layer.json not found -- skipping the per-layer synapse breakdown "
+          "(the dashboard will just show all layers, same as before).")
 
 # ---- STEP 4: which cells to sample per type (generated alongside this script) ----
 # Small enough to paste in directly -- ask Claude to regenerate this block if the µJump
@@ -122,6 +140,7 @@ def query_with_retries(fn, *args, max_attempts=4, base_delay=8, **kwargs):
 connectivity = {}   # source type -> Counter of partner type -> synapse count
 partner_cells = {}  # source type -> Counter of partner type -> DISTINCT partner cell count
 synapse_io = {}     # source type -> {input/output synapse totals + per-sampled-cell averages}
+synapse_io_by_layer = {}  # layer -> source type -> {same shape as synapse_io} (added 2026-08)
 failed_types = []   # types that failed even after retries -- re-attempted once more at the end
 
 def query_one_type(src_type, root_ids):
@@ -168,6 +187,29 @@ def query_one_type(src_type, root_ids):
         "avg_output_synapses_per_cell": round(len(out_df) / n_sampled, 1) if n_sampled else 0,
         "avg_input_synapses_per_cell": round(len(in_df) / n_sampled, 1) if n_sampled else 0,
     }
+
+    # ---- 2026-08: same thing again, but bucketed by the SAMPLED cell's OWN cortical layer ----
+    # (not the synaptic partner's layer). This is what lets the dashboard answer "how many
+    # synapses do Layer 5b cells of this type send/receive", per Søren's request for a layer
+    # picker on this chart. Skipped gracefully (leaves synapse_io_by_layer empty for this type)
+    # if root_id_to_layer.json wasn't uploaded -- the flat synapse_io above still works either way.
+    if ROOT_TO_LAYER:
+        cell_layer = {rid: ROOT_TO_LAYER.get(str(rid), "Unknown") for rid in root_ids_int}
+        n_by_layer = collections.Counter(cell_layer.values())
+        out_by_layer = collections.Counter()
+        in_by_layer = collections.Counter()
+        for _, row in out_df.iterrows():
+            out_by_layer[cell_layer.get(int(row["pre_pt_root_id"]), "Unknown")] += 1
+        for _, row in in_df.iterrows():
+            in_by_layer[cell_layer.get(int(row["post_pt_root_id"]), "Unknown")] += 1
+        for layer, n in n_by_layer.items():
+            synapse_io_by_layer.setdefault(layer, {})[src_type] = {
+                "n_sampled_cells": n,
+                "output_synapses_total": int(out_by_layer.get(layer, 0)),
+                "input_synapses_total": int(in_by_layer.get(layer, 0)),
+                "avg_output_synapses_per_cell": round(out_by_layer.get(layer, 0) / n, 1) if n else 0,
+                "avg_input_synapses_per_cell": round(in_by_layer.get(layer, 0) / n, 1) if n else 0,
+            }
     return True
 
 # ---- First pass over every type ----
@@ -208,11 +250,15 @@ out = {
             "of how many synapses they share with the sampled cells. synapse_io (added "
             "2026-08-02) gives per-type input/output synapse totals AND per-sampled-cell "
             "averages for the same sample -- the average is the fairer cross-type comparison, "
-            "since different cell types have very different sample sizes here.",
+            "since different cell types have very different sample sizes here. "
+            "synapse_io_by_layer (added 2026-08) is the same shape as synapse_io, one level "
+            "deeper by the SAMPLED cell's own estimated cortical layer (not the partner's) -- "
+            "empty if root_id_to_layer.json wasn't uploaded for this run.",
     "sample_size_per_type": {t: len(v) for t, v in ROOT_IDS_BY_TYPE.items()},
     "by_synapse_count": connectivity,
     "by_distinct_partner_cells": partner_cells,
     "synapse_io": synapse_io,
+    "synapse_io_by_layer": synapse_io_by_layer,
 }
 with open("connectivity_aggregate.json", "w") as f:
     json.dump(out, f, indent=2)

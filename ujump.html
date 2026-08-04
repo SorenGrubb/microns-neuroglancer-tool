@@ -22,7 +22,13 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
    wiring live here. Breaks out of .wrap's 760px column (full-bleed, standard vw/negative-margin
    trick) since the dashboard's own multi-column Plotly grid wants real width -- squeezing it into
    the narrow Jump/Filter column would work but cram every chart into one skinny stack. */
-.tabpanel[data-tabpanel="dashboard"]{max-width:none;width:100vw;position:relative;left:50%;margin-left:-50vw}
+/* 2026-08 follow-up: dropped the earlier full-bleed 100vw override for the dashboard tabpanel
+   (Søren: "I want the same width of the panels in the Dashboard as in the other tabs, also when
+   opening on a wide screen"). #dashPanel is now just a normal child of .wrap like every other
+   tabpanel, capped at the same 760px regardless of screen width. The dashboard's own .grid still
+   has max-width:1400px/auto-fit columns (harmless no-op inside a 760px parent -- auto-fit simply
+   settles on a single column, same as the rest of this narrow-column app) rather than being
+   rewritten, so nothing breaks if a wider container is ever wanted again later. */
 /* 2026-08 (Søren, after finding out ujump_dashboard.html is only ~55KB against ujump.html's own
    multi-MB embedded-data footprint: "I think we should incorporate it fully into the µJump file")
    -- superseded the iframe embed ([[ujump-dashboard-embed]]) with the dashboard's REAL markup/CSS/
@@ -465,10 +471,22 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
   </div>
 
   <div class="card wide">
-    <h2>Nucleus volume as a share of whole-cell (mesh) volume, by cell type</h2>
-    <p class="sub" title="Always a dot plot. Once same-cell nucleus+mesh pairs exist: one dot per paired cell = nucleus volume ÷ whole-cell volume for that same cell, %, with physically-impossible (&gt;100%) and statistically outlying (Tukey 1.5×IQR) ratios excluded. Until then: nucleus and whole-cell volumes shown as two independent per-type distributions, clearly labelled as not the same cells. Merged-nucleus-blob detections (not yet split into individual cells) are excluded throughout.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click. Compare within one category:
+    <h2>Nucleus volume, by cell type</h2>
+    <p class="sub" title="Precomputed per nucleus (see the Master cell list) -- free to show for every identified cell, not gated behind a &quot;Compute volume&quot; click the way whole-cell mesh volume is.">LIVE, from &quot;Master cell list&quot;&rsquo;s precomputed nucleus volumes. Compare within one category (also used by the two volume charts below):
       <select class="picker" id="volumeCategoryPicker"></select>
     </p>
+    <div class="plot" id="plotNucleusVolume"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Whole-cell (mesh) volume, by cell type</h2>
+    <p class="sub" title="Not precomputed anywhere -- MICrONS publishes no whole-cell mesh volume, so this only grows from real usage: every successful &quot;Compute volume&quot; click while signed in adds one measurement. Merged-nucleus-blob detections (not yet split into individual cells) are excluded.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click. Uses the same category selector as the nucleus-volume chart above.</p>
+    <div class="plot" id="plotMeshVolume"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Nucleus volume as a share of whole-cell (mesh) volume, by cell type</h2>
+    <p class="sub" title="Always a dot plot. Once same-cell nucleus+mesh pairs exist: one dot per paired cell = nucleus volume ÷ whole-cell volume for that same cell, %, with physically-impossible (&gt;100%) and statistically outlying (Tukey 1.5×IQR) ratios excluded. Until then: nucleus and whole-cell volumes shown as two independent per-type distributions, clearly labelled as not the same cells. Merged-nucleus-blob detections (not yet split into individual cells) are excluded throughout.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click. Uses the same category selector as the two volume charts above.</p>
     <div class="plot" id="plotVolumes"></div>
   </div>
 
@@ -490,7 +508,9 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 
   <div class="card wide">
     <h2>Input vs. output synapses per cell type</h2>
-    <p class="sub" title="Average synapse count per sampled cell (not a whole-dataset total) -- normalizes for the very different sample sizes per type in connectivity_aggregate.json. Input = synapses this cell type receives; output = synapses it makes. Same offline CAVE step and same file as the connectivity chart above.">Average per sampled cell — same offline data as the connectivity chart above.</p>
+    <p class="sub" title="Average synapse count per sampled cell (not a whole-dataset total) -- normalizes for the very different sample sizes per type in connectivity_aggregate.json. Input = synapses this cell type receives; output = synapses it makes. Same offline CAVE step and same file as the connectivity chart above. The layer picker filters to sampled cells whose OWN estimated cortical layer matches -- it does not affect which layer the synaptic PARTNERS are in.">Average per sampled cell — same offline data as the connectivity chart above.
+      <select class="picker" id="synapseLayerPicker" style="display:none"></select>
+    </p>
     <div id="synapseIoArea"></div>
   </div>
 
@@ -850,13 +870,22 @@ function renderLiveCoreCharts(live){
   // Primary cilia % -- category-ordered instead of sorted by percent.
   const pc=live.primary_cilia.percent_with_cilium_by_type;
   const pcTypes=sortByCategory(Object.keys(pc),t=>pc[t].percent);
+  /* BASE_LAYOUT's top margin (8px) is fine for every OTHER chart on this page -- this is the only
+     one with "n/total" text labels sitting ABOVE each bar (textposition:"outside"), and 8px isn't
+     enough room for that text before it gets clipped by the plot's own top edge whenever a bar is
+     near 100% (Søren, from a screenshot: "not enough space in the top to show the labels"). Give
+     this one chart a real top margin instead, and widen the y-axis range further above 100 so the
+     tallest bars' labels have somewhere to sit rather than crowding the very top edge. */
   Plotly.newPlot("plotCiliaPercent",[{
     type:"bar",
     x:pcTypes, y:pcTypes.map(t=>pc[t].percent),
     text:pcTypes.map(t=>pc[t].with_cilium+"/"+pc[t].checked),
     textposition:"outside",
     marker:{color:pcTypes.map(colorFor)}
-  }],categorizedLayout(pcTypes,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"% with primary cilium",range:[0,105]})}),PLOTLY_CFG);
+  }],categorizedLayout(pcTypes,{
+    margin:Object.assign({},BASE_LAYOUT.margin,{t:32}),
+    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"% with primary cilium",range:[0,118]})
+  }),PLOTLY_CFG);
 
   // Cilium length / nucleus-to-centriole distance -- already live-merged server-side (any
   // Organelle-locations report not yet folded into the sheet is included by dashboardLive()
@@ -1028,9 +1057,70 @@ function renderVolumes(rows){
     :"<div class='placeholder'>No volume data yet — this graph grows every time someone clicks &ldquo;Compute volume&rdquo; in µJump while signed in with Google.</div>";
 }
 
-/* Populates the volume chart's category picker once (options never change) and wires its change
-   handler to redraw from the cached rows without a network round-trip. Called once at setup,
-   safe to call before any live data has loaded -- the picker just sits inert until then. */
+/* Shared by all 3 volume charts (nucleus-only, whole-cell-only, and the %-ratio chart) -- reads
+   the ONE #volumeCategoryPicker (declared once, on the nucleus-volume card; the other two cards
+   just reference it in their own copy). */
+function selectedVolumeCategory(){
+  const picker=document.getElementById("volumeCategoryPicker");
+  return picker?picker.value:"";
+}
+function inSelectedVolumeCategory(t){
+  const c=selectedVolumeCategory();
+  return !c||c==="__all__"||categoryOf(t)===c;
+}
+function categoryPlaceholderSuffix(){
+  const c=selectedVolumeCategory();
+  return (c&&c!=="__all__")?(" for "+c):"";
+}
+
+/* Nucleus volume, by cell type (2026-08, Søren: "I would like a nucleus volume graph and a
+   whole-cell volume graph also, before the nucleus volume % of whole cell volume graph. Those
+   graphs should be same style with selection of categories") -- the FULL live per-type nucleus-
+   volume distribution (same dotMedianChart convention as cilium length/nucleus-centriole
+   distance), not restricted to cells that also happen to have a paired mesh-volume measurement
+   the way the %-ratio chart's Tier 1 is. */
+function renderNucleusVolumeChart(){
+  const area=document.getElementById("plotNucleusVolume");
+  if(!area)return;
+  const byType={};
+  Object.keys(_liveNucleusVolumeByType||{}).forEach(function(t){
+    if(inSelectedVolumeCategory(t))byType[t]=_liveNucleusVolumeByType[t];
+  });
+  if(!Object.values(byType).some(a=>a&&a.length>=3)){
+    area.innerHTML="<div class='placeholder'>No nucleus-volume data yet"+categoryPlaceholderSuffix()+".</div>";
+    return;
+  }
+  area.innerHTML="";
+  dotMedianChart(area.id,byType,"Nucleus volume (µm³)",true,true);
+}
+
+/* Whole-cell (mesh) volume, by cell type -- same idea, but the FULL live mesh-volume distribution
+   (every "Compute volume" row with a usable cellType+volumeUm3, paired or not -- unlike the
+   %-ratio chart, this doesn't care whether a matching nucleus volume exists for the same cell). */
+function meshVolumeByType(){
+  const byType={};
+  (_lastVolumeRows||[]).forEach(function(r){
+    if(!r.cellType||!(r.volumeUm3>0)||isMergedBlobType(r.cellType)||!inSelectedVolumeCategory(r.cellType))return;
+    (byType[r.cellType]=byType[r.cellType]||[]).push(r.volumeUm3);
+  });
+  return byType;
+}
+function renderMeshVolumeChart(){
+  const area=document.getElementById("plotMeshVolume");
+  if(!area)return;
+  const byType=meshVolumeByType();
+  if(!Object.values(byType).some(a=>a&&a.length>=3)){
+    area.innerHTML="<div class='placeholder'>No whole-cell volume data yet"+categoryPlaceholderSuffix()+" — this graph grows every time someone clicks &ldquo;Compute volume&rdquo; in µJump while signed in with Google.</div>";
+    return;
+  }
+  area.innerHTML="";
+  dotMedianChart(area.id,byType,"Whole-cell (mesh) volume (µm³)",true,true);
+}
+
+/* Populates the volume charts' shared category picker once (options never change) and wires its
+   change handler to redraw all 3 volume charts from already-cached data, no network round-trip.
+   Called once at setup, safe to call before any live data has loaded -- the picker just sits
+   inert until then. */
 function setupVolumeCategoryPicker(){
   const picker=document.getElementById("volumeCategoryPicker");
   if(!picker)return;
@@ -1044,7 +1134,7 @@ function setupVolumeCategoryPicker(){
   // types is exactly the overcrowding Søren asked to fix, so "All categories" is available as an
   // explicit opt-in rather than the default.
   if(CATEGORY_ORDER&&CATEGORY_ORDER.length)picker.value=CATEGORY_ORDER[0];
-  picker.addEventListener("change",function(){renderVolumes();});
+  picker.addEventListener("change",function(){renderNucleusVolumeChart();renderMeshVolumeChart();renderVolumes();});
 }
 
 function renderReportsOverTime(daily){
@@ -1106,24 +1196,60 @@ function renderConnectivity(conn){
    step). Shows the PER-SAMPLED-CELL AVERAGE, not a whole-dataset total -- sample sizes vary a lot
    per type (up to 40 cells, fewer for rare types), so a raw total would just track sample size
    rather than anything biological. Grouped bar (not a dot plot): this is one aggregate number per
-   type per direction, not a distribution of individual measurements, so there's nothing to jitter. */
+   type per direction, not a distribution of individual measurements, so there's nothing to jitter.
+
+   2026-08: added a cortical-layer picker (Søren: "possibility to select the cortical layer, but
+   default should be all layers (like it is now)"). Reads the NEW conn.synapse_io_by_layer field
+   (layer -> type -> {same shape as synapse_io}), keyed by the SAMPLED cell's OWN layer, not the
+   partner's -- see microns_connectivity_colab.py's query_one_type() comment. "All layers" (the
+   default, value "__all__") uses the existing flat conn.synapse_io untouched, so behavior is
+   byte-identical to before this change unless a real layer is picked. If synapse_io_by_layer is
+   absent (older connectivity_aggregate.json, not yet regenerated with the new Colab script), the
+   picker itself is just hidden -- no broken control shown for data that doesn't exist yet. */
 function renderSynapseIO(conn){
   const area=document.getElementById("synapseIoArea");
+  const picker=document.getElementById("synapseLayerPicker");
   if(!conn||!conn.synapse_io||!Object.keys(conn.synapse_io).length){
+    if(picker)picker.style.display="none";
     area.innerHTML="<div class='placeholder'>Not generated yet — comes from the same connectivity_aggregate.json as the chart above (re-run microns_connectivity_colab.py/.ipynb to add it).</div>";
     return;
   }
   area.innerHTML='<div class="plot" id="plotSynapseIo"></div>';
-  const types=sortByCategory(Object.keys(conn.synapse_io),t=>conn.synapse_io[t].avg_input_synapses_per_cell+conn.synapse_io[t].avg_output_synapses_per_cell);
-  const inputVals=types.map(t=>conn.synapse_io[t].avg_input_synapses_per_cell||0);
-  const outputVals=types.map(t=>conn.synapse_io[t].avg_output_synapses_per_cell||0);
-  Plotly.newPlot("plotSynapseIo",[
-    {type:"bar",name:"Input (received)",x:types,y:inputVals,marker:{color:"#00b7ff"}},
-    {type:"bar",name:"Output (made)",x:types,y:outputVals,marker:{color:"#ff4fa3"}}
-  ],categorizedLayout(types,{
-    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"avg. synapses per sampled cell"}),
-    barmode:"group",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
-  }),PLOTLY_CFG);
+
+  const byLayer=conn.synapse_io_by_layer||{};
+  const layersPresent=Object.keys(LAYER_COLORS).filter(l=>byLayer[l]&&Object.keys(byLayer[l]).length);
+  if(picker&&layersPresent.length){
+    picker.style.display="inline-block";
+    picker.innerHTML="";
+    const allOpt=document.createElement("option");
+    allOpt.value="__all__";allOpt.textContent="All layers";
+    picker.appendChild(allOpt);
+    layersPresent.forEach(function(l){const o=document.createElement("option");o.value=l;o.textContent=l;picker.appendChild(o);});
+    picker.value="__all__";
+  }else if(picker){
+    picker.style.display="none";
+  }
+
+  function ioDataFor(layer){
+    return (layer&&layer!=="__all__"&&byLayer[layer])?byLayer[layer]:conn.synapse_io;
+  }
+  function renderOne(){
+    const layer=picker?picker.value:"__all__";
+    const io=ioDataFor(layer);
+    const types=sortByCategory(Object.keys(io),t=>io[t].avg_input_synapses_per_cell+io[t].avg_output_synapses_per_cell);
+    const inputVals=types.map(t=>io[t].avg_input_synapses_per_cell||0);
+    const outputVals=types.map(t=>io[t].avg_output_synapses_per_cell||0);
+    const yTitle="avg. synapses per sampled cell"+(layer&&layer!=="__all__"?" — "+layer:"");
+    Plotly.newPlot("plotSynapseIo",[
+      {type:"bar",name:"Input (received)",x:types,y:inputVals,marker:{color:"#00b7ff"}},
+      {type:"bar",name:"Output (made)",x:types,y:outputVals,marker:{color:"#ff4fa3"}}
+    ],categorizedLayout(types,{
+      yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle}),
+      barmode:"group",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
+    }),PLOTLY_CFG);
+  }
+  if(picker)picker.onchange=renderOne;
+  renderOne();
 }
 
 function setStatus(msg){document.getElementById("statusLine").textContent=msg;}
@@ -1199,6 +1325,8 @@ function applyLiveData(d){
   renderLiveCoreCharts(live);
   renderPredictedVerified(live);
   renderVolumes(d.computedVolumes||[]);
+  renderNucleusVolumeChart();
+  renderMeshVolumeChart();
   renderReportsOverTime(d.reportsDaily||[]);
   renderConnectivity(d.connectivity);
   renderSynapseIO(d.connectivity);
