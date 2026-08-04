@@ -287,27 +287,8 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 </div>
 </div>
 <div style="margin-top:14px">
-<label style="font-size:12px" title="Draws organelle/structure point annotations for the cells matched above — one independently-toggleable layer per kind you check here, colour-coded per kind. Sourced from the community 'report an organelle' data; centriole and primary cilium also draw from Søren's own-verified dataset. No point for a given cell just means nobody has logged one there yet, not a confirmed biological absence. The two vector checkboxes below draw an additional 3D arrow on top of the plain points — check a point checkbox on its own to show the organelle's location without the vector.">Include organelles</label>
-<div class="toggles" style="margin-top:4px">
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="centriole"> Centriole / centrosome</label>
-<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell's nucleus centre to its centriole, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCentVec"> Nucleus-to-centriole vector</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="cilium"> Primary cilium (base + tip)</label>
-<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from cilium base to tip, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCilVec"> Primary cilia base-to-tip vector</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="lysosome"> Lysosome</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="peroxisome"> Peroxisome</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="golgi"> Golgi apparatus</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="er"> Endoplasmic reticulum</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="mitochondria"> Mitochondria</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="mvb"> Multivesicular body</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="lipid_droplet"> Lipid droplet</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="phagosome"> Phagosome</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="glycogen"> Glycogen</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="adherens_junction"> Adherens junction</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="gap_junction"> Gap junction</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="tight_junction"> Tight junction</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="gfap"> GFAP</label>
-<label style="font-size:12px"><input type="checkbox" class="forgpt" value="synapse"> Synapse</label>
-</div>
+<label style="font-size:12px" title="Draws organelle/extracellular-structure point annotations for the cells matched above — one independently-toggleable layer per kind you check here, colour-coded per kind, organized by topic. Sourced from the community 'report an organelle' data; centriole and primary cilium also draw from Søren's own-verified dataset. No point for a given cell just means nobody has logged one there yet, not a confirmed biological absence. The two vector checkboxes (under Centriole &amp; cilium) draw an additional 3D arrow on top of the plain points — check a point checkbox on its own to show the organelle's location without the vector.">Organelles and extracellular structures</label>
+<div id="filterOrganellesBox" style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px"></div>
 </div>
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
@@ -2920,46 +2901,152 @@ function postReport(payload,okMsg){
    doGet, which selects reporterName and timestamp but deliberately omits reporterEmail). Anyone
    submitting a report types the name themselves or signs in with Google, so the displayed name is
    the one they chose to attach. */
-/* ---------- Organelle/structure kinds (2026-08-02) ----------
-   Søren: "Instead of report centriole/cilium, it should be report an organelle... there should
-   also be options for lysosomes, peroxisomes, golgi apparatus, endoplasmic reticulum,
-   mitochondria, multivesicular bodies, lipid droplet, phagosome, glycogen, adherens junction,
-   gap junction, tight junction, GFAP, synapse. All these should be a single annotation. I still
-   want centrioles to be the default one and primary cilia to be the default if adding another
-   one." This ONE list drives every "what is this?" dropdown (the main organelle-report form's
-   .organ-row-kind AND the merged-nucleus mini-widget's .mrOrganKind, which must stay in sync --
-   previously they were two independently hand-written <select> option lists) plus every
-   read-back display (organelleStructRowsHtml/organelleCountParts below). `vector:true` is what
-   distinguishes cilium (the one kind needing base+tip, i.e. two points) from every other kind
-   here, which is "a single annotation" (one x/y/z point) per Søren's own phrasing -- adding a
-   17th kind later only means appending one entry here, never touching the three functions that
-   already loop over ORGANELLE_KINDS generically. `short` is the compact name used in count
-   summaries ("2× centriole, 1× Golgi apparatus"), separate from the fuller dropdown `label`
-   (e.g. cilium's label spells out "(base + tip)", which would read oddly repeated in a tally).
-   kind VALUES are stored verbatim in the "Organelle locations" sheet's free-text `kind` column
-   (see doPost's organelle_location branch in Code.gs.txt) -- no backend schema change was needed
-   to add the 14 new kinds, since that column was never an enum server-side. */
-const ORGANELLE_KINDS=[
-  {value:"centriole",label:"Centriole / centrosome",short:"centriole",vector:false},
-  {value:"cilium",label:"Primary cilium (base + tip)",short:"cilium",vector:true},
-  {value:"lysosome",label:"Lysosome",short:"lysosome",vector:false},
-  {value:"peroxisome",label:"Peroxisome",short:"peroxisome",vector:false},
-  {value:"golgi",label:"Golgi apparatus",short:"Golgi apparatus",vector:false},
-  {value:"er",label:"Endoplasmic reticulum",short:"ER",vector:false},
-  {value:"mitochondria",label:"Mitochondria",short:"mitochondrion",vector:false},
-  {value:"mvb",label:"Multivesicular body",short:"MVB",vector:false},
-  {value:"lipid_droplet",label:"Lipid droplet",short:"lipid droplet",vector:false},
-  {value:"phagosome",label:"Phagosome",short:"phagosome",vector:false},
-  {value:"glycogen",label:"Glycogen",short:"glycogen",vector:false},
-  {value:"adherens_junction",label:"Adherens junction",short:"adherens junction",vector:false},
-  {value:"gap_junction",label:"Gap junction",short:"gap junction",vector:false},
-  {value:"tight_junction",label:"Tight junction",short:"tight junction",vector:false},
-  {value:"gfap",label:"GFAP",short:"GFAP",vector:false},
-  {value:"synapse",label:"Synapse",short:"synapse",vector:false}
+/* ---------- Organelle/structure kinds (2026-08-02, expanded 2026-08-06) ----------
+   Søren, 2026-08-02: "Instead of report centriole/cilium, it should be report an organelle...
+   there should also be options for lysosomes, peroxisomes, golgi apparatus, endoplasmic
+   reticulum, mitochondria, multivesicular bodies, lipid droplet, phagosome, glycogen, adherens
+   junction, gap junction, tight junction, GFAP, synapse. All these should be a single
+   annotation. I still want centrioles to be the default one and primary cilia to be the default
+   if adding another one."
+   Søren, 2026-08-06, on top of that original 16: "we need to have 'Nucleoplasmic reticulum (type
+   I)' and 'Nucleoplasmic reticulum (type II)'. We could also have 'Nuclear pore' and the
+   endoplasmic reticulum could be divided into 'Rough endoplasmic reticulum' and 'Smooth
+   endoplasmic reticulum'. We also need [33 more, see the full list below] ... I guess it should
+   be called 'Organelles and Extracellular Structures' and the list should be organized into
+   topics." The single flat "er" kind was retired in favour of er_rough/er_smooth (an existing
+   historical report with kind:"er" still displays fine -- see the "unrecognized kind" fallback
+   below -- it just won't be double-counted into the new split kinds).
+   Søren, same day, immediate follow-up: "Also add peg-and-socket junction, myoendothelial
+   junction, tripartite junction, Astrocyte endfoot, Microglia plug, Swelling, Synaptic vesicle,
+   Extracellular vesicle and Perivascular debris." The first 6 vascular/perivascular-contact terms
+   got their own new "Vascular & perivascular contacts" group (distinct from the generic
+   adherens/gap/tight "Cell junctions" group -- these are all specific neurovascular-unit contact
+   types, matching Søren's own research focus); Synaptic/Extracellular vesicle joined "Vesicles &
+   trafficking"; Swelling joined "Pathology".
+   Søren, same day, one more addition: "I want to add a 'What the... is this?' for some organelle
+   or extracellular structure that the user wants an expert opinion on." A dedicated "Not sure
+   what this is?" group, ONE kind (ask_expert), placed FIRST in ORGANELLE_GROUPS so it's the most
+   discoverable option in both dropdowns and the Filter-and-show checkbox list -- deliberately
+   just another ORGANELLE_KINDS entry rather than a bespoke new reporting flow, so it inherits
+   every existing mechanism for free: the report form's whole-submission "Comments (optional)"
+   field already lets a reporter describe what's puzzling them, and checking its Filter-and-show
+   box is how Søren (playing "the expert") finds and reviews every flagged point across the whole
+   dataset. Given its own bespoke colour (matches --warn, #e3b341) instead of an auto-generated
+   one, for the same "make this one stand out" reason centriole/cilium keep their own colours.
+
+   ORGANELLE_GROUPS is the source of truth: an ordered list of {label, kinds:[...]} topic groups,
+   each kind the same {value,label,short,vector} shape as before. ORGANELLE_KINDS (flat,
+   derived below) is kept for every consumer that doesn't care about grouping -- this ONE
+   structure drives every "what is this?" dropdown (the main organelle-report form's
+   .organ-row-kind AND the merged-nucleus mini-widget's .mrOrganKind, now rendered as <optgroup>
+   sections so a 49-item list stays navigable), every read-back display
+   (organelleStructRowsHtml/organelleCountParts below), AND (new) the Filter-and-show "Organelles
+   and extracellular structures" checkbox list (built from window.ORGANELLE_GROUPS -- exposed on
+   window since that UI lives in a LATER <script> tag, and top-level const/let bindings don't
+   cross <script> tag boundaries in a browser, only `var`/function declarations or an explicit
+   `window.x=` do). `vector:true` is still what distinguishes cilium (the one kind needing
+   base+tip, i.e. two points) from every other kind, which is "a single annotation" (one x/y/z
+   point) -- adding a 50th kind later only means appending one entry to the right group here,
+   never touching any function that loops over ORGANELLE_KINDS/ORGANELLE_GROUPS generically.
+   `short` is the compact name used in count summaries ("2× centriole, 1× Golgi apparatus"),
+   separate from the fuller dropdown `label`. kind VALUES are stored verbatim in the "Organelle
+   locations" sheet's free-text `kind` column (see doPost's organelle_location branch in
+   Code.gs.txt) -- no backend schema change was needed for any of these additions, since that
+   column was never an enum server-side. */
+const ORGANELLE_GROUPS=[
+  {label:"Not sure what this is?",kinds:[
+    {value:"ask_expert",label:"What the… is this? (ask an expert)",short:"flagged: ask expert",vector:false}
+  ]},
+  {label:"Nucleus",kinds:[
+    {value:"nucleolus",label:"Nucleolus",short:"nucleolus",vector:false},
+    {value:"chromatin",label:"Chromatin",short:"chromatin",vector:false},
+    {value:"nuclear_pore",label:"Nuclear pore",short:"nuclear pore",vector:false},
+    {value:"nucleoplasmic_reticulum_1",label:"Nucleoplasmic reticulum (type I)",short:"NR type I",vector:false},
+    {value:"nucleoplasmic_reticulum_2",label:"Nucleoplasmic reticulum (type II)",short:"NR type II",vector:false}
+  ]},
+  {label:"Centriole & cilium",kinds:[
+    {value:"centriole",label:"Centriole / centrosome",short:"centriole",vector:false},
+    {value:"cilium",label:"Primary cilium (base + tip)",short:"cilium",vector:true}
+  ]},
+  {label:"Endomembrane system",kinds:[
+    {value:"er_rough",label:"Rough endoplasmic reticulum",short:"rough ER",vector:false},
+    {value:"er_smooth",label:"Smooth endoplasmic reticulum",short:"smooth ER",vector:false},
+    {value:"golgi",label:"Golgi apparatus",short:"Golgi apparatus",vector:false},
+    {value:"lysosome",label:"Lysosome",short:"lysosome",vector:false},
+    {value:"peroxisome",label:"Peroxisome",short:"peroxisome",vector:false},
+    {value:"mitochondria",label:"Mitochondria",short:"mitochondrion",vector:false},
+    {value:"mvb",label:"Multivesicular body",short:"MVB",vector:false},
+    {value:"endosome",label:"Endosome",short:"endosome",vector:false}
+  ]},
+  {label:"Vesicles & trafficking",kinds:[
+    {value:"pinocytic_vesicle",label:"Pinocytic vesicle",short:"pinocytic vesicle",vector:false},
+    {value:"caveolae",label:"Caveolae",short:"caveolae",vector:false},
+    {value:"secretory_vesicle",label:"Secretory vesicle",short:"secretory vesicle",vector:false},
+    {value:"transport_vesicle",label:"Transport vesicle",short:"transport vesicle",vector:false},
+    {value:"autophagosome",label:"Autophagosome",short:"autophagosome",vector:false},
+    {value:"phagosome",label:"Phagosome",short:"phagosome",vector:false},
+    {value:"weibel_palade_body",label:"Weibel-Palade body",short:"Weibel-Palade body",vector:false},
+    {value:"synaptic_vesicle",label:"Synaptic vesicle",short:"synaptic vesicle",vector:false},
+    {value:"extracellular_vesicle",label:"Extracellular vesicle",short:"extracellular vesicle",vector:false}
+  ]},
+  {label:"Cytoskeleton",kinds:[
+    {value:"microtubules",label:"Microtubules",short:"microtubules",vector:false},
+    {value:"microfilaments",label:"Microfilaments",short:"microfilaments",vector:false},
+    {value:"intermediate_filaments",label:"Intermediate filaments",short:"intermediate filaments",vector:false},
+    {value:"contractile_elements",label:"Contractile elements",short:"contractile elements",vector:false}
+  ]},
+  {label:"Cell junctions",kinds:[
+    {value:"adherens_junction",label:"Adherens junction",short:"adherens junction",vector:false},
+    {value:"gap_junction",label:"Gap junction",short:"gap junction",vector:false},
+    {value:"tight_junction",label:"Tight junction",short:"tight junction",vector:false}
+  ]},
+  {label:"Vascular & perivascular contacts",kinds:[
+    {value:"peg_and_socket_junction",label:"Peg-and-socket junction",short:"peg-and-socket junction",vector:false},
+    {value:"myoendothelial_junction",label:"Myoendothelial junction",short:"myoendothelial junction",vector:false},
+    {value:"tripartite_junction",label:"Tripartite junction",short:"tripartite junction",vector:false},
+    {value:"astrocyte_endfoot",label:"Astrocyte endfoot",short:"astrocyte endfoot",vector:false},
+    {value:"microglia_plug",label:"Microglia plug",short:"microglia plug",vector:false},
+    {value:"perivascular_debris",label:"Perivascular debris",short:"perivascular debris",vector:false}
+  ]},
+  {label:"Cytoplasmic inclusions",kinds:[
+    {value:"lipid_droplet",label:"Lipid droplet",short:"lipid droplet",vector:false},
+    {value:"glycogen",label:"Glycogen",short:"glycogen",vector:false},
+    {value:"ribosome",label:"Ribosome",short:"ribosome",vector:false},
+    {value:"lipofuscin_granule",label:"Lipofuscin granule",short:"lipofuscin granule",vector:false},
+    {value:"corpora_amylacea",label:"Corpora amylacea",short:"corpora amylacea",vector:false}
+  ]},
+  {label:"Surface & membrane specializations",kinds:[
+    {value:"microvillus",label:"Microvillus",short:"microvillus",vector:false},
+    {value:"glycocalyx",label:"Glycocalyx",short:"glycocalyx",vector:false},
+    {value:"myelin_sheath",label:"Myelin sheath",short:"myelin sheath",vector:false}
+  ]},
+  {label:"Markers & contacts",kinds:[
+    {value:"gfap",label:"GFAP",short:"GFAP",vector:false},
+    {value:"synapse",label:"Synapse",short:"synapse",vector:false}
+  ]},
+  {label:"Extracellular matrix & structures",kinds:[
+    {value:"elastin",label:"Elastin",short:"elastin",vector:false},
+    {value:"fibrin",label:"Fibrin",short:"fibrin",vector:false},
+    {value:"collagen",label:"Collagen",short:"collagen",vector:false},
+    {value:"extracellular_space",label:"Extracellular space",short:"extracellular space",vector:false},
+    {value:"glia_limitans",label:"Glia limitans",short:"glia limitans",vector:false},
+    {value:"basement_membrane",label:"Basement membrane",short:"basement membrane",vector:false}
+  ]},
+  {label:"Pathology",kinds:[
+    {value:"amyloid_beta_plaque",label:"Amyloid beta plaque",short:"amyloid-β plaque",vector:false},
+    {value:"tau_tangle",label:"Tau tangle",short:"tau tangle",vector:false},
+    {value:"dystrophic_neurite",label:"Dystrophic neurite",short:"dystrophic neurite",vector:false},
+    {value:"tunneling_nanotube",label:"Tunneling nanotube",short:"tunneling nanotube",vector:false},
+    {value:"swelling",label:"Swelling",short:"swelling",vector:false}
+  ]}
 ];
+window.ORGANELLE_GROUPS=ORGANELLE_GROUPS;
+const ORGANELLE_KINDS=ORGANELLE_GROUPS.reduce((a,g)=>a.concat(g.kinds),[]);
 const ORGANELLE_KIND_BY_VALUE={};ORGANELLE_KINDS.forEach(k=>ORGANELLE_KIND_BY_VALUE[k.value]=k);
-/* <option> list shared verbatim by both organelle-reporting forms (see the big comment above). */
-const ORGANELLE_KIND_OPTIONS_HTML=ORGANELLE_KINDS.map(k=>'<option value="'+k.value+'">'+k.label+'</option>').join("");
+/* <optgroup>-sectioned <option> list shared verbatim by both organelle-reporting forms (see the
+   big comment above) -- topic-organized per Søren's "the list should be organized into topics"
+   now that it has grown to 49 entries. */
+const ORGANELLE_KIND_OPTIONS_HTML=ORGANELLE_GROUPS.map(g=>'<optgroup label="'+g.label+'">'+g.kinds.map(k=>'<option value="'+k.value+'">'+k.label+'</option>').join("")+'</optgroup>').join("");
 /* Tally a flat list of {kind,...} structures into short "N× label" parts, generically over
    EVERY kind in ORGANELLE_KINDS (not just centriole/cilium) -- shared by the three near-identical
    "structures logged for this cell" summary lines (main nucleus panel, out-of-region community
@@ -6046,7 +6133,7 @@ function wireOrganelleFlag(slug){
 }
 function organelleFormHtml(slug){
   const name=slug?LEAF_NAMES[slug]:null;
-  let h='<p class="hint">Mark where an organelle or structure sits on this cell — centriole, primary cilium, or any of the others in the list below. Add one row per structure — mix and match freely, and log more than one of the same kind if the cell has more than one (e.g. two centrioles, or several mitochondria).</p>';
+  let h='<p class="hint">Mark where an organelle or extracellular structure sits on this cell — centriole, primary cilium, or any of the others in the topic-organized list below. Add one row per structure — mix and match freely, and log more than one of the same kind if the cell has more than one (e.g. two centrioles, or several mitochondria).</p>';
   h+='<div class="meta">'+(name?"Identified as: <b>"+name+"</b> &middot; ":"")+(ID_CTX.nucId?"nucleus "+ID_CTX.nucId:"no nucleus ID on file")+(ID_CTX.root?" &middot; root "+ID_CTX.root:"")+(ID_CTX.pos?" &middot; voxel ("+coordSpan(ID_CTX.pos[0],ID_CTX.pos[1],ID_CTX.pos[2])+")":"")+'</div>';
   h+='<div id="organRows"></div>';
   h+='<button type="button" class="idbtn" id="organAddRow" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another structure</button>';
@@ -7148,6 +7235,30 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     }
     typeBox.innerHTML=html;
   }
+  /* "Organelles and extracellular structures" checkboxes in "Add to the Neuroglancer view" --
+     same generation pattern as the cell-type checkboxes just above (topic sub-headline + one
+     .toggles div per topic), built from window.ORGANELLE_GROUPS (defined in an earlier <script>
+     tag and exposed via window since top-level const/let bindings don't cross <script> tag
+     boundaries -- see the big comment above ORGANELLE_GROUPS). 2026-08-06, Søren: "the list
+     should be organized into topics." The two vector checkboxes (#filterCentVec/#filterCilVec,
+     unchanged IDs from before this rewrite) are spliced in right after their own kind's point
+     checkbox -- centriole/cilium are the only two kinds with a bespoke "draw a 3D arrow" option,
+     since that arrow is anchored on a DIFFERENT point outside the kind's own data (nucleus centre
+     for centriole; the kind's own two points for cilium), not something generic every kind has. */
+  const orgBox=document.getElementById("filterOrganellesBox");
+  if(orgBox&&window.ORGANELLE_GROUPS){
+    let oh="";
+    window.ORGANELLE_GROUPS.forEach(function(g){
+      oh+='<div style="margin-top:8px"><b style="font-size:12px;color:var(--mut)">'+g.label+'</b><div class="toggles" style="margin-top:4px">';
+      g.kinds.forEach(function(k){
+        oh+='<label style="font-size:12px"><input type="checkbox" class="forgpt" value="'+k.value+'"> '+k.label+'</label>';
+        if(k.value==="centriole")oh+='<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell\'s nucleus centre to its centriole, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCentVec"> Nucleus-to-centriole vector</label>';
+        if(k.value==="cilium")oh+='<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from cilium base to tip, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCilVec"> Primary cilia base-to-tip vector</label>';
+      });
+      oh+="</div></div>";
+    });
+    orgBox.innerHTML=oh;
+  }
   /* The "needing attention" dropdown and the cell-type checkboxes above it are mutually
      exclusive in practice -- runFilter()'s attention pass ignores the checkboxes entirely (see
      the comment there), which was confusing when someone had both set and only realised the
@@ -8106,28 +8217,34 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       return map;
     }catch(_){return{};}
   }
-  /* Colour per organelle kind for the "Include organelles" point layers (2026-08-06, Søren:
-     "I want to include all the organelles as an addon to the Neuroglancer view ... the nucleus
-     and centrioles can also be shown without the vector"). Local to this script block rather than
-     reusing ORGANELLE_KINDS (defined in an earlier <script> tag -- top-level const/let bindings
-     don't cross <script> tag boundaries in a browser, only `var`/`window.x` do) -- kept in the
-     same value-string order as ORGANELLE_KINDS purely for readability, not a hard dependency.
-     Centriole/cilium reuse their own vector colours for a natural pairing; the other 14 get a
-     distinct, readable-on-dark-background palette. */
-  const ORG_POINT_COLORS={
-    centriole:"#ffd21a",cilium:"#ff5bd0",lysosome:"#ff6b6b",peroxisome:"#ffa94d",
-    golgi:"#69db7c",er:"#4dabf7",mitochondria:"#e64980",mvb:"#9775fa",
-    lipid_droplet:"#fab005",phagosome:"#20c997",glycogen:"#f783ac",
-    adherens_junction:"#74c0fc",gap_junction:"#63e6be",tight_junction:"#ffa8a8",
-    gfap:"#b197fc",synapse:"#dee2e6"
-  };
-  const ORG_POINT_LABELS={
-    centriole:"Centriole / centrosome",cilium:"Primary cilium (base + tip)",lysosome:"Lysosome",
-    peroxisome:"Peroxisome",golgi:"Golgi apparatus",er:"Endoplasmic reticulum",
-    mitochondria:"Mitochondria",mvb:"Multivesicular body",lipid_droplet:"Lipid droplet",
-    phagosome:"Phagosome",glycogen:"Glycogen",adherens_junction:"Adherens junction",
-    gap_junction:"Gap junction",tight_junction:"Tight junction",gfap:"GFAP",synapse:"Synapse"
-  };
+  /* Colour + label per organelle kind for the "Organelles and extracellular structures" point
+     layers, derived from window.ORGANELLE_GROUPS (defined in an earlier <script> tag and exposed
+     via window -- see the big comment above ORGANELLE_GROUPS) rather than hand-maintained here, so
+     the 2026-08-06 expansion to 49 kinds (and any kind added after it) never needs a matching edit
+     in this script block. Centriole/cilium keep their own bespoke vector colours for a natural
+     pairing with their "Nucleus-to-centriole vector"/"Primary cilia base-to-tip vector" layers;
+     every other kind gets an automatically-generated, maximally-distinct colour via golden-angle
+     (137.508°) hue spacing -- a standard technique for generating N visually separated hues
+     without hand-picking a large palette (hardcoding 47 more hex codes by hand would be tedious
+     and error-prone, and wouldn't scale to a 50th kind). */
+  function hslToHex(h,s,l){
+    s/=100;l/=100;
+    const k=n=>(n+h/30)%12,a=s*Math.min(l,1-l);
+    const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+    const toHex=x=>Math.round(255*x).toString(16).padStart(2,"0");
+    return "#"+toHex(f(0))+toHex(f(8))+toHex(f(4));
+  }
+  const ORG_POINT_COLORS={},ORG_POINT_LABELS={};
+  (function(){
+    const list=(window.ORGANELLE_GROUPS||[]).reduce((a,g)=>a.concat(g.kinds),[]);
+    list.forEach(function(k,idx){
+      ORG_POINT_LABELS[k.value]=k.label;
+      if(k.value==="centriole")ORG_POINT_COLORS[k.value]="#ffd21a";
+      else if(k.value==="cilium")ORG_POINT_COLORS[k.value]="#ff5bd0";
+      else if(k.value==="ask_expert")ORG_POINT_COLORS[k.value]="#e3b341"; // matches --warn, same attention-grabbing colour used elsewhere in this file
+      else ORG_POINT_COLORS[k.value]=hslToHex((idx*137.508)%360,70,60);
+    });
+  })();
   function buildFilterViewerState(matches,includeVasc,includeEM,includeV1Col,includeVascTrace,includeCentVec,includeCilVec,includeOrgPoints){
     includeOrgPoints=includeOrgPoints||[];
     /* "position" in a Neuroglancer state is in VOXEL units of the declared per-axis scale
