@@ -4192,20 +4192,44 @@ const MeshDL=(()=>{
      buffer. Safe to do naively -- fetchMesh() already returns absolute dataset coordinates
      specifically so multiple downloaded meshes stay spatially aligned (see the comment on
      fetchMesh above) -- so these fragments land in their true positions relative to each other,
-     not stacked on top of one another. Falls back to a single, unmodified fetchMesh() result
-     when there are no extras (the common case), preserving the original per-mesh lod/numLods
-     info that only makes sense for a single fetch. */
+     not stacked on top of one another.
+     2026-08 (S\u00f8ren: "I had tried to compute a neuron's root ID volume but it was not
+     available, then I identified its root ID and wanted to compute it, but now it says cached
+     unavailable... if it is unavailable, then the user reported root ID should replace it and the
+     volume can be computed based on the user reported root ID") -- each candidate root ID
+     (main + extras) is now fetched independently and a failure on ONE (e.g. the main MICrONS root
+     ID has since been re-segmented away and is no longer in the seg_m1300 shard index) no longer
+     aborts the whole combine. Only throws when EVERY candidate fails; still throws immediately
+     (before trying anything) when there are no candidates at all. meshCached on the thrown error
+     is only set true when ALL failures were "known not found" cache hits, so a genuine network
+     failure on one ID doesn't get silently mislabelled as a cache hit. mainUnavailable on the
+     returned object flags the "main root ID's own mesh didn't resolve, this used one or more
+     proposed/community root IDs instead" case so callers can tell the user what happened. */
   async function fetchCombinedMesh(mainRootIdStr,onProgress,forceRecheck){
     const rootIds=[String(mainRootIdStr)].concat(extraImg65RootIds(mainRootIdStr)).filter(function(id){return id&&id!=="";});
     if(!rootIds.length)throw new Error("No root IDs available for this cell yet \u2014 propose one below, then try again.");
-    if(rootIds.length===1){
-      const m=await fetchMesh(rootIds[0],onProgress,forceRecheck);
-      return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds};
-    }
-    const n=rootIds.length,meshes=[];
+    const n=rootIds.length,meshes=[],usedIds=[],failures=[];
     for(let i=0;i<n;i++){
       const idx=i;
-      meshes.push(await fetchMesh(rootIds[i],(frac,msg)=>onProgress&&onProgress((idx+frac)/n,(msg||"")+" (fragment "+(idx+1)+"/"+n+")"),forceRecheck));
+      try{
+        const m=await fetchMesh(rootIds[i],(frac,msg)=>onProgress&&onProgress((idx+frac)/n,(msg||"")+(n>1?" (fragment "+(idx+1)+"/"+n+")":"")),forceRecheck);
+        meshes.push(m);usedIds.push(rootIds[i]);
+      }catch(err){
+        console.warn("[uJump mesh] root ID "+rootIds[i]+" unavailable, skipping:",err&&err.message);
+        failures.push(err);
+      }
+    }
+    if(!meshes.length){
+      const allCached=failures.length>0&&failures.every(function(e){return e&&e.meshCached;});
+      const err=new Error(n>1
+        ?"None of the "+n+" root IDs for this cell (main + proposed) were found in the seg_m1300 mesh snapshot."
+        :((failures[0]&&failures[0].message)||"Mesh not found."));
+      err.meshCached=allCached;throw err;
+    }
+    const mainUnavailable=usedIds.indexOf(String(mainRootIdStr))<0;
+    if(meshes.length===1){
+      const m=meshes[0];
+      return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds:usedIds,mainUnavailable};
     }
     let totalV=0,totalI=0,bytes=0;
     meshes.forEach(m=>{totalV+=m.positions.length;totalI+=m.indices.length;bytes+=m.bytes||0;});
@@ -4216,10 +4240,10 @@ const MeshDL=(()=>{
       for(let k=0;k<m.indices.length;k++)indices[iOff+k]=m.indices[k]+vCount;
       vOff+=m.positions.length;iOff+=m.indices.length;vCount+=m.positions.length/3;
     });
-    return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:n,rootIds};
+    return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:meshes.length,rootIds:usedIds,mainUnavailable};
   }
   async function downloadRoot(rootIdStr,onProgress,forceRecheck){
-    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount,rootIds}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount,rootIds,mainUnavailable}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
     const {positions,indices}=flipYForGLTF(rawPositions,rawIndices);
     /* When there's no main root ID (community-only combine), fall back to the first combined ID
        so the filename is still a real, traceable segmentation ID rather than a blank/underscore. */
@@ -4232,7 +4256,7 @@ const MeshDL=(()=>{
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {lod,numLods,bytes,vertices:positions.length/3,filename,fragmentCount,rootIds};
+    return {lod,numLods,bytes,vertices:positions.length/3,filename,fragmentCount,rootIds,mainUnavailable};
   }
   /* ---------- Mesh volume (on-demand, per Søren's request 2026-07-30) ----------
      Nucleus volume (see NV/nucVolumeStr near the top of the file) is precomputed and free to
@@ -4251,7 +4275,7 @@ const MeshDL=(()=>{
      reported to the user as an ESTIMATE, not an exact figure. Positions are already in this tool's
      usual µm mesh-download units, so no extra scaling is needed. */
   async function computeVolume(rootIdStr,onProgress,forceRecheck){
-    const {positions,indices,fragmentCount,rootIds}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+    const {positions,indices,fragmentCount,rootIds,mainUnavailable}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
     onProgress&&onProgress(0.98,"computing volume…");
     let vol6=0;
     for(let t=0;t<indices.length;t+=3){
@@ -4261,7 +4285,7 @@ const MeshDL=(()=>{
       const cx=positions[ic],cy=positions[ic+1],cz=positions[ic+2];
       vol6+=ax*(by*cz-bz*cy)-ay*(bx*cz-bz*cx)+az*(bx*cy-by*cx);
     }
-    return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3,fragmentCount,rootIds};
+    return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3,fragmentCount,rootIds,mainUnavailable};
   }
   /* ---------- PowerPoint (.pptx) with a live, auto-spinning 3D model ----------
      PPTXSK is a ~32KB skeleton .pptx -- ONE slide holding a 3D-model placeholder with the
@@ -4438,7 +4462,7 @@ const MeshDL=(()=>{
     return {positions,indices:new Uint32Array(idx),barLenUm};
   }
   async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress,forceRecheck){
-    const [{positions:cellRawPositions,indices:cellRawIndices,fragmentCount,rootIds},JSZip]=await Promise.all([fetchCombinedMesh(rootIdStr,onProgress,forceRecheck),loadJSZip()]);
+    const [{positions:cellRawPositions,indices:cellRawIndices,fragmentCount,rootIds,mainUnavailable},JSZip]=await Promise.all([fetchCombinedMesh(rootIdStr,onProgress,forceRecheck),loadJSZip()]);
     /* Same "no main root ID -- community-only combine" fallback as downloadRoot() above. */
     const idForName=rootIdStr||rootIds[0];
     onProgress&&onProgress(0.96,"building PowerPoint…");
@@ -4518,7 +4542,7 @@ const MeshDL=(()=>{
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {filename,vertices:positions.length/3,fragmentCount,barLenUm:barLen,rootIds};
+    return {filename,vertices:positions.length/3,fragmentCount,barLenUm:barLen,rootIds,mainUnavailable};
   }
   /* 2026-08-05 (Sören: recalculate should only be offered once MORE root IDs exist than the
      saved computation used) -- exposes the exact "main + qualifying extras" count
@@ -4579,7 +4603,12 @@ document.addEventListener("click",(e)=>{
           if(valSpan){
             valSpan.textContent="≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³";
             valSpan.dataset.c=String(Math.round(info.volumeUm3*100)/100);
-            valSpan.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices)"+combinedStr+" — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure. Saved to the shared dashboard just now. Click to copy.";
+            /* mainUnavailable (2026-08, Søren: main root ID's mesh was "cached unavailable" but a
+               user-reported root ID for the same nucleus worked -- fetchCombinedMesh() now falls
+               back to whichever proposed root IDs DO resolve instead of failing outright). Surfaced
+               here rather than silently swapped in, so the estimate's provenance stays visible. */
+            const fallbackStr=info.mainUnavailable?" — the main root ID's mesh wasn't found in the seg_m1300 snapshot; computed from a community-reported root ID for this nucleus instead.":"";
+            valSpan.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices)"+combinedStr+" — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure."+fallbackStr+" Saved to the shared dashboard just now. Click to copy.";
           }
           volEl.style.display="flex";
         }
@@ -4619,6 +4648,9 @@ document.addEventListener("click",(e)=>{
       const barStr=info.barLenUm?", scale bar "+(info.barLenUm>=1000?(info.barLenUm/1000)+" mm":info.barLenUm+" µm"):"";
       btn.textContent=isPptx?"✓ saved ("+combinedStr+vertStr+barStr+", autoplays)"
                             :"✓ saved ("+(info.fragmentCount>1?combinedStr+vertStr:"LOD "+info.lod+"/"+(info.numLods-1)+", "+vertStr)+")";
+      /* Same main-root-ID-unavailable fallback as the .meshvol handler above -- noted in the
+         title (not the button text itself, which is already busy) so it's still discoverable. */
+      if(info.mainUnavailable)btn.title="The main root ID's mesh wasn't found in the seg_m1300 snapshot; this used a community-reported root ID for this nucleus instead.";
       setTimeout(()=>{btn.textContent=orig;btn.disabled=false;},4000);
     })
     .catch(err=>{
