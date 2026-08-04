@@ -9510,7 +9510,14 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       layers.push({type:"segmentation",source:SRC.seg35,tab:"source",name:"Vasculature (Img35)",segments:[VASC_ID_IMG35],segmentColors:{[VASC_ID_IMG35]:VASC_COLOR},objectAlpha:0.3});
     }
     if(includeCentVec||includeCilVec||includeOrgPoints.length){
-      var centAnns=[],cilAnns=[],ORG=window.ORG_MAP||{};
+      var centAnns=[],cilAnns=[],holeLineAnns=[],ORG=window.ORG_MAP||{};
+      /* Astrocyte holes (NR type II) get a connecting LINE between their 2 endpoints, not just 2
+         separate dots (Søren: "For the holes, I would like a line annotation between the 2 ends of
+         the hole") -- a plain line, not the arrowhead vecArrowAnns() draws for centriole/cilium
+         vectors (a hole has no natural "from/to" direction the way a centriole-from-nucleus or
+         cilium base-to-tip does). One color per line, reusing this kind's own point color so the
+         line and its 2 endpoint dots read as the same structure. */
+      function holeLineAnn(pA,pB,id){return{type:"line",id:id,pointA:pA,pointB:pB,props:[ORG_POINT_COLORS.nucleoplasmic_reticulum_2||"#8bd5ff"]};}
       /* 2026-08-06 (Søren: "include all the organelles as an addon ... nucleus and centrioles can
          also be shown without the vector") -- ptAnnsByKind collects plain point markers (no arrow/
          line) per organelle kind, independent of the two vector checkboxes above. addPt() is a
@@ -9538,6 +9545,21 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
             if(includeCilVec&&o.kind==="cilium"&&o.a&&o.b)cilAnns=cilAnns.concat(vecArrowAnns(o.a,o.b,"#ff5bd0","clvc"+mr.i+"_"+ri));
             if(o.a)addPt(o.kind,o.a,"orgptA"+mr.i+"_"+ri);
             if(o.b)addPt(o.kind,o.b,"orgptB"+mr.i+"_"+ri);
+            if(o.kind==="nucleoplasmic_reticulum_2"&&o.a&&o.b&&includeOrgPoints.indexOf("nucleoplasmic_reticulum_2")>=0)
+              holeLineAnns.push(holeLineAnn(o.a,o.b,"holelinec"+mr.i+"_"+ri));
+          }
+          /* Søren's own embedded historical microglia-plug / astrocyte-hole data (organelledata --
+             see its own comment further up) -- separate from the live ORG_MAP reports above (a
+             plain paste into "Organelle locations" bypasses the app's own submission flow, so
+             these never show up in ORG_MAP), keyed by nucdata index the same way. */
+          var plugs=plugsForNucIdx(mr.i);
+          if(plugs)for(var pgi=0;pgi<plugs.length;pgi++)addPt("microglia_plug",plugs[pgi],"plugpt"+mr.i+"_"+pgi);
+          var holes=holesForNucIdx(mr.i);
+          if(holes)for(var hgi=0;hgi<holes.length;hgi++){
+            addPt("nucleoplasmic_reticulum_2",holes[hgi][0],"holeptA"+mr.i+"_"+hgi);
+            addPt("nucleoplasmic_reticulum_2",holes[hgi][1],"holeptB"+mr.i+"_"+hgi);
+            if(includeOrgPoints.indexOf("nucleoplasmic_reticulum_2")>=0)
+              holeLineAnns.push(holeLineAnn(holes[hgi][0],holes[hgi][1],"holeline"+mr.i+"_"+hgi));
           }
         } else if(mr.space==="ST"){
           /* Standalone (out-of-region / Img35) verified points carry their own centriole (ST_CENT*)
@@ -9555,6 +9577,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       }
       if(centAnns.length)layers.push({type:"annotation",source:"local://annotations",annotations:centAnns,annotationProperties:[{id:"color",type:"rgb",default:"#ffd21a"}],shader:"void main() { setColor(prop_color()); }",name:"Nucleus→centriole vectors"});
       if(cilAnns.length)layers.push({type:"annotation",source:"local://annotations",annotations:cilAnns,annotationProperties:[{id:"color",type:"rgb",default:"#ff5bd0"}],shader:"void main() { setColor(prop_color()); }",name:"Cilium base→tip vectors"});
+      if(holeLineAnns.length)layers.push({type:"annotation",source:"local://annotations",annotations:holeLineAnns,annotationProperties:[{id:"color",type:"rgb",default:ORG_POINT_COLORS.nucleoplasmic_reticulum_2||"#8bd5ff"}],shader:"void main() { setColor(prop_color()); }",name:"Astrocyte hole (NR type II) lines"});
       includeOrgPoints.forEach(function(kind){
         var anns=ptAnnsByKind[kind];
         if(!anns||!anns.length)return;
