@@ -2933,6 +2933,20 @@ function postReport(payload,okMsg){
    box is how Søren (playing "the expert") finds and reviews every flagged point across the whole
    dataset. Given its own bespoke colour (matches --warn, #e3b341) instead of an auto-generated
    one, for the same "make this one stand out" reason centriole/cilium keep their own colours.
+   Søren, same day, one more refinement pass: "Centrioles should still be the default for
+   reporting an organelle. GFAP should be part of the cytoskeleton. We can add dendritic spine and
+   axonal bouton to the category with synapse and rename that category. Tunelling nanotube should
+   be in the cell junctions category." GFAP moved Markers & contacts -> Cytoskeleton (it's an
+   intermediate-filament protein, so this is a straightforward reclassification, not a new kind).
+   Tunneling nanotube moved Pathology -> Cell junctions. "Markers & contacts" (which would have
+   been left with only "Synapse" after GFAP moved out) was renamed "Synaptic structures" and gained
+   two new kinds, dendritic_spine and axonal_bouton. Separately: the two organelle-report forms'
+   addRow() functions used to rely on "centriole" simply being the first <option> in the dropdown
+   for their first-row default -- true before "ask_expert" was inserted at the very front of
+   ORGANELLE_GROUPS earlier the same day, silently NOT true after. Both now set
+   `kindEl.value="centriole"` explicitly for the first row (see the two addRow() comments below),
+   so this default no longer depends on list ordering at all, no matter what's added or reordered
+   in ORGANELLE_GROUPS in the future.
 
    ORGANELLE_GROUPS is the source of truth: an ordered list of {label, kinds:[...]} topic groups,
    each kind the same {value,label,short,vector} shape as before. ORGANELLE_KINDS (flat,
@@ -2993,12 +3007,14 @@ const ORGANELLE_GROUPS=[
     {value:"microtubules",label:"Microtubules",short:"microtubules",vector:false},
     {value:"microfilaments",label:"Microfilaments",short:"microfilaments",vector:false},
     {value:"intermediate_filaments",label:"Intermediate filaments",short:"intermediate filaments",vector:false},
-    {value:"contractile_elements",label:"Contractile elements",short:"contractile elements",vector:false}
+    {value:"contractile_elements",label:"Contractile elements",short:"contractile elements",vector:false},
+    {value:"gfap",label:"GFAP",short:"GFAP",vector:false}
   ]},
   {label:"Cell junctions",kinds:[
     {value:"adherens_junction",label:"Adherens junction",short:"adherens junction",vector:false},
     {value:"gap_junction",label:"Gap junction",short:"gap junction",vector:false},
-    {value:"tight_junction",label:"Tight junction",short:"tight junction",vector:false}
+    {value:"tight_junction",label:"Tight junction",short:"tight junction",vector:false},
+    {value:"tunneling_nanotube",label:"Tunneling nanotube",short:"tunneling nanotube",vector:false}
   ]},
   {label:"Vascular & perivascular contacts",kinds:[
     {value:"peg_and_socket_junction",label:"Peg-and-socket junction",short:"peg-and-socket junction",vector:false},
@@ -3020,9 +3036,10 @@ const ORGANELLE_GROUPS=[
     {value:"glycocalyx",label:"Glycocalyx",short:"glycocalyx",vector:false},
     {value:"myelin_sheath",label:"Myelin sheath",short:"myelin sheath",vector:false}
   ]},
-  {label:"Markers & contacts",kinds:[
-    {value:"gfap",label:"GFAP",short:"GFAP",vector:false},
-    {value:"synapse",label:"Synapse",short:"synapse",vector:false}
+  {label:"Synaptic structures",kinds:[
+    {value:"synapse",label:"Synapse",short:"synapse",vector:false},
+    {value:"dendritic_spine",label:"Dendritic spine",short:"dendritic spine",vector:false},
+    {value:"axonal_bouton",label:"Axonal bouton",short:"axonal bouton",vector:false}
   ]},
   {label:"Extracellular matrix & structures",kinds:[
     {value:"elastin",label:"Elastin",short:"elastin",vector:false},
@@ -3036,7 +3053,6 @@ const ORGANELLE_GROUPS=[
     {value:"amyloid_beta_plaque",label:"Amyloid beta plaque",short:"amyloid-β plaque",vector:false},
     {value:"tau_tangle",label:"Tau tangle",short:"tau tangle",vector:false},
     {value:"dystrophic_neurite",label:"Dystrophic neurite",short:"dystrophic neurite",vector:false},
-    {value:"tunneling_nanotube",label:"Tunneling nanotube",short:"tunneling nanotube",vector:false},
     {value:"swelling",label:"Swelling",short:"swelling",vector:false}
   ]}
 ];
@@ -5868,7 +5884,13 @@ function buildMergedRowOrganelleWidget(container){
     // isC means "is this kind the vector (base+tip) shape" -- see the matching comment in the
     // main form's addRow() above for why this checks .vector rather than a hardcoded ==="cilium".
     kindEl.addEventListener("change",()=>{const info=ORGANELLE_KIND_BY_VALUE[kindEl.value];const isC=!!(info&&info.vector);cFields.style.display=isC?"none":"";ciFields.style.display=isC?"":"none";});
-    if(!isFirstRow){kindEl.value="cilium";cFields.style.display="none";ciFields.style.display="";}
+    /* First row defaults to Centriole, every row added after that defaults to Primary cilium, per
+       Søren's explicit request -- previously relied on "centriole" simply being the browser's
+       default first <option>, which broke silently once "ask_expert" became the true first entry
+       in ORGANELLE_KINDS (2026-08-06). Now set explicitly on BOTH branches so this default no
+       longer depends on list ordering at all. */
+    if(isFirstRow){kindEl.value="centriole";}
+    else{kindEl.value="cilium";cFields.style.display="none";ciFields.style.display="";}
     const cx=row.querySelector(".mrocx"),cy=row.querySelector(".mrocy"),cz=row.querySelector(".mrocz");
     const bx=row.querySelector(".mrobx"),by=row.querySelector(".mroby"),bz=row.querySelector(".mrobz");
     const tx=row.querySelector(".mrotx"),ty=row.querySelector(".mroty"),tz=row.querySelector(".mrotz");
@@ -6244,7 +6266,14 @@ function wireOrganelleForm(container,slug){
       centrioleFields.style.display=isCilium?"none":"";
       ciliumFields.style.display=isCilium?"":"none";
     });
-    if(!isFirstRow){
+    /* First row defaults to Centriole, every row added after that defaults to Primary cilium, per
+       Søren's explicit request -- previously relied on "centriole" simply being the browser's
+       default first <option>, which broke silently once "ask_expert" became the true first entry
+       in ORGANELLE_KINDS (2026-08-06). Now set explicitly on BOTH branches so this default no
+       longer depends on list ordering at all. */
+    if(isFirstRow){
+      kindEl.value="centriole";
+    }else{
       kindEl.value="cilium";
       centrioleFields.style.display="none";
       ciliumFields.style.display="";
