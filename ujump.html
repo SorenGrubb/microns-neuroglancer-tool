@@ -1369,6 +1369,7 @@ document.getElementById("refreshBtn").addEventListener("click",function(){loadLi
 </div>
 <div class="card" id="cellPanelCard">
 <p class="err" id="err"></p>
+<div id="backNavRow" style="display:none;margin-bottom:8px"><button type="button" class="idbtn" id="backToPrevBtn" style="width:auto;padding:6px 12px;font-size:13px">&larr; Back to previous cell</button></div>
 <div class="nuc" id="nucpanel"></div>
 <div class="idf" id="idfpanel"></div>
 <div class="out" id="out" style="display:none"><label>Neuroglancer state URL</label><div class="urlbox" id="url"></div>
@@ -2369,6 +2370,18 @@ function inRegion(vx,vy,vz){const m=20000,nx=vx*4,ny=vy*4,nz=vz*40;return nx>=BB
 function distToBB(pos){var nx=pos[0]*4,ny=pos[1]*4,nz=pos[2]*40;return Math.min(nx-BB.xmin,BB.xmax-nx,ny-BB.ymin,BB.ymax-ny,nz-BB.zmin,BB.zmax-nz);}
 
 let CUR_ROOT=null,CUR_NUCID=null,SEARCH_HISTORY=[],CUR_EXTRA_ROOTS=[];
+/* "← Back to previous cell" (2026-08-08, Søren: "For the 3 nearest neighbouring cells we need a
+   back button as soon as you click on one of the cells to go back to the previous cell.") --
+   PREV_CELL_POS holds the position of whatever cell was on screen right before a ".njump" click
+   (jumping to a neighbour in the "3 nearest neighbouring cells"/"3 nearest cells" list, both the
+   in-region and out-of-region variants share the same .njump class -- see wireJumpButtons() below),
+   captured from window.CUR_POS (set at the end of every showNucleus() render branch). NAV_FROM_NJUMP
+   is a one-shot flag read by the "go" button's own click handler so an UNRELATED search (typed
+   coordinate, favourite, history chip, etc.) clears any stale "back" target instead of silently
+   pointing at a cell the user never actually navigated away from via the neighbour list. Single-
+   step only, by design -- clicking Back consumes PREV_CELL_POS rather than building a full history
+   stack, matching "go back to THE previous cell" (singular) rather than a multi-level undo. */
+let PREV_CELL_POS=null,NAV_FROM_NJUMP=false;
 /* Whether the cell CURRENTLY on screen is a neuron (excitatory or inhibitory) -- neurons have
    dendritic/axonal arbors that can span hundreds of microns to over a millimetre, dwarfing every
    other cell type in this dataset (glia, immune cells, vascular cells), so a single flat 3D
@@ -2767,6 +2780,10 @@ function showNucleus(pos){
   h+='<div class="idcta-search">'+leafSearchHtml("mainLeaf","Already know it? Jump straight there")+'</div></div>';
   panel.innerHTML=h;
   panel.querySelectorAll(".jump,.njump").forEach(b=>b.addEventListener("click",()=>{
+    /* Only ".njump" (a "3 nearest neighbouring/nearest cells" list entry) sets a Back target --
+       ".jump" ("Jump to this nucleus/cell") re-centers on the SAME cell already on screen, so
+       there's nothing meaningful to go "back" from. See PREV_CELL_POS's declaration comment. */
+    if(b.classList.contains("njump")){PREV_CELL_POS=window.CUR_POS?window.CUR_POS.slice():null;NAV_FROM_NJUMP=true;}
     unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
     document.getElementById("x").value=b.dataset.x;document.getElementById("y").value=b.dataset.y;document.getElementById("z").value=b.dataset.z;document.getElementById("go").click();
   }));
@@ -2859,12 +2876,38 @@ function buildState(pos){
   return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false};
 }
 function fail(m){const e=document.getElementById("err");e.textContent=m;e.style.display="block";document.getElementById("out").classList.remove("show");}
+/* Shows/hides the persistent "Back to previous cell" row (a sibling of #nucpanel, NOT inside it --
+   #nucpanel's innerHTML is fully replaced on every showNucleus() render branch, so anything placed
+   inside it would be wiped on the very next navigation). Called once after every "go" click, once
+   PREV_CELL_POS has already been resolved for this navigation (see the "go" handler and
+   goToPrevCell() below). */
+function refreshBackNavRow(){
+  const row=document.getElementById("backNavRow");
+  if(row)row.style.display=PREV_CELL_POS?"block":"none";
+}
+function goToPrevCell(){
+  if(!PREV_CELL_POS)return;
+  const p=PREV_CELL_POS;
+  PREV_CELL_POS=null; // single-step back only -- consumed on use, see the declaration comment above
+  NAV_FROM_NJUMP=false;
+  unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
+  document.getElementById("x").value=p[0];document.getElementById("y").value=p[1];document.getElementById("z").value=p[2];
+  document.getElementById("go").click();
+}
+document.getElementById("backToPrevBtn").addEventListener("click",goToPrevCell);
 document.getElementById("go").addEventListener("click",()=>{
   document.getElementById("err").style.display="none";
   const x=parseFloat(document.getElementById("x").value),y=parseFloat(document.getElementById("y").value),z=parseFloat(document.getElementById("z").value);
   if([x,y,z].some(v=>isNaN(v))){fail("Enter three numeric values for x, y and z.");return;}
   const pos=toVoxels(x,y,z).map(round);
+  /* This navigation only KEEPS its PREV_CELL_POS if a ".njump" click just set it (NAV_FROM_NJUMP)
+     -- any other trigger (typed coordinate, a favourite, a recent-search chip, Back itself) means
+     there's no meaningful "cell we just came from" for THIS jump, so clear it rather than leaving a
+     stale target from an earlier, unrelated neighbour click. */
+  if(!NAV_FROM_NJUMP)PREV_CELL_POS=null;
+  NAV_FROM_NJUMP=false;
   showNucleus(pos);
+  refreshBackNavRow();
   let state;try{state=buildState(pos);}catch(err){fail("Couldn't read the custom base state \u2014 check it's a valid Neuroglancer link or JSON.");return;}
   const url=document.getElementById("viewer").value+"#!"+encodeURIComponent(JSON.stringify(state));
   document.getElementById("url").textContent=url;document.getElementById("out").classList.add("show");
@@ -6305,6 +6348,10 @@ function renderUserReportedCell(ur,panel){
     +'<div class="idcta-search">'+leafSearchHtml("newCellLeaf","Already know the type? Jump straight there")+'</div></div>';
   panel.innerHTML=oh;
   panel.querySelectorAll(".jump,.njump").forEach(b=>b.addEventListener("click",()=>{
+    /* Only ".njump" (a "3 nearest neighbouring/nearest cells" list entry) sets a Back target --
+       ".jump" ("Jump to this nucleus/cell") re-centers on the SAME cell already on screen, so
+       there's nothing meaningful to go "back" from. See PREV_CELL_POS's declaration comment. */
+    if(b.classList.contains("njump")){PREV_CELL_POS=window.CUR_POS?window.CUR_POS.slice():null;NAV_FROM_NJUMP=true;}
     unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
     document.getElementById("x").value=b.dataset.x;document.getElementById("y").value=b.dataset.y;document.getElementById("z").value=b.dataset.z;document.getElementById("go").click();
   }));
