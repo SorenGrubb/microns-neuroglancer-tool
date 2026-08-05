@@ -2248,9 +2248,19 @@ if(!randomTypeSelect)return;
   const dispFor=(raw,lab)=>{const d=String(lab||raw);return d.charAt(0).toUpperCase()+d.slice(1);};
   if(!window.__CODE_CLASS){window.__CODE_CLASS={};for(var _cci=0;_cci<CT_NAMES.length;_cci++)window.__CODE_CLASS[CT_NAMES[_cci]]=CT_CLASS[_cci];}
 const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_neuron"||l.indexOf("excitatory")>=0)return "Excitatory neurons";if(cls==="inhibitory_neuron"||l.indexOf("inhibitory")>=0)return "Inhibitory neurons";var _mc=String(raw).match(/\(([^)]+)\)\s*$/);if(_mc){var _cc=window.__CODE_CLASS[_mc[1]];if(_cc==="excitatory_neuron")return "Excitatory neurons";if(_cc==="inhibitory_neuron")return "Inhibitory neurons";}if(l.indexOf("pericyte")>=0||l.indexOf("smooth muscle")>=0)return "Vascular cells";return CATEGORY_OF[raw]||"Other";};
+  /* "excitatory_neuron"/"inhibitory_neuron" are the GENERIC fallback leaves for a cell someone
+     could only resolve to "definitely excitatory/inhibitory, can't tell the specific subtype from
+     this view" (see the identification form's own "Can't resolve the subtype from this view --
+     record it as a generic excitatory neuron" option) -- a legitimate escape hatch for REPORTING,
+     but not one of this tool's 16 trainable leaf cell types, so it shouldn't appear as its own
+     pickable "random example of TYPE X" option here (Søren, 2026-08-07: "there is now an option
+     excitatory neuron (34) and inhibitory neuron (1) they should not be there"). Matches on the
+     underlying slug/label regardless of casing or underscore-vs-space, since it can arrive here as
+     a raw CT_NAMES slug, an own-verified TYPE_NAMES entry, or a community-reported display string. */
+  function isGenericExcInh(s){var t=String(s||"").toLowerCase().replace(/[_\s]/g,"");return t==="excitatoryneuron"||t==="inhibitoryneuron";}
   const addPool=(disp,cat,pick)=>{const k=disp.toLowerCase()+"|"+cat;if(!RP[k])RP[k]={label:disp,cat,picks:[],k};RP[k].picks.push(pick);};
-  for(let ti=0;ti<CT_NAMES.length;ti++){const n=CT_NAMES[ti];if(!IDX_BY_TYPE[n]||!IDX_BY_TYPE[n].length)continue;addPool(longName(n),catFor(n,CT_CLASS[ti]),{src:"m",key:n});}
-  for(const n of Object.keys(OWN_POS_BY_TYPE)){if(!OWN_POS_BY_TYPE[n]||!OWN_POS_BY_TYPE[n].length)continue;addPool(longName(n),catFor(n,null),{src:"o",key:n});}
+  for(let ti=0;ti<CT_NAMES.length;ti++){const n=CT_NAMES[ti];if(isGenericExcInh(n))continue;if(!IDX_BY_TYPE[n]||!IDX_BY_TYPE[n].length)continue;addPool(longName(n),catFor(n,CT_CLASS[ti]),{src:"m",key:n});}
+  for(const n of Object.keys(OWN_POS_BY_TYPE)){if(isGenericExcInh(n))continue;if(!OWN_POS_BY_TYPE[n]||!OWN_POS_BY_TYPE[n].length)continue;addPool(longName(n),catFor(n,null),{src:"o",key:n});}
   var RECLASS_OUT={};
   try{
     // Resolve a type name to an already-built base pool by its (case-insensitive) label, so a
@@ -2268,6 +2278,7 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
       var cinfo=keyFor(comm,null),commKey=cinfo.k;
       if(origKey===commKey)continue;
       if(origKey)RECLASS_OUT[origKey]=(RECLASS_OUT[origKey]||0)+1;
+      if(isGenericExcInh(cinfo.label))continue; // see isGenericExcInh's comment above
       (__inCells[commKey]=__inCells[commKey]||{label:cinfo.label,cat:cinfo.cat,cells:[]}).cells.push(ci);
     }
     for(var ik in __inCells){if(!RP[ik])RP[ik]={label:__inCells[ik].label,cat:__inCells[ik].cat,picks:[],k:ik};RP[ik].picks.push({src:"c",cells:__inCells[ik].cells});}
@@ -2284,6 +2295,7 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
         var c=(sub.coord||"").split(",").map(Number);
         if(c.length!==3||c.some(isNaN))return;
         var info=keyFor(sub.identified,null);
+        if(isGenericExcInh(info.label))return; // see isGenericExcInh's comment above
         (__msPos[info.k]=__msPos[info.k]||{label:info.label,cat:info.cat,positions:[]}).positions.push(c);
       });
       for(var mk in __msPos){if(!RP[mk])RP[mk]={label:__msPos[mk].label,cat:__msPos[mk].cat,picks:[],k:mk};RP[mk].picks.push({src:"ms",positions:__msPos[mk].positions});}
@@ -2929,21 +2941,19 @@ const TREE={
  ne2:{q:"Synapses its axon makes (or somatic proxies)?",opts:[
    {label:"Asymmetric (Gray I), round vesicles, thick PSD; spiny dendrites + apical dendrite, pyramidal soma → excitatory",next:"ne_exc"},
    {label:"Symmetric (Gray II), flat/pleomorphic vesicles, thin PSD; aspiny, indented nucleus, dense somatic synapses → inhibitory",next:"ne_inh"}]},
- ne_exc:{q:"Which excitatory subtype? MICrONS excitatory subtypes are set by cortical layer + 3-D dendritic shape (apical trunk, tuft, soma size), reconstructed from the full segmentation — a single TEM section usually can't resolve them, and the morphology is largely a continuum with only a few sharp exceptions in layers 5–6 (Weis et al. 2025). Use the predicted layer shown above as your main cue; pick the closest fit, or the last option if unsure.",opts:[
+ ne_exc:{q:"Which excitatory subtype? MICrONS excitatory subtypes are set by cortical layer + 3-D dendritic shape (apical trunk, tuft, soma size), reconstructed from the full segmentation — a single TEM section usually can't resolve them, and the morphology is largely a continuum with only a few sharp exceptions in layers 5–6 (Weis et al. 2025). Use the predicted layer shown above as your main cue and pick the closest fit.",opts:[
    {label:"Upper cortex (L2/3): one spiny apical dendrite rising to L1 with a modest tuft; arbor width & tuft shrink with depth (IT-projecting)",leaf:"exc_l23_it"},
    {label:"Layer 4: small soma, weak or absent apical dendrite (spiny-stellate / star-pyramid), locally-branching spiny dendrites; thalamo-recipient",leaf:"exc_l4"},
    {label:"Layer 5, large soma: THICK apical trunk with a prominent L1 tuft + extensive basal/oblique dendrites; thick myelinated axon to white matter (thick-tufted, ET)",leaf:"exc_l5_et"},
    {label:"Layer 5, moderate soma: slender apical dendrite with a thinner/weaker tuft (intratelencephalic, IT)",leaf:"exc_l5_it"},
    {label:"Layer 5: sparse dendritic arbor with little or no apical tuft (near-projecting, NP)",leaf:"exc_l5_np"},
    {label:"Layer 6: tall, narrow, upright apical dendrite reaching up toward L4/upper layers (corticothalamic, CT)",leaf:"exc_l6_ct"},
-   {label:"Layer 6: shorter apical dendrite, diverse forms incl. horizontal/inverted (intratelencephalic, IT — can be hard to separate from 6P-CT)",leaf:"exc_l6_it"},
-   {label:"Can't resolve the subtype from this view — record it as a generic excitatory neuron",leaf:"excitatory_neuron"}]},
- ne_inh:{q:"Which inhibitory subtype? MICrONS inhibitory subtypes are defined mainly by where the axon places its synapses (Schneider-Mizell et al. 2025), so a full axon reconstruction / connectivity is usually needed — nucleus & soma ultrastructure alone separates the broad subclasses to ~90% (Elabbady et al. 2025). Match the axonal/dendritic pattern below, or pick the last option if unsure.",opts:[
+   {label:"Layer 6: shorter apical dendrite, diverse forms incl. horizontal/inverted (intratelencephalic, IT — can be hard to separate from 6P-CT)",leaf:"exc_l6_it"}]},
+ ne_inh:{q:"Which inhibitory subtype? MICrONS inhibitory subtypes are defined mainly by where the axon places its synapses (Schneider-Mizell et al. 2025), so a full axon reconstruction / connectivity is usually needed — nucleus & soma ultrastructure alone separates the broad subclasses to ~90% (Elabbady et al. 2025). Match the axonal/dendritic pattern below.",opts:[
    {label:"Dense LOCAL axon studding somata & proximal dendrites with perisomatic boutons; multipolar dendrites (perisomatic-targeting ≈ PV basket)",leaf:"inh_basket"},
    {label:"Axon ASCENDS to layer 1 and arborizes there, targeting distal apical dendrites; soma in L2/3–L5 (distal-targeting ≈ SST Martinotti)",leaf:"inh_martinotti"},
    {label:"Vertical bipolar / bitufted dendrites; axon preferentially targets OTHER interneurons (inhibitory-targeting, disinhibitory ≈ VIP bipolar)",leaf:"inh_bipolar"},
-   {label:"Small round soma with a dense, fine, short-range axonal cloud; enriched in layer 1; sparse / volume-transmission targeting (≈ neurogliaform)",leaf:"inh_neurogliaform"},
-   {label:"Can't resolve the subtype from this view — record it as a generic inhibitory neuron",leaf:"inhibitory_neuron"}]},
+   {label:"Small round soma with a dense, fine, short-range axonal cloud; enriched in layer 1; sparse / volume-transmission targeting (≈ neurogliaform)",leaf:"inh_neurogliaform"}]},
  g1:{q:"Cytoplasmic density + contents + cilium?",opts:[
    {label:"Electron-lucent (pale) cytoplasm — paler than the darker oligodendrocyte; glycogen granules, 10-nm GFAP intermediate-filament bundles, irregular/angular nucleus with sparse chromatin, perivascular endfeet, gap junctions, primary cilium; spongy space-filling 3D territory",leaf:"astrocyte"},
    {label:"Scant dark cytoplasm, elongated dense nucleus w/ peripheral heterochromatin band, large dense lysosomes, NO cilium",leaf:"microglia"},
