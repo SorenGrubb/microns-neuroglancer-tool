@@ -2979,6 +2979,27 @@ const CONFUSED_WITH={
   dendritic_cell:{withName:"Perivascular macrophage",note:"Both are perivascular immune cells with overlapping ultrastructure; dendritic cells are far rarer, so a confident call benefits from a second opinion.",ref:"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/",refLabel:"PMC7930431"}
 };
 const LEAF_NAMES={erythrocyte:"Erythrocyte",platelet:"Platelet",neutrophil:"Neutrophil",lymphocyte:"Lymphocyte",monocyte:"Monocyte",endothelial_cell:"Endothelial cell",pericyte:"Pericyte",smooth_muscle_cell:"Smooth muscle cell",venular_smooth_muscle_pericyte:"Venular smooth muscle cell",perivascular_macrophage:"Perivascular macrophage",perivascular_fibroblast:"Perivascular fibroblast",dendritic_cell:"Dendritic cell",excitatory_neuron:"Excitatory neuron",inhibitory_neuron:"Inhibitory neuron",exc_l23_it:"L2/3 pyramidal neuron (23P)",exc_l4:"Layer 4 pyramidal / spiny-stellate neuron (4P)",exc_l5_it:"Layer 5 IT pyramidal neuron (5P-IT)",exc_l5_et:"Layer 5 ET thick-tufted pyramidal neuron (5P-ET)",exc_l5_np:"Layer 5 near-projecting neuron (5P-NP)",exc_l6_it:"Layer 6 IT pyramidal neuron (6P-IT)",exc_l6_ct:"Layer 6 CT pyramidal neuron (6P-CT)",inh_basket:"Basket cell — PV / perisomatic-targeting (BC)",inh_martinotti:"Martinotti cell — SST / distal-targeting (MC)",inh_bipolar:"Bipolar cell — VIP / inhibitory-targeting (BPC)",inh_neurogliaform:"Neurogliaform cell — sparsely-targeting (NGC)",astrocyte:"Astrocyte",microglia:"Microglia",oligodendrocyte:"Oligodendrocyte",opc:"OPC",pia_mater_fibroblast:"Pia mater fibroblast",pial_sheath_fibroblast:"Pial sheath fibroblast",arachnoid_barrier_cell:"Arachnoid barrier cell",fibroblast_reticular_cell:"Fibroblast reticular cell",inner_arachnoid_fibroblast:"Inner arachnoid fibroblast",dural_border_cell:"Dural border cell"};
+/* Canonicalizes a guided-ID leaf's DISPLAY name (LEAF_NAMES[slug], sentence case, sometimes with
+   an added qualifying word like "Perivascular") into the exact string used as the TYPE-BUCKET key
+   everywhere else in this app -- Søren's own-verified dataset (OWN_TYPE_NAMES, embedded above),
+   the Master List's current_identity column, and the Dashboard's live per-type aggregation. 4 leaf
+   display names don't literally match their canonical own-verified string: 3 differ only in the
+   capitalization of "fibroblast" ("Perivascular Fibroblast"/"Pia mater Fibroblast"/"Pial sheath
+   Fibroblast" are the real OWN_TYPE_NAMES strings; the leaf labels use sentence-case "fibroblast"
+   instead -- fine as on-screen text, but a DIFFERENT string to an exact-match spreadsheet lookup),
+   and "Perivascular macrophage" collapses to the broader canonical "Macrophage" bucket (there is
+   no separate "Perivascular macrophage" type in the verified dataset -- COMM_TO_ROWTYPE already
+   encodes this exact correction for client-side filtering, just never applied at submission time).
+   Root cause of Søren's 2026-08-08 report: "Perivascular fibroblast[s]"/"Pia mater fibroblast[s]"
+   each showing up TWICE on the dashboard's "Cells per cell type"/cilia-percent-by-type charts --
+   every guided-ID submission through one of these leaves was posting the mismatched display
+   string verbatim as `identified`, so it landed in the Master List/live-aggregation as its own
+   separate, differently-cased bucket holding only that handful of community reports. Apply this
+   ONLY when constructing the `identified`/`type` field of a report payload (postReport) -- never
+   for on-screen text, where the leaf's own wording (with its extra context, e.g. "Perivascular")
+   is clearer to a reader than the bare canonical type name. */
+const LEAF_SUBMIT_CANON={"Perivascular fibroblast":"Perivascular Fibroblast","Pia mater fibroblast":"Pia mater Fibroblast","Pial sheath fibroblast":"Pial sheath Fibroblast","Perivascular macrophage":"Macrophage"};
+function canonSubmitName(nm){return nm?(LEAF_SUBMIT_CANON[nm]||nm):nm;}
 // Real files currently sitting in the image library folders (matches what's on disk today).
 // coord is [x,y,z] in VOXELS, filled in from the catalog's Notes/coordinate column.
 // Left null until supplied -- thumbnails without a coord show greyed-out with no jump link.
@@ -3613,7 +3634,9 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
    ALSO IMPORTANT (2026-08-xx): doGet's "?allOrganelles=1" (used by the dashboard's cilia-length/
    nucleus-centriole charts) now also returns "identified" alongside the existing nucleusId/kind/
    pointA/pointB/coord fields -- the exact cell-type string that was on screen at the moment the
-   organelle_location report was submitted (see wireOrganelleForm()'s identified:name||"" calls),
+   organelle_location report was submitted (see wireOrganelleForm()'s identified:canonSubmitName(name)||""
+   call -- canonSubmitName() maps a leaf's display name onto its canonical own-verified type string
+   where the two differ, see that function's own comment),
    same convention save_computed_volume already uses for its cellType field. Reason: Søren wanted
    the dashboard's organelle charts to grow from LIVE community reports rather than needing a
    periodic manual re-bake of the static owndata/cildata snapshot (chosen over the alternative of
@@ -6856,7 +6879,7 @@ function renderResult(slug){
       timestamp:new Date().toISOString(),
       nucleusId:ID_CTX.nucId||"",rootId:ID_CTX.root||"",
       coord:ID_CTX.pos?ID_CTX.pos.join(","):"",
-      registered:ID_CTX.suggested||"",identified:name,
+      registered:ID_CTX.suggested||"",identified:canonSubmitName(name),
       certainty:getCertainty(),
       comment:commentEl?commentEl.value.trim():"",
       path:ID_PATH.map(n=>(TREE[n]?TREE[n].q:n)).join(" > ")
@@ -6874,7 +6897,7 @@ function renderResult(slug){
       timestamp:new Date().toISOString(),
       nucleusId:ID_CTX.nucId||"",rootId:ID_CTX.root||"",
       coord:ID_CTX.pos?ID_CTX.pos.join(","):"",
-      identified:name,
+      identified:canonSubmitName(name),
       certainty:getCertainty(),
       comment:commentEl?commentEl.value.trim():"",
       path:ID_PATH.map(n=>(TREE[n]?TREE[n].q:n)).join(" > ")
@@ -6900,7 +6923,7 @@ function renderResult(slug){
       timestamp:new Date().toISOString(),
       nucleusId:ID_CTX.nucId||"",rootId:ID_CTX.root||"",
       coord:ID_CTX.pos?ID_CTX.pos.join(","):"",
-      identified:name,
+      identified:canonSubmitName(name),
       certainty:getCertainty(),
       comment:commentEl?commentEl.value.trim():"",
       path:ID_PATH.map(n=>(TREE[n]?TREE[n].q:n)).join(" > ")
@@ -6938,7 +6961,7 @@ function renderResult(slug){
       // the SAME coordinate goes through this exact same code path with a real name/certainty
       // and append:true, and doPost's append-merge branch fills those blanks in server-side
       // (see the Code.gs.txt comment there) rather than creating a duplicate row.
-      identified:locationOnly?"":name,
+      identified:locationOnly?"":canonSubmitName(name),
       certainty:locationOnly?"":getCertainty(),
       comment:commentEl?commentEl.value.trim():"",
       path:ID_PATH.map(n=>(TREE[n]?TREE[n].q:n)).join(" > ")
@@ -7193,7 +7216,7 @@ function renderMergedReport(returnFn){
       const subRootId=row.querySelector(".merged-row-rootid").value.trim();
       const structures=row.__organWidget?row.__organWidget.getStructures():[];
       if(structures===null)organIncomplete=true;
-      return{coord:x+","+y+","+z,identified:slug?LEAF_NAMES[slug]:"",certainty:row.querySelector(".merged-row-cert").value,subRootId,structures:structures||[]};
+      return{coord:x+","+y+","+z,identified:slug?canonSubmitName(LEAF_NAMES[slug]):"",certainty:row.querySelector(".merged-row-cert").value,subRootId,structures:structures||[]};
     });
     if(!allFilled){alert("Please fill in an approximate x/y/z center for every nucleus listed.");return;}
     if(organIncomplete){alert("Please fill in every coordinate field for each organelle/structure listed (or remove the incomplete row).");return;}
@@ -7463,7 +7486,7 @@ function wireOrganelleForm(container,slug){
       coord:ID_CTX.pos?ID_CTX.pos.join(","):"",
       groupId,subIndex:i+1,subCount:subs.length,
       kind:s.kind,pointA:s.pointA,pointB:s.pointB,
-      identified:name||"",
+      identified:canonSubmitName(name)||"",
       comment,path
     }));
     submitBtn.textContent="submitted";
