@@ -8966,17 +8966,36 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          never independently detected this cell at all, that's the entire premise of it being a
          merged-split report. See the "History" column below for the fuller merged-nucleus story. */
       {header:"Source",get:m=>m.row.space==="MS"?"Community — merged-nucleus split":(m.row.source==="own"?"Own — verified, Grubb et al.":m.row.source==="none"?"No prediction (unclassified)":"MICrONS prediction")},
-      /* Preserves the "history as merged nuclei and what they used to be" Søren explicitly asked
-         for -- blank for every normal row, populated only for MS rows: the parent nucleus id,
-         how many real cells MICrONS's detector fused together (when the source report recorded
-         it), and what the whole fused blob was originally (mis)classified as (via nidToIndex()/
-         typeInfo(), same lookup renderMergedSubCell() uses on-screen). */
+      /* Preserves the "history as merged nuclei and what they used to be" Søren originally asked
+         for (MS rows: the parent nucleus id, how many real cells MICrONS's detector fused together
+         when the source report recorded it, and what the whole fused blob was originally
+         (mis)classified as, via nidToIndex()/typeInfo(), same lookup renderMergedSubCell() uses
+         on-screen). EXTENDED 2026-08-08 (Søren: "there is a column in the sheet called History. It
+         never contains anything as far as I see. I would like there to be a column that shows what
+         a cell was called prior to it being user reported.") -- for an ordinary main-nucleus row
+         whose CURRENT type came from an own-verified or community override (source "own"/
+         "community"), typeInfo(m.row.i) recomputes MICrONS's RAW, un-overridden prediction for
+         that same nucleus index (NT[]/CT_NAMES -- completely independent of any override, exactly
+         the field the override replaced) and reports it as "Originally MICrONS-predicted: X". A
+         row whose type IS still the untouched raw MICrONS prediction (source "micrONS", never
+         overridden by anyone) has nothing prior to show, same as a standalone (own-verified-only,
+         no MICrONS nucleus/prediction to begin with) point -- both stay blank, same as before this
+         change. This only reports the ORIGINAL/raw prediction, not a full multi-report chronology
+         (e.g. MICrONS type -> community report A -> community report B) -- consistent with the
+         pre-existing MS wording ("originally (mis)classified as X"), and the only thing computable
+         here without an extra per-row report-history fetch at export scale. */
       {header:"History",get:m=>{
-        if(m.row.space!=="MS")return "";
-        const ref=m.row.subRef;
-        let orig="unknown";
-        if(ref.nucleusId){const pIdx=nidToIndex(ref.nucleusId);if(pIdx>=0)orig=longName(typeInfo(pIdx).name);}
-        return "Part of nucleus "+(ref.nucleusId||"?")+(ref.subCount>1?", fused by MICrONS's detector with "+(ref.subCount-1)+" other real nucle"+(ref.subCount-1>1?"i":"us"):"")+" — originally (mis)classified as "+orig;
+        if(m.row.space==="MS"){
+          const ref=m.row.subRef;
+          let orig="unknown";
+          if(ref.nucleusId){const pIdx=nidToIndex(ref.nucleusId);if(pIdx>=0)orig=longName(typeInfo(pIdx).name);}
+          return "Part of nucleus "+(ref.nucleusId||"?")+(ref.subCount>1?", fused by MICrONS's detector with "+(ref.subCount-1)+" other real nucle"+(ref.subCount-1>1?"i":"us"):"")+" — originally (mis)classified as "+orig;
+        }
+        if(m.row.space!=="N")return "";
+        if(m.row.source==="micrONS")return "";
+        const ti=typeInfo(m.row.i);
+        const prior=ti.cls?longName(ti.name):"Unclassified (no MICrONS prediction)";
+        return "Originally MICrONS-predicted: "+prior;
       }},
       {header:"Allen m-type (fine subtype)",get:m=>{const p=rowPos(m.row);const mt=mtypeInfo(p[0],p[1],p[2]);return mt?mt.name:"";}},
       {header:"Vessel type",get:m=>m.fine!=null?(window.FINE_NAMES||[])[m.fine]:""},
