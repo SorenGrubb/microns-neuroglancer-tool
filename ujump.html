@@ -9069,7 +9069,11 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         if(c.length!==3||c.some(isNaN))continue;
         const rt=commToRowType(sub.identified);
         if(!rt)continue;
-        rows.push({type:rt,source:"community",space:"MS",subRef:{pos:c,nucleusId:sub.nucleusId||"",subRootId:sub.subRootId||"",subCount:sub.subCount||""}});
+        // groupId+subIndex (2026-08-09, added alongside the Excel export's "Classification
+        // certainty" column) let a later REPORTS_CACHE.byNucleus lookup find THIS specific
+        // sub-cell's own report instead of some other sub-cell sharing the same nucleusId --
+        // see classificationCertainty() near buildColumns().
+        rows.push({type:rt,source:"community",space:"MS",subRef:{pos:c,nucleusId:sub.nucleusId||"",subRootId:sub.subRootId||"",subCount:sub.subCount||"",groupId:sub.groupId||"",subIndex:sub.subIndex||""}});
       }
     }
     ALL_IDENTITIES=rows;
@@ -9360,7 +9364,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      per-nucleus lookup used elsewhere). Returns null if that's not available yet (REPORT_ENDPOINT
      unset, or an older doGet still deployed without this mode, or the fetch failed), so callers
      can tell "nothing reported" apart from "couldn't check". */
-  let REPORTS_CACHE=null; // {ids:Set<string>, byNucleus:Map<string,Array<{type,identified,comment}>>}
+  let REPORTS_CACHE=null; // {ids:Set<string>, byNucleus:Map<string,Array<{identified,comment,reporterName,certainty,timestamp,merged?,groupId?,subIndex?,notNucleus?}>>} -- certainty/groupId/subIndex used by classificationCertainty() near buildColumns()
   async function fetchAllReports(){
     if(REPORTS_CACHE)return REPORTS_CACHE;
     if(!REPORT_ENDPOINT)return null;
@@ -9717,6 +9721,131 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     return typeInfo(nb.i).name;
   }
 
+  /* --- Excel export: classification-provenance columns (2026-08-09) ---------------------------
+     Søren: "Manual reclassifications overwrite the original MICrONS classifications" in every
+     export so far -- "Cell type" only ever shows the CURRENT/resolved identity, and the old
+     "History" column (above) is free text that's blank for untouched rows. These five helpers
+     back five new, ALWAYS-populated columns added to buildColumns() below: the raw MICrONS call
+     never disappears behind an override, and the override itself gets its own dedicated column
+     instead of being inferred from prose. Added as NEW columns rather than changing "Cell type"/
+     "Source"/"History" in place, so any existing sheet/macro reading this export by header name
+     keeps working (Søren: "Maintain backward compatibility"). */
+
+  // Column 3: what MICrONS's own detector/classifier said, independent of any override --
+  // always populated, even when nothing else in the row ever touches MICrONS's prediction.
+  function originalMicronsClassification(row){
+    if(row.space==="ST")return "No MICrONS nucleus detection (own-reported point)";
+    if(row.space==="MS"){
+      const ref=row.subRef;
+      if(!ref||!ref.nucleusId)return "Unknown (parent nucleus id not on file)";
+      const pIdx=nidToIndex(ref.nucleusId);
+      if(pIdx<0)return "Unknown (parent nucleus not found)";
+      const ti=typeInfo(pIdx);
+      return ti.cls?longName(ti.name):"Unclassified (no MICrONS prediction)";
+    }
+    const ti=typeInfo(row.i);
+    return ti.cls?longName(ti.name):"Unclassified (no MICrONS prediction)";
+  }
+  // Column 4: ONLY the override value (own-verified or community), blank when the row is still
+  // the untouched raw MICrONS prediction -- the mirror image of column 3 above, so a reader can
+  // always tell "what MICrONS said" apart from "what a person said" even when they disagree.
+  function communityManualClassification(row){
+    if(row.space==="MS")return row.type; // an MS row only exists BECAUSE a person identified it -- no MICrONS baseline to compare against
+    if(row.space==="ST")return row.type; // standalone points are own-verified by construction, never a MICrONS detection
+    if(row.source==="own"||row.source==="community")return row.type;
+    return "";
+  }
+  // Column 5: the 1-5 certainty rating attached to the specific report that produced the row's
+  // current community classification. Only meaningful for source:"community" (own-verified rows
+  // are Søren's authoritative call, not a rated community vote; untouched MICrONS predictions
+  // have no report at all) -- matched against REPORTS_CACHE by nucleus id + identified name
+  // (MS rows instead match by groupId/subIndex, since several sub-cells can share one nucleusId
+  // -- see the subRef.groupId/subIndex comment where MS rows are built, above). Needs
+  // REPORTS_CACHE populated first (fetchAllReports(), called from the filterDownload click
+  // handler below) -- returns "" rather than "unknown" when it isn't, same convention as the
+  // "Reported by community?" column already uses for "not fetched".
+  function classificationCertainty(row){
+    const nid=rowNucId(row);
+    if(!nid||!REPORTS_CACHE)return "";
+    const reps=REPORTS_CACHE.byNucleus.get(nid);
+    if(!reps||!reps.length)return "";
+    if(row.space==="MS"){
+      const ref=row.subRef||{};
+      const match=reps.find(r=>r.merged&&(!ref.groupId||String(r.groupId||"")===String(ref.groupId))&&(!ref.subIndex||String(r.subIndex||"")===String(ref.subIndex)));
+      return(match&&match.certainty)?match.certainty:"";
+    }
+    if(row.source!=="community")return "";
+    const wantName=String(row.type||"").trim().toLowerCase();
+    const match=reps.find(r=>!r.merged&&!r.notNucleus&&String(r.identified||"").trim().toLowerCase()===wantName);
+    return(match&&match.certainty)?match.certainty:"";
+  }
+  // Column 6: mesh/cell-body volume (as opposed to the precomputed nucleus-only volume in its own
+  // column below), read from window._computedVolumesMap -- the same bulk, pre-fetched source the
+  // ".meshvol" buttons use (see fetchComputedVolumesMap()'s doc comment) -- rather than an
+  // expensive per-row mesh fetch, which isn't feasible at export scale (see the Nucleus volume
+  // column's own comment for the same reasoning). Blank whenever nobody has ever run "Compute
+  // volume" on this root ID.
+  function rootIdVolume(row){
+    if(!window._computedVolumesMap)return "";
+    const rid=rowRootId(row),nid=rowNucId(row);
+    for(const key of computedVolCacheKeys(rid,nid)){
+      const entry=window._computedVolumesMap[key];
+      if(entry&&entry.volumeUm3>0)return Math.round(entry.volumeUm3*10)/10;
+    }
+    return "";
+  }
+  // Column 8: a clean version of the existing "Source" column's intent -- kept as a NEW column
+  // rather than editing "Source" in place (backward compatibility), and fixes a gap "Source" has
+  // always had: a community-overridden MAIN-nucleus row (source:"community", space:"N") fell
+  // through Source's ternary to "MICrONS prediction", which is wrong -- a person DID override it.
+  function annotationSourceLabel(row){
+    if(row.space==="MS")return "Community — crowd-sourced (merged-nucleus split)";
+    if(row.source==="own")return "Own — expert-verified, Grubb et al.";
+    if(row.source==="community")return "Community — crowd-sourced";
+    if(row.source==="micrONS")return "MICrONS — automated prediction only";
+    return "None — unclassified";
+  }
+  // Column 9: whether the CURRENT classification has been independently checked by anyone with
+  // standing to do so, distinct from "Annotation source" above (source says WHO/WHAT produced the
+  // call; this says how much a reader should trust it as-is).
+  function verificationStatusLabel(row){
+    if(row.space==="MS")return "Community-reported (merged-nucleus split) — not independently verified";
+    if(row.source==="own")return row.merged?"Verified — Grubb et al. (merged-nucleus split)":"Verified — Grubb et al.";
+    if(row.source==="community")return "Community-reported — not independently verified";
+    if(row.source==="micrONS")return "Unverified — MICrONS automated prediction only";
+    return "Unverified — no classification on file";
+  }
+
+  /* buildColumns(result) -- the column set for the main "Download as Excel" bulk Filter-and-show
+     export (microns_filtered_cells.xlsx, written by the dlBtn handler below). NOT used by the two
+     other XLSX.writeFile() call sites in this file: the "Connections" partner-synapse export
+     (rows2/lastPoints, near the connectivity panel) is a per-synapse/per-partner table, not a
+     per-cell classification listing, and "my_microns_work_<email>.xlsx" (downloadMyWork()) is a
+     raw per-report activity log built entirely server-side from myReportsList() in Code.gs.txt --
+     neither has a "current classification vs. original MICrONS call" distinction to preserve, so
+     the 2026-08-09 columns below were added only here.
+
+     Always-present columns, in order: Nucleus ID, Root ID, Nucleus volume (µm³, precomputed --
+     see its own comment), Voxel X/Y/Z, nm X/Y/Z, Cell type (current/resolved identity), Source
+     (legacy, kept verbatim for backward compatibility -- see its own comment for a known gap),
+     History (legacy free-text, blank on untouched rows -- superseded by the columns below for
+     any reader who wants a clean, always-populated field), then the six 2026-08-09 additions:
+       - Original MICrONS classification -- the raw, un-overridden MICrONS call, ALWAYS populated
+         (originalMicronsClassification(), above).
+       - Community/manual classification -- ONLY the override value, blank if the row is untouched
+         (communityManualClassification(), above).
+       - Classification certainty -- the reporter's 1-5 rating on the report that produced the
+         current community classification, blank for own-verified/untouched rows
+         (classificationCertainty(), above; needs REPORTS_CACHE -- see fetchAllReports()).
+       - Root ID volume (µm³) -- mesh/cell-body volume, distinct from the Nucleus volume column
+         (rootIdVolume(), above; needs window._computedVolumesMap -- see fetchComputedVolumesMap()).
+       - Annotation source -- corrected/clean version of Source's intent (annotationSourceLabel()).
+       - Verification status -- how much a reader should trust the current call as-is
+         (verificationStatusLabel()).
+     followed by Allen m-type, Vessel type, Distance to nearest vessel, Cortical layer, Primary
+     cilium/Centriole annotated?, then the conditional community-report/glia-limitans/white-matter/
+     V1-column/region-box columns and the three Nearest-neighbour blocks, exactly as before. No
+     existing header was renamed, removed, or repositioned by this change. */
   function buildColumns(result){
     const cols=[
       {header:"Nucleus ID",get:m=>rowNucId(m.row)},
@@ -9779,6 +9908,16 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         const prior=ti.cls?longName(ti.name):"Unclassified (no MICrONS prediction)";
         return "Originally MICrONS-predicted: "+prior;
       }},
+      /* --- New 2026-08-09 columns (Søren: "Manual reclassifications overwrite the original
+         MICrONS classifications" -- see the doc comment above buildColumns() for the full
+         reasoning). Unlike "History" above (free text, blank on untouched rows), "Original
+         MICrONS classification" is ALWAYS populated and never affected by any override. */
+      {header:"Original MICrONS classification",get:m=>originalMicronsClassification(m.row)},
+      {header:"Community/manual classification",get:m=>communityManualClassification(m.row)},
+      {header:"Classification certainty",get:m=>classificationCertainty(m.row)},
+      {header:"Root ID volume (µm³)",get:m=>rootIdVolume(m.row)},
+      {header:"Annotation source",get:m=>annotationSourceLabel(m.row)},
+      {header:"Verification status",get:m=>verificationStatusLabel(m.row)},
       {header:"Allen m-type (fine subtype)",get:m=>{const p=rowPos(m.row);const mt=mtypeInfo(p[0],p[1],p[2]);return mt?mt.name:"";}},
       {header:"Vessel type",get:m=>m.fine!=null?(window.FINE_NAMES||[])[m.fine]:""},
       {header:"Distance to nearest vessel (µm)",get:m=>m.fineDist!=null&&m.fineDist!==65535?(m.fineDist/1000).toFixed(1):""},
@@ -10625,6 +10764,12 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(REPORT_ENDPOINT){
       dlBtn.textContent="Fetching report list…";
       await fetchAllReports(); // cached after the first call; buildColumns reads REPORTS_CACHE directly
+      dlBtn.textContent="Fetching root ID volumes…";
+      // 2026-08-09: the "Root ID volume" export column reads window._computedVolumesMap
+      // directly (same bulk source the .meshvol buttons use, see decorateMeshVolButtons()'s
+      // doc comment) -- fetchComputedVolumesMap() is itself cached after the first call, so
+      // this is a no-op if the map was already populated earlier in the session.
+      await fetchComputedVolumesMap();
       dlBtn.textContent="Preparing…";
     }
     setTimeout(()=>{
