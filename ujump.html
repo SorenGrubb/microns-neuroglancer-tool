@@ -582,7 +582,7 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <div class="row" style="margin-top:8px;gap:10px">
 <button class="idbtn" id="filterViewerAll" disabled title="Click &quot;Preview matches&quot; first — opens a zoomed-out 3D view sized to fit every matching cell, one colour-coded layer per cell type plus its own nuclei layer; any &quot;Add to the Neuroglancer view&quot; options checked above (vasculature outline, EM imagery, V1 column boundary, traced vessel lines, organelle points, centriole/cilia vectors) are added as extra toggleable layers, but never change which cells matched or what's in the Excel export." style="flex:1">Open all matches in Neuroglancer (3D)</button>
 </div>
-<div class="card" id="stepThroughCard" style="margin-top:14px;background:#0f1420;display:none">
+<div class="card" id="stepThroughCard" style="margin-top:14px;display:none">
 <label style="font-size:12px" title="Visits every matched cell exactly once, in a fixed order — unlike the random buttons on the Jump tab, nothing is skipped or repeated. Each step loads the cell into the Jump tab's identification panel, same as clicking there directly. Progress (current position + how many you've checked) is remembered in this browser for this exact set of matched cells, so closing the tab and coming back later resumes where you left off — changing the filters above and re-previewing starts a fresh count.">Systematically step through matches</label>
 <p class="hint" id="stepCounter" style="margin-top:10px;font-weight:600;color:var(--ink)"></p>
 <div class="row" style="gap:8px;margin-top:6px">
@@ -862,18 +862,33 @@ const colorFor=(function(){
    retintPlotlyCharts() (see its own comment, defined near the theme-toggle code above), which
    calls Plotly.relayout() on every live chart div to update font/gridline colors in place without
    needing to touch this object or re-render anything. */
-const THEME_CHART_COLORS=liveThemeColors();
-const AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:THEME_CHART_COLORS.ink};
-const BASE_LAYOUT={
-  margin:{l:56,r:16,t:8,b:110},
-  font:AXIS_FONT,
-  paper_bgcolor:"rgba(0,0,0,0)",
-  plot_bgcolor:"rgba(0,0,0,0)",
-  showlegend:false,
-  xaxis:{tickangle:-45,automargin:true,gridcolor:THEME_CHART_COLORS.line},
-  yaxis:{gridcolor:THEME_CHART_COLORS.line,zeroline:false},
-  hoverlabel:{bgcolor:THEME_CHART_COLORS.panel,font:{color:THEME_CHART_COLORS.ink},bordercolor:THEME_CHART_COLORS.line}
-};
+/* 2026-08-09 (Søren: light-mode chart labels "too light grey to read" -- same root cause found
+   and fixed in the connectivity panel's CONN_AXIS_FONT/CONN_BASE_LAYOUT, see that block's own
+   comment for the full explanation) -- AXIS_FONT/BASE_LAYOUT used to be `const`s frozen at
+   whatever theme was active the first time this script tag ran. Any dashboard chart drawn or
+   REDRAWN after a theme toggle (which is every chart, since the whole dashboard tab is rebuilt
+   from scratch on every open/refresh -- see initDashboardTab()) kept reusing that frozen color,
+   and title/annotation font objects set explicitly at creation time never picked up
+   retintPlotlyCharts()'s later relayout at all. Converted to functions, called fresh at every
+   Plotly.newPlot() site below and inside categorizedLayout(), so every draw genuinely reads
+   liveThemeColors() at that moment instead of whatever was true on first page load. */
+function axisFont(){
+  const c=liveThemeColors();
+  return{family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:c.ink};
+}
+function baseLayout(){
+  const c=liveThemeColors();
+  return{
+    margin:{l:56,r:16,t:8,b:110},
+    font:axisFont(),
+    paper_bgcolor:"rgba(0,0,0,0)",
+    plot_bgcolor:"rgba(0,0,0,0)",
+    showlegend:false,
+    xaxis:{tickangle:-45,automargin:true,gridcolor:c.line},
+    yaxis:{gridcolor:c.line,zeroline:false},
+    hoverlabel:{bgcolor:c.panel,font:{color:c.ink},bordercolor:c.line}
+  };
+}
 const PLOTLY_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d"]};
 
 function sortedEntries(obj){
@@ -928,8 +943,9 @@ function sortByCategoryAndRank(types,fallbackSecondaryFn){
    chart itself to mark the boundaries -- eliminates the overlap risk entirely rather than
    trying a third positioning heuristic with no way to confirm it renders correctly. */
 function categorizedLayout(types,extra){
-  return Object.assign({},BASE_LAYOUT,{
-    xaxis:Object.assign({},BASE_LAYOUT.xaxis,{categoryorder:"array",categoryarray:types})
+  const layout=baseLayout();
+  return Object.assign({},layout,{
+    xaxis:Object.assign({},layout.xaxis,{categoryorder:"array",categoryarray:types})
   },extra||{});
 }
 /* boxgap/boxgroupgap are Plotly's box-trace equivalent of bar charts' bargap/bargroupgap --
@@ -944,9 +960,10 @@ function barChart(divId,dataObj,yTitle,byCategory){
   let types=Object.keys(dataObj);
   types=byCategory?sortByCategory(types,t=>dataObj[t]):types.sort((a,b)=>dataObj[b]-dataObj[a]);
   const y=types.map(t=>dataObj[t]);
+  const bl=baseLayout();
   const layout=byCategory
-    ?categorizedLayout(types,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle})})
-    :Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle})});
+    ?categorizedLayout(types,{yaxis:Object.assign({},bl.yaxis,{title:yTitle})})
+    :Object.assign({},bl,{yaxis:Object.assign({},bl.yaxis,{title:yTitle})});
   Plotly.newPlot(divId,[{type:"bar",x:types,y,marker:{color:types.map(colorFor)}}],layout,PLOTLY_CFG);
 }
 
@@ -969,7 +986,7 @@ function dotMedianChart(divId,dataObj,yTitle,tight,useRank){
     };
   });
   Plotly.newPlot(divId,traces,categorizedLayout(types,Object.assign({
-    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle}),
+    yaxis:Object.assign({},baseLayout().yaxis,{title:yTitle}),
     showlegend:false
   },tight?TIGHT_BOX_LAYOUT:{})),PLOTLY_CFG);
 }
@@ -1038,7 +1055,7 @@ function groupedDotChart(divId,seriesList,yTitle,tight,useRank){
     });
   });
   Plotly.newPlot(divId,traces,categorizedLayout(types,Object.assign({
-    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle}),
+    yaxis:Object.assign({},baseLayout().yaxis,{title:yTitle}),
     boxmode:"group",
     showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
   },tight?TIGHT_BOX_LAYOUT:{})),PLOTLY_CFG);
@@ -1057,7 +1074,7 @@ function showLiveNotReady(note){
     const el=document.getElementById(id);
     if(el)el.innerHTML="<div class='placeholder'>"+(note||"Live data not available yet.")+"</div>";
   });
-  Plotly.newPlot("plotIdentifiedUnclassified",[],{annotations:[{text:"Not available yet",showarrow:false,font:AXIS_FONT}],paper_bgcolor:"rgba(0,0,0,0)"},PLOTLY_CFG);
+  Plotly.newPlot("plotIdentifiedUnclassified",[],{annotations:[{text:"Not available yet",showarrow:false,font:axisFont()}],paper_bgcolor:"rgba(0,0,0,0)"},PLOTLY_CFG);
   /* renderPredictedVerified is NOT called here -- applyLiveData() always calls it right after
      renderLiveCoreCharts() regardless of live.ready, so calling it here too just double-renders
      the same "(loading...)" bars. */
@@ -1624,7 +1641,7 @@ document.getElementById("refreshBtn").addEventListener("click",function(){loadLi
 <div class="out" id="out" style="display:none"><label>Neuroglancer state URL</label><div class="urlbox" id="url"></div>
 <div class="actions"><button class="copy" id="copy">Copy link</button></div></div>
 </div>
-<div class="card" style="background:#0f1420">
+<div class="card">
 <p class="hint" style="margin:0">This tool was made by <b>S&oslash;ren Grubb</b> (Neuroscience Academy Denmark) to make identifying brain cortical cells in electron microscopy easy. It was built using Claude AI. Predictions from the <a class="ref" href="https://doi.org/10.1038/s41586-025-08790-w" target="_blank" rel="noopener">MICrONS consortium</a> are included, but you can help identify cells that lack a prediction, or revise ones already made &mdash; identification discrepancies and newly identified cells are shared back with the MICrONS consortium.</p>
 </div>
 </div>
@@ -2118,14 +2135,27 @@ function renderLayerDiagram(layer){
   const bands=[["Leptomeninges",-LEP,0,"#3a3f4a"]];
   for(const b of layer.bounds)bands.push([b[0],b[1],b[2],LAYER_COLORS[b[0]]||"#888"]);
   bands.push(["White matter",layer.thickUm,layer.thickUm+WMH,"#c9c9c9"]);
-  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto" xmlns="http://www.w3.org/2000/svg">';
+  /* 2026-08-09 (Søren, light-mode screenshot: "some figure labels are too light grey to read") --
+     this diagram is injected live into the page DOM (see renderLayerDiagram()'s call site), so
+     CSS custom properties resolve normally on it, same as any other element. Two fixes: (1) an
+     explicit themed background on the <svg> itself, matching the other two hand-drawn SVGs in
+     this file (search "background:var(--bg)") -- previously transparent, so it silently inherited
+     whatever was behind it instead of guaranteeing contrast; (2) the OUTER label text (x=196, sits
+     on that page background, not on a colored band) now tracks the theme via a CSS `style` fill
+     instead of the old hardcoded "#e6edf3" (a light grey tuned for the dark theme's near-black
+     background -- unreadable once the page background turns white). The band-color labels at
+     x=40 are deliberately left alone: those sit ON TOP of a saturated data colour (teal/orange/
+     purple/etc, same "data-encoding colours are out of scope for theming" rule as the rest of the
+     file's chart-series/segment colours -- see the light-mode CSS comment block), not on the page
+     background, so near-white text reads fine there in both themes already. */
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:var(--bg)" xmlns="http://www.w3.org/2000/svg">';
   for(const bd of bands){
     const y0=px(bd[1]+LEP),y1=px(bd[2]+LEP);
     const desc=LAYER_INFO[bd[0]]||"";
     svg+='<rect x="40" y="'+y0.toFixed(1)+'" width="150" height="'+Math.max(0,(y1-y0)).toFixed(1)+'" fill="'+bd[3]+'" stroke="#0d1117" stroke-width="0.5"><title>'+bd[0]+'. '+desc+'</title></rect>';
     const textColor=(bd[3]==="#c9c9c9")?"#0d1117":"#e6edf3";
     svg+='<text x="40" y="'+((y0+y1)/2+3).toFixed(1)+'" font-size="9" fill="'+textColor+'" font-family="monospace" text-anchor="middle" transform="rotate(0)"></text>';
-    svg+='<text x="196" y="'+((y0+y1)/2+3).toFixed(1)+'" font-size="9" fill="#e6edf3" font-family="monospace">'+bd[0]+'<title>'+bd[0]+'. '+desc+'</title></text>';
+    svg+='<text x="196" y="'+((y0+y1)/2+3).toFixed(1)+'" font-size="9" style="fill:var(--ink)" font-family="monospace">'+bd[0]+'<title>'+bd[0]+'. '+desc+'</title></text>';
   }
   const dotUm=Math.max(-LEP,Math.min(layer.thickUm+WMH,layer.depthUm));
   svg+='<circle cx="115" cy="'+px(dotUm+LEP).toFixed(1)+'" r="5" fill="#fff200" stroke="#0d1117" stroke-width="1"/>';
@@ -5146,18 +5176,36 @@ const connColorFor=(function(){
   };
 })();
 // Theme-aware, same convention as AXIS_FONT/BASE_LAYOUT above -- see that block's own comment.
-const CONN_THEME_CHART_COLORS=liveThemeColors();
-const CONN_AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:CONN_THEME_CHART_COLORS.ink};
-const CONN_BASE_LAYOUT={
-  margin:{l:56,r:16,t:36,b:70},
-  font:CONN_AXIS_FONT,
-  paper_bgcolor:"rgba(0,0,0,0)",
-  plot_bgcolor:"rgba(0,0,0,0)",
-  showlegend:false,
-  xaxis:{tickangle:-45,automargin:true,gridcolor:CONN_THEME_CHART_COLORS.line},
-  yaxis:{gridcolor:CONN_THEME_CHART_COLORS.line,zeroline:false},
-  hoverlabel:{bgcolor:CONN_THEME_CHART_COLORS.panel,font:{color:CONN_THEME_CHART_COLORS.ink},bordercolor:CONN_THEME_CHART_COLORS.line}
-};
+/* 2026-08-09 (Søren, light-mode screenshot: connectivity-panel chart titles/legends/axis labels
+   "too light grey to read" after switching to light mode) -- CONN_AXIS_FONT/CONN_BASE_LAYOUT used
+   to be `const`s, computed ONCE when this script tag first ran. retintPlotlyCharts() (see its own
+   doc comment near liveThemeColors()) only relayouts charts ALREADY on screen at toggle time --
+   any chart drawn or REDRAWN afterward (a fresh query, a different root ID, the colour-by dropdown
+   changing) called Plotly.newPlot() again with these same frozen objects, silently reverting to
+   whatever theme was active on first page load. Worse, plot elements that were given their OWN
+   explicit font object at creation time (title.font, the "No data" annotations' font) never
+   inherit from a later layout.font relayout at all, even for charts that WERE already on screen --
+   relayout's blanket "font.color" only ever updated the LAYOUT default, not those explicit
+   overrides. Converting both to functions, called fresh at every Plotly.newPlot() site below
+   (matching the AXIS_FONT/BASE_LAYOUT fix already applied to the main dashboard's charts), fixes
+   both problems at once -- every draw call now genuinely reads liveThemeColors() at that moment. */
+function connAxisFont(){
+  const c=liveThemeColors();
+  return{family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:c.ink};
+}
+function connBaseLayout(){
+  const c=liveThemeColors();
+  return{
+    margin:{l:56,r:16,t:36,b:70},
+    font:connAxisFont(),
+    paper_bgcolor:"rgba(0,0,0,0)",
+    plot_bgcolor:"rgba(0,0,0,0)",
+    showlegend:false,
+    xaxis:{tickangle:-45,automargin:true,gridcolor:c.line},
+    yaxis:{gridcolor:c.line,zeroline:false},
+    hoverlabel:{bgcolor:c.panel,font:{color:c.ink},bordercolor:c.line}
+  };
+}
 const CONN_PLOTLY_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d"]};
 const CONN_INPUT_COLOR="#5fd0ff",CONN_OUTPUT_COLOR="#ff8fc4";
 /* Shared depth-axis dressing for both the violin (y only) and scatter (x and/or y) charts --
@@ -5198,11 +5246,11 @@ function connRenderIODepthChart(divId,points){
     fillcolor:"rgba(255,143,196,0.35)",points:false,meanline:{visible:false},hoverinfo:"y+name"});
   const ticks=connLayerTicks();
   if(!traces.length){
-    Plotly.newPlot(divId,[],{annotations:[{text:"No synapse depth data",showarrow:false,font:CONN_AXIS_FONT}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
+    Plotly.newPlot(divId,[],{annotations:[{text:"No synapse depth data",showarrow:false,font:connAxisFont()}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
     return;
   }
-  Plotly.newPlot(divId,traces,Object.assign({},CONN_BASE_LAYOUT,{
-    title:{text:"Input/Output Depth",font:CONN_AXIS_FONT},
+  Plotly.newPlot(divId,traces,Object.assign({},connBaseLayout(),{
+    title:{text:"Input/Output Depth",font:connAxisFont()},
     violingap:0,violingroupgap:0,violinmode:"overlay",
     showlegend:true,legend:{orientation:"h",y:1.14,font:{size:10}},
     xaxis:{type:"category",visible:false,fixedrange:true,range:[-0.5,0.5]},
@@ -5224,7 +5272,7 @@ function connRenderScatterChart(divId,points,colorField){
     const g=groups.get(key);g.x.push(p.somaDepthUm);g.y.push(p.synDepthUm);
   });
   if(!groups.size){
-    Plotly.newPlot(divId,[],{annotations:[{text:"No soma-depth data (partner types/positions unavailable)",showarrow:false,font:CONN_AXIS_FONT}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
+    Plotly.newPlot(divId,[],{annotations:[{text:"No soma-depth data (partner types/positions unavailable)",showarrow:false,font:connAxisFont()}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
     return;
   }
   const keys=Array.from(groups.keys()).sort(function(a,b){
@@ -5237,8 +5285,8 @@ function connRenderScatterChart(divId,points,colorField){
       hoverinfo:"x+y+name"};
   });
   const ticks=connLayerTicks();
-  Plotly.newPlot(divId,traces,Object.assign({},CONN_BASE_LAYOUT,{
-    title:{text:"Synapse/Target Soma Depth",font:CONN_AXIS_FONT},
+  Plotly.newPlot(divId,traces,Object.assign({},connBaseLayout(),{
+    title:{text:"Synapse/Target Soma Depth",font:connAxisFont()},
     showlegend:true,legend:{font:{size:9},x:1.02,y:1},
     xaxis:{tickvals:ticks.tickvals,ticktext:ticks.ticktext,gridcolor:"transparent",
       zeroline:false,title:"Soma Depth",automargin:true},
@@ -5260,17 +5308,18 @@ function connRenderDistChart(divId,points,colorField){
     if(a==="No Type")return 1;if(b==="No Type")return -1;return counts[b]-counts[a];
   });
   if(!keys.length){
-    Plotly.newPlot(divId,[],{annotations:[{text:"No data",showarrow:false,font:CONN_AXIS_FONT}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
+    Plotly.newPlot(divId,[],{annotations:[{text:"No data",showarrow:false,font:connAxisFont()}],paper_bgcolor:"rgba(0,0,0,0)"},CONN_PLOTLY_CFG);
     return;
   }
   const maxCount=Math.max.apply(null,keys.map(function(k){return counts[k];}));
+  const layout=connBaseLayout(); // read once so xaxis/yaxis below build on the SAME live-color snapshot
   Plotly.newPlot(divId,[{
     type:"bar",x:keys,y:keys.map(function(k){return counts[k];}),
     text:keys.map(function(k){return String(counts[k]);}),textposition:"outside",cliponaxis:false,
     marker:{color:keys.map(function(k){return k==="No Type"?"#5a6169":connColorFor(k);})}
-  }],Object.assign({},CONN_BASE_LAYOUT,{
-    title:{text:"Target Distribution",font:CONN_AXIS_FONT},
-    yaxis:Object.assign({},CONN_BASE_LAYOUT.yaxis,{title:"# of synapses",range:[0,maxCount*1.18]})
+  }],Object.assign({},layout,{
+    title:{text:"Target Distribution",font:connAxisFont()},
+    yaxis:Object.assign({},layout.yaxis,{title:"# of synapses",range:[0,maxCount*1.18]})
   }),CONN_PLOTLY_CFG);
 }
 /* Draws all three graphs together -- called once right after a successful query (Søren: "The
