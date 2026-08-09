@@ -141,6 +141,21 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .chist-cert{font-family:var(--mono);font-size:11px;color:var(--ink);margin-top:3px}
 .chist-comment{font-size:12px;color:var(--ink);margin-top:5px;padding:6px 9px;background:#161b22;border-radius:6px;font-style:italic}
 .chist-empty{font-size:12px;color:var(--mut);font-style:italic}
+/* Step-through review vote panel (Filter-and-show tab) -- deliberately compact (one line per
+   votable classification, at most 2 lines total) per "minimal clutter"; buttons are real
+   <button> elements sized generously enough for a touch tap target (unlike the smaller inline
+   ▲/▼ pills elsewhere in this file, e.g. .idvote/.ridvote at padding:0/1px 5-7px) since this is
+   the one vote surface meant to be used repeatedly, quickly, while reviewing many cells in a row
+   on any device. flex-wrap keeps it usable on narrow phone widths without a media query, same
+   convention as every other row in this file. */
+.stepvote-panel{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.stepvote-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px}
+.stepvote-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.stepvote-row:last-child{margin-bottom:0}
+.stepvote-label{font-size:11px;color:var(--mut);white-space:nowrap}
+.stepvote-name{font-size:13px;font-weight:600;flex:1 1 auto;min-width:60px}
+.stepvote-net{min-width:22px;text-align:center;font-size:12px;color:var(--ink);font-family:var(--mono)}
+.stepvote{padding:5px 12px!important;font-size:14px!important;line-height:1}
 .idbtn{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent);border-radius:7px;padding:8px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
 .idbtn:disabled{background:#21262d;color:var(--mut);border-color:var(--line);cursor:not-allowed}
 .idcta:not(.warn) .idbtn{background:#0b0f14;color:var(--ink);border-color:var(--line)}
@@ -408,6 +423,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
 <button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
 </div>
+<div id="stepVotePanel"></div>
 <button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched cells">Reset progress</button>
 </div>
 </div>
@@ -2774,6 +2790,15 @@ function showNucleus(pos){
      checkOverrideContext() can never warn using a STALE list of identities from whichever cell
      was on screen before this one, in the window before the new fetch resolves. */
   window.CUR_COMMUNITY_IDS=[];
+  /* CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME feed the step-through review panel's 4 vote buttons
+     (2026-08-09, Søren: "add upvote/downvote original classification, upvote/downvote community
+     classification" to the Filter-and-show step-through flow) -- reset here for the same reason
+     as CUR_COMMUNITY_IDS just above (never let a stale name from the PREVIOUS cell leak into the
+     vote panel during the window before this cell's own data resolves). CUR_MICRONS_NAME is set
+     synchronously below, in the plain-MICrONS-prediction branch only (own-verified/merged cells
+     have no single "MICrONS predicted this" fact to vote on). CUR_COMMUNITY_TOP_NAME is set
+     asynchronously, by loadCommunityReports() once it determines a winning community identity. */
+  window.CUR_MICRONS_NAME=null;window.CUR_COMMUNITY_TOP_NAME=null;
   /* Checked FIRST, ahead of even the standalone-annotation check below: a community-reported,
      identified sub-cell of a merged-nucleus detection sits INSIDE a real MICrONS nucleus
      detection (unlike a standalone point), so without this check the normal nearest() lookup a
@@ -2880,6 +2905,7 @@ function showNucleus(pos){
        since community input there is a second opinion on an existing call, not the naming of an
        unnamed cell, and quietly overwriting it would hide the disagreement. */
     const unclassified=ti.name==="Unclassified";
+    if(!unclassified)window.CUR_MICRONS_NAME=longName(ti.name); // see CUR_MICRONS_NAME's reset comment above -- no real prediction to vote on when unclassified
     h+='<span class="tag '+ti.ab+'" id="ctTag" title="'+BROAD_SOURCE_NOTE+'">'+(ti.cls?ti.cls.replace("_"," "):"nucleus &middot; no prediction")+'</span>';
     h+='<div class="celltype" id="ctHeadline"'+(unclassified?' data-unclassified="1"':'')+' data-microns-name="'+escHtml(longName(ti.name))+'" title="'+(ciBroad?ciBroad.full+" \u2014 "+ciBroad.role:"")+'">'+celltypeLink(pos,longName(ti.name))+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+' <small>'+(unclassified?"no MICrONS prediction":"MICrONS prediction")+'</small></div>';     h+='<div id="idVotePanel" style="margin:3px 0 2px"></div>';
     h+='<div class="meta" id="commReports"></div>';
@@ -3110,6 +3136,10 @@ document.getElementById("go").addEventListener("click",()=>{
      Back/Forward button enabled-state either way, since NAV_INDEX itself didn't change. */
   if(window.CUR_HAS_CELL)pushNavHistory(pos,navLabel,navFromHistory);
   else renderNavControls();
+  /* Step-through review vote panel (see its own comment) -- covers every navigation path, not
+     just Prev/Next, so its content is always correct whatever cell ends up on screen. Re-called
+     again once the async community-report fetch resolves (see loadCommunityReports() above). */
+  if(typeof renderStepVotePanel==="function")renderStepVotePanel();
 });
 renderNavControls();renderRecentlyViewedPanel();
 document.getElementById("copy").addEventListener("click",async()=>{const url=document.getElementById("url").textContent;try{await navigator.clipboard.writeText(url);document.getElementById("copy").textContent="Copied";setTimeout(()=>document.getElementById("copy").textContent="Copy link",1200);}catch(_){}});
@@ -4504,6 +4534,70 @@ function loadIdentityVotesPanel(nid,seeds){
     }));
   };
   fetch(REPORT_ENDPOINT+"?identityVotes="+encodeURIComponent(nid)).then(function(r){return r.json();}).then(function(d){render((d&&d.identityVotes)||[]);}).catch(function(){});
+}
+/* Step-through review voting -- 2026-08-09 (Søren: "users can step through filtered cells one by
+   one, but cannot easily vote on classifications... Upvote/downvote original classification,
+   upvote/downvote community classification"). Deliberately its own small function, NOT a call
+   into loadIdentityVotesPanel() -- that panel pools every votable identity (MICrONS prediction +
+   every community proposal) into one undifferentiated list of pills, which is exactly right for
+   "agree with any of these names" but wrong here: the review workflow specifically wants ONE
+   clearly-labelled action for "the original (MICrONS) call" and ONE for "the community's current
+   call", not a variable-length pill list someone has to parse while quickly stepping through many
+   cells. Reuses the EXACT same server mechanism though (postReport type "vote_identity", the same
+   "Identity votes" sheet/?identityVotes= read endpoint) -- voting is voting, regardless of which
+   UI surface it's cast from, so no backend changes were needed for this feature.
+   name may be null (no MICrONS prediction, or no community identification yet for this cell) --
+   returns "" in that case, which is how the two rows below independently disappear rather than
+   showing an empty/dead vote target ("minimal clutter"). */
+function stepVoteRowHtml(label,name,votesMap){
+  if(!name)return"";
+  var t=votesMap[String(name).toLowerCase()]||{up:0,down:0,net:0};
+  var mine=window.MY_PROPOSED_IDS||{};
+  var isMine=!!mine[String(name).toLowerCase()];
+  return '<div class="stepvote-row">'
+    +'<span class="stepvote-label">'+escHtml(label)+'</span>'
+    +'<span class="stepvote-name">'+escHtml(name)+'</span>'
+    +(isMine?'<span class="nsub" title="You proposed this identification, so you can\'t vote on it">your ID</span>'
+      :'<button type="button" class="idbtn stepvote" data-nm="'+escHtml(name)+'" data-v="1" aria-label="Upvote '+escHtml(label)+' classification: '+escHtml(name)+'" title="Agree">&#9650;</button>')
+    +'<span class="stepvote-net">'+(t.net>0?"+":"")+t.net+'</span>'
+    +(isMine?''
+      :'<button type="button" class="idbtn stepvote" data-nm="'+escHtml(name)+'" data-v="-1" aria-label="Downvote '+escHtml(label)+' classification: '+escHtml(name)+'" title="Disagree">&#9660;</button>')
+    +'</div>';
+}
+/* Renders (or clears) #stepVotePanel, inside #stepThroughCard on the Filter-and-show tab. Safe to
+   call from anywhere, any time -- no-ops cleanly if the panel isn't in the DOM (e.g. before the
+   Filter tab has ever been opened) or there's no current nucleus. When window.CUR_MICRONS_NAME
+   and window.CUR_COMMUNITY_TOP_NAME resolve to the SAME name (a cell everyone agrees on), only
+   ONE row is shown instead of two identical-looking vote targets -- voting on either would cast
+   an identical vote for the identical string, so showing both would just be visual clutter with
+   no added function. */
+function renderStepVotePanel(){
+  var el=document.getElementById("stepVotePanel");
+  if(!el)return;
+  var nid=CUR_NUCID;
+  var micronsName=window.CUR_MICRONS_NAME||null;
+  var commName=window.CUR_COMMUNITY_TOP_NAME||null;
+  if(!nid||(!micronsName&&!commName)||!REPORT_ENDPOINT){el.innerHTML="";return;}
+  fetch(REPORT_ENDPOINT+"?identityVotes="+encodeURIComponent(nid)).then(function(r){return r.json();}).then(function(d){
+    var list=(d&&d.identityVotes)||[];
+    var map={};list.forEach(function(v){map[String(v.identity).toLowerCase()]=v;});
+    var sameAsMicrons=micronsName&&commName&&String(micronsName).toLowerCase()===String(commName).toLowerCase();
+    var rows=sameAsMicrons
+      ?stepVoteRowHtml("Original / community-confirmed",micronsName,map)
+      :stepVoteRowHtml("Original (MICrONS)",micronsName,map)+stepVoteRowHtml("Community",commName,map);
+    if(!rows){el.innerHTML="";return;}
+    el.innerHTML='<div class="stepvote-panel"><div class="stepvote-title">Vote on this cell&rsquo;s classification</div>'+rows+'</div>';
+    el.querySelectorAll(".stepvote").forEach(function(b){
+      b.addEventListener("click",function(){
+        b.disabled=true;
+        if(postReport({type:"vote_identity",timestamp:new Date().toISOString(),nucleusId:nid,identity:b.dataset.nm,vote:Number(b.dataset.v)},"Vote recorded — thank you.")){
+          setTimeout(renderStepVotePanel,1500);
+        } else {
+          b.disabled=false;
+        }
+      });
+    });
+  }).catch(function(){});
 }
 function segTypeLabel(t){return t==="img35"?"Seg35":(t==="nucleus35"?"Nucleus·35":((t==="nucleus"||t==="nucleus65")?"Nucleus·65":"Seg65"));}
 /* containerEl (optional, added 2026-07-30) lets this same propose/vote panel be embedded more
@@ -6155,6 +6249,14 @@ function loadCommunityReports(nid,cellPos){
       window.CUR_COMMUNITY_IDS=Array.from(new Set(reports.map(function(r){return r.identified;}).filter(Boolean).map(String)));
       try{var _myn=String((typeof REPORTER_NAME!=="undefined"&&REPORTER_NAME)||"").trim().toLowerCase();var _mine={};if(_myn){reports.forEach(function(r){if(r&&r.identified&&String(r.reporterName||"").trim().toLowerCase()===_myn)_mine[String(r.identified).toLowerCase()]=1;});}window.MY_PROPOSED_IDS=_mine;}catch(_mp){window.MY_PROPOSED_IDS={};}
       if(typeof loadIdentityVotesPanel==="function")loadIdentityVotesPanel(nid,window.__idvBase||[]);
+      /* Placed BEFORE the early-return just below so it always fires, whether or not this
+         nucleus has any community reports -- CUR_COMMUNITY_TOP_NAME may still be null at this
+         point (set further down, only if ranked.length), which is correct: renderStepVotePanel()
+         just shows the "Original (MICrONS)" row alone in that case. Re-called again after
+         ranked/win resolves below when there IS a winning community name, so the panel never has
+         to guess -- it always reflects window.CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME as of the
+         moment it's called. */
+      if(typeof renderStepVotePanel==="function")renderStepVotePanel();
       if(!reports.length&&!mergedGroups.length&&!notNucleusReports.length&&!organelleGroups.length)return;
       let html="";
       if(reports.length){
@@ -6191,6 +6293,8 @@ function loadCommunityReports(nid,cellPos){
         const users=n=>n+' '+(n>1?'users':'user');
         if(ranked.length){
           const win=ranked[0];
+          window.CUR_COMMUNITY_TOP_NAME=win.name; // see CUR_COMMUNITY_TOP_NAME's reset comment in showNucleus() -- feeds the step-through vote panel
+          if(typeof renderStepVotePanel==="function")renderStepVotePanel();
           /* Promote the winning name to the cell's HEADLINE when the cell was otherwise
              unclassified -- the point of letting the first reporter name a cell is that the cell
              then carries that name, not that it stays "Unclassified" with the name in small print
