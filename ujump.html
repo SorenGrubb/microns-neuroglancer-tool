@@ -5114,16 +5114,28 @@ async function caveApiQuery(table,filterJson,token,version){
   if(!res.ok)throw new Error(res.status+" "+res.statusText+" — "+(await res.text()).slice(0,200));
   return caveToRecords(caveParseBigSafe(await res.text()));
 }
-function caveSynFilter(rootId,direction){
+/* rootIds accepts either a single id or an array -- (2026-08-09, Søren: "When a cell has a user
+   reported root ID, that root ID should be also used in the connectivity") a cell whose
+   segmentation is split across several root IDs (the main MICrONS one plus any community-proposed
+   img65 fragments, see mergeSelfRootIds() below) can be queried as ONE $in filter covering every
+   fragment at once, rather than one query per fragment -- CAVE's filter_in_dict already supports a
+   list here, so this is both simpler and cheaper than N separate round-trips. */
+function caveSynFilter(rootIds,direction){
   const col=direction==="input"?"post_pt_root_id":"pre_pt_root_id";
-  return '{"filter_in_dict":{"'+CAVE_SYN_TABLE+'":{"'+col+'":['+rootId+']}}}';
+  const list=Array.isArray(rootIds)?rootIds:[rootIds];
+  return '{"filter_in_dict":{"'+CAVE_SYN_TABLE+'":{"'+col+'":['+list.join(",")+']}}}';
 }
-function caveAggregate(rows,rootId,direction){
+/* selfIds: same single-or-array flexibility as caveSynFilter above. Excludes ANY partner id that's
+   one of OUR OWN fragments, not just a single rootId -- otherwise, once a cell is queried as
+   multiple merged root ID fragments, one fragment's synapse onto another fragment of the SAME cell
+   would wrongly show up as a "partner" instead of being recognised as still-the-same-cell. */
+function caveAggregate(rows,selfIds,direction){
   const partnerCol=direction==="input"?"pre_pt_root_id":"post_pt_root_id";
+  const selfSet=new Set((Array.isArray(selfIds)?selfIds:[selfIds]).map(String));
   const map=new Map(),pts=[];
   for(const r of rows){
     const p=String(r[partnerCol]);
-    if(p===String(rootId)||p==="0")continue;
+    if(selfSet.has(p)||p==="0")continue;
     const e=map.get(p)||{partner:p,direction,syn_count:0,syn_size:0};
     e.syn_count++;e.syn_size+=Number(r.size)||0;map.set(p,e);
     /* The raw CAVE materialize REST endpoint (unlike the caveclient Python wrapper) always
@@ -5138,9 +5150,14 @@ const CAVE_MAX_SYN_POINTS=400;
 const SYN_POINT_COLOR="#ffe11a";
 /* centerPos is this cell's own nucleus voxel position ([NX[i],NY[i],NZ[i]]) -- this is the fix
    for bug (1) above: the state ALWAYS centres on the query cell, never on a synapse point. */
-function buildConnectivityState(centerPos,queryRootId,shown,points){
-  const segments=[String(queryRootId),...shown.map(p=>p.partner)];
-  const segmentColors={[String(queryRootId)]:"#ffffff"};
+/* queryRootIds: single id or array -- see caveSynFilter's own comment. Every self fragment gets the
+   same white highlight so a multi-fragment cell reads as one cell in Neuroglancer, not one main
+   segment plus unexplained extra white blobs. */
+function buildConnectivityState(centerPos,queryRootIds,shown,points){
+  const selfList=(Array.isArray(queryRootIds)?queryRootIds:[queryRootIds]).map(String).filter(Boolean);
+  const segments=[...selfList,...shown.map(p=>p.partner)];
+  const segmentColors={};
+  selfList.forEach(id=>segmentColors[id]="#ffffff");
   const dirColor={input:"#00b7ff",output:"#ff4fa3"};
   shown.forEach(p=>segmentColors[p.partner]=dirColor[p.direction]);
   const layers=[
@@ -5437,11 +5454,55 @@ function saveConnectivitySample(nucleusId,rootId,cellType,centerPos,allPoints){
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
   fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
 }
+/* 2026-08-09 (Søren: "When a cell has a user reported root ID, that root ID should be also used in
+   the connectivity") -- fetches this nucleus's community-proposed root IDs fresh (same ?rootIds=
+   endpoint loadRootIdPanel() uses) rather than reading the CUR_EXTRA_ROOTS global, since that panel
+   may not have finished its own fetch yet by the time this runs (it's called right after
+   loadRootIdPanel() at the same call site, but async). Only img65-segType proposals qualify -- Seg35
+   lives in a different bucket CAVE's synapse table isn't guaranteed to line up with (same
+   restriction the mesh/volume merge already applies, see decorateMeshVolButtons's own comment). */
+async function fetchCommunityRootIds(nucleusId){
+  if(!REPORT_ENDPOINT||!nucleusId)return[];
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(nucleusId));
+    const d=await r.json();
+    return (d&&d.rootIds)||[];
+  }catch(e){return[];}
+}
+/* Merges the official MICrONS root ID (if any) with every img65 community-proposed root ID for
+   this nucleus into one ordered, de-duplicated "self" list -- the main root ID first (if present),
+   so it stays the label/primary id everywhere a single id is still shown (xlsx filename, "root ID"
+   column, etc.), with any community fragments folded in as additional self ids for the query. */
+function mergeSelfRootIds(rootId,communityRoots){
+  const ids=[];
+  if(rootId)ids.push(String(rootId));
+  (communityRoots||[]).forEach(function(x){
+    const st=x.segType||"img65";
+    if(st!=="img65")return;
+    const id=String(x.rootId||"");
+    if(id&&ids.indexOf(id)<0)ids.push(id);
+  });
+  return ids;
+}
 function loadConnectivityPanel(containerId,rootId,centerPos,cellType,nucleusId){
   const el=document.getElementById(containerId);
   if(!el)return;
   el.innerHTML="";
-  if(!rootId){return;}
+  /* Cells WITH a MICrONS root ID render the panel immediately, same as always -- connGo() below
+     folds in any community-reported img65 fragments right before querying. Cells with NO root ID
+     at all used to just bail here ("if(!rootId){return;}"); now a quick async check for a
+     community-reported root ID decides whether the panel appears at all -- if someone's proposed
+     one via the "additional root / nucleus IDs" panel, connectivity becomes available the same way
+     mesh/volume downloads already fall back to it; if nobody has, the panel stays absent as before. */
+  if(rootId){
+    renderConnectivityToggle(el,containerId,rootId,centerPos,cellType,nucleusId);
+  } else {
+    fetchCommunityRootIds(nucleusId).then(function(list){
+      if(mergeSelfRootIds("",list).length)renderConnectivityToggle(el,containerId,rootId,centerPos,cellType,nucleusId);
+    });
+  }
+}
+function renderConnectivityToggle(el,containerId,rootId,centerPos,cellType,nucleusId){
   let built=false;
   const label=()=>"Connectivity (synaptic partners)";
   el.innerHTML='<a href="#" id="connToggle" class="nsub" style="font-size:12px;cursor:pointer;text-decoration:underline">+ '+label()+'</a><div id="connBody" style="display:none;margin:6px 0 2px"></div>';
@@ -5498,12 +5559,22 @@ function loadConnectivityPanel(containerId,rootId,centerPos,cellType,nucleusId){
       try{remember?localStorage.setItem("cave_token",token):localStorage.removeItem("cave_token");}catch(_lse2){}
       const goBtn=bod.querySelector("#connGo");goBtn.disabled=true;
       try{
+        /* 2026-08-09 (S\u00f8ren: "When a cell has a user reported root ID, that root ID should be also
+           used in the connectivity") -- fetched fresh on every query click (not reused from the
+           panel's initial open) so a root ID proposed/voted on AFTER this panel was expanded still
+           gets picked up. selfIds is rootId (if this cell has a MICrONS one) plus every
+           community-proposed img65 root ID for this nucleus, treated as one merged cell for the
+           query -- see mergeSelfRootIds()/caveSynFilter()/caveAggregate()'s own comments. */
+        const communityRoots=await fetchCommunityRootIds(nucleusId);
+        const selfIds=mergeSelfRootIds(rootId,communityRoots);
+        if(!selfIds.length){setStatus("No root ID \u2014 MICrONS or community-reported \u2014 is available for this cell yet.","err");return;}
+        const queryRootId=selfIds[0];
         const dirs=[];if(doIn)dirs.push("input");if(doOut)dirs.push("output");
         let allPartners=[],allPoints=[];
         for(const dir of dirs){
-          setStatus("Querying "+dir+" synapses\u2026");
-          const rows=await caveApiQuery(CAVE_SYN_TABLE,caveSynFilter(rootId,dir),token,version);
-          const agg=caveAggregate(rows,rootId,dir);
+          setStatus("Querying "+dir+" synapses\u2026"+(selfIds.length>1?" (merged across "+selfIds.length+" root ID fragments, including community-reported ones)":""));
+          const rows=await caveApiQuery(CAVE_SYN_TABLE,caveSynFilter(selfIds,dir),token,version);
+          const agg=caveAggregate(rows,selfIds,dir);
           allPartners.push(...agg.partners);allPoints.push(...agg.points);
         }
         const shown=dirs.flatMap(d=>allPartners.filter(p=>p.direction===d&&p.syn_count>=minSyn).slice(0,topN));
@@ -5594,10 +5665,12 @@ function loadConnectivityPanel(containerId,rootId,centerPos,cellType,nucleusId){
         // 2026-08-09 (Søren: "every time a user looks at the connectivity, the data should be
         // added to the graph") -- see saveConnectivitySample()'s own comment for what this sends
         // and why it's silent/unattributed-in-the-UI (no toast, no sign-in prompt on failure).
-        saveConnectivitySample(nucleusId,rootId,cellType,centerPos,allPoints);
+        // queryRootId (not the possibly-empty rootId param) so an unsegmented cell that only has a
+        // community-reported root ID still logs a real id here.
+        saveConnectivitySample(nucleusId,queryRootId,cellType,centerPos,allPoints);
         const shownIds=new Set(shown.map(p=>p.partner));
         const points=doSyn?allPoints.filter(p=>shownIds.has(p.partner)):[];
-        const state=buildConnectivityState(centerPos,rootId,shown,points);
+        const state=buildConnectivityState(centerPos,selfIds,shown,points);
         const viewerEl=document.getElementById("viewer");
         const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
         const url=base+"#!"+encodeURIComponent(JSON.stringify(state));
@@ -5638,6 +5711,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos,cellType,nucleusId){
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+(p.syn_size||0)+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+escHtml(p.cell_type||"—")+'</td></tr>').join("")
             +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the graphs, download, and this table cover every partner/synapse found. Per-synapse size and cortical depth are also shown in Neuroglancer itself \u2014 click/hover a yellow synapse point.</div>'
+            +(selfIds.length>1?'<div class="hint" style="margin-top:4px">Queried as '+selfIds.length+' merged root ID fragments of this cell (main root ID'+(rootId?"":" \u2014 none from MICrONS")+' + '+(selfIds.length-1)+' community-reported): '+selfIds.map(escHtml).join(", ")+'.</div>':'')
             +(typeNote?'<div class="hint" style="margin-top:4px;color:'+(typeNoteWarn?"var(--warn)":"var(--mut)")+'">'+escHtml(typeNote)+'</div>':'');
           const colorByEl=rt.querySelector("#connColorBy");
           const noTypeEl=rt.querySelector("#connShowNoType");
@@ -5680,12 +5754,12 @@ function loadConnectivityPanel(containerId,rootId,centerPos,cellType,nucleusId){
               const avgDepth=(d&&d.n)?Number((d.sum/d.n).toFixed(2)):"";
               const pi=partnerInfo.get(p.partner);
               const somaDepth=(pi&&pi.somaDepthUm!=null)?Number(pi.somaDepthUm.toFixed(2)):"";
-              data.push([String(rootId),p.direction,String(p.partner),p.syn_count,p.syn_size,p.cell_type||"",avgDepth,somaDepth]);
+              data.push([queryRootId,p.direction,String(p.partner),p.syn_count,p.syn_size,p.cell_type||"",avgDepth,somaDepth]);
             }
             const ws=XLSX.utils.aoa_to_sheet(data);
             const wb=XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb,ws,"Connections");
-            XLSX.writeFile(wb,"partners_"+rootId+".xlsx");
+            XLSX.writeFile(wb,"partners_"+queryRootId+".xlsx");
           });
         }
       }catch(err){
