@@ -137,6 +137,8 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .chist-src.community{background:rgba(240,136,62,.15);color:var(--exc);border:1px solid var(--exc)}
 .chist-src.verification{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)}
 .chist-src.manual_revision{background:rgba(88,166,255,.15);color:var(--inh);border:1px solid var(--inh)}
+.chist-src.undo{background:rgba(240,136,62,.08);color:var(--mut);border:1px dashed var(--mut)}
+.chist-src.admin_restore{background:rgba(248,81,73,.12);color:#f85149;border:1px solid #f85149}
 .chist-meta{font-family:var(--mono);font-size:11px;color:var(--mut)}
 .chist-cert{font-family:var(--mono);font-size:11px;color:var(--ink);margin-top:3px}
 .chist-comment{font-size:12px;color:var(--ink);margin-top:5px;padding:6px 9px;background:#161b22;border-radius:6px;font-style:italic}
@@ -3277,6 +3279,44 @@ const LEAF_NAMES={erythrocyte:"Erythrocyte",platelet:"Platelet",neutrophil:"Neut
    is clearer to a reader than the bare canonical type name. */
 const LEAF_SUBMIT_CANON={"Perivascular fibroblast":"Perivascular Fibroblast","Pia mater fibroblast":"Pia mater Fibroblast","Pial sheath fibroblast":"Pial sheath Fibroblast","Perivascular macrophage":"Macrophage"};
 function canonSubmitName(nm){return nm?(LEAF_SUBMIT_CANON[nm]||nm):nm;}
+/* Coarse cell-type "family" buckets -- 2026-08-09, undo/restore feature (Søren's example: "a
+   neuron was accidentally reclassified as an endothelial cell instead of a nearby pericyte" --
+   neuron -> endothelial crosses a family boundary that pericyte -> endothelial doesn't quite as
+   badly, but ANY cross-family jump is exactly the class of accidental misclick this is meant to
+   catch). Deliberately KEYWORD-based rather than a lookup keyed on the 16 leaf slugs: the actual
+   string compared here is whatever's currently on screen as the "previous" identity (a MICrONS
+   suggestion, a community vote, or a free-text override), which doesn't always match a leaf slug
+   verbatim (different casing, spacing, or a name that predates a later leaf rename) -- a
+   substring match against normalized (lowercased, underscores->spaces) text is far more robust to
+   that than an exact map would be. Order matters where a name could match more than one keyword
+   set (there isn't one today, but if a future leaf name did, the first matching family wins). */
+const CLASS_FAMILY_KEYWORDS=[
+  {family:"neuron",kws:["neuron","interneuron","pyramidal"]},
+  {family:"vascular",kws:["endothelial","pericyte","smooth muscle","mural"]},
+  {family:"perivascular",kws:["perivascular","fibroblast"]},
+  {family:"blood",kws:["erythrocyte","platelet"]},
+  {family:"circulating immune",kws:["neutrophil","lymphocyte","monocyte"]},
+  {family:"glial",kws:["astrocyte","oligodendrocyte","opc","precursor cell"]},
+  {family:"resident immune",kws:["microglia"]}
+];
+function familyOf(nameStr){
+  if(!nameStr)return null;
+  const s=String(nameStr).toLowerCase().replace(/_/g," ");
+  for(const grp of CLASS_FAMILY_KEYWORDS){
+    if(grp.kws.some(k=>s.indexOf(k)>=0))return grp.family;
+  }
+  return null;
+}
+/* Shown as a native confirm() dialog right before a reclassification that crosses a family
+   boundary (see familyOf() above) actually posts -- cheap, unmissable, blocking, and needs no new
+   UI: exactly what "confirmation dialog for major class changes" calls for. Returns true if the
+   submission should proceed (no family change, families unknown/unclassified so nothing to
+   compare, or the user confirmed), false if the user backed out. */
+function confirmMajorClassChange(oldName,newName){
+  const oldFam=familyOf(oldName),newFam=familyOf(newName);
+  if(!oldFam||!newFam||oldFam===newFam)return true;
+  return confirm("This changes the cell's category from "+oldFam+" (“"+oldName+"”) to "+newFam+" (“"+newName+"”) — a major reclassification, not just a nearby subtype.\n\nDouble-check this against the ultrastructure before submitting. Continue?");
+}
 // Real files currently sitting in the image library folders (matches what's on disk today).
 // coord is [x,y,z] in VOXELS, filled in from the catalog's Notes/coordinate column.
 // Left null until supplied -- thumbnails without a coord show greyed-out with no jump link.
@@ -4055,6 +4095,57 @@ function showSubmitToast(ok,msg){
   t.style.opacity="1";
   clearTimeout(showSubmitToast._h);
   showSubmitToast._h=setTimeout(function(){t.style.opacity="0";},ok?4500:8000);
+}
+/* Fire-and-forget "restore_classification" submission -- the shared plumbing behind the Undo
+   toast below, the "Correct this" button on a reporter's OWN classification-history rows, and the
+   admin-only "Restore this version" button (see renderCellHistory() in the cell-history panel
+   code further down). Just a thin postReport() wrapper: the actual self-vs-admin / time-window
+   authorization all happens server-side (see Code.gs.txt's restore_classification doPost branch
+   and RESTORE_UNDO_WINDOW_MS's own comment) since postReport() is mode:"no-cors" and this client
+   can never read whether a given restore actually succeeded. opts: {undoLast, targetTimestamp,
+   reason, rootId, coord}. */
+function restoreClassification(nucleusId,opts){
+  opts=opts||{};
+  postReport({
+    type:"restore_classification",
+    timestamp:new Date().toISOString(),
+    nucleusId:nucleusId||"",rootId:opts.rootId||"",
+    coord:opts.coord||"",
+    undoLast:opts.undoLast===true,
+    targetTimestamp:opts.targetTimestamp||"",
+    reason:opts.reason||""
+  },opts.undoLast===true?"Undo submitted.":"Restore submitted.");
+}
+/* "Undo" toast -- 2026-08-09 (Søren: "add Undo after submission... ensure accidental changes do
+   not permanently overwrite existing classifications"). Shown right after every successful
+   idfreport/idfcontribute submission (see those handlers above), separate from the plain
+   ok/fail showSubmitToast() above so the two never fight over the same DOM node or clobber each
+   other's countdown -- this one persists longer and carries an actionable button, that one is a
+   quick pass/fail flash. Client-side visibility window (UNDO_TOAST_MS) is deliberately SHORTER
+   than the server's own RESTORE_UNDO_WINDOW_MS enforcement (20 min) so that as long as the button
+   is still on screen, clicking it is guaranteed to still be inside the server's own window --
+   the toast disappearing is not the real deadline, it's just good UX (an undo button that's been
+   sitting there for 20 minutes stops being about THIS submission and starts being confusing). */
+const UNDO_TOAST_MS=45000;
+function showUndoToast(nucleusId,rootId,pos){
+  if(!nucleusId)return;
+  var t=document.getElementById("undoToast");
+  if(!t){
+    t=document.createElement("div");t.id="undoToast";
+    t.style.cssText="position:fixed;left:50%;bottom:76px;transform:translateX(-50%);z-index:99999;max-width:90vw;padding:10px 14px;border-radius:10px;font:13px/1.4 -apple-system,Segoe UI,sans-serif;color:#fff;background:#24292f;box-shadow:0 6px 24px rgba(0,0,0,.3);opacity:0;transition:opacity .2s;display:flex;align-items:center;gap:10px";
+    document.body.appendChild(t);
+  }
+  var coord=pos?pos.join(","):"";
+  t.innerHTML='<span>Submitted.</span><button id="undoToastBtn" class="idbtn" style="padding:3px 10px;font-size:12px">Undo</button>';
+  t.style.opacity="1";
+  document.getElementById("undoToastBtn").onclick=function(){
+    restoreClassification(nucleusId,{undoLast:true,rootId:rootId,coord:coord,reason:"Undo (misclick) via the post-submission Undo toast."});
+    t.innerHTML='<span>Undo submitted — refreshing history…</span>';
+    setTimeout(()=>{t.style.opacity="0";},2000);
+    setTimeout(()=>loadClassificationHistory(nucleusId),2500);
+  };
+  clearTimeout(showUndoToast._h);
+  showUndoToast._h=setTimeout(function(){t.style.opacity="0";},UNDO_TOAST_MS);
 }
 /* Best-effort, SILENT save of a "Compute volume" result to the µJump dashboard's growing
    dataset (see the "Computed volumes" ALSO IMPORTANT note above REPORT_ENDPOINT). Deliberately
@@ -6214,6 +6305,8 @@ function sourceTypeLabel(src){
   if(src==="microns_original")return"Original MICrONS annotation";
   if(src==="verification")return"Verification (Grubb et al.)";
   if(src==="manual_revision")return"Manual revision";
+  if(src==="undo")return"Undo";
+  if(src==="admin_restore")return"Restored by administrator";
   return"Community identification";
 }
 function annotationTypeLabel(t){
@@ -6238,7 +6331,16 @@ function mergeCellHistory(changeItems,annoItems){
   combined.sort(function(a,b){return String(a.timestamp||"").localeCompare(String(b.timestamp||""));});
   return combined;
 }
-function renderCellHistory(items){
+/* nucleusId/rootId/coord (2026-08-09, undo/restore feature) are only needed to wire up the
+   "Correct this" / "Restore this version" buttons below (they must know which cell/version to
+   restore) -- every OTHER caller of renderCellHistory keeps working unchanged since these are
+   optional. canRestore on a "change" item (only ?classificationHistory= entries carry it --
+   annotation-history entries from ?annotationHistory= never do, so those never get a button) is
+   computed server-side from the viewer's own verified identity (see doGet's viewerCredential
+   handling) -- isOwn -> button reads "Correct this" (re-apply one of MY OWN earlier calls, no
+   time limit); OWNER_EMAIL-but-not-isOwn -> "Restore this version" (administrator override,
+   authoritative, no time limit). Never shown for a signed-out visitor or anyone else's entry. */
+function renderCellHistory(items,nucleusId,rootId,coord){
   const el=document.getElementById("classHistoryPanel");
   if(!el)return;
   if(!items||!items.length){el.innerHTML='<div class="chist-panel"><h4>Cell history</h4><div class="chist-empty">No recorded changes or reports yet for this cell.</div></div>';return;}
@@ -6250,11 +6352,14 @@ function renderCellHistory(items){
         :escHtml(h.newIdentity||"(unnamed)");
       const cert=h.certainty?'<div class="chist-cert">Certainty: '+escHtml(String(h.certainty))+'/5</div>':"";
       const comment=h.comment?'<div class="chist-comment">“'+escHtml(h.comment)+'”</div>':"";
+      const restoreBtn=(h.canRestore&&nucleusId&&h.timestamp)
+        ?'<button class="idbtn chist-restore-btn" data-ts="'+escHtml(String(h.timestamp))+'" style="padding:2px 8px;font-size:11px;margin-top:5px">'+(h.isOwn?"Correct this":"Restore this version")+'</button>'
+        :"";
       return '<div class="chist-row">'
         +'<div class="chist-top"><span class="chist-change">'+change+'</span>'
         +'<span class="chist-src '+escHtml(src)+'">'+escHtml(sourceTypeLabel(src))+'</span></div>'
         +'<div class="chist-meta">'+(h.reporterName?escHtml(h.reporterName)+' &middot; ':"")+fmtHistTs(h.timestamp)+'</div>'
-        +cert+comment+'</div>';
+        +cert+comment+restoreBtn+'</div>';
     }
     // kind:"annotation" -- a raw report-log row, may or may not have changed the current identity.
     const statusClass=h.status==="resolved"?"st-resolved":(String(h.status||"").indexOf("unresolved")===0?"st-unresolved":"st-recorded");
@@ -6271,19 +6376,33 @@ function renderCellHistory(items){
       +'</div>';
   }).join("");
   el.innerHTML='<div class="chist-panel"><h4>Cell history ('+items.length+')</h4>'+rows+'</div>';
+  if(nucleusId){
+    Array.prototype.forEach.call(el.querySelectorAll(".chist-restore-btn"),function(btn){
+      btn.addEventListener("click",function(){
+        const ts=btn.getAttribute("data-ts");
+        const label=btn.textContent;
+        if(!confirm((label==="Correct this"?"Re-apply this earlier identification of yours":"Restore the cell to this earlier classification (administrator override)")+"?\n\nThis is logged in the cell's history like any other change — nothing is deleted."))return;
+        btn.disabled=true;btn.textContent="Submitting…";
+        restoreClassification(nucleusId,{targetTimestamp:ts,rootId:rootId,coord:coord,
+          reason:label==="Correct this"?"Correcting my own earlier submission via the history panel.":"Administrator restore via the history panel."});
+        setTimeout(()=>loadClassificationHistory(nucleusId),2500);
+      });
+    });
+  }
 }
 function loadClassificationHistory(nid){
   const el=document.getElementById("classHistoryPanel");
   if(!el)return;
   el.innerHTML="";
   if(!REPORT_ENDPOINT||!nid)return;
+  const viewerQS=(GOOGLE_VERIFIED&&GOOGLE_CREDENTIAL)?"&viewerCredential="+encodeURIComponent(GOOGLE_CREDENTIAL):"";
   Promise.all([
-    fetch(REPORT_ENDPOINT+"?classificationHistory="+encodeURIComponent(nid)).then(r=>r.json()).catch(()=>null),
+    fetch(REPORT_ENDPOINT+"?classificationHistory="+encodeURIComponent(nid)+viewerQS).then(r=>r.json()).catch(()=>null),
     fetch(REPORT_ENDPOINT+"?annotationHistory="+encodeURIComponent(nid)).then(r=>r.json()).catch(()=>null)
   ]).then(function(results){
     const changeItems=(results[0]&&results[0].history)||[];
     const annoItems=(results[1]&&results[1].annotations)||[];
-    renderCellHistory(mergeCellHistory(changeItems,annoItems));
+    renderCellHistory(mergeCellHistory(changeItems,annoItems),nid,(typeof CUR_ROOT!=="undefined"&&CUR_ROOT)||"",window.CUR_POS?window.CUR_POS.join(","):"");
   }).catch(()=>{});
 }
 function loadCommunityReports(nid,cellPos){
@@ -7399,6 +7518,11 @@ function renderResult(slug){
     const cmtVal=commentEl?commentEl.value.trim():"";
     const overrideIds=checkOverrideContext(canonSubmitName(name),cmtVal);
     if(overrideIds){renderOverrideWarning(overrideIds);return;} // held back -- see checkOverrideContext()'s comment
+    // "Add confirmation dialog for major class changes" -- see confirmMajorClassChange()'s own
+    // comment. Only meaningful here (the "disagrees with MICrONS' own suggestion" path): idfcontribute
+    // has no prior identity to compare against, and idfconfirm's whole premise is agreeing with the
+    // suggestion, so families can never differ there.
+    if(!confirmMajorClassChange(ID_CTX.suggested,canonSubmitName(name)))return;
     renderOverrideWarning(null);
     const ok=postReport({
       type:"discrepancy",
@@ -7413,7 +7537,7 @@ function renderResult(slug){
     if(ok){
       reportBtn.textContent="Submitted — thank you!";reportBtn.disabled=true;
       document.getElementById("idfThanks").innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">🎉 Thanks — your correction has been logged against MICrONS\' original classification. Disagreement reports like this are exactly how the dataset gets more trustworthy over time.</div>';
-      if(ID_CTX.nucId)setTimeout(()=>loadClassificationHistory(ID_CTX.nucId),2500);
+      if(ID_CTX.nucId){setTimeout(()=>loadClassificationHistory(ID_CTX.nucId),2500);showUndoToast(ID_CTX.nucId,ID_CTX.root,ID_CTX.pos);}
     }
   });
   const contribBtn=document.getElementById("idfcontribute");
@@ -7436,7 +7560,7 @@ function renderResult(slug){
     if(ok){
       contribBtn.textContent="Contributed — thank you!";contribBtn.disabled=true;
       document.getElementById("idfThanks").innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">🎉 Thanks for identifying a previously unclassified cell — that’s a real contribution to the dataset. Every one of these helps build a more trustworthy map of the cortex.</div>';
-      if(ID_CTX.nucId)setTimeout(()=>loadClassificationHistory(ID_CTX.nucId),2500);
+      if(ID_CTX.nucId){setTimeout(()=>loadClassificationHistory(ID_CTX.nucId),2500);showUndoToast(ID_CTX.nucId,ID_CTX.root,ID_CTX.pos);}
     }
   });
   /* "Confirm this identification" -- the agrees case (see the const above): the user's guided-ID
