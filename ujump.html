@@ -6556,12 +6556,32 @@ function renderUserReportedCell(ur,panel){
   if(ur.comment)oh+='<div class="meta">'+escHtml(ur.comment)+'</div>';
   oh+='<div class="meta">'+(ur.dist<50?"at":ur.dist.toFixed(0)+" nm from")+' voxel ('+coordSpan(ur.pos[0],ur.pos[1],ur.pos[2])+') &mdash; this is the reporter’s own estimated location; the minnie35/Img35 imagery here has no MICrONS nucleus detection to compare against.</div>';
   oh+=renderLocationDiagram(ur.pos);
-  if(ur.rootId||ur.nucRootId){
-    oh+='<div class="ids">';
-    if(ur.rootId)oh+='<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.rootId)+'">'+escHtml(ur.rootId)+'</span>'+meshDlButtonHtml(ur.rootId,isUnclassified?"Unclassified cell":ur.identified,ur.pos)+'</div>'+meshVolRowHtml(ur.rootId);
-    if(ur.nucRootId)oh+='<div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.nucRootId)+'">'+escHtml(ur.nucRootId)+'</span></div>';
-    oh+='</div>';
-  }
+  /* 2026-08-09 (Søren: "cells lacking nuclei should allow assignment of a nucleus ID, future
+     calculation of nucleus volume, future calculation of root ID volume") -- this block used to
+     only render at all if the ORIGINAL reporter happened to type a rootId/nucRootId into the
+     report form, with no way for anyone else to add one afterwards. Now always rendered, mirroring
+     the main in-region nucleus panel's "unsegmented" fallback (meshDlButtonHtml("",...) + the
+     #rootIdPanel propose/vote form) exactly: root ID starts hidden-until-confirmed via
+     decorateMeshVolButtons() the same way, and the SAME loadRootIdPanel() used everywhere else in
+     this tool already supports proposing a Nucleus ID (segType "nucleus65"/"nucleus35", not just a
+     root ID) keyed by this report's own coordinate string -- the same "own-coordinate as the key"
+     convention renderStandalone() already uses for verified points with no MICrONS nucleus. Once
+     ANY root ID (the reporter's own or a later community proposal) is on file, "Compute volume"
+     works automatically -- meshDlButtonHtml()/MeshDL already combine every proposed root ID for
+     this key, this just gives standalone/no-nucleus cells the same live path main nuclei have.
+     Nucleus-mesh volume (as opposed to whole-cell mesh volume) is not yet computable even once a
+     Nucleus ID is proposed here -- see this feature's implementation notes for why that's a
+     separate, larger piece of work (no code path fetches/decodes a *nuclei*-layer mesh today,
+     only the main cell segmentation). */
+  oh+='<div class="ids">';
+  oh+=ur.rootId
+    ?'<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.rootId)+'">'+escHtml(ur.rootId)+'</span>'+meshDlButtonHtml(ur.rootId,isUnclassified?"Unclassified cell":ur.identified,ur.pos)+'</div>'+meshVolRowHtml()
+    :'<div class="idrow"><span class="k">root ID</span><span class="nsub">none yet &mdash; propose one below</span>'+meshDlButtonHtml("",isUnclassified?"Unclassified cell":ur.identified,ur.pos)+'</div>'+meshVolRowHtml();
+  oh+=ur.nucRootId
+    ?'<div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+escHtml(ur.nucRootId)+'">'+escHtml(ur.nucRootId)+'</span></div>'
+    :'<div class="idrow"><span class="k">nucleus ID</span><span class="nsub">none yet &mdash; propose one below (Nucleus ID option)</span></div>';
+  oh+='</div>';
+  oh+='<div id="rootIdPanel" style="margin:6px 0"></div>';
   /* Centriole/cilium reports logged against this SAME cell (see organellesNearPos() and the
      ?newCellOrganelles=1 doGet branch) -- these have no nucleus ID to key on, so they're matched
      by coordinate proximity, same 5000nm "trust this as one cell" threshold used everywhere else
@@ -6616,6 +6636,13 @@ function renderUserReportedCell(ur,panel){
   const newCellBtn=panel.querySelector("#idfNewCellGo");
   if(newCellBtn)newCellBtn.addEventListener("click",()=>openIdentify(newCellCtx));
   wireLeafSearch("newCellLeaf",slug=>openIdentifyToLeaf(newCellCtx,slug));
+  /* Keyed by this report's OWN coordinate string, same "own-coordinate as the key" convention
+     renderStandalone() already uses -- the backend never assumes this looks like a real MICrONS
+     nucleusId, it's just a string "Root ID proposals" groups and tallies by (see propose_root_id/
+     activeRootIdsForNucleus in Code.gs.txt). Populates CUR_EXTRA_ROOTS on resolve, which is what
+     lets decorateMeshVolButtons() reveal the "Compute volume"/"3D model"/"PowerPoint" buttons
+     rendered hidden above once a root ID exists. */
+  loadRootIdPanel(ur.pos.join(","));
 }
 /* Shown when a query coordinate lands on (within 300nm of) a community-reported, IDENTIFIED
    sub-cell of a merged-nucleus detection (see nearestMergedSub()/MERGED_SUB_REPORTS_CACHE) --
