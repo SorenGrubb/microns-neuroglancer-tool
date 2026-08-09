@@ -141,6 +141,12 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .chist-cert{font-family:var(--mono);font-size:11px;color:var(--ink);margin-top:3px}
 .chist-comment{font-size:12px;color:var(--ink);margin-top:5px;padding:6px 9px;background:#161b22;border-radius:6px;font-style:italic}
 .chist-empty{font-size:12px;color:var(--mut);font-style:italic}
+.chist-type{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:20px;font-weight:600;white-space:nowrap;background:rgba(139,148,158,.12);color:var(--mut);border:1px solid var(--line)}
+.chist-status{font-family:var(--mono);font-size:11px;margin-top:3px}
+.chist-status.st-resolved{color:var(--ok,#3fb950)}
+.chist-status.st-unresolved{color:var(--exc)}
+.chist-status.st-recorded{color:var(--mut)}
+.chist-group{font-family:var(--mono);font-size:10px;color:var(--mut);margin-left:6px}
 /* Step-through review vote panel (Filter-and-show tab) -- deliberately compact (one line per
    votable classification, at most 2 lines total) per "minimal clutter"; buttons are real
    <button> elements sized generously enough for a touch tap target (unlike the smaller inline
@@ -6184,55 +6190,101 @@ function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive,nucVolUm3,nucleu
     +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+' data-coords="'+coords+'"'+nucidAttr+' title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates, plus an embedded scale-bar rod below it that spins along with the model \u2014 automatically combined with any additionally-proposed root IDs for this nucleus \u2014 the Turntable spin autoplays in the slideshow, no click needed \u2014 built entirely in your browser, no CAVE token needed. If a root ID isn\u2019t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don\u2019t re-check the network \u2014 Shift-click to force a fresh check.'+noMainNote+'" style="'+hideAttr+'padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">\u2b07 PowerPoint</button>'
     +'<button class="idbtn meshvol" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+nucvolAttr+nucidAttr+' title="Estimate this cell\u2019s mesh volume (\u00b5m\u00b3) by fetching and decoding its full 3D geometry \u2014 not precomputed, so this costs one real mesh fetch, same as the 3D model download \u2014 automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries. Saved (root ID, cell type, volume) to the shared \u00b5Jump dashboard when signed in with Google. If a root ID isn\u2019t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don\u2019t re-check the network \u2014 Shift-click to force a fresh check.'+noMainNote+'" style="'+hideAttr+'padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
 }
-/* Classification history panel -- 2026-08-09 (Søren: every reclassification should be
-   understandable to future contributors, not just visible as a changed headline). Reads the new
-   ?classificationHistory=<nucleusId> endpoint (Code.gs.txt doGet, returns {history:[...]}
-   already sorted oldest-first) and renders one card per historical change: who, when, the
-   previous -> new identity, certainty, an optional comment shown prominently, and which of the
-   four source types it came from (original MICrONS annotation / community identification /
-   verification / manual revision -- see sourceTypeLabel()). Fails silently, same convention as
-   loadCommunityReports() below, since this is additive context on top of the core lookup, not
-   required for the tool to work. Only wired up for the main in-region nucleus panel (showNucleus's
-   in-region branch) -- standalone/merged-sub/user-reported cells aren't tracked by nucleusId in
-   "Master cell list" today, so there is nothing for this endpoint to return for them yet. */
+/* Cell history panel -- 2026-08-09, extended 2026-08-09 (Søren: every reclassification should be
+   understandable to future contributors, not just visible as a changed headline; then further:
+   "a complete annotation audit trail... reports report status... unresolved vs resolved... link
+   related annotations together"). Merges TWO sources into one chronological feed, both fetched
+   from Code.gs.txt's doGet:
+     - ?classificationHistory=<nucleusId> -> {history:[...]}, NAME-CHANGE events only, derived
+       from the "Classification history" sheet (who/when/previous->new identity/certainty/
+       comment/sourceType).
+     - ?annotationHistory=<nucleusId> -> {annotations:[...]}, the RAW report log across every
+       sheet a submission can land in (New identifications/Confirmations/Discrepancies/Merged
+       splits/Organelle locations/Not a nucleus) -- so a comment or note that never changed the
+       current identity (e.g. a Confirmation's remark, a merged-nucleus report's justification, an
+       organelle report, a not-a-nucleus flag) still shows up here instead of being invisible.
+   Deliberately ONE combined panel/#classHistoryPanel rather than two side-by-side panels, so a
+   contributor sees the whole story for a cell in one scroll instead of having to reconcile two
+   lists themselves. Fails silently on either fetch, same convention as loadCommunityReports()
+   below, since this is additive context on top of the core lookup, not required for the tool to
+   work. Only wired up for the main in-region nucleus panel (showNucleus's in-region branch) --
+   standalone/merged-sub/user-reported cells aren't tracked by nucleusId in "Master cell list"
+   today, so there is nothing for either endpoint to return for them yet. */
 function sourceTypeLabel(src){
   if(src==="microns_original")return"Original MICrONS annotation";
   if(src==="verification")return"Verification (Grubb et al.)";
   if(src==="manual_revision")return"Manual revision";
   return"Community identification";
 }
+function annotationTypeLabel(t){
+  if(t==="new_identification")return"New identification";
+  if(t==="confirmation")return"Confirmation";
+  if(t==="discrepancy")return"Discrepancy";
+  if(t==="merged_split")return"Merged-nucleus report";
+  if(t==="organelle_location")return"Organelle report";
+  if(t==="not_a_nucleus")return"Not-a-nucleus flag";
+  return t||"Report";
+}
 function fmtHistTs(ts){
   if(!ts)return"";
   try{return new Date(ts).toLocaleString(undefined,{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});}catch(e){return String(ts);}
 }
-function renderClassificationHistory(items){
+/* Combines classification-history items (kind:"change") and annotation-history items
+   (kind:"annotation") into one array sorted oldest-first by timestamp -- plain string sort works
+   since both endpoints already return ISO-format timestamps. */
+function mergeCellHistory(changeItems,annoItems){
+  const combined=(changeItems||[]).map(function(h){return Object.assign({kind:"change"},h);})
+    .concat((annoItems||[]).map(function(a){return Object.assign({kind:"annotation"},a);}));
+  combined.sort(function(a,b){return String(a.timestamp||"").localeCompare(String(b.timestamp||""));});
+  return combined;
+}
+function renderCellHistory(items){
   const el=document.getElementById("classHistoryPanel");
   if(!el)return;
-  if(!items||!items.length){el.innerHTML='<div class="chist-panel"><h4>Classification history</h4><div class="chist-empty">No recorded changes yet for this cell.</div></div>';return;}
+  if(!items||!items.length){el.innerHTML='<div class="chist-panel"><h4>Cell history</h4><div class="chist-empty">No recorded changes or reports yet for this cell.</div></div>';return;}
   const rows=items.map(function(h){
-    const src=h.sourceType||"community";
-    const change=h.previousIdentity
-      ?'<span class="old">'+escHtml(h.previousIdentity)+'</span> &rarr; '+escHtml(h.newIdentity||"(unnamed)")
-      :escHtml(h.newIdentity||"(unnamed)");
+    if(h.kind==="change"){
+      const src=h.sourceType||"community";
+      const change=h.previousIdentity
+        ?'<span class="old">'+escHtml(h.previousIdentity)+'</span> &rarr; '+escHtml(h.newIdentity||"(unnamed)")
+        :escHtml(h.newIdentity||"(unnamed)");
+      const cert=h.certainty?'<div class="chist-cert">Certainty: '+escHtml(String(h.certainty))+'/5</div>':"";
+      const comment=h.comment?'<div class="chist-comment">“'+escHtml(h.comment)+'”</div>':"";
+      return '<div class="chist-row">'
+        +'<div class="chist-top"><span class="chist-change">'+change+'</span>'
+        +'<span class="chist-src '+escHtml(src)+'">'+escHtml(sourceTypeLabel(src))+'</span></div>'
+        +'<div class="chist-meta">'+(h.reporterName?escHtml(h.reporterName)+' &middot; ':"")+fmtHistTs(h.timestamp)+'</div>'
+        +cert+comment+'</div>';
+    }
+    // kind:"annotation" -- a raw report-log row, may or may not have changed the current identity.
+    const statusClass=h.status==="resolved"?"st-resolved":(String(h.status||"").indexOf("unresolved")===0?"st-unresolved":"st-recorded");
+    const identLine=h.identified?'<div class="chist-change">'+escHtml(h.identified)+(h.registered?' <span class="old">(was: '+escHtml(h.registered)+')</span>':'')+'</div>':"";
     const cert=h.certainty?'<div class="chist-cert">Certainty: '+escHtml(String(h.certainty))+'/5</div>':"";
-    const comment=h.comment?'<div class="chist-comment">“'+escHtml(h.comment)+'”</div>':"";
+    const note=h.note?'<div class="chist-comment">“'+escHtml(h.note)+'”</div>':"";
+    const groupTag=h.groupId?'<span class="chist-group">group '+escHtml(String(h.groupId))+(h.subIndex?(' &middot; sub '+escHtml(String(h.subIndex))+(h.subCount?'/'+escHtml(String(h.subCount)):'')):'')+'</span>':"";
     return '<div class="chist-row">'
-      +'<div class="chist-top"><span class="chist-change">'+change+'</span>'
-      +'<span class="chist-src '+escHtml(src)+'">'+escHtml(sourceTypeLabel(src))+'</span></div>'
+      +'<div class="chist-top"><span class="chist-type">'+escHtml(annotationTypeLabel(h.type))+'</span>'+groupTag+'</div>'
+      +identLine
       +'<div class="chist-meta">'+(h.reporterName?escHtml(h.reporterName)+' &middot; ':"")+fmtHistTs(h.timestamp)+'</div>'
-      +cert+comment+'</div>';
+      +cert+note
+      +'<div class="chist-status '+statusClass+'">'+escHtml(h.status||"recorded")+'</div>'
+      +'</div>';
   }).join("");
-  el.innerHTML='<div class="chist-panel"><h4>Classification history ('+items.length+')</h4>'+rows+'</div>';
+  el.innerHTML='<div class="chist-panel"><h4>Cell history ('+items.length+')</h4>'+rows+'</div>';
 }
 function loadClassificationHistory(nid){
   const el=document.getElementById("classHistoryPanel");
   if(!el)return;
   el.innerHTML="";
   if(!REPORT_ENDPOINT||!nid)return;
-  fetch(REPORT_ENDPOINT+"?classificationHistory="+encodeURIComponent(nid))
-    .then(r=>r.json())
-    .then(d=>renderClassificationHistory((d&&d.history)||[]))
-    .catch(()=>{});
+  Promise.all([
+    fetch(REPORT_ENDPOINT+"?classificationHistory="+encodeURIComponent(nid)).then(r=>r.json()).catch(()=>null),
+    fetch(REPORT_ENDPOINT+"?annotationHistory="+encodeURIComponent(nid)).then(r=>r.json()).catch(()=>null)
+  ]).then(function(results){
+    const changeItems=(results[0]&&results[0].history)||[];
+    const annoItems=(results[1]&&results[1].annotations)||[];
+    renderCellHistory(mergeCellHistory(changeItems,annoItems));
+  }).catch(()=>{});
 }
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
