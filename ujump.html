@@ -514,7 +514,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 
   <div class="card wide">
     <h2>Nucleus volume, by cell type</h2>
-    <p class="sub" title="Precomputed per nucleus (see the Master cell list) -- free to show for every identified cell, not gated behind a &quot;Compute volume&quot; click the way whole-cell mesh volume is.">LIVE, from &quot;Master cell list&quot;&rsquo;s precomputed nucleus volumes. Compare within one category (also used by the two volume charts below):
+    <p class="sub" title="Precomputed per nucleus (see the Master cell list) -- free to show for every identified cell, not gated behind a &quot;Compute volume&quot; click the way whole-cell mesh volume is. Unclassified cells (and the two generic exc./inh. neuron fallback types) have no real cell-type identity to bucket a volume under, so they're excluded from this distribution server-side -- see the &quot;Identified vs. unclassified&quot; chart above for the true total cell count including unclassified.">LIVE, from &quot;Master cell list&quot;&rsquo;s precomputed nucleus volumes, identified cells only (unclassified cells excluded — see &ldquo;Identified vs. unclassified&rdquo; above for totals). Compare within one category (also used by the two volume charts below):
       <select class="picker" id="volumeCategoryPicker"></select>
     </p>
     <div class="plot" id="plotNucleusVolume"></div>
@@ -522,13 +522,13 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 
   <div class="card wide">
     <h2>Whole-cell (mesh) volume, by cell type</h2>
-    <p class="sub" title="Not precomputed anywhere -- MICrONS publishes no whole-cell mesh volume, so this only grows from real usage: every successful &quot;Compute volume&quot; click while signed in adds one measurement. Merged-nucleus-blob detections (not yet split into individual cells) are excluded.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click. Uses the same category selector as the nucleus-volume chart above.</p>
+    <p class="sub" title="Not precomputed anywhere -- MICrONS publishes no whole-cell mesh volume, so this only grows from real usage: every successful &quot;Compute volume&quot; click while signed in adds one measurement. Merged-nucleus-blob detections (not yet split into individual cells) are excluded, as are measurements logged against an unclassified cell -- an unclassified cell has no real cell-type identity for a volume distribution to describe.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click, identified cells only (unclassified cells excluded). Uses the same category selector as the nucleus-volume chart above.</p>
     <div class="plot" id="plotMeshVolume"></div>
   </div>
 
   <div class="card wide">
     <h2>Nucleus volume as a share of whole-cell (mesh) volume, by cell type</h2>
-    <p class="sub" title="Always a dot plot. Once same-cell nucleus+mesh pairs exist: one dot per paired cell = nucleus volume ÷ whole-cell volume for that same cell, %, with physically-impossible (&gt;100%) and statistically outlying (Tukey 1.5×IQR) ratios excluded. Until then: nucleus and whole-cell volumes shown as two independent per-type distributions, clearly labelled as not the same cells. Merged-nucleus-blob detections (not yet split into individual cells) are excluded throughout.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click. Uses the same category selector as the two volume charts above.</p>
+    <p class="sub" title="Always a dot plot. Once same-cell nucleus+mesh pairs exist: one dot per paired cell = nucleus volume ÷ whole-cell volume for that same cell, %, with physically-impossible (&gt;100%) and statistically outlying (Tukey 1.5×IQR) ratios excluded. Until then: nucleus and whole-cell volumes shown as two independent per-type distributions, clearly labelled as not the same cells. Merged-nucleus-blob detections (not yet split into individual cells) and unclassified-cell measurements are excluded throughout, for the same reason as the two volume charts above.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click, identified cells only (unclassified cells excluded). Uses the same category selector as the two volume charts above.</p>
     <div class="plot" id="plotVolumes"></div>
   </div>
 
@@ -796,6 +796,24 @@ function dotMedianChart(divId,dataObj,yTitle,tight,useRank){
 function isMergedBlobType(name){
   return /[+×]/.test(String(name||""));
 }
+/* 2026-08-09 (Søren: "unclassified cells should not contribute to volume distribution charts") --
+   an unclassified cell has no real cell-type identity, so pooling its volume into a per-type
+   distribution (or worse, letting "Unclassified" show up as its own bogus "cell type" series next
+   to Astrocyte/Pericyte/etc.) would misrepresent what's actually being measured. Mirrors
+   isGenericFallbackType() server-side (Code.gs.txt, dashboardLive()) which already excludes
+   "Excitatory neuron"/"Inhibitory neuron" fallback types AND unclassified rows from the live
+   nucleus_volume_um3 bucketing that chart already draws from -- this is the client-side
+   equivalent, needed because the OTHER two volume charts (mesh volume, nucleus-vs-mesh ratio)
+   read raw unfiltered rows straight from the "Computed volumes" sheet via ?computedVolumes=1
+   (that endpoint intentionally returns everything -- see its own comment in Code.gs.txt -- so any
+   type filtering has to happen here). Matches both literal strings that can reach that sheet as a
+   cellType: "Unclassified" (typeInfo()'s no-MICrONS-prediction case, longName()'d unchanged) and
+   "Unclassified cell" (the standalone/out-of-region community-report display string, see
+   renderStandalone()/renderUserReportedCell()). */
+function isUnclassifiedType(name){
+  var n=String(name||"").trim().toLowerCase();
+  return n==="unclassified"||n==="unclassified cell";
+}
 
 /* Grouped dot-plot: multiple independent per-type distributions (e.g. nucleus volume vs. mesh
    volume, NOT necessarily the same cells) shown side by side per category via Plotly's standard
@@ -1010,7 +1028,7 @@ function renderVolumes(rows){
   Object.keys(_liveNucleusVolumeByType||{}).forEach(function(t){
     if(inSelectedCategory(t))nucByType[t]=_liveNucleusVolumeByType[t];
   });
-  const allRows=(rows||[]).filter(r=>r.cellType&&r.volumeUm3&&!isMergedBlobType(r.cellType)&&inSelectedCategory(r.cellType));
+  const allRows=(rows||[]).filter(r=>r.cellType&&r.volumeUm3&&!isMergedBlobType(r.cellType)&&!isUnclassifiedType(r.cellType)&&inSelectedCategory(r.cellType));
   /* PAIRED rows: the nucleus volume and mesh volume were measured on the exact same cell (the
      "Compute volume" click happened from the main nucleus display, where NV[i] -- the
      precomputed nucleus volume -- was already known; see meshDlButtonHtml()'s comment in the
@@ -1142,7 +1160,7 @@ function renderNucleusVolumeChart(){
 function meshVolumeByType(){
   const byType={};
   (_lastVolumeRows||[]).forEach(function(r){
-    if(!r.cellType||!(r.volumeUm3>0)||isMergedBlobType(r.cellType)||!inSelectedVolumeCategory(r.cellType))return;
+    if(!r.cellType||!(r.volumeUm3>0)||isMergedBlobType(r.cellType)||isUnclassifiedType(r.cellType)||!inSelectedVolumeCategory(r.cellType))return;
     (byType[r.cellType]=byType[r.cellType]||[]).push(r.volumeUm3);
   });
   return byType;

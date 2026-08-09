@@ -131,7 +131,7 @@
 
   <div class="card wide">
     <h2>Nucleus volume as a share of whole-cell (mesh) volume, by cell type</h2>
-    <p class="sub" title="Always a dot plot. Once same-cell nucleus+mesh pairs exist: one dot per paired cell = nucleus volume ÷ whole-cell volume for that same cell, %, with physically-impossible (&gt;100%) and statistically outlying (Tukey 1.5×IQR) ratios excluded. Until then: nucleus and whole-cell volumes shown as two independent per-type distributions, clearly labelled as not the same cells. Merged-nucleus-blob detections (not yet split into individual cells) are excluded throughout.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click. Compare within one category:
+    <p class="sub" title="Always a dot plot. Once same-cell nucleus+mesh pairs exist: one dot per paired cell = nucleus volume ÷ whole-cell volume for that same cell, %, with physically-impossible (&gt;100%) and statistically outlying (Tukey 1.5×IQR) ratios excluded. Until then: nucleus and whole-cell volumes shown as two independent per-type distributions, clearly labelled as not the same cells. Merged-nucleus-blob detections (not yet split into individual cells) and unclassified-cell measurements are excluded throughout -- an unclassified cell has no real cell-type identity for a volume distribution to describe.">LIVE, grows with every signed-in &ldquo;Compute volume&rdquo; click, identified cells only (unclassified cells excluded). Compare within one category:
       <select class="picker" id="volumeCategoryPicker"></select>
     </p>
     <div class="plot" id="plotVolumes"></div>
@@ -401,6 +401,15 @@ function dotMedianChart(divId,dataObj,yTitle,tight,useRank){
 function isMergedBlobType(name){
   return /[+×]/.test(String(name||""));
 }
+/* 2026-08-09 (Søren: "unclassified cells should not contribute to volume distribution charts").
+   Mirrors the same helper added to ujump.html (which now inlines this whole dashboard as its 4th
+   tab) -- kept identical here since Søren asked for ujump_dashboard.html to stay in sync as a
+   standalone page. Matches both literal cellType strings that can reach the "Computed volumes"
+   sheet for an unclassified cell: "Unclassified" and "Unclassified cell". */
+function isUnclassifiedType(name){
+  var n=String(name||"").trim().toLowerCase();
+  return n==="unclassified"||n==="unclassified cell";
+}
 
 /* Grouped dot-plot: multiple independent per-type distributions (e.g. nucleus volume vs. mesh
    volume, NOT necessarily the same cells) shown side by side per category via Plotly's standard
@@ -606,7 +615,7 @@ function renderVolumes(rows){
   Object.keys(_liveNucleusVolumeByType||{}).forEach(function(t){
     if(inSelectedCategory(t))nucByType[t]=_liveNucleusVolumeByType[t];
   });
-  const allRows=(rows||[]).filter(r=>r.cellType&&r.volumeUm3&&!isMergedBlobType(r.cellType)&&inSelectedCategory(r.cellType));
+  const allRows=(rows||[]).filter(r=>r.cellType&&r.volumeUm3&&!isMergedBlobType(r.cellType)&&!isUnclassifiedType(r.cellType)&&inSelectedCategory(r.cellType));
   /* PAIRED rows: the nucleus volume and mesh volume were measured on the exact same cell (the
      "Compute volume" click happened from the main nucleus display, where NV[i] -- the
      precomputed nucleus volume -- was already known; see meshDlButtonHtml()'s comment in the
