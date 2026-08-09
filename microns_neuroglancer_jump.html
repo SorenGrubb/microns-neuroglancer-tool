@@ -5730,7 +5730,7 @@ function openDashboard(){
     if(s.nextLevel){h+='<div class="bar"><i style="width:'+prog+'%"></i></div><div style="font-size:11px;color:var(--mut,#8b949e)">'+(s.nextLevelAt-s.points)+' pts to '+escHtml(s.nextLevel)+'</div>';}
     h+='<h3>Your activity</h3><div class="grid">'
       +stat(s.reports,"total reports")+stat(s.daysActive,"days active")+stat(s.streak,"day streak")
-      +stat(s.longestStreak,"longest streak")+stat(s.newCells,"new cells found")+stat(s.organelles,"centrioles/cilia")
+      +stat(s.longestStreak,"longest streak")+stat(s.newCells,"new cells found")+stat(s.organelles,"organelles","Every centriole, primary cilium, and other logged organelle counts here — cilia and centrioles just earn more points per report, they're not the only thing tallied.")
       +stat(s.rootProposals,"root IDs proposed")+stat(s.upvotesReceived,"upvotes received")+stat(s.favourites,"favourites")+'</div>';
     if(s.cellTypes&&s.cellTypes.length){h+='<h3>Cell types you identify most</h3><div style="font-size:13px">'
       +s.cellTypes.map(function(c){return escHtml(c[0])+' <b>'+c[1]+'</b>';}).join(' &nbsp; ')+'</div>';}
@@ -5779,7 +5779,7 @@ function openDashboard(){
     });
   });
 }
-function stat(v,label){return '<div class="stat"><b>'+(v==null?0:v)+'</b><span>'+label+'</span></div>';}
+function stat(v,label,title){return '<div class="stat"'+(title?' title="'+escHtml(title)+'"':'')+'><b>'+(v==null?0:v)+'</b><span>'+label+'</span></div>';}
 function closeDashboard(){var d=document.getElementById("gameDash");if(d)d.style.display="none";}
 function favStarHtml(nid,root,x,y,z){
   var on=window.FAV_SET&&(window.FAV_SET.has(String(nid))||window.FAV_SET.has(x+','+y+','+z));
