@@ -854,15 +854,11 @@ const colorFor=(function(){
   };
 })();
 
-/* Theme-aware chart colors (2026-08-09, light-mode feature) -- Plotly can't read CSS custom
-   properties directly, so these are read ONCE from the live :root --ink/--line values via
-   getComputedStyle() at the moment this function runs (i.e. whichever theme is active when the
-   dashboard tab is first opened), rather than hardcoded hex. This alone does NOT keep already-
-   rendered charts in sync with a LATER theme toggle -- that's handled separately by
-   retintPlotlyCharts() (see its own comment, defined near the theme-toggle code above), which
-   calls Plotly.relayout() on every live chart div to update font/gridline colors in place without
-   needing to touch this object or re-render anything. */
-/* 2026-08-09 (Søren: light-mode chart labels "too light grey to read" -- same root cause found
+/* Theme-aware chart colors -- Plotly can't read CSS custom properties directly, so these are read
+   from the live :root --ink/--line/--panel values via getComputedStyle() (liveThemeColors()).
+   retintPlotlyCharts() (see its own comment, defined near the theme-toggle code above) separately
+   keeps ALREADY-rendered charts in sync with a later theme toggle via Plotly.relayout().
+   2026-08-09 (Søren: light-mode chart labels "too light grey to read" -- same root cause found
    and fixed in the connectivity panel's CONN_AXIS_FONT/CONN_BASE_LAYOUT, see that block's own
    comment for the full explanation) -- AXIS_FONT/BASE_LAYOUT used to be `const`s frozen at
    whatever theme was active the first time this script tag ran. Any dashboard chart drawn or
@@ -1105,7 +1101,7 @@ function renderLiveCoreCharts(live){
     marker:{colors:["#3a6b5a","#c9c2b4"]},
     textinfo:"label+percent",
     hole:0.45
-  }],{margin:{l:10,r:10,t:10,b:10},font:AXIS_FONT,paper_bgcolor:"rgba(0,0,0,0)"},PLOTLY_CFG);
+  }],{margin:{l:10,r:10,t:10,b:10},font:axisFont(),paper_bgcolor:"rgba(0,0,0,0)"},PLOTLY_CFG);
 
   // Cells per type per layer -- grouped bar, one trace per layer, x = cell type (Unclassified
   // already excluded server-side; see the dedicated plotUnclassifiedPerLayer chart for those).
@@ -1119,7 +1115,7 @@ function renderLiveCoreCharts(live){
   });
   Plotly.newPlot("plotCellsPerLayer",layerTraces,categorizedLayout(types,{
     barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
-    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"# of cells"})
+    yaxis:Object.assign({},baseLayout().yaxis,{title:"# of cells"})
   }),PLOTLY_CFG);
 
   // Unclassified cells per layer -- its own simple chart, x = cortical layer (not cell type,
@@ -1130,13 +1126,13 @@ function renderLiveCoreCharts(live){
     Plotly.newPlot("plotUnclassifiedPerLayer",[{
       type:"bar",x:ulLayers,y:ulLayers.map(l=>ul.counts[l]||0),
       marker:{color:ulLayers.map(l=>LAYER_COLORS[l]||"#999")}
-    }],Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"# of unclassified cells"})}),PLOTLY_CFG);
+    }],Object.assign({},baseLayout(),{yaxis:Object.assign({},baseLayout().yaxis,{title:"# of unclassified cells"})}),PLOTLY_CFG);
   }
 
   // Primary cilia % -- category-ordered instead of sorted by percent.
   const pc=live.primary_cilia.percent_with_cilium_by_type;
   const pcTypes=sortByCategory(Object.keys(pc),t=>pc[t].percent);
-  /* BASE_LAYOUT's top margin (8px) is fine for every OTHER chart on this page -- this is the only
+  /* baseLayout()'s top margin (8px) is fine for every OTHER chart on this page -- this is the only
      one with "n/total" text labels sitting ABOVE each bar (textposition:"outside"), and 8px isn't
      enough room for that text before it gets clipped by the plot's own top edge whenever a bar is
      near 100% (Søren, from a screenshot: "not enough space in the top to show the labels"). Give
@@ -1149,8 +1145,8 @@ function renderLiveCoreCharts(live){
     textposition:"outside",
     marker:{color:pcTypes.map(colorFor)}
   }],categorizedLayout(pcTypes,{
-    margin:Object.assign({},BASE_LAYOUT.margin,{t:32}),
-    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"% with primary cilium",range:[0,118]})
+    margin:Object.assign({},baseLayout().margin,{t:32}),
+    yaxis:Object.assign({},baseLayout().yaxis,{title:"% with primary cilium",range:[0,118]})
   }),PLOTLY_CFG);
 
   // Cilium length / nucleus-to-centriole distance -- already live-merged server-side (any
@@ -1174,7 +1170,7 @@ function renderLiveCoreCharts(live){
     Plotly.newPlot("plotNeighborComposition",[{
       type:"bar",x:ordered,y:ordered.map(nt=>(nc[t]||{})[nt]||0),
       marker:{color:ordered.map(colorFor)}
-    }],categorizedLayout(ordered,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"neighbour occurrences (×5 per "+t+" cell)"})}),PLOTLY_CFG);
+    }],categorizedLayout(ordered,{yaxis:Object.assign({},baseLayout().yaxis,{title:"neighbour occurrences (×5 per "+t+" cell)"})}),PLOTLY_CFG);
   }
   if(!_neighborPickerWired){picker.addEventListener("change",renderNeighbor);_neighborPickerWired=true;}
   if(ncTypes.length){
@@ -1199,7 +1195,7 @@ function renderPredictedVerified(live){
   Plotly.newPlot("plotIdentitySource",[{
     type:"bar",x:labels,y:values,marker:{color:colors},
     text:s?["","","",""]:["(loading…)","(loading…)","(loading…)","(loading…)"],textposition:"outside"
-  }],Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"# of nuclei"})}),PLOTLY_CFG);
+  }],Object.assign({},baseLayout(),{yaxis:Object.assign({},baseLayout().yaxis,{title:"# of nuclei"})}),PLOTLY_CFG);
 }
 
 /* renderVolumes(): always a dot plot, never a bar -- three tiers depending on what data is
@@ -1421,10 +1417,10 @@ function renderReportsOverTime(daily){
     return {type:"scatter",mode:"lines",name:t,x:dates,y:cumByType[t],
       line:{color:colorFor(t),width:2},stackgroup:"one"};
   });
-  Plotly.newPlot(area.id,traces,Object.assign({},BASE_LAYOUT,{
+  Plotly.newPlot(area.id,traces,Object.assign({},baseLayout(),{
     showlegend:true,legend:{orientation:"h",y:1.12,font:{size:10}},
-    xaxis:Object.assign({},BASE_LAYOUT.xaxis,{tickangle:-30}),
-    yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"cumulative reports"})
+    xaxis:Object.assign({},baseLayout().xaxis,{tickangle:-30}),
+    yaxis:Object.assign({},baseLayout().yaxis,{title:"cumulative reports"})
   }),PLOTLY_CFG);
 }
 
@@ -1449,7 +1445,7 @@ function renderConnectivity(conn){
     Plotly.newPlot("plotConnectivity",[{
       type:"bar",x:entries.map(e=>e[0]),y:entries.map(e=>e[1]),
       marker:{color:entries.map(e=>colorFor(e[0]))}
-    }],Object.assign({},BASE_LAYOUT,{yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:"synapse count, "+t+" ↔ partner"})}),PLOTLY_CFG);
+    }],Object.assign({},baseLayout(),{yaxis:Object.assign({},baseLayout().yaxis,{title:"synapse count, "+t+" ↔ partner"})}),PLOTLY_CFG);
   }
   picker.addEventListener("change",renderOne);
   picker.value=types[0];
@@ -1510,7 +1506,7 @@ function renderSynapseIO(conn){
       {type:"bar",name:"Input (received)",x:types,y:inputVals,marker:{color:"#00b7ff"}},
       {type:"bar",name:"Output (made)",x:types,y:outputVals,marker:{color:"#ff4fa3"}}
     ],categorizedLayout(types,{
-      yaxis:Object.assign({},BASE_LAYOUT.yaxis,{title:yTitle}),
+      yaxis:Object.assign({},baseLayout().yaxis,{title:yTitle}),
       barmode:"group",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
     }),PLOTLY_CFG);
   }
