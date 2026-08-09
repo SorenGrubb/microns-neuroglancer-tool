@@ -1463,34 +1463,42 @@ function renderConnectivity(conn){
   renderOne();
 }
 
-/* Input vs output synapses per cell type (2026-08-02, Søren's request) -- reads conn.synapse_io,
-   the new field microns_connectivity_colab.py/.ipynb adds alongside by_synapse_count/
-   by_distinct_partner_cells in the SAME connectivity_aggregate.json (no separate fetch or offline
-   step). Shows the PER-SAMPLED-CELL AVERAGE, not a whole-dataset total -- sample sizes vary a lot
-   per type (up to 40 cells, fewer for rare types), so a raw total would just track sample size
-   rather than anything biological. Grouped bar (not a dot plot): this is one aggregate number per
-   type per direction, not a distribution of individual measurements, so there's nothing to jitter.
+/* Input vs output synapses per cell type (2026-08-02, Søren's request; REWRITTEN 2026-08-09,
+   Søren: "should be dot plots like the other figures, and every time a user looks at the
+   connectivity, the data should be added to the graph") -- used to read conn.synapse_io, a
+   PRE-AVERAGED number per type per direction from connectivity_aggregate.json, Søren's own
+   occasional offline Colab re-run (up to 40 sampled cells/type, his own CAVE token). That's a
+   single aggregate number, not a distribution, so it was rendered as a grouped bar -- there was
+   nothing to jitter. Now driven entirely by connSamples (?connectivitySamples=1, one row per real
+   connectivity-panel query anyone on the site has ever run -- see saveConnectivitySample() near
+   loadConnectivityPanel()), which DOES carry one real value per query, so this can finally be a
+   real dot plot: groupedDotChart() (same function every other per-cell-type distribution on this
+   dashboard already uses, e.g. the nucleus/mesh volume charts) with two series, Input and Output.
+   connectivity_aggregate.json/conn.synapse_io is no longer read by this chart at all -- it's
+   still used by the "by_synapse_count" chart above (renderConnectivity()), which this change
+   doesn't touch. No synthetic seed points are mixed in from the old static average either: a
+   single pre-averaged number and a real per-query sample aren't the same kind of measurement, and
+   quietly blending them would misrepresent the real distribution once enough samples exist --
+   this chart just starts sparse and fills in as people use the connectivity panel, exactly per
+   Søren's request.
 
-   2026-08: added a cortical-layer picker (Søren: "possibility to select the cortical layer, but
-   default should be all layers (like it is now)"). Reads the NEW conn.synapse_io_by_layer field
-   (layer -> type -> {same shape as synapse_io}), keyed by the SAMPLED cell's OWN layer, not the
-   partner's -- see microns_connectivity_colab.py's query_one_type() comment. "All layers" (the
-   default, value "__all__") uses the existing flat conn.synapse_io untouched, so behavior is
-   byte-identical to before this change unless a real layer is picked. If synapse_io_by_layer is
-   absent (older connectivity_aggregate.json, not yet regenerated with the new Colab script), the
-   picker itself is just hidden -- no broken control shown for data that doesn't exist yet. */
-function renderSynapseIO(conn){
+   Layer picker: kept from the old design, but now filters connSamples by each sample's OWN
+   `layer` field (set client-side via estimateLayerFast() at query time -- see
+   saveConnectivitySample()) instead of reading a separate precomputed synapse_io_by_layer field.
+   Options are built from whichever layers actually have at least one sample, same "don't show a
+   control for data that doesn't exist" reasoning the old version used. */
+function renderSynapseIO(connSamples){
   const area=document.getElementById("synapseIoArea");
   const picker=document.getElementById("synapseLayerPicker");
-  if(!conn||!conn.synapse_io||!Object.keys(conn.synapse_io).length){
+  const samples=connSamples||[];
+  if(!samples.length){
     if(picker)picker.style.display="none";
-    area.innerHTML="<div class='placeholder'>Not generated yet — comes from the same connectivity_aggregate.json as the chart above (re-run microns_connectivity_colab.py/.ipynb to add it).</div>";
+    area.innerHTML="<div class='placeholder'>No samples yet — every time someone expands a cell’s “Connectivity” panel and runs a real query, that cell’s input/output synapse counts are added here. Check back after a few cells have been queried.</div>";
     return;
   }
   area.innerHTML='<div class="plot" id="plotSynapseIo"></div>';
 
-  const byLayer=conn.synapse_io_by_layer||{};
-  const layersPresent=Object.keys(LAYER_COLORS).filter(l=>byLayer[l]&&Object.keys(byLayer[l]).length);
+  const layersPresent=Object.keys(LAYER_COLORS).filter(l=>samples.some(s=>s.layer===l));
   if(picker&&layersPresent.length){
     picker.style.display="inline-block";
     picker.innerHTML="";
@@ -1503,23 +1511,28 @@ function renderSynapseIO(conn){
     picker.style.display="none";
   }
 
-  function ioDataFor(layer){
-    return (layer&&layer!=="__all__"&&byLayer[layer])?byLayer[layer]:conn.synapse_io;
+  function samplesFor(layer){
+    return (layer&&layer!=="__all__")?samples.filter(s=>s.layer===layer):samples;
   }
   function renderOne(){
     const layer=picker?picker.value:"__all__";
-    const io=ioDataFor(layer);
-    const types=sortByCategory(Object.keys(io),t=>io[t].avg_input_synapses_per_cell+io[t].avg_output_synapses_per_cell);
-    const inputVals=types.map(t=>io[t].avg_input_synapses_per_cell||0);
-    const outputVals=types.map(t=>io[t].avg_output_synapses_per_cell||0);
-    const yTitle="avg. synapses per sampled cell"+(layer&&layer!=="__all__"?" — "+layer:"");
-    Plotly.newPlot("plotSynapseIo",[
-      {type:"bar",name:"Input (received)",x:types,y:inputVals,marker:{color:"#00b7ff"}},
-      {type:"bar",name:"Output (made)",x:types,y:outputVals,marker:{color:"#ff4fa3"}}
-    ],categorizedLayout(types,{
-      yaxis:Object.assign({},baseLayout().yaxis,{title:yTitle}),
-      barmode:"group",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
-    }),PLOTLY_CFG);
+    const shown=samplesFor(layer);
+    const inputByType={},outputByType={};
+    shown.forEach(function(s){
+      const t=s.cellType||"Unclassified";
+      if(!inputByType[t])inputByType[t]=[];
+      if(!outputByType[t])outputByType[t]=[];
+      inputByType[t].push(s.inputCount);
+      outputByType[t].push(s.outputCount);
+    });
+    const yTitle="synapses per queried cell"+(layer&&layer!=="__all__"?" — "+layer:"");
+    // groupedDotChart() already filters out any type with fewer than 3 samples (see its own
+    // comment) -- exactly right here too: a type with 1-2 queries so far just doesn't have
+    // enough of a distribution to plot yet, and will appear once more people look at it.
+    groupedDotChart("plotSynapseIo",[
+      {name:"Input (received)",color:"#00b7ff",dataObj:inputByType},
+      {name:"Output (made)",color:"#ff4fa3",dataObj:outputByType}
+    ],yTitle,true);
   }
   if(picker)picker.onchange=renderOne;
   renderOne();
@@ -1564,7 +1577,7 @@ function writeLiveCache(data){
    EVENT timeline, not a per-cell current-state view) are unrelated to Master cell list and
    still fetched directly, same as before. */
 async function fetchLiveData(){
-  let live={ready:false,note:"Could not reach the backend."}, computedVolumes=[], reportsDaily=[], connectivity=null;
+  let live={ready:false,note:"Could not reach the backend."}, computedVolumes=[], reportsDaily=[], connectivity=null, connSamples=[];
   try{
     const r=await fetch(REPORT_ENDPOINT+"?dashboardLive=1");
     live=await r.json();
@@ -1587,7 +1600,16 @@ async function fetchLiveData(){
     if(r.ok)connectivity=await r.json();
   }catch(e){/* file not present -- fine, handled as "not generated yet" */}
 
-  return {live,computedVolumes,reportsDaily,connectivity};
+  // 2026-08-09 -- live, ever-growing per-query samples for renderSynapseIO()'s dot plot (see its
+  // own comment). Separate from `connectivity` above (still the static, offline-generated
+  // connectivity_aggregate.json, still used by renderConnectivity()'s "by_synapse_count" chart).
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?connectivitySamples=1");
+    const d=await r.json();
+    connSamples=(d&&d.connectivitySamples)||[];
+  }catch(e){console.warn("[dashboard] connectivitySamples fetch failed",e);}
+
+  return {live,computedVolumes,reportsDaily,connectivity,connSamples};
 }
 
 /* Renders every live-fed chart from an already-fetched (or cached) data bundle -- no network
@@ -1602,7 +1624,7 @@ function applyLiveData(d){
   renderMeshVolumeChart();
   renderReportsOverTime(d.reportsDaily||[]);
   renderConnectivity(d.connectivity);
-  renderSynapseIO(d.connectivity);
+  renderSynapseIO(d.connSamples);
 }
 
 /* force=true (the Refresh button) always hits the network, no matter how fresh the cache is.
@@ -3224,7 +3246,12 @@ function showNucleus(pos){
     if(locOnlyBtnFar)locOnlyBtnFar.addEventListener("click",()=>openLocationOnlyReport(pos));
   }
   window.CUR_POS=pos;loadCommunityReports(nid,pos);loadRootIdPanel(nid);loadIdentityVotesPanel(nid,[ti&&ti.name,(own&&own.fine)]);loadClassificationHistory(nid);
-  if(typeof loadConnectivityPanel==="function")loadConnectivityPanel("connPanel",root,[NX[i],NY[i],NZ[i]]);
+  /* cellType/nucleusId (2026-08-09, "every time a user looks at the connectivity, the data
+     should be added to the graph") -- same own-verified > MICrONS-prediction > "Unclassified"
+     precedence save_computed_volume already uses for its own cellType, so a cell's connectivity
+     samples bucket into the SAME type label its computed-volume samples do. See
+     saveConnectivitySample() near loadConnectivityPanel() for what these feed into. */
+  if(typeof loadConnectivityPanel==="function")loadConnectivityPanel("connPanel",root,[NX[i],NY[i],NZ[i]],own?own.type:(ti.cls?longName(ti.name):"Unclassified"),nid);
 }
 
 async function checkNucMesh(panel){
@@ -5376,7 +5403,41 @@ function connRenderAllCharts(ids,points,colorField,showNoType){
    expanded, so a plain cell view stays lightweight. containerId is the empty <div> showNucleus()
    leaves for this; rootId is this cell's OWN root ID (nothing is shown if there isn't one, since
    an unsegmented cell has no partners to query); centerPos is [voxelX,voxelY,voxelZ]. */
-function loadConnectivityPanel(containerId,rootId,centerPos){
+/* 2026-08-09 (Søren: "every time a user looks at the connectivity, the data should be added to
+   the graph") -- feeds the µJump dashboard's "Input vs output synapses per cell type" dot plot
+   (renderSynapseIO()) from real usage instead of relying solely on Søren's occasional offline
+   Colab re-run. Modeled directly on maybeSaveComputedVolume() (same file, near
+   fetchComputedVolumesMap()): silently gated on sign-in (no alert() if the visitor isn't signed
+   in -- unlike postReport(), this isn't a deliberate "Submit" click, so nagging someone to sign in
+   just for looking at connectivity would be poor UX), fire-and-forget mode:"no-cors" POST, no
+   toast on success or failure. inputCount/outputCount are the TOTAL synapse counts for THIS query
+   (every synapse the CAVE query returned for the cell whose panel this is, tagged by direction) --
+   not a partner count, not an average across partners -- exactly what connRenderIODepthChart()
+   computes for its own violin chart from the same allPoints array, just counted here instead of
+   plotted. layer is looked up from centerPos via the same grid-accelerated estimateLayerFast()
+   the bulk Filter-and-show export already uses, so renderSynapseIO()'s layer picker can filter
+   live samples the same way it used to filter the static aggregate's precomputed breakdown. */
+function saveConnectivitySample(nucleusId,rootId,cellType,centerPos,allPoints){
+  if(!REPORT_ENDPOINT)return;
+  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
+  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
+  const inputCount=allPoints.filter(function(p){return p.direction==="input";}).length;
+  const outputCount=allPoints.filter(function(p){return p.direction==="output";}).length;
+  if(!inputCount&&!outputCount)return; // nothing to add -- an empty/failed query, not a real sample
+  let layer="";
+  try{
+    if(window.estimateLayerFast&&centerPos&&centerPos.length===3){
+      const est=window.estimateLayerFast(Number(centerPos[0]),Number(centerPos[1]),Number(centerPos[2]));
+      layer=(est&&est.label)||"";
+    }
+  }catch(_elf){/* layer is optional -- an unlabeled sample still counts, just isn't filterable by layer */}
+  const payload={type:"connectivity_sample",nucleusId:nucleusId||"",rootId:rootId||"",
+    cellType:cellType||"Unclassified",layer:layer,inputCount:inputCount,outputCount:outputCount,
+    reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
+    credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
+  fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
+}
+function loadConnectivityPanel(containerId,rootId,centerPos,cellType,nucleusId){
   const el=document.getElementById(containerId);
   if(!el)return;
   el.innerHTML="";
@@ -5530,6 +5591,10 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
           p.somaDepthUm=(pi&&pi.somaDepthUm!=null)?pi.somaDepthUm:null;
         });
         lastPoints=allPoints;
+        // 2026-08-09 (Søren: "every time a user looks at the connectivity, the data should be
+        // added to the graph") -- see saveConnectivitySample()'s own comment for what this sends
+        // and why it's silent/unattributed-in-the-UI (no toast, no sign-in prompt on failure).
+        saveConnectivitySample(nucleusId,rootId,cellType,centerPos,allPoints);
         const shownIds=new Set(shown.map(p=>p.partner));
         const points=doSyn?allPoints.filter(p=>shownIds.has(p.partner)):[];
         const state=buildConnectivityState(centerPos,rootId,shown,points);
