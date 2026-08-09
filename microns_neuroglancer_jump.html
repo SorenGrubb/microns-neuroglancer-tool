@@ -26,7 +26,10 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
 .tabbtn{display:inline-block;font:inherit;font-size:12px;color:var(--mut);text-decoration:none;background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 11px;vertical-align:middle;cursor:pointer}
 .tabbtn:hover{color:var(--ink);border-color:var(--accent)}
 .tabbtn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
-#themeToggleBtn{position:fixed;top:14px;right:14px;z-index:9998;display:flex;align-items:center;gap:6px;font:inherit;font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;cursor:pointer;box-shadow:0 2px 8px var(--shadow)}
+/* top:52px, not 14px -- see ujump.html's own copy of this comment: this page also has the
+   gamification account chip (#gameChip) pinned at top:10px in the same corner, and the toggle
+   needs to sit BELOW it rather than overlapping. */
+#themeToggleBtn{position:fixed;top:52px;right:12px;z-index:8900;display:flex;align-items:center;gap:6px;font:inherit;font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;cursor:pointer;box-shadow:0 2px 8px var(--shadow)}
 #themeToggleBtn:hover{border-color:var(--accent)}
 .tabpanel{display:none}
 .tabpanel.active{display:block}
