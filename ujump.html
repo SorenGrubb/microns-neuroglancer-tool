@@ -122,6 +122,25 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .idcta.warn .idcta-top span{color:var(--warn);font-weight:600}
 .idcta-search{border-top:1px dashed var(--line);padding-top:10px}
 .idcta-search .leaf-search label{margin-bottom:4px}
+/* Classification history panel (one card per historical identity change, chronological). Reuses
+   .tag's pill shape for the source-type badge (own/community/verification tag colours already
+   established elsewhere in this file) rather than inventing new colours per source. */
+.chist-panel{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.chist-panel h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}
+.chist-row{border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin-bottom:8px}
+.chist-row:last-child{margin-bottom:0}
+.chist-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.chist-change{font-size:13px;font-weight:600}
+.chist-change .old{color:var(--mut);font-weight:400;text-decoration:line-through}
+.chist-src{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:20px;font-weight:600;white-space:nowrap}
+.chist-src.microns_original{background:rgba(139,148,158,.12);color:var(--mut);border:1px solid var(--line)}
+.chist-src.community{background:rgba(240,136,62,.15);color:var(--exc);border:1px solid var(--exc)}
+.chist-src.verification{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)}
+.chist-src.manual_revision{background:rgba(88,166,255,.15);color:var(--inh);border:1px solid var(--inh)}
+.chist-meta{font-family:var(--mono);font-size:11px;color:var(--mut)}
+.chist-cert{font-family:var(--mono);font-size:11px;color:var(--ink);margin-top:3px}
+.chist-comment{font-size:12px;color:var(--ink);margin-top:5px;padding:6px 9px;background:#161b22;border-radius:6px;font-style:italic}
+.chist-empty{font-size:12px;color:var(--mut);font-style:italic}
 .idbtn{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent);border-radius:7px;padding:8px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
 .idbtn:disabled{background:#21262d;color:var(--mut);border-color:var(--line);cursor:not-allowed}
 .idcta:not(.warn) .idbtn{background:#0b0f14;color:var(--ink);border-color:var(--line)}
@@ -2733,6 +2752,10 @@ function showNucleus(pos){
      as a visited cell. Each render branch below sets both explicitly once it knows what it's
      showing. */
   window.CUR_ID_SOURCE=null;window.CUR_HAS_CELL=false;
+  /* Reset here (not just at the top of loadCommunityReports()'s fetch .then()) so
+     checkOverrideContext() can never warn using a STALE list of identities from whichever cell
+     was on screen before this one, in the window before the new fetch resolves. */
+  window.CUR_COMMUNITY_IDS=[];
   /* Checked FIRST, ahead of even the standalone-annotation check below: a community-reported,
      identified sub-cell of a merged-nucleus detection sits INSIDE a real MICrONS nucleus
      detection (unlike a standalone point), so without this check the normal nearest() lookup a
@@ -2907,6 +2930,7 @@ function showNucleus(pos){
   h+='</div>';
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
   h+='<div id="connPanel" style="margin:6px 0"></div>';
+  h+='<div id="classHistoryPanel" style="margin:6px 0"></div>';
   h+='<button class="jump" data-x="'+NX[i]+'" data-y="'+NY[i]+'" data-z="'+NZ[i]+'">Jump to this nucleus &#8599;</button>';
   const ne=kNearest(NX[i],NY[i],NZ[i],3,i);
   h+='<div class="neigh"><h4>3 nearest neighbouring cells</h4>';
@@ -2945,7 +2969,7 @@ function showNucleus(pos){
     const locOnlyBtnFar=panel.querySelector("#idfLocOnlyGo");
     if(locOnlyBtnFar)locOnlyBtnFar.addEventListener("click",()=>openLocationOnlyReport(pos));
   }
-  window.CUR_POS=pos;loadCommunityReports(nid,pos);loadRootIdPanel(nid);loadIdentityVotesPanel(nid,[ti&&ti.name,(own&&own.fine)]);
+  window.CUR_POS=pos;loadCommunityReports(nid,pos);loadRootIdPanel(nid);loadIdentityVotesPanel(nid,[ti&&ti.name,(own&&own.fine)]);loadClassificationHistory(nid);
   if(typeof loadConnectivityPanel==="function")loadConnectivityPanel("connPanel",root,[NX[i],NY[i],NZ[i]]);
 }
 
@@ -6048,6 +6072,56 @@ function meshDlButtonHtml(rootId,cellTypeName,nucVox,followLive,nucVolUm3,nucleu
     +'<button class="idbtn pptxdl" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+' data-coords="'+coords+'"'+nucidAttr+' title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its cell type, root ID and nucleus coordinates, plus an embedded scale-bar rod below it that spins along with the model \u2014 automatically combined with any additionally-proposed root IDs for this nucleus \u2014 the Turntable spin autoplays in the slideshow, no click needed \u2014 built entirely in your browser, no CAVE token needed. If a root ID isn\u2019t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don\u2019t re-check the network \u2014 Shift-click to force a fresh check.'+noMainNote+'" style="'+hideAttr+'padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">\u2b07 PowerPoint</button>'
     +'<button class="idbtn meshvol" data-root="'+rootId+'" data-celltype="'+ct+'"'+(followLive?' data-follow-live="1"':'')+nucvolAttr+nucidAttr+' title="Estimate this cell\u2019s mesh volume (\u00b5m\u00b3) by fetching and decoding its full 3D geometry \u2014 not precomputed, so this costs one real mesh fetch, same as the 3D model download \u2014 automatically combined with any additionally-proposed root IDs for this nucleus. This is an estimate: the raw MICrONS mesh can have small gaps at fragment boundaries. Saved (root ID, cell type, volume) to the shared \u00b5Jump dashboard when signed in with Google. If a root ID isn\u2019t in the seg_m1300 mesh snapshot, that result is cached so repeat clicks don\u2019t re-check the network \u2014 Shift-click to force a fresh check.'+noMainNote+'" style="'+hideAttr+'padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">Compute volume</button>';
 }
+/* Classification history panel -- 2026-08-09 (Søren: every reclassification should be
+   understandable to future contributors, not just visible as a changed headline). Reads the new
+   ?classificationHistory=<nucleusId> endpoint (Code.gs.txt doGet, returns {history:[...]}
+   already sorted oldest-first) and renders one card per historical change: who, when, the
+   previous -> new identity, certainty, an optional comment shown prominently, and which of the
+   four source types it came from (original MICrONS annotation / community identification /
+   verification / manual revision -- see sourceTypeLabel()). Fails silently, same convention as
+   loadCommunityReports() below, since this is additive context on top of the core lookup, not
+   required for the tool to work. Only wired up for the main in-region nucleus panel (showNucleus's
+   in-region branch) -- standalone/merged-sub/user-reported cells aren't tracked by nucleusId in
+   "Master cell list" today, so there is nothing for this endpoint to return for them yet. */
+function sourceTypeLabel(src){
+  if(src==="microns_original")return"Original MICrONS annotation";
+  if(src==="verification")return"Verification (Grubb et al.)";
+  if(src==="manual_revision")return"Manual revision";
+  return"Community identification";
+}
+function fmtHistTs(ts){
+  if(!ts)return"";
+  try{return new Date(ts).toLocaleString(undefined,{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});}catch(e){return String(ts);}
+}
+function renderClassificationHistory(items){
+  const el=document.getElementById("classHistoryPanel");
+  if(!el)return;
+  if(!items||!items.length){el.innerHTML='<div class="chist-panel"><h4>Classification history</h4><div class="chist-empty">No recorded changes yet for this cell.</div></div>';return;}
+  const rows=items.map(function(h){
+    const src=h.sourceType||"community";
+    const change=h.previousIdentity
+      ?'<span class="old">'+escHtml(h.previousIdentity)+'</span> &rarr; '+escHtml(h.newIdentity||"(unnamed)")
+      :escHtml(h.newIdentity||"(unnamed)");
+    const cert=h.certainty?'<div class="chist-cert">Certainty: '+escHtml(String(h.certainty))+'/5</div>':"";
+    const comment=h.comment?'<div class="chist-comment">“'+escHtml(h.comment)+'”</div>':"";
+    return '<div class="chist-row">'
+      +'<div class="chist-top"><span class="chist-change">'+change+'</span>'
+      +'<span class="chist-src '+escHtml(src)+'">'+escHtml(sourceTypeLabel(src))+'</span></div>'
+      +'<div class="chist-meta">'+(h.reporterName?escHtml(h.reporterName)+' &middot; ':"")+fmtHistTs(h.timestamp)+'</div>'
+      +cert+comment+'</div>';
+  }).join("");
+  el.innerHTML='<div class="chist-panel"><h4>Classification history ('+items.length+')</h4>'+rows+'</div>';
+}
+function loadClassificationHistory(nid){
+  const el=document.getElementById("classHistoryPanel");
+  if(!el)return;
+  el.innerHTML="";
+  if(!REPORT_ENDPOINT||!nid)return;
+  fetch(REPORT_ENDPOINT+"?classificationHistory="+encodeURIComponent(nid))
+    .then(r=>r.json())
+    .then(d=>renderClassificationHistory((d&&d.history)||[]))
+    .catch(()=>{});
+}
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
   if(!el)return;
@@ -6892,6 +6966,41 @@ function getCertainty(){
   const sel=document.querySelector("#certScale .cert-opt.sel");
   return sel?sel.dataset.val:"";
 }
+/* "Prevent situations where users repeatedly overwrite each other without context" (Søren).
+   The reporting endpoint is POSTed with mode:"no-cors" (see postReport()), which means the
+   client can NEVER read a response body back -- so a server-side "reject and explain why" round
+   trip is not viable here (it would either silently drop the submission with no visible error,
+   or the UI would have to lie and show "submitted" regardless). This guard instead runs
+   entirely client-side, BEFORE postReport() is ever called, using window.CUR_COMMUNITY_IDS
+   (already populated by loadCommunityReports() with every distinct identity currently on file
+   for this nucleus). If the name about to be submitted differs from every identity already on
+   record AND no comment has been written, submission is held back with an inline explanation
+   instead of silently overwriting -- adding a comment (any comment) satisfies it. This is a
+   friction/UX gate, not a hard block: nothing stops a user who really has nothing to add from
+   writing one word, on purpose -- the point is making an override a deliberate, visible choice
+   rather than a silent one, and every override is now permanently visible afterwards in the
+   Classification History panel regardless. Returns the list of existing identities being
+   overridden, or null if no warning is needed. */
+function checkOverrideContext(newName,commentText){
+  if(commentText&&commentText.trim())return null; // context given -- nothing to warn about
+  const ids=window.CUR_COMMUNITY_IDS||[];
+  if(!ids.length)return null; // nothing on file yet -- there is nothing to "override"
+  const nn=String(newName||"").trim().toLowerCase();
+  if(ids.some(x=>String(x).trim().toLowerCase()===nn))return null; // agrees with what's already there
+  return ids;
+}
+function renderOverrideWarning(existingIds){
+  const el=document.getElementById("overrideWarning");
+  if(!el)return;
+  if(!existingIds){el.innerHTML="";return;}
+  el.innerHTML='<div class="idf-flag" style="border-color:var(--warn);color:var(--warn);margin-top:10px">'
+    +'&#9888; Already identified as <b>'+existingIds.map(escHtml).join(", ")+'</b> by the community. '
+    +'Please add a short comment explaining your reasoning before submitting a different identification &mdash; '
+    +'it helps future contributors understand why the call changed. (This is recorded either way in the '
+    +'Classification history panel, but a comment makes it far more useful.)</div>';
+  const cEl=document.getElementById("idfComment");
+  if(cEl)cEl.focus();
+}
 function renderResult(slug){
   const panel=document.getElementById("idfpanel");
   /* locationOnly (slug===null, ID_CTX.locationOnly===true) is openLocationOnlyReport()'s entry
@@ -6943,6 +7052,7 @@ function renderResult(slug){
   if(!locationOnly)h+='<div class="idf-certainty"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:12px">How certain are you of this identification? '+((disagrees||unclassified||noNucleus||agrees)?'<span class="cert-required">(required to submit)</span>':'')+'</label>'
     +'<div class="cert-scale" id="certScale">'+[1,2,3,4,5].map(n=>'<button type="button" class="cert-opt" data-val="'+n+'">'+n+'</button>').join("")+'</div>'
     +'<div class="cert-labels"><span>Not sure</span><span>Certain</span></div></div>';
+  h+='<div id="overrideWarning"></div>';
   h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:12px">Comments (optional)</label>'
     +'<textarea id="idfComment" placeholder="e.g. ambiguous ultrastructure, could also be X..."></textarea>';
   if(noNucleus){
@@ -7085,6 +7195,10 @@ function renderResult(slug){
   const reportBtn=document.getElementById("idfreport");
   if(reportBtn)reportBtn.addEventListener("click",()=>{
     if(!getCertainty()){alert("Please select a certainty rating before submitting.");return;} // belt-and-braces -- button is disabled until this is true, but guard anyway
+    const cmtVal=commentEl?commentEl.value.trim():"";
+    const overrideIds=checkOverrideContext(canonSubmitName(name),cmtVal);
+    if(overrideIds){renderOverrideWarning(overrideIds);return;} // held back -- see checkOverrideContext()'s comment
+    renderOverrideWarning(null);
     const ok=postReport({
       type:"discrepancy",
       timestamp:new Date().toISOString(),
@@ -7092,17 +7206,22 @@ function renderResult(slug){
       coord:ID_CTX.pos?ID_CTX.pos.join(","):"",
       registered:ID_CTX.suggested||"",identified:canonSubmitName(name),
       certainty:getCertainty(),
-      comment:commentEl?commentEl.value.trim():"",
+      comment:cmtVal,
       path:ID_PATH.map(n=>(TREE[n]?TREE[n].q:n)).join(" > ")
     });
     if(ok){
       reportBtn.textContent="Submitted — thank you!";reportBtn.disabled=true;
       document.getElementById("idfThanks").innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">🎉 Thanks — your correction has been logged against MICrONS\' original classification. Disagreement reports like this are exactly how the dataset gets more trustworthy over time.</div>';
+      if(ID_CTX.nucId)setTimeout(()=>loadClassificationHistory(ID_CTX.nucId),2500);
     }
   });
   const contribBtn=document.getElementById("idfcontribute");
   if(contribBtn)contribBtn.addEventListener("click",()=>{
     if(!getCertainty()){alert("Please select a certainty rating before submitting.");return;} // belt-and-braces -- button is disabled until this is true, but guard anyway
+    const cmtVal2=commentEl?commentEl.value.trim():"";
+    const overrideIds2=checkOverrideContext(canonSubmitName(name),cmtVal2);
+    if(overrideIds2){renderOverrideWarning(overrideIds2);return;} // held back -- see checkOverrideContext()'s comment
+    renderOverrideWarning(null);
     const ok=postReport({
       type:"new_identification",
       timestamp:new Date().toISOString(),
@@ -7110,12 +7229,13 @@ function renderResult(slug){
       coord:ID_CTX.pos?ID_CTX.pos.join(","):"",
       identified:canonSubmitName(name),
       certainty:getCertainty(),
-      comment:commentEl?commentEl.value.trim():"",
+      comment:cmtVal2,
       path:ID_PATH.map(n=>(TREE[n]?TREE[n].q:n)).join(" > ")
     });
     if(ok){
       contribBtn.textContent="Contributed — thank you!";contribBtn.disabled=true;
       document.getElementById("idfThanks").innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">🎉 Thanks for identifying a previously unclassified cell — that’s a real contribution to the dataset. Every one of these helps build a more trustworthy map of the cortex.</div>';
+      if(ID_CTX.nucId)setTimeout(()=>loadClassificationHistory(ID_CTX.nucId),2500);
     }
   });
   /* "Confirm this identification" -- the agrees case (see the const above): the user's guided-ID
@@ -7142,6 +7262,7 @@ function renderResult(slug){
     if(ok){
       confirmBtn.textContent="Confirmed — thank you!";confirmBtn.disabled=true;
       document.getElementById("idfThanks").innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">🎉 Thanks for confirming this identification — independent agreement is exactly what builds confidence in a cell\'s type over time.</div>';
+      if(ID_CTX.nucId)setTimeout(()=>loadClassificationHistory(ID_CTX.nucId),2500);
     }
   });
   const newCellBtn=document.getElementById("idfnewcell");
