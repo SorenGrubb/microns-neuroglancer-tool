@@ -4528,8 +4528,32 @@ document.addEventListener("DOMContentLoaded",function(){
   fetchComputedVolumesMap().then(decorateMeshVolButtons);
   const panel=document.getElementById("cellPanelCard");
   if(!panel)return;
-  const mo=new MutationObserver(function(){decorateMeshVolButtons();});
-  mo.observe(panel,{childList:true,subtree:true});
+  /* 2026-08-09 (performance audit, "some interface components feel delayed") -- this used to call
+     decorateMeshVolButtons() (a querySelectorAll + per-button loop) on EVERY mutation anywhere in
+     #cellPanelCard's subtree, which is a lot: typing in a comment box, the history panel
+     re-rendering, the connectivity panel expanding, a Neuroglancer link updating -- none of which
+     have anything to do with mesh-volume buttons. Only worth doing the real work when a mutation
+     actually introduces (or could introduce) a .meshvol element -- a plain childList/attribute
+     check on the mutation records themselves is far cheaper than the query + loop it used to run
+     unconditionally, and skips it entirely for the common case of unrelated panel updates.
+     window._computedVolumesMap updating asynchronously (fetchComputedVolumesMap()) already calls
+     decorateMeshVolButtons() directly (see right above), independent of this observer -- so the
+     observer only needs to catch NEWLY-RENDERED .meshvol buttons appearing via some other render
+     path, which is exactly what this checks for. */
+  function mutationTouchesMeshVol(records){
+    for(const rec of records){
+      for(const n of rec.addedNodes){
+        if(n.nodeType!==1)continue;
+        if((n.matches&&n.matches(".meshvol"))||(n.querySelector&&n.querySelector(".meshvol")))return true;
+      }
+      if(rec.type==="attributes"&&rec.target&&rec.target.nodeType===1&&rec.target.matches&&rec.target.matches(".meshvol"))return true;
+    }
+    return false;
+  }
+  const mo=new MutationObserver(function(records){
+    if(mutationTouchesMeshVol(records))decorateMeshVolButtons();
+  });
+  mo.observe(panel,{childList:true,subtree:true,attributes:true,attributeFilter:["disabled","data-vol-fresh"]});
 });
 function postReport(payload,okMsg){
   if(!REPORT_ENDPOINT){alert("Reporting isn't wired up yet — set REPORT_ENDPOINT near the top of the script (see the comment above it) to a Google Apps Script web app URL.");return false;}
@@ -4555,6 +4579,11 @@ function postReport(payload,okMsg){
      count simply stays as it was until the next refresh -- no worse than before, and never wrong,
      since it always re-reads the real list rather than optimistically incrementing. */
   if(window.refreshUnclassifiedCounts)setTimeout(()=>window.refreshUnclassifiedCounts(true),2500);
+  // 2026-08-09 (performance audit) -- same delayed-refetch reasoning as refreshUnclassifiedCounts
+  // above (no-cors POST has no readable response, and Apps Script needs a moment to write), but
+  // for NEW_CELL_REPORTS_CACHE/MERGED_SUB_REPORTS_CACHE specifically, which previously had no
+  // invalidation at all -- see invalidateNewCellAndMergedSubCaches()'s own comment.
+  if(window.invalidateNewCellAndMergedSubCaches)setTimeout(()=>window.invalidateNewCellAndMergedSubCaches(),2500);
   return true;
 }
 
@@ -6945,6 +6974,24 @@ async function fetchIdentifiedMergedSubs(){
   }catch(_){return null;}
 }
 fetchIdentifiedMergedSubs();
+/* 2026-08-09 (performance audit) -- unlike REPORTS_CACHE (invalidated after a submission via
+   refreshUnclassifiedCounts(true), see postReport()), these two caches had NO invalidation path
+   at all: once fetched, they stayed exactly as they were for the rest of the session, even after
+   the user themselves reported a new standalone cell or identified a merged-nucleus sub-cell --
+   their own just-submitted report would silently stay invisible (not just slow to appear, but
+   genuinely never shown) until a full page reload. Plain function declaration (not an arrow/const)
+   so it attaches to window and is callable from postReport() in an earlier script tag, same
+   cross-script-tag convention this file already relies on elsewhere (see the "script-tag scope
+   boundary" reasoning near liveThemeColors()/retintPlotlyCharts()). Re-fetches immediately rather
+   than just nulling and waiting for the next lazy access, since both caches are also read eagerly
+   on page load (fetchNewCellReports()/fetchIdentifiedMergedSubs() calls right after their own
+   definitions) -- callers expect these to already be populated, not to trigger a fetch mid-use. */
+function invalidateNewCellAndMergedSubCaches(){
+  NEW_CELL_REPORTS_CACHE=null;
+  MERGED_SUB_REPORTS_CACHE=null;
+  fetchNewCellReports();
+  fetchIdentifiedMergedSubs();
+}
 /* Same TIE_NM/completeness-preferring pattern as nearestUserReportedCell() above -- a merged
    sub-cell can plausibly get more than one report over time (different users splitting the same
    fused detection independently), and whichever one has a root ID filled in is the more useful
