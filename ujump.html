@@ -360,6 +360,17 @@ function retintPlotlyCharts(){
   });
 }
 function currentTheme(){return document.documentElement.getAttribute("data-theme")==="light"?"light":"dark";}
+/* 2026-08-09 (Søren: "I meant that only the white theme will have a white background in
+   Neuroglancer and the dark theme keeps the dark background... so that it is consistent with the
+   light or dark theme") -- corrects the 2026-08-09 white-background feature, which originally set
+   BOTH Neuroglancer background keys to a hardcoded "#ffffff" unconditionally, regardless of
+   µJump's own theme (reasoning at the time: Neuroglancer opens in its own separate tab via
+   window.open, so it can't inherit this page's CSS -- true, but the fix should still key off
+   currentTheme() rather than hardcoding one color for every opened instance). "#000000" is
+   Neuroglancer's own default background (what every instance used before this feature existed),
+   not an invented dark value. Plain function declaration so it's callable from every script tag
+   that builds a Neuroglancer state, same cross-script-tag convention as currentTheme() itself. */
+function ngBgColor(){return currentTheme()==="light"?"#ffffff":"#000000";}
 function setTheme(mode){
   var light=mode==="light";
   if(light)document.documentElement.setAttribute("data-theme","light");
@@ -3281,15 +3292,12 @@ function buildState(pos){
      NOT applied to the custom-base-state path above (the "paste your own Neuroglancer state"
      advanced option) -- that's an escape hatch for a state the user brought themselves, so its
      own settings are left alone rather than silently overridden. */
-  /* crossSectionBackgroundColor/perspectiveViewBackgroundColor (2026-08-09, Søren: "make the
-     background in opened Neuroglancer instances white both in the 2D and 3D environment") -- this
-     is INDEPENDENT of this page's own light/dark toggle above: Neuroglancer always opens in its
-     own separate tab (window.open, see neuroglancerLinkForPos()), so it has no way to inherit this
-     page's CSS anyway, and white is what Søren specifically asked for regardless of which theme
-     µJump itself is in. Applies to both the 2D cross-section slice panels and the 3D perspective
-     panel -- confirmed against Neuroglancer's own JSON state schema (both keys accept a plain hex
-     string). */
-  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:"#ffffff",perspectiveViewBackgroundColor:"#ffffff"};
+  /* crossSectionBackgroundColor/perspectiveViewBackgroundColor -- tracks µJump's OWN light/dark
+     toggle via ngBgColor() (see its own comment near currentTheme()): white background only when
+     µJump itself is in light mode, Neuroglancer's normal dark default otherwise. Applies to both
+     the 2D cross-section slice panels and the 3D perspective panel -- confirmed against
+     Neuroglancer's own JSON state schema (both keys accept a plain hex string). */
+  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function fail(m){const e=document.getElementById("err");e.textContent=m;e.style.display="block";document.getElementById("out").classList.remove("show");}
 /* Shows/hides the persistent "Back to previous cell" row (a sibling of #nucpanel, NOT inside it --
@@ -5148,7 +5156,7 @@ function buildConnectivityState(centerPos,queryRootId,shown,points){
     projectionScale:Math.max(computeConnSpanNm(centerPos,shown,points)*0.3,10000),
     layers,selectedLayer:{layer:"cell + partners",visible:true},
     layout:{type:"3d",orthographicProjection:true},showDefaultAnnotations:false,
-    crossSectionBackgroundColor:"#ffffff",perspectiveViewBackgroundColor:"#ffffff"};
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 /* Rough physical-nm span across the query cell + every rendered synapse point, so the initial
    zoom is wide enough to see scattered partners rather than defaulting to a single-soma zoom
@@ -7301,7 +7309,7 @@ function buildExampleState(pos,modality,rootOverride,isNeuron){
   }
   const hasSeg=layers.some(l=>l.name==="segmentation");
   layers.push(...buildLayerAnnotationLayers(pos));
-  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(isNeuron),layers,selectedLayer:{layer:hasSeg?"segmentation":"EM",visible:true},layout:{type:is3D?"3d":"xy",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:"#ffffff",perspectiveViewBackgroundColor:"#ffffff"};
+  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(isNeuron),layers,selectedLayer:{layer:hasSeg?"segmentation":"EM",visible:true},layout:{type:is3D?"3d":"xy",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function exampleUrl(coord,modality,rootOverride,isNeuron){
   const state=buildExampleState(coord,modality,rootOverride,isNeuron);
@@ -10785,8 +10793,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       selectedLayer:{layer:layers.length?layers[0].name:"segmentation",visible:true},
       layout:{type:"3d",orthographicProjection:true},
       showDefaultAnnotations:false,
-      crossSectionBackgroundColor:"#ffffff",
-      perspectiveViewBackgroundColor:"#ffffff"
+      crossSectionBackgroundColor:ngBgColor(),
+      perspectiveViewBackgroundColor:ngBgColor()
     };
   }
 
