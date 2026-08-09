@@ -165,6 +165,21 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .hist-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
 .hist-chip{font-family:var(--mono);font-size:11px;background:#0b0f14;border:1px solid var(--line);color:var(--mut);border-radius:6px;padding:4px 9px;cursor:pointer}
 .hist-chip:hover{border-color:var(--accent);color:var(--accent)}
+/* Navigation history (Back/Forward + Recently Viewed Cells) -- follows the same flex-wrap-based
+   responsiveness as every other row in this file (see .hist-row above) rather than a media query,
+   since nothing else in the app uses one either. */
+.navctrl{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.navctrl button{flex:none;padding:6px 12px;font-size:12px}
+.rv-panel{margin-top:10px}
+.rv-panel summary{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rv-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:280px;overflow-y:auto}
+.rv-row{border:1px solid var(--line);border-radius:7px;padding:7px 10px;cursor:pointer}
+.rv-row:hover{border-color:var(--accent)}
+.rv-row.cur{border-color:var(--accent);background:var(--accent-dim)}
+.rv-main{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.rv-type{font-size:13px;font-weight:600}
+.rv-src{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);white-space:nowrap}
+.rv-sub{font-family:var(--mono);font-size:11px;color:var(--mut);margin-top:2px}
 .leaf-search{position:relative;margin-bottom:14px}
 .leaf-search-results{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#161b22;border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;z-index:5;display:none;box-shadow:0 6px 16px rgba(0,0,0,.35)}
 .leaf-search-results.show{display:block}
@@ -240,6 +255,14 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Jump to this coordinate, build the Neuroglancer link and enable identification">&#8594;</button></div>
 <p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.</p>
 <div class="hist-row" id="searchHistory"></div>
+<div class="navctrl">
+<button class="idbtn" id="navBackBtn" type="button" title="Go back to the previous cell you viewed" disabled>&#8592; Back</button>
+<button class="idbtn" id="navFwdBtn" type="button" title="Go forward again" disabled>Forward &#8594;</button>
+</div>
+<details class="rv-panel" id="recentlyViewedPanel">
+<summary>Recently viewed cells</summary>
+<div class="rv-list" id="recentlyViewedList"></div>
+</details>
 <div style="margin-top:14px">
 <label>Or browse a random cell</label>
 <button class="idbtn" id="randomUnclassified" style="width:100%;margin-bottom:8px">Random unassigned cell &mdash; help identify one</button>
@@ -2370,6 +2393,113 @@ function inRegion(vx,vy,vz){const m=20000,nx=vx*4,ny=vy*4,nz=vz*40;return nx>=BB
 function distToBB(pos){var nx=pos[0]*4,ny=pos[1]*4,nz=pos[2]*40;return Math.min(nx-BB.xmin,BB.xmax-nx,ny-BB.ymin,BB.ymax-ny,nz-BB.zmin,BB.zmax-nz);}
 
 let CUR_ROOT=null,CUR_NUCID=null,SEARCH_HISTORY=[],CUR_EXTRA_ROOTS=[];
+/* Full navigation history (Back/Forward + "Recently viewed cells" panel), persisted to
+   localStorage so it survives a page refresh -- distinct from SEARCH_HISTORY above, which is an
+   in-memory-only 3-entry "recent chips" convenience and from PREV_CELL_POS below, which is a
+   single-step "undo the last neighbour click" shortcut. NAV_HISTORY is a chronological array of
+   every distinct cell visited via #go (any trigger: typed coordinate, search, filter/random
+   pick, neighbour click, guided-ID result, a Recently-Viewed click, or Back/Forward itself);
+   NAV_INDEX is a pointer into it marking "where we are now", exactly like a browser's session
+   history. NAV_FROM_HISTORY is a one-shot flag (same pattern as NAV_FROM_NJUMP) set only by
+   goNavToIndex()/goNavBack()/goNavForward() so the #go handler knows this navigation is
+   REPLAYING an existing entry rather than creating a new one -- otherwise every Back click would
+   itself get appended as a new "forward" entry. */
+let NAV_HISTORY=[],NAV_INDEX=-1,NAV_FROM_HISTORY=false;
+const NAV_HISTORY_KEY="ujump_nav_history",NAV_HISTORY_MAX=200;
+(function loadNavHistory(){
+  try{
+    const raw=localStorage.getItem(NAV_HISTORY_KEY);
+    if(!raw)return;
+    const d=JSON.parse(raw);
+    if(d&&Array.isArray(d.h)){NAV_HISTORY=d.h;NAV_INDEX=typeof d.i==="number"?Math.min(d.i,d.h.length-1):d.h.length-1;}
+  }catch(e){}
+})();
+function saveNavHistory(){try{localStorage.setItem(NAV_HISTORY_KEY,JSON.stringify({h:NAV_HISTORY,i:NAV_INDEX}));}catch(e){}}
+function renderNavControls(){
+  const b=document.getElementById("navBackBtn"),f=document.getElementById("navFwdBtn");
+  if(b)b.disabled=NAV_INDEX<=0;
+  if(f)f.disabled=NAV_INDEX<0||NAV_INDEX>=NAV_HISTORY.length-1;
+}
+/* Called once after every "go" click that actually resolved to a real cell (window.CUR_HAS_CELL
+   true -- set per render branch below), mirroring pushSearchHistory()'s call site but with its
+   own persistence, larger history, and back/forward bookkeeping. fromHistory is the value of
+   NAV_FROM_HISTORY captured by the #go handler BEFORE it was reset, so this function still knows
+   whether the click that triggered this render was a replay (Back/Forward/Recently-Viewed) or a
+   brand-new search. */
+function pushNavHistory(pos,label,fromHistory){
+  const key=pos.join(",");
+  const entry={key,pos,root:CUR_ROOT||null,nucId:CUR_NUCID||null,label:label||null,ts:Date.now(),idSource:window.CUR_ID_SOURCE||null};
+  if(fromHistory){
+    // Replaying an existing entry (Back/Forward/Recently-Viewed click) -- NAV_INDEX was already
+    // moved to it by goNavToIndex(); just refresh its label/ids/timestamp in place rather than
+    // growing the array, so repeatedly revisiting the same cell never creates duplicates.
+    if(NAV_INDEX>=0&&NAV_INDEX<NAV_HISTORY.length&&NAV_HISTORY[NAV_INDEX].key===key)NAV_HISTORY[NAV_INDEX]=entry;
+  } else if(NAV_INDEX>=0&&NAV_HISTORY[NAV_INDEX]&&NAV_HISTORY[NAV_INDEX].key===key){
+    // Re-searching the exact same cell twice in a row (e.g. re-clicking "Jump to this nucleus")
+    // -- refresh in place instead of appending a duplicate sequential entry.
+    NAV_HISTORY[NAV_INDEX]=entry;
+  } else {
+    // Fresh navigation to a new cell: discard any stale "forward" entries past the current
+    // position (standard browser back/forward semantics -- visiting somewhere new after going
+    // Back drops the old forward branch), then append.
+    NAV_HISTORY=NAV_HISTORY.slice(0,NAV_INDEX+1);
+    NAV_HISTORY.push(entry);
+    if(NAV_HISTORY.length>NAV_HISTORY_MAX)NAV_HISTORY.splice(0,NAV_HISTORY.length-NAV_HISTORY_MAX);
+    NAV_INDEX=NAV_HISTORY.length-1;
+  }
+  saveNavHistory();renderNavControls();renderRecentlyViewedPanel();
+}
+function goNavToIndex(idx){
+  if(idx<0||idx>=NAV_HISTORY.length)return;
+  const h=NAV_HISTORY[idx];
+  NAV_INDEX=idx;
+  NAV_FROM_HISTORY=true;
+  unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
+  document.getElementById("x").value=h.pos[0];document.getElementById("y").value=h.pos[1];document.getElementById("z").value=h.pos[2];
+  document.getElementById("go").click();
+}
+function goNavBack(){goNavToIndex(NAV_INDEX-1);}
+function goNavForward(){goNavToIndex(NAV_INDEX+1);}
+/* "Recently viewed cells" list shown in the panel -- deduplicated by cell (key), most-recently-
+   visited first, capped at 20 for display (NAV_HISTORY itself, used for Back/Forward, keeps the
+   full chronological path including revisits up to NAV_HISTORY_MAX). _idx is the entry's real
+   index in NAV_HISTORY so a click can jump straight to it via goNavToIndex(). */
+function recentlyViewedList(limit){
+  const seen=new Set(),out=[];
+  for(let idx=NAV_HISTORY.length-1;idx>=0&&out.length<limit;idx--){
+    const h=NAV_HISTORY[idx];
+    if(seen.has(h.key))continue;
+    seen.add(h.key);
+    out.push(Object.assign({},h,{_idx:idx}));
+  }
+  return out;
+}
+function idSourceLabel(src){
+  if(src==="own")return"verified (Grubb et al.)";
+  if(src==="community")return"community-reported";
+  if(src==="unclassified")return"unclassified";
+  if(src==="microns")return"MICrONS prediction";
+  return"";
+}
+function fmtNavTs(ts){
+  if(!ts)return"";
+  try{return new Date(ts).toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});}catch(e){return"";}
+}
+function renderRecentlyViewedPanel(){
+  const el=document.getElementById("recentlyViewedList");
+  if(!el)return;
+  const items=recentlyViewedList(20);
+  if(!items.length){el.innerHTML='<p class="hint" style="margin:0">No cells viewed yet.</p>';return;}
+  el.innerHTML=items.map(h=>{
+    const src=idSourceLabel(h.idSource);
+    return '<div class="rv-row'+(h._idx===NAV_INDEX?' cur':'')+'" data-idx="'+h._idx+'">'
+      +'<div class="rv-main"><span class="rv-type">'+escHtml(h.label||"(unnamed cell)")+'</span>'
+      +(src?'<span class="rv-src">'+escHtml(src)+'</span>':'')+'</div>'
+      +'<div class="rv-sub">'+(h.root?'root '+escHtml(String(h.root)):(h.nucId?'nuc '+escHtml(String(h.nucId)):'no segmentation ID'))+' &middot; '+fmtNavTs(h.ts)+'</div>'
+      +'</div>';
+  }).join("");
+  el.querySelectorAll(".rv-row").forEach(row=>row.addEventListener("click",()=>goNavToIndex(+row.dataset.idx)));
+}
 /* "← Back to previous cell" (2026-08-08, Søren: "For the 3 nearest neighbouring cells we need a
    back button as soon as you click on one of the cells to go back to the previous cell.") --
    PREV_CELL_POS holds the position of whatever cell was on screen right before a ".njump" click
@@ -2588,7 +2718,7 @@ function renderStandalone(st,panel,outOfRegion){
   const idfBtn=panel.querySelector("#idfgo");
   if(idfBtn)idfBtn.addEventListener("click",()=>openIdentify(idfCtx));
   wireLeafSearch("mainLeaf",slug=>openIdentifyToLeaf(idfCtx,slug));
-  window.CUR_POS=st.pos;
+  window.CUR_POS=st.pos;window.CUR_CELLTYPE_DISPLAY=longName(st.type);window.CUR_ID_SOURCE="own";window.CUR_HAS_CELL=true;
   loadRootIdPanel(st.pos.join(","));
 }
 
@@ -2597,6 +2727,12 @@ function showNucleus(pos){
   const[vx,vy,vz]=pos,panel=document.getElementById("nucpanel");
   LAST_OOB_QUERY++;
   panel.className="nuc show";CUR_ROOT=null;CUR_NUCID=null;CUR_NUC_ROOT=null;CUR_IS_NEURON=false;
+  /* CUR_ID_SOURCE/CUR_HAS_CELL feed the navigation-history "Recently viewed cells" panel (see
+     pushNavHistory() above) -- CUR_HAS_CELL stays false through the "no predictions for this
+     part of the dataset" fallback below, so a search that lands on empty space is never recorded
+     as a visited cell. Each render branch below sets both explicitly once it knows what it's
+     showing. */
+  window.CUR_ID_SOURCE=null;window.CUR_HAS_CELL=false;
   /* Checked FIRST, ahead of even the standalone-annotation check below: a community-reported,
      identified sub-cell of a merged-nucleus detection sits INSIDE a real MICrONS nucleus
      detection (unlike a standalone point), so without this check the normal nearest() lookup a
@@ -2724,6 +2860,11 @@ function showNucleus(pos){
      baked into the .pptx matches what's on screen rather than re-deriving it. _sum/own are
      var/const from the branches above and still in scope here regardless of which one ran. */
   window.CUR_CELLTYPE_DISPLAY=merged?_sum:(own?longName(own.type):longName(ti.name));
+  /* merged/own sub-cells are identifications from Søren's own verified dataset either way (a
+     merged blob's sub-cells are looked up the same way own-verified points are); anything else
+     is either the plain MICrONS prediction or, if MICrONS made no prediction at all, unclassified. */
+  window.CUR_ID_SOURCE=(merged||own)?"own":(ti.name==="Unclassified"?"unclassified":"microns");
+  window.CUR_HAS_CELL=true;
   const v1=v1ColumnInfo(i);
   if(v1)h+=v1ColumnBadgeHtml(v1);
   h+=renderLocationDiagram(pos);
@@ -2895,6 +3036,8 @@ function goToPrevCell(){
   document.getElementById("go").click();
 }
 document.getElementById("backToPrevBtn").addEventListener("click",goToPrevCell);
+document.getElementById("navBackBtn").addEventListener("click",goNavBack);
+document.getElementById("navFwdBtn").addEventListener("click",goNavForward);
 document.getElementById("go").addEventListener("click",()=>{
   document.getElementById("err").style.display="none";
   const x=parseFloat(document.getElementById("x").value),y=parseFloat(document.getElementById("y").value),z=parseFloat(document.getElementById("z").value);
@@ -2906,14 +3049,27 @@ document.getElementById("go").addEventListener("click",()=>{
      stale target from an earlier, unrelated neighbour click. */
   if(!NAV_FROM_NJUMP)PREV_CELL_POS=null;
   NAV_FROM_NJUMP=false;
+  /* Captured (and reset) BEFORE showNucleus() runs, then handed to pushNavHistory() below -- see
+     NAV_FROM_HISTORY's declaration comment for why this needs to be a one-shot flag read into a
+     local rather than checked live at push time. */
+  const navFromHistory=NAV_FROM_HISTORY;NAV_FROM_HISTORY=false;
   showNucleus(pos);
   refreshBackNavRow();
   let state;try{state=buildState(pos);}catch(err){fail("Couldn't read the custom base state \u2014 check it's a valid Neuroglancer link or JSON.");return;}
   const url=document.getElementById("viewer").value+"#!"+encodeURIComponent(JSON.stringify(state));
   document.getElementById("url").textContent=url;document.getElementById("out").classList.add("show");
   const nameEl=document.querySelector("#nucpanel .celltype");
-  pushSearchHistory(pos,nameEl?nameEl.textContent.replace(/\s*↗\s*$/,"").trim():null);
+  const navLabel=window.CUR_CELLTYPE_DISPLAY||(nameEl?nameEl.textContent.replace(/\s*↗\s*$/,"").trim():null);
+  pushSearchHistory(pos,navLabel);
+  /* Only record a "recently viewed cell" when a real cell was actually shown -- window.CUR_HAS_CELL
+     is set by every render branch in showNucleus() (see its declaration comment) and stays false
+     for the "no predictions for this part of the dataset" fallback, so searching empty space
+     doesn't pollute the Back/Forward history or the Recently Viewed panel. Still refresh the
+     Back/Forward button enabled-state either way, since NAV_INDEX itself didn't change. */
+  if(window.CUR_HAS_CELL)pushNavHistory(pos,navLabel,navFromHistory);
+  else renderNavControls();
 });
+renderNavControls();renderRecentlyViewedPanel();
 document.getElementById("copy").addEventListener("click",async()=>{const url=document.getElementById("url").textContent;try{await navigator.clipboard.writeText(url);document.getElementById("copy").textContent="Copied";setTimeout(()=>document.getElementById("copy").textContent="Copy link",1200);}catch(_){}});
 /* ---------- Guided identification ---------- */
 const TREE={
@@ -6292,6 +6448,14 @@ function renderUserReportedCell(ur,panel){
      normal (classified but unverified) report so it reads as "help wanted: classify this" rather
      than a mystery blank field. */
   const isUnclassified=!(ur.identified&&ur.identified.trim());
+  /* window.CUR_POS was never set in this branch before -- a latent gap that also meant the
+     ".njump"/PREV_CELL_POS single-step back button (below) captured a stale position when
+     navigating away from a user-reported cell. Set here for both that and the new navigation-
+     history panel, which needs an accurate position/label/id-source for every branch. */
+  window.CUR_POS=ur.pos;
+  window.CUR_CELLTYPE_DISPLAY=isUnclassified?"Unclassified cell":ur.identified;
+  window.CUR_ID_SOURCE=isUnclassified?"unclassified":"community";
+  window.CUR_HAS_CELL=true;
   let oh=isUnclassified
     ?'<span class="tag" style="background:#332900;color:#e8b923;border:1px solid #e8b923" title="Logged by another tool user through the ‘report a new cell’ flow, with no cell-type identification yet — just its location and any segmentation IDs found. Add an identification below to classify it.">unclassified — location only</span>'
     :'<span class="tag" style="background:#332900;color:#e8b923;border:1px solid #e8b923" title="Logged by another tool user through the ‘report a new cell’ flow — not yet reviewed or confirmed by Søren. Treat as a lead worth checking, not a verified identification.">user-reported, unverified</span>';
@@ -6375,7 +6539,7 @@ function renderMergedSubCell(sub,panel){
   panel.className="nuc show";
   CUR_ROOT=sub.subRootId||null;CUR_NUCID=null;CUR_NUC_ROOT=null;
   CUR_IS_NEURON=looksLikeNeuron(sub.identified);
-  window.CUR_POS=sub.pos;window.CUR_CELLTYPE_DISPLAY=sub.identified;
+  window.CUR_POS=sub.pos;window.CUR_CELLTYPE_DISPLAY=sub.identified;window.CUR_ID_SOURCE="community";window.CUR_HAS_CELL=true;
   let h='<span class="tag" style="background:#332900;color:#e8b923;border:1px solid #e8b923" title="Reported through the ‘report a merged nucleus’ flow: MICrONS’s automatic nucleus detector fused this cell together with at least one other real nucleus into a single detection, but this specific sub-cell has since been given its own identity (and, if known, its own root ID) by a tool user.">community-reported — merged-nucleus split</span>';
   h+='<div class="celltype">'+celltypeLink(sub.pos,escHtml(sub.identified))+'</div>';
   /* History/provenance: the parent nucleus id, how many real cells MICrONS fused together
