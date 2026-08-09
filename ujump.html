@@ -486,6 +486,19 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <option value="untouched">Totally unclassified cells (no MICrONS prediction, not verified, no report on file — needs attention most)</option>
 </select>
 <p class="hint" id="filterAttnWarning" style="display:none;color:var(--warn);font-weight:600">This dropdown overrides the cell-type checkboxes above — with it set, you're filtering only by attention status (plus vessel/glia-limitans/layer/region below, if those are also set), and the checked cell type(s) above are being ignored.</p>
+<!-- 2026-08-09 (Søren: "Master Cell List reports >150,000 cells... Filter and Show with no
+     filters applied returns only ~106,000 cells... implement the include unclassified cells
+     checkbox") -- runFilter()'s normal pass (over ALL_IDENTITIES) silently skips any nucleus
+     with NT[i]===0 and no own-verified/merged-nucleus override at all, since it was never given
+     an identity to filter by; "Master cell list" counts every detected nucleus regardless, hence
+     the mismatch. This checkbox folds that missing population (same one the "All unclassified
+     cells" attention tier above already finds) into the ORDINARY filtered/exported result set,
+     so a plain "no filters, include unclassified" run now matches Master Cell List's count
+     instead of silently undercounting it by ~44k. Independent of the attention dropdown (which
+     still exists for people who want ONLY the unclassified population, sliced by verified/
+     reported/untouched) -- see updateAttentionUI() below, which disables this checkbox whenever
+     the attention dropdown is in use, since it would be redundant (a subset of "all" there). -->
+<label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-top:8px" title="Includes every nucleus with no MICrONS prediction on file and no verification/override of any kind (source: 'Unclassified'), alongside whatever else this filter run already matches — the population Master Cell List counts that the checkboxes above otherwise never surface. Ignored while the 'needing attention' dropdown above is set (it already covers this, and more)."><input type="checkbox" id="filterIncludeUnclassified"> Include unclassified cells (no MICrONS prediction, not yet verified — this is what makes a plain "no filters" run match Master Cell List's total)</label>
 </div>
 <div class="row" style="margin-top:12px;align-items:center">
 <div style="flex:1 1 200px"><label style="font-size:12px">Vessel proximity</label><select id="filterVessel" style="width:100%"></select></div>
@@ -9301,6 +9314,15 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     const attnOn=!!(attnEl&&attnEl.value);
     if(typeBox){typeBox.style.opacity=attnOn?"0.4":"";typeBox.style.pointerEvents=attnOn?"none":"";}
     if(warnEl)warnEl.style.display=(attnOn&&document.querySelectorAll(".ftype:checked").length)?"block":"none";
+    // "Include unclassified cells" is a strict subset of the attention dropdown's "all" option
+    // once that dropdown is in use (see runFilter()'s attention branch) -- disabling it avoids
+    // implying it does anything extra in that state.
+    const inclUnclEl=document.getElementById("filterIncludeUnclassified");
+    if(inclUnclEl){
+      inclUnclEl.disabled=attnOn;
+      const lbl=inclUnclEl.closest("label");
+      if(lbl)lbl.style.opacity=attnOn?"0.4":"";
+    }
   }
   const attnSel=document.getElementById("filterAttention");
   if(attnSel)attnSel.addEventListener("change",updateAttentionUI);
@@ -9492,6 +9514,10 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     buildAllIdentities();
     const types=activeTypeSet();
     const attention=document.getElementById("filterAttention")?document.getElementById("filterAttention").value:"";
+    // See the checkbox's own doc comment near filterAttention in the HTML above -- only acted on
+    // in the normal (non-attention) branch below, since the attention dropdown's "all" option
+    // already is this population (and more, sliced by verified/reported/untouched).
+    const includeUnclassified=(!attention)&&(document.getElementById("filterIncludeUnclassified")?document.getElementById("filterIncludeUnclassified").checked:false);
     const vesselSel=fineSel?fineSel.value:"";
     const glOn=document.getElementById("filterGLOn")?document.getElementById("filterGLOn").checked:false;
     const glDistInput=document.getElementById("filterGLDist");
@@ -9665,6 +9691,25 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         if(types.size&&!types.has(row.type))continue;
         const m=evalRow(row);
         if(m)out.push(m);
+      }
+      /* "Include unclassified cells" checkbox (2026-08-09) -- ALL_IDENTITIES never contains a
+         nucleus with NT[i]===0 and no own-verified/merged-nucleus override (see the "if(t===0)
+         continue;" skip in buildAllIdentities()), so the loop above can never surface it no
+         matter what's checked. This adds exactly that missing population back in, same rows the
+         "All unclassified cells" attention tier finds (own/merged-covered nuclei are explicitly
+         skipped here since those are ALREADY in ALL_IDENTITIES above -- this must never produce
+         a duplicate row for the same nucleus). Deliberately ignores the `types` checkbox set --
+         an unclassified cell has no real type to match against, so "include unclassified" is an
+         orthogonal "also show me the ones nobody's named yet" toggle, same convention the
+         attention dropdown already uses (it ignores the type checkboxes entirely too). */
+      if(includeUnclassified){
+        for(let i=0;i<N;i++){
+          if(NT[i]!==0)continue;
+          if(OWN_TYPE[i]!==255)continue; // already included above via ALL_IDENTITIES's own-override row
+          if(mergedInfo(i))continue; // already included above via ALL_IDENTITIES's merged-breakdown rows
+          const m=evalRow({type:"Unclassified",source:"none",space:"N",i});
+          if(m)out.push(m);
+        }
       }
     }
     return{matches:out,vesselActive:!!vesselSel,glActive:glOn,layerActive:layers.size>0,wmActive:wmOn,regionActive:!!(regionOn&&regionValid),attentionActive:!!attention,v1ColActive:v1On};
