@@ -1,8 +1,70 @@
 <!DOCTYPE html>
-<html lang="en"><head><!-- Google tag (gtag.js) --> <script async src="https://www.googletagmanager.com/gtag/js?id=G-DV02FHZ57V"></script> <script> window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-DV02FHZ57V'); </script> <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<html lang="en"><head><script>/* Theme FOUC guard -- 2026-08-09, light-mode feature. Must run BEFORE the <style> block below is
+   parsed/painted, which is why it's the very first thing in <head>, ahead of even the analytics
+   tag: without this, a returning visitor who picked light mode would see one dark-mode frame
+   flash (the default :root palette) before the second script further down applies
+   [data-theme="light"]. Kept deliberately tiny and dependency-free (no access to anything else in
+   the page yet) -- see setTheme()/toggleTheme() later in the body for the full theme module this
+   pairs with, which both read/write the SAME "ujump_theme" localStorage key. */
+try{if(localStorage.getItem("ujump_theme")==="light")document.documentElement.setAttribute("data-theme","light");}catch(_fe){}
+</script><!-- Google tag (gtag.js) --> <script async src="https://www.googletagmanager.com/gtag/js?id=G-DV02FHZ57V"></script> <script> window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-DV02FHZ57V'); </script> <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>µJump — MICrONS cell explorer</title>
 <style>
-:root{--bg:#0d1117;--panel:#161b22;--line:#2a313c;--ink:#e6edf3;--mut:#8b949e;--accent:#27e0b3;--accent-dim:#176b57;--warn:#e3b341;--exc:#f0883e;--inh:#58a6ff;--non:#8957e5;--mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,monospace}
+/* ---------------------------------------------------------------------------------------------
+   THEME ARCHITECTURE (2026-08-09, light-mode feature).
+
+   Every color used anywhere in this file's OWN chrome (not Neuroglancer's/MICrONS's data colors
+   -- see the note below) should be one of the custom properties declared here, referenced via
+   var(--x) -- never a hardcoded hex/rgba literal. That's what lets a single attribute flip
+   ([data-theme="light"] on <html>, set by setTheme()/toggleTheme() below) re-skin the entire
+   page with zero duplicated CSS rules: the DARK block below is :root's unconditional default
+   (unchanged from before this feature -- every existing var name/value is preserved so nothing
+   that already depended on them breaks), and the LIGHT block is an override that only applies
+   when [data-theme="light"] is present, using the exact same variable NAMES with different
+   VALUES. No selector anywhere else in this file needs to know or care which theme is active.
+
+   New variables added alongside the original 11 (--ok/--danger/--gold/--inset/--shadow/--scrim):
+   these give a real CSS-variable home to colors that were previously hardcoded ad hoc in random
+   places (a literal #3fb950 success green, an unbacked #f85149 admin-restore red, an unbacked
+   #e8b923 "community/unverified" gold, a third hardcoded dark surface #0b0f14 used for inputs
+   distinct from --panel, and raw rgba(0,0,0,...) shadow/scrim values) -- see the hardcoded-color
+   fixes elsewhere in this stylesheet/script that now reference these instead.
+
+   OUT OF SCOPE, DELIBERATELY: the large cell-type/vasculature/organelle color palettes used
+   for chart series (PALETTE/LAYER_COLORS/CONN_PALETTE), Neuroglancer segmentColors, and the
+   excitatory/inhibitory/non-neuronal badge colors (--exc/--inh/--non themselves, though their
+   VALUES do change per theme below) are DATA-encoding colors with fixed scientific meaning, not
+   page chrome -- retinting them per-theme would make a cell type look like a different cell type
+   between light and dark mode, which is far worse than a chart merely looking slightly different.
+   Only the page's own text/background/border/status chrome is themed.
+
+   PLOTLY NOTE: Plotly cannot read CSS custom properties, so its chart layouts read --ink/--line
+   once via getComputedStyle() through liveThemeColors() (defined further down, a plain function
+   declaration so it's visible from every <script> tag in this file including initDashboardTab()'s
+   own separate scope -- see that function's own comment on why only function declarations, not
+   const bindings, cross that boundary). retintPlotlyCharts() (also below) re-applies live colors
+   to every already-rendered chart via Plotly.relayout() whenever the theme is toggled, so open
+   charts update in place without a full page reload. */
+:root{--bg:#0d1117;--panel:#161b22;--line:#2a313c;--ink:#e6edf3;--mut:#8b949e;--accent:#27e0b3;--accent-dim:#176b57;--on-accent:#06231c;--warn:#e3b341;--exc:#f0883e;--inh:#58a6ff;--non:#8957e5;--ok:#3fb950;--danger:#f85149;--gold:#e8b923;--inset:#0b0f14;--disabled:#21262d;--shadow:rgba(0,0,0,.3);--scrim:rgba(0,0,0,.45);--mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,monospace}
+/* LIGHT THEME -- chosen for readability on screen AND on paper: near-black text on white
+   (~16:1 contrast, well past WCAG AAA), every accent/status color independently checked to stay
+   readable at normal text size on white (all >=4.5:1), no pure-saturated neon hues (the dark
+   theme's --accent teal and --warn yellow in particular would be low-contrast if simply reused
+   on a white background, so light-mode equivalents are deliberately darker/desaturated
+   versions of the same hue family, not the same color faded). --shadow/--scrim are lighter too,
+   since a heavy black shadow that looks fine floating on a dark page reads as a printing error
+   or a grubby smudge on white. */
+:root[data-theme="light"]{--bg:#ffffff;--panel:#f6f8fa;--line:#d0d7de;--ink:#1f2328;--mut:#57606a;--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff;--warn:#9a6700;--exc:#bc4c00;--inh:#0969da;--non:#8250df;--ok:#1a7f37;--danger:#cf222e;--gold:#9a6700;--inset:#ffffff;--disabled:#eaeef2;--shadow:rgba(140,149,159,.25);--scrim:rgba(140,149,159,.5)}
+/* Printing: force the light palette regardless of the on-screen theme (Søren may print while
+   working in dark mode) and strip decorations that waste toner / look wrong on paper without
+   adding a viewport media query -- this is the one deliberate exception to "no @media queries,
+   everything else uses flex-wrap" elsewhere in this file, since @media print concerns OUTPUT
+   MEDIUM, not responsive breakpoints, and there's no other way to react to "about to print". */
+@media print{
+  :root{--bg:#ffffff;--panel:#ffffff;--line:#c8ccd1;--ink:#000000;--mut:#3a3f45;--accent:#0f766e;--accent-dim:#eaf6f4;--on-accent:#ffffff;--warn:#7a5200;--exc:#8a3900;--inh:#07508f;--non:#6a3fb0;--ok:#136329;--danger:#a4001f;--gold:#7a5200;--inset:#ffffff;--disabled:#e5e5e5;--shadow:transparent;--scrim:transparent}
+  #themeToggleBtn,.tabbar,#undoToast,#submitToast{display:none!important}
+  body{padding:0}
+}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5;padding:24px}
 .wrap{max-width:760px;margin:0 auto}
@@ -12,6 +74,8 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
 .tabbtn{display:inline-block;font:inherit;font-size:12px;color:var(--mut);text-decoration:none;background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 11px;vertical-align:middle;cursor:pointer}
 .tabbtn:hover{color:var(--ink);border-color:var(--accent)}
 .tabbtn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+#themeToggleBtn{position:fixed;top:14px;right:14px;z-index:9998;display:flex;align-items:center;gap:6px;font:inherit;font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;cursor:pointer;box-shadow:0 2px 8px var(--shadow)}
+#themeToggleBtn:hover{border-color:var(--accent)}
 .tabpanel{display:none}
 .tabpanel.active{display:block}
 /* 2026-08 (Søren: opening the dashboard used to mean leaving ujump.html entirely -- a target=_blank
@@ -44,9 +108,9 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
 #dashPanel header{padding:0 0 10px;border-bottom:1px solid var(--line)}
 #dashPanel .subhead{color:var(--mut);font-size:13px;margin:0 0 16px;max-width:900px}
 #dashPanel .toolbar{display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap}
-#dashPanel button.refresh{background:var(--accent);color:#06231c;border:none;border-radius:7px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
+#dashPanel button.refresh{background:var(--accent);color:var(--on-accent);border:none;border-radius:7px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
 #dashPanel button.refresh:hover{opacity:.9}
-#dashPanel button.refresh:disabled{background:#21262d;color:var(--mut);cursor:not-allowed}
+#dashPanel button.refresh:disabled{background:var(--disabled);color:var(--mut);cursor:not-allowed}
 #dashPanel .status{font-size:12px;color:var(--mut)}
 #dashPanel .grid{max-width:1400px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:18px;padding:20px 24px 60px}
 #dashPanel .card{padding:14px 16px 6px;margin-bottom:0;min-width:0}
@@ -55,7 +119,7 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
 #dashPanel .card .sub{font-size:11.5px;color:var(--mut);margin:0 0 8px;line-height:1.4}
 #dashPanel .plot{width:100%;height:360px}
 #dashPanel .plot.tall{height:430px}
-#dashPanel select.picker{font-size:12px;padding:3px 6px;border-radius:5px;border:1px solid var(--line);background:#0b0f14;color:var(--ink);margin-left:6px}
+#dashPanel select.picker{font-size:12px;padding:3px 6px;border-radius:5px;border:1px solid var(--line);background:var(--inset);color:var(--ink);margin-left:6px}
 #dashPanel .placeholder{display:flex;align-items:center;justify-content:center;height:360px;color:var(--mut);font-size:13px;text-align:center;padding:0 30px;line-height:1.5}
 #dashPanel .footnote{font-size:10.5px;color:var(--mut);margin:4px 0 10px;line-height:1.4}
 #dashPanel a{color:var(--accent)}
@@ -63,29 +127,29 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
 label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:6px}
 .row{display:flex;gap:10px;flex-wrap:wrap}.coord{flex:1;min-width:90px}
-input[type=text],input[type=password],input[type=number],select,textarea{width:100%;background:#0b0f14;border:1px solid var(--line);border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:15px;padding:9px 10px}
+input[type=text],input[type=password],input[type=number],select,textarea{width:100%;background:var(--inset);border:1px solid var(--line);border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:15px;padding:9px 10px}
 textarea{min-height:64px;font-size:12px;resize:vertical}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .units{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
-.units button{background:#0b0f14;border:1px solid var(--line);color:var(--mut);padding:6px 12px;border-radius:6px;font-family:var(--mono);font-size:13px;cursor:pointer}
+.units button{background:var(--inset);border:1px solid var(--line);color:var(--mut);padding:6px 12px;border-radius:6px;font-family:var(--mono);font-size:13px;cursor:pointer}
 .units button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
 .toggles{display:flex;gap:16px;flex-wrap:wrap;margin-top:4px}
 .toggles label{display:flex;align-items:center;gap:7px;text-transform:none;letter-spacing:0;color:var(--ink);font-size:13px;cursor:pointer;margin:0}
 .hint{font-size:12px;color:var(--mut);margin:10px 0 0}
-.go{width:100%;margin-top:4px;background:var(--accent);color:#06231c;border:none;padding:13px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;letter-spacing:.02em}
+.go{width:100%;margin-top:4px;background:var(--accent);color:var(--on-accent);border:none;padding:13px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;letter-spacing:.02em}
 .go:hover{filter:brightness(1.08)}
 .go.inline{width:44px;flex:0 0 44px;margin-top:0;padding:0;font-size:19px;line-height:1}
 .out{margin-top:14px;display:none}.out.show{display:block}
-.urlbox{font-family:var(--mono);font-size:11px;word-break:break-all;background:#0b0f14;border:1px solid var(--line);border-radius:7px;padding:10px;max-height:120px;overflow:auto}
+.urlbox{font-family:var(--mono);font-size:11px;word-break:break-all;background:var(--inset);border:1px solid var(--line);border-radius:7px;padding:10px;max-height:120px;overflow:auto}
 .actions{display:flex;gap:10px;margin-top:10px}
 .actions a,.actions button{flex:1;text-align:center;text-decoration:none;border-radius:7px;padding:10px;font-size:14px;cursor:pointer;border:1px solid var(--line)}
-.copy{background:#0b0f14;color:var(--ink)}
+.copy{background:var(--inset);color:var(--ink)}
 details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-size:13px}details[open] summary{color:var(--ink);margin-bottom:10px}
 summary.card-toggle{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:0}
 details.card{padding-bottom:14px}details.card:not([open]){padding-bottom:18px}
 .err{color:var(--warn);font-size:12px;margin-top:8px;display:none}
 code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-size:12px}
-.nuc{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:16px;background:#0b0f14;display:none}.nuc.show{display:block}.nuc.oob{border-color:var(--warn)}
+.nuc{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--inset);display:none}.nuc.show{display:block}.nuc.oob{border-color:var(--warn)}
 /* #cellPanelCard wraps err/nucpanel/idfpanel/out and lives OUTSIDE the tab panels (so it shows
    under whichever tab is active -- Jump, Filter and show, or References -- instead of only being
    reachable from the Jump tab). All four children default to display:none until a cell is
@@ -104,9 +168,9 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .ids{margin-top:10px;display:flex;flex-direction:column;gap:6px}
 .idrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .idrow span.k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);min-width:74px}
-.idval{font-family:var(--mono);font-size:12px;background:#161b22;border:1px solid var(--line);padding:3px 8px;border-radius:5px;word-break:break-all;cursor:pointer}
+.idval{font-family:var(--mono);font-size:12px;background:var(--panel);border:1px solid var(--line);padding:3px 8px;border-radius:5px;word-break:break-all;cursor:pointer}
 .idval:hover{border-color:var(--accent)}
-.jump{background:#0b0f14;border:1px solid var(--accent);color:var(--accent);border-radius:7px;padding:7px 11px;font-size:13px;cursor:pointer;margin-top:12px}
+.jump{background:var(--inset);border:1px solid var(--accent);color:var(--accent);border-radius:7px;padding:7px 11px;font-size:13px;cursor:pointer;margin-top:12px}
 .oobmsg{color:var(--warn);font-size:14px}
 .neigh{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
 .neigh h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 6px}
@@ -114,8 +178,8 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .nleft{display:flex;align-items:center;gap:9px;min-width:0}
 .dot{width:9px;height:9px;border-radius:50%;flex:none}.dot.exc{background:var(--exc)}.dot.inh{background:var(--inh)}.dot.non{background:var(--non)}.dot.none{background:var(--mut)}
 .ntype{font-weight:600;font-size:14px}.nsub{font-family:var(--mono);font-size:11px;color:var(--mut)}
-.njump{background:#0b0f14;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;flex:none}.njump:hover{border-color:var(--accent);color:var(--accent)}
-.idcta{margin-top:14px;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:#0b0f14;display:flex;flex-direction:column;gap:10px}
+.njump{background:var(--inset);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;flex:none}.njump:hover{border-color:var(--accent);color:var(--accent)}
+.idcta{margin-top:14px;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--inset);display:flex;flex-direction:column;gap:10px}
 .idcta.warn{border-color:var(--warn)}
 .idcta-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .idcta-top span{font-size:13px;color:var(--ink)}
@@ -133,15 +197,21 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .chist-change{font-size:13px;font-weight:600}
 .chist-change .old{color:var(--mut);font-weight:400;text-decoration:line-through}
 .chist-src{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:20px;font-weight:600;white-space:nowrap}
-.chist-src.microns_original{background:rgba(139,148,158,.12);color:var(--mut);border:1px solid var(--line)}
-.chist-src.community{background:rgba(240,136,62,.15);color:var(--exc);border:1px solid var(--exc)}
+/* color-mix() (2026-08-09, light-mode fix) rather than a hardcoded rgba() alpha wrapper -- CSS
+   can't apply an alpha channel to a custom property's hex value any other way, and a fixed rgba
+   literal like the ones this replaced (rgba(240,136,62,.15) etc.) would silently stay the DARK
+   theme's tint forever even after switching to light mode, since it's not derived from var(--exc)
+   at all. color-mix(in srgb, var(--x) N%, transparent) always re-derives from the CURRENT theme's
+   color. Well-supported in every evergreen browser by 2026. */
+.chist-src.microns_original{background:color-mix(in srgb,var(--mut) 12%,transparent);color:var(--mut);border:1px solid var(--line)}
+.chist-src.community{background:color-mix(in srgb,var(--exc) 15%,transparent);color:var(--exc);border:1px solid var(--exc)}
 .chist-src.verification{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)}
-.chist-src.manual_revision{background:rgba(88,166,255,.15);color:var(--inh);border:1px solid var(--inh)}
-.chist-src.undo{background:rgba(240,136,62,.08);color:var(--mut);border:1px dashed var(--mut)}
-.chist-src.admin_restore{background:rgba(248,81,73,.12);color:#f85149;border:1px solid #f85149}
+.chist-src.manual_revision{background:color-mix(in srgb,var(--inh) 15%,transparent);color:var(--inh);border:1px solid var(--inh)}
+.chist-src.undo{background:color-mix(in srgb,var(--exc) 8%,transparent);color:var(--mut);border:1px dashed var(--mut)}
+.chist-src.admin_restore{background:color-mix(in srgb,var(--danger) 12%,transparent);color:var(--danger);border:1px solid var(--danger)}
 .chist-meta{font-family:var(--mono);font-size:11px;color:var(--mut)}
 .chist-cert{font-family:var(--mono);font-size:11px;color:var(--ink);margin-top:3px}
-.chist-comment{font-size:12px;color:var(--ink);margin-top:5px;padding:6px 9px;background:#161b22;border-radius:6px;font-style:italic}
+.chist-comment{font-size:12px;color:var(--ink);margin-top:5px;padding:6px 9px;background:var(--inset);border-radius:6px;font-style:italic}
 .chist-empty{font-size:12px;color:var(--mut);font-style:italic}
 .chist-type{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:20px;font-weight:600;white-space:nowrap;background:rgba(139,148,158,.12);color:var(--mut);border:1px solid var(--line)}
 .chist-status{font-family:var(--mono);font-size:11px;margin-top:3px}
@@ -165,9 +235,9 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .stepvote-net{min-width:22px;text-align:center;font-size:12px;color:var(--ink);font-family:var(--mono)}
 .stepvote{padding:5px 12px!important;font-size:14px!important;line-height:1}
 .idbtn{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent);border-radius:7px;padding:8px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
-.idbtn:disabled{background:#21262d;color:var(--mut);border-color:var(--line);cursor:not-allowed}
-.idcta:not(.warn) .idbtn{background:#0b0f14;color:var(--ink);border-color:var(--line)}
-.idf{margin-top:16px;border:1px solid var(--accent);border-radius:10px;padding:18px;background:#0b0f14;display:none}.idf.show{display:block}
+.idbtn:disabled{background:var(--disabled);color:var(--mut);border-color:var(--line);cursor:not-allowed}
+.idcta:not(.warn) .idbtn{background:var(--inset);color:var(--ink);border-color:var(--line)}
+.idf{margin-top:16px;border:1px solid var(--accent);border-radius:10px;padding:18px;background:var(--inset);display:none}.idf.show{display:block}
 .idf-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
 .idf-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
 .idf-crumbs{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:3px}
@@ -175,7 +245,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .idf-back{color:var(--accent);cursor:pointer;text-decoration:underline;font-size:12px;margin-bottom:8px;display:inline-block}
 .idf-q{font-size:15px;font-weight:600;margin-bottom:12px;line-height:1.4}
 .idf-opts{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
-.idf-opt{text-align:left;background:#161b22;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:13px;cursor:pointer}
+.idf-opt{text-align:left;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:13px;cursor:pointer}
 .idf-opt:hover{border-color:var(--accent)}
 .idf-gal{border-top:1px solid var(--line);padding-top:12px}
 .idf-gal h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}
@@ -183,7 +253,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .idf-cell{width:120px}
 .idf-cell-name{font-size:12px;font-weight:600;margin-bottom:4px}
 .idf-thumbs{display:flex;gap:4px;flex-wrap:wrap}
-.idf-thumb{position:relative;width:56px;height:56px;border-radius:5px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:#161b22}
+.idf-thumb{position:relative;width:56px;height:56px;border-radius:5px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--panel)}
 .idf-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .idf-thumb .mod{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#fff;font-size:8px;text-align:center;letter-spacing:.03em}
 .idf-thumb.nocoord{opacity:.5;cursor:default}
@@ -194,18 +264,18 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .idf-actions{display:flex;gap:10px;margin-top:14px;justify-content:center}
 .idf-certainty{margin-top:14px}
 .cert-scale{display:flex;gap:8px;justify-content:center;margin-top:6px}
-.cert-opt{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:#161b22;color:var(--ink);font-family:var(--mono);font-size:14px;font-weight:600;cursor:pointer}
+.cert-opt{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:14px;font-weight:600;cursor:pointer}
 .cert-opt:hover{border-color:var(--accent)}
-.cert-opt.sel{background:var(--accent);color:#06231c;border-color:var(--accent)}
+.cert-opt.sel{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .cert-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--mut);margin-top:4px;max-width:200px;margin-left:auto;margin-right:auto}
 .idf-submitnote{font-size:11px;color:var(--mut);margin-top:10px}
-.idbtn-submit{background:var(--accent);color:#06231c;border-color:var(--accent);font-weight:600}
+.idbtn-submit{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
 .idbtn-submit:hover{filter:brightness(1.08)}
-.idbtn-submit:disabled{background:#21262d;color:var(--mut);border-color:var(--line);font-weight:400;cursor:not-allowed;filter:none}
+.idbtn-submit:disabled{background:var(--disabled);color:var(--mut);border-color:var(--line);font-weight:400;cursor:not-allowed;filter:none}
 .idbtn-submit:disabled:hover{filter:none}
 .cert-required{color:var(--warn);text-transform:none;letter-spacing:normal;font-weight:600}
 .hist-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
-.hist-chip{font-family:var(--mono);font-size:11px;background:#0b0f14;border:1px solid var(--line);color:var(--mut);border-radius:6px;padding:4px 9px;cursor:pointer}
+.hist-chip{font-family:var(--mono);font-size:11px;background:var(--inset);border:1px solid var(--line);color:var(--mut);border-radius:6px;padding:4px 9px;cursor:pointer}
 .hist-chip:hover{border-color:var(--accent);color:var(--accent)}
 /* Navigation history (Back/Forward + Recently Viewed Cells) -- follows the same flex-wrap-based
    responsiveness as every other row in this file (see .hist-row above) rather than a media query,
@@ -223,7 +293,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .rv-src{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);white-space:nowrap}
 .rv-sub{font-family:var(--mono);font-size:11px;color:var(--mut);margin-top:2px}
 .leaf-search{position:relative;margin-bottom:14px}
-.leaf-search-results{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#161b22;border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;z-index:5;display:none;box-shadow:0 6px 16px rgba(0,0,0,.35)}
+.leaf-search-results{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;z-index:5;display:none;box-shadow:0 6px 16px var(--shadow)}
 .leaf-search-results.show{display:block}
 .leaf-search-item{padding:8px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line)}
 .leaf-search-item:last-child{border-bottom:none}
@@ -234,8 +304,77 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 </head><body>
 <div class="wrap">
+<button type="button" id="themeToggleBtn" title="Switch between dark and light mode" aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span> <span id="themeToggleLabel">Dark</span></button>
 <a href="#" id="logoHome" style="text-decoration:none;color:inherit;display:inline-block" title="Reload µJump"><h1 class="logo"><span class="mu">µ</span><span class="jm">Jump</span></h1></a>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
+<script>
+/* ---------------------------------------------------------------------------------------------
+   Theme module -- 2026-08-09, light-mode feature. Plain FUNCTION DECLARATIONS throughout
+   (deliberately, not const arrow functions) so every one of these is visible from every other
+   <script> tag in the page, including initDashboardTab()'s own separate top-level scope further
+   down (see the "THEME ARCHITECTURE" comment above :root for why that boundary matters here) --
+   the dashboard/connectivity chart code below calls liveThemeColors() and retintPlotlyCharts()
+   directly by name, relying on that cross-tag visibility.
+
+   setTheme(mode)      -- applies "dark" or "light": sets/removes [data-theme] on <html>,
+                          persists to the SAME "ujump_theme" localStorage key the <head> FOUC
+                          guard reads, updates the toggle button's own label/icon, and retints
+                          any already-rendered Plotly charts in place.
+   toggleTheme()        -- flips between the two, called by the button's click handler.
+   currentTheme()        -- "light" or "dark", read from the live [data-theme] attribute (the
+                          single source of truth once the page has loaded -- NOT re-read from
+                          localStorage, so this stays correct even if a future caller changes
+                          the theme by some other path).
+   liveThemeColors()    -- {ink,line} read fresh from the live :root custom properties via
+                          getComputedStyle(); used to seed AXIS_FONT/BASE_LAYOUT (and their CONN_
+                          counterparts) with the CURRENT theme's colors at chart-creation time.
+   retintPlotlyCharts() -- walks every already-rendered Plotly div (Plotly.js tags each one
+                          "js-plotly-plot") and calls Plotly.relayout() to update its font/
+                          gridline colors in place -- this is what keeps OPEN charts in sync with
+                          a theme toggle without needing to touch or re-render any of the many
+                          individual chart-drawing functions elsewhere in the file (there are 20+
+                          Plotly.newPlot call sites; relayout-ing the live divs after the fact is
+                          far less invasive than changing every one of them). No-op, safely, if
+                          Plotly hasn't been loaded yet (nobody has opened the dashboard or
+                          connectivity panel this session) or no charts are on screen. */
+function liveThemeColors(){
+  var cs=getComputedStyle(document.documentElement);
+  return{ink:(cs.getPropertyValue("--ink")||"#e6edf3").trim(),line:(cs.getPropertyValue("--line")||"#2a313c").trim(),
+    panel:(cs.getPropertyValue("--panel")||"#161b22").trim()};
+}
+function retintPlotlyCharts(){
+  if(typeof Plotly==="undefined")return;
+  var c=liveThemeColors();
+  // hoverlabel.* covers Plotly's own tooltip box -- otherwise it stays whatever color it was
+  // created with (Plotly has no CSS-var awareness of its own), which is exactly the "tooltips"
+  // theming requirement for the dashboard/connectivity charts.
+  document.querySelectorAll(".js-plotly-plot").forEach(function(div){
+    try{Plotly.relayout(div,{"font.color":c.ink,"xaxis.gridcolor":c.line,"yaxis.gridcolor":c.line,
+      "hoverlabel.bgcolor":c.panel,"hoverlabel.font.color":c.ink,"hoverlabel.bordercolor":c.line});}catch(_rp){}
+  });
+}
+function currentTheme(){return document.documentElement.getAttribute("data-theme")==="light"?"light":"dark";}
+function setTheme(mode){
+  var light=mode==="light";
+  if(light)document.documentElement.setAttribute("data-theme","light");
+  else document.documentElement.removeAttribute("data-theme");
+  try{localStorage.setItem("ujump_theme",light?"light":"dark");}catch(_st){}
+  var icon=document.getElementById("themeToggleIcon"),label=document.getElementById("themeToggleLabel"),
+      btn=document.getElementById("themeToggleBtn");
+  if(icon)icon.textContent=light?"☀️":"🌙";
+  if(label)label.textContent=light?"Light":"Dark";
+  if(btn)btn.setAttribute("aria-pressed",light?"true":"false");
+  retintPlotlyCharts();
+}
+function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
+(function(){
+  var btn=document.getElementById("themeToggleBtn");
+  if(btn)btn.addEventListener("click",toggleTheme);
+  // Sync the button's own label/icon to whatever the <head> FOUC guard already applied (it only
+  // sets the attribute, it doesn't know about the button since the button didn't exist yet).
+  setTheme(currentTheme());
+})();
+</script>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -696,18 +835,25 @@ const colorFor=(function(){
   };
 })();
 
-/* Dark-theme chart colors (2026-08-02) -- Plotly can't read CSS custom properties, so these are
-   hardcoded copies of the :root --ink/--mut/--line values above; keep them in sync manually if
-   the page's palette ever changes. */
-const AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:"#e6edf3"};
+/* Theme-aware chart colors (2026-08-09, light-mode feature) -- Plotly can't read CSS custom
+   properties directly, so these are read ONCE from the live :root --ink/--line values via
+   getComputedStyle() at the moment this function runs (i.e. whichever theme is active when the
+   dashboard tab is first opened), rather than hardcoded hex. This alone does NOT keep already-
+   rendered charts in sync with a LATER theme toggle -- that's handled separately by
+   retintPlotlyCharts() (see its own comment, defined near the theme-toggle code above), which
+   calls Plotly.relayout() on every live chart div to update font/gridline colors in place without
+   needing to touch this object or re-render anything. */
+const THEME_CHART_COLORS=liveThemeColors();
+const AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:THEME_CHART_COLORS.ink};
 const BASE_LAYOUT={
   margin:{l:56,r:16,t:8,b:110},
   font:AXIS_FONT,
   paper_bgcolor:"rgba(0,0,0,0)",
   plot_bgcolor:"rgba(0,0,0,0)",
   showlegend:false,
-  xaxis:{tickangle:-45,automargin:true,gridcolor:"#2a313c"},
-  yaxis:{gridcolor:"#2a313c",zeroline:false}
+  xaxis:{tickangle:-45,automargin:true,gridcolor:THEME_CHART_COLORS.line},
+  yaxis:{gridcolor:THEME_CHART_COLORS.line,zeroline:false},
+  hoverlabel:{bgcolor:THEME_CHART_COLORS.panel,font:{color:THEME_CHART_COLORS.ink},bordercolor:THEME_CHART_COLORS.line}
 };
 const PLOTLY_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d"]};
 
@@ -2217,7 +2363,7 @@ function renderTopViewDiagram(vx,vy,vz){
   const W=260,H=140,pad=6;
   const sx=v=>pad+(v-fullA0)/(fullA1-fullA0)*(W-2*pad);
   const sy=v=>pad+(v-fullB0)/(fullB1-fullB0)*(H-2*pad);
-  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:#0d1117;border:1px solid var(--line);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:var(--bg);border:1px solid var(--line);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
   for(const e of extents){
     const ex0=sx(e.a0),ex1=sx(e.a1),ey0=sy(e.b0),ey1=sy(e.b1);
     svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"/>';
@@ -3090,7 +3236,15 @@ function buildState(pos){
      NOT applied to the custom-base-state path above (the "paste your own Neuroglancer state"
      advanced option) -- that's an escape hatch for a state the user brought themselves, so its
      own settings are left alone rather than silently overridden. */
-  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false};
+  /* crossSectionBackgroundColor/perspectiveViewBackgroundColor (2026-08-09, Søren: "make the
+     background in opened Neuroglancer instances white both in the 2D and 3D environment") -- this
+     is INDEPENDENT of this page's own light/dark toggle above: Neuroglancer always opens in its
+     own separate tab (window.open, see neuroglancerLinkForPos()), so it has no way to inherit this
+     page's CSS anyway, and white is what Søren specifically asked for regardless of which theme
+     µJump itself is in. Applies to both the 2D cross-section slice panels and the 3D perspective
+     panel -- confirmed against Neuroglancer's own JSON state schema (both keys accept a plain hex
+     string). */
+  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:"#ffffff",perspectiveViewBackgroundColor:"#ffffff"};
 }
 function fail(m){const e=document.getElementById("err");e.textContent=m;e.style.display="block";document.getElementById("out").classList.remove("show");}
 /* Shows/hides the persistent "Back to previous cell" row (a sibling of #nucpanel, NOT inside it --
@@ -4088,9 +4242,12 @@ function initGSI(retriesLeft,targetId){
 function showSubmitToast(ok,msg){
   var t=document.getElementById("submitToast");
   if(!t){t=document.createElement("div");t.id="submitToast";
-    t.style.cssText="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;max-width:90vw;padding:12px 18px;border-radius:10px;font:14px/1.4 -apple-system,Segoe UI,sans-serif;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.3);opacity:0;transition:opacity .2s";
+    t.style.cssText="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;max-width:90vw;padding:12px 18px;border-radius:10px;font:14px/1.4 -apple-system,Segoe UI,sans-serif;color:#fff;box-shadow:0 6px 24px var(--shadow);opacity:0;transition:opacity .2s";
     document.body.appendChild(t);}
-  t.style.background=ok?"#2e7d32":"#c62828";
+  // var(--ok)/var(--danger) rather than a fixed hex -- both stay dark/saturated enough in EITHER
+  // theme for the toast's always-white text to stay readable (see the "THEME ARCHITECTURE" note
+  // above :root for why the light-theme status colors are deliberately darker, not just faded).
+  t.style.background=ok?"var(--ok)":"var(--danger)";
   t.textContent=(ok?"✓ ":"✗ ")+msg;
   t.style.opacity="1";
   clearTimeout(showSubmitToast._h);
@@ -4132,7 +4289,7 @@ function showUndoToast(nucleusId,rootId,pos){
   var t=document.getElementById("undoToast");
   if(!t){
     t=document.createElement("div");t.id="undoToast";
-    t.style.cssText="position:fixed;left:50%;bottom:76px;transform:translateX(-50%);z-index:99999;max-width:90vw;padding:10px 14px;border-radius:10px;font:13px/1.4 -apple-system,Segoe UI,sans-serif;color:#fff;background:#24292f;box-shadow:0 6px 24px rgba(0,0,0,.3);opacity:0;transition:opacity .2s;display:flex;align-items:center;gap:10px";
+    t.style.cssText="position:fixed;left:50%;bottom:76px;transform:translateX(-50%);z-index:99999;max-width:90vw;padding:10px 14px;border-radius:10px;font:13px/1.4 -apple-system,Segoe UI,sans-serif;color:var(--ink);background:var(--panel);border:1px solid var(--line);box-shadow:0 6px 24px var(--shadow);opacity:0;transition:opacity .2s;display:flex;align-items:center;gap:10px";
     document.body.appendChild(t);
   }
   var coord=pos?pos.join(","):"";
@@ -4730,7 +4887,7 @@ function loadRootIdPanel(nid,containerEl){
           +'<button class="idbtn ridvote" data-rid="'+x.rootId+'" data-v="1" style="padding:1px 7px">▲</button>'
           +'<button class="idbtn ridvote" data-rid="'+x.rootId+'" data-v="-1" style="padding:1px 7px">▼</button>'
           +(x.by?'<span style="font-size:11px;color:var(--mut)">by '+String(x.by).replace(/</g,"&lt;")+'</span>':'')
-          +(isOwner?'<button class="idbtn ridremove" data-rid="'+x.rootId+'" style="padding:1px 7px;color:#c62828">remove</button>':'')
+          +(isOwner?'<button class="idbtn ridremove" data-rid="'+x.rootId+'" style="padding:1px 7px;color:var(--danger)">remove</button>':'')
           +'</div>';
         /* No per-row mesh/PowerPoint button here any more (removed 2026-07-28) -- these
            img65-segType extra root IDs are fragments of the SAME cell as the main root ID
@@ -4916,7 +5073,8 @@ function buildConnectivityState(centerPos,queryRootId,shown,points){
   return{dimensions:DIM,position:centerPos,crossSectionScale:3.0,
     projectionScale:Math.max(computeConnSpanNm(centerPos,shown,points)*0.3,10000),
     layers,selectedLayer:{layer:"cell + partners",visible:true},
-    layout:{type:"3d",orthographicProjection:true},showDefaultAnnotations:false};
+    layout:{type:"3d",orthographicProjection:true},showDefaultAnnotations:false,
+    crossSectionBackgroundColor:"#ffffff",perspectiveViewBackgroundColor:"#ffffff"};
 }
 /* Rough physical-nm span across the query cell + every rendered synapse point, so the initial
    zoom is wide enough to see scattered partners rather than defaulting to a single-soma zoom
@@ -4968,15 +5126,18 @@ const connColorFor=(function(){
     return map[name];
   };
 })();
-const CONN_AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:"#e6edf3"};
+// Theme-aware, same convention as AXIS_FONT/BASE_LAYOUT above -- see that block's own comment.
+const CONN_THEME_CHART_COLORS=liveThemeColors();
+const CONN_AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:CONN_THEME_CHART_COLORS.ink};
 const CONN_BASE_LAYOUT={
   margin:{l:56,r:16,t:36,b:70},
   font:CONN_AXIS_FONT,
   paper_bgcolor:"rgba(0,0,0,0)",
   plot_bgcolor:"rgba(0,0,0,0)",
   showlegend:false,
-  xaxis:{tickangle:-45,automargin:true,gridcolor:"#2a313c"},
-  yaxis:{gridcolor:"#2a313c",zeroline:false}
+  xaxis:{tickangle:-45,automargin:true,gridcolor:CONN_THEME_CHART_COLORS.line},
+  yaxis:{gridcolor:CONN_THEME_CHART_COLORS.line,zeroline:false},
+  hoverlabel:{bgcolor:CONN_THEME_CHART_COLORS.panel,font:{color:CONN_THEME_CHART_COLORS.ink},bordercolor:CONN_THEME_CHART_COLORS.line}
 };
 const CONN_PLOTLY_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d"]};
 const CONN_INPUT_COLOR="#5fd0ff",CONN_OUTPUT_COLOR="#ff8fc4";
@@ -5135,7 +5296,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
     let savedToken="";try{savedToken=localStorage.getItem("cave_token")||"";}catch(_lse){}
     let h='<div style="font-size:12px;color:var(--mut);margin-bottom:8px">Looks up this cell\'s synaptic partners directly from the CAVE materialization API and opens the cell plus its partners in Neuroglancer, coloured by direction (input '
       +'<span style="color:#00b7ff">&#9679;</span> / output <span style="color:#ff4fa3">&#9679;</span>).</div>';
-    h+='<div style="font-size:11.5px;color:var(--mut);background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
+    h+='<div style="font-size:11.5px;color:var(--mut);background:var(--inset);border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
       +'<b style="color:var(--ink)">Need a CAVE token?</b> Visit <a href="https://global.daf-apis.com/auth/api/v1/create_token" target="_blank" rel="noopener">global.daf-apis.com/auth/api/v1/create_token</a>, '
       +'sign in with the Google account you use for MICrONS, and copy the token shown on the page. '
       +'Paste just that string below \u2014 with or without quotes around it, both are fine, they\'re stripped automatically. '
@@ -5291,10 +5452,10 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
             +'<option value="cell_type">cell_type</option></select></div>'
             +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer;font-size:11px;color:var(--mut)"><input type="checkbox" id="connShowNoType"> show unmatched (No Type)</label>'
             +'</div>'
-            +'<div style="margin-bottom:10px"><div id="'+chartIoId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:280px"></div></div>'
+            +'<div style="margin-bottom:10px"><div id="'+chartIoId+'" style="background:var(--inset);border:1px solid var(--line);border-radius:8px;min-height:280px"></div></div>'
             +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px;margin-bottom:10px">'
-            +'<div id="'+chartScatId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:280px"></div>'
-            +'<div id="'+chartDistId+'" style="background:#0b0f14;border:1px solid var(--line);border-radius:8px;min-height:280px"></div>'
+            +'<div id="'+chartScatId+'" style="background:var(--inset);border:1px solid var(--line);border-radius:8px;min-height:280px"></div>'
+            +'<div id="'+chartDistId+'" style="background:var(--inset);border:1px solid var(--line);border-radius:8px;min-height:280px"></div>'
             +'</div>'
             +'<div style="margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap">'
             +'<button class="idbtn" id="connNgl" type="button">Open in Neuroglancer</button>'
@@ -5311,7 +5472,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+(p.syn_size||0)+'</td>'
               +'<td style="padding:4px 8px;border-bottom:1px solid var(--line)">'+escHtml(p.cell_type||"—")+'</td></tr>').join("")
             +'</tbody></table></div><div class="hint" style="margin-top:6px">Only the top N partners per direction (above) are loaded as meshes in Neuroglancer; the graphs, download, and this table cover every partner/synapse found. Per-synapse size and cortical depth are also shown in Neuroglancer itself \u2014 click/hover a yellow synapse point.</div>'
-            +(typeNote?'<div class="hint" style="margin-top:4px;color:'+(typeNoteWarn?"#ffb74d":"var(--mut)")+'">'+escHtml(typeNote)+'</div>':'');
+            +(typeNote?'<div class="hint" style="margin-top:4px;color:'+(typeNoteWarn?"var(--warn)":"var(--mut)")+'">'+escHtml(typeNote)+'</div>':'');
           const colorByEl=rt.querySelector("#connColorBy");
           const noTypeEl=rt.querySelector("#connShowNoType");
           const ioEl=rt.querySelector("#"+chartIoId),scatEl=rt.querySelector("#"+chartScatId),distEl=rt.querySelector("#"+chartDistId);
@@ -6783,8 +6944,8 @@ function oobNeighborRowHtml(c){
       +'</div></div><button class="njump" data-x="'+ST_X[c.i]+'" data-y="'+ST_Y[c.i]+'" data-z="'+ST_Z[c.i]+'">Jump</button></div>';
   }
   const rep=c.rep,who=rep.reporterName&&rep.reporterName.trim()?rep.reporterName.trim():"anonymous";
-  return '<div class="nrow"><div class="nleft"><span class="dot" style="background:#e8b923"></span><div>'
-    +'<div class="ntype"><span style="color:#e8b923" title="User-reported, unverified">'+escHtml(rep.identified||"(no type given)")+'</span></div>'
+  return '<div class="nrow"><div class="nleft"><span class="dot" style="background:var(--gold)"></span><div>'
+    +'<div class="ntype"><span style="color:var(--gold)" title="User-reported, unverified">'+escHtml(rep.identified||"(no type given)")+'</span></div>'
     +'<div class="nsub">'+(c.dist/1000).toFixed(2)+' &micro;m &middot; reported by '+escHtml(who)+' &middot; voxel ('+coordSpan(c.pos[0],c.pos[1],c.pos[2])+')</div>'
     +'</div></div><button class="njump" data-x="'+c.pos[0]+'" data-y="'+c.pos[1]+'" data-z="'+c.pos[2]+'">Jump</button></div>';
 }
@@ -6824,8 +6985,8 @@ function renderUserReportedCell(ur,panel){
   window.CUR_ID_SOURCE=isUnclassified?"unclassified":"community";
   window.CUR_HAS_CELL=true;
   let oh=isUnclassified
-    ?'<span class="tag" style="background:#332900;color:#e8b923;border:1px solid #e8b923" title="Logged by another tool user through the ‘report a new cell’ flow, with no cell-type identification yet — just its location and any segmentation IDs found. Add an identification below to classify it.">unclassified — location only</span>'
-    :'<span class="tag" style="background:#332900;color:#e8b923;border:1px solid #e8b923" title="Logged by another tool user through the ‘report a new cell’ flow — not yet reviewed or confirmed by Søren. Treat as a lead worth checking, not a verified identification.">user-reported, unverified</span>';
+    ?'<span class="tag" style="background:color-mix(in srgb,var(--gold) 15%,transparent);color:var(--gold);border:1px solid var(--gold)" title="Logged by another tool user through the ‘report a new cell’ flow, with no cell-type identification yet — just its location and any segmentation IDs found. Add an identification below to classify it.">unclassified — location only</span>'
+    :'<span class="tag" style="background:color-mix(in srgb,var(--gold) 15%,transparent);color:var(--gold);border:1px solid var(--gold)" title="Logged by another tool user through the ‘report a new cell’ flow — not yet reviewed or confirmed by Søren. Treat as a lead worth checking, not a verified identification.">user-reported, unverified</span>';
   oh+='<div class="celltype">'+celltypeLink(ur.pos,isUnclassified?"Unclassified cell":escHtml(ur.identified))+'</div>';
   oh+='<div class="meta">Reported by '+escHtml(who)+(ur.certainty?' &middot; certainty '+escHtml(ur.certainty)+'/5':'')+'</div>';
   if(ur.comment)oh+='<div class="meta">'+escHtml(ur.comment)+'</div>';
@@ -6934,7 +7095,7 @@ function renderMergedSubCell(sub,panel){
   CUR_ROOT=sub.subRootId||null;CUR_NUCID=null;CUR_NUC_ROOT=null;
   CUR_IS_NEURON=looksLikeNeuron(sub.identified);
   window.CUR_POS=sub.pos;window.CUR_CELLTYPE_DISPLAY=sub.identified;window.CUR_ID_SOURCE="community";window.CUR_HAS_CELL=true;
-  let h='<span class="tag" style="background:#332900;color:#e8b923;border:1px solid #e8b923" title="Reported through the ‘report a merged nucleus’ flow: MICrONS’s automatic nucleus detector fused this cell together with at least one other real nucleus into a single detection, but this specific sub-cell has since been given its own identity (and, if known, its own root ID) by a tool user.">community-reported — merged-nucleus split</span>';
+  let h='<span class="tag" style="background:color-mix(in srgb,var(--gold) 15%,transparent);color:var(--gold);border:1px solid var(--gold)" title="Reported through the ‘report a merged nucleus’ flow: MICrONS’s automatic nucleus detector fused this cell together with at least one other real nucleus into a single detection, but this specific sub-cell has since been given its own identity (and, if known, its own root ID) by a tool user.">community-reported — merged-nucleus split</span>';
   h+='<div class="celltype">'+celltypeLink(sub.pos,escHtml(sub.identified))+'</div>';
   /* History/provenance: the parent nucleus id, how many real cells MICrONS fused together
      (subCount, if the source report included it), and -- via nidToIndex()/typeInfo() -- what
@@ -7029,7 +7190,7 @@ function buildExampleState(pos,modality,rootOverride,isNeuron){
   }
   const hasSeg=layers.some(l=>l.name==="segmentation");
   layers.push(...buildLayerAnnotationLayers(pos));
-  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(isNeuron),layers,selectedLayer:{layer:hasSeg?"segmentation":"EM",visible:true},layout:{type:is3D?"3d":"xy",orthographicProjection:true},showDefaultAnnotations:false};
+  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(isNeuron),layers,selectedLayer:{layer:hasSeg?"segmentation":"EM",visible:true},layout:{type:is3D?"3d":"xy",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:"#ffffff",perspectiveViewBackgroundColor:"#ffffff"};
 }
 function exampleUrl(coord,modality,rootOverride,isNeuron){
   const state=buildExampleState(coord,modality,rootOverride,isNeuron);
@@ -7462,7 +7623,7 @@ function renderResult(slug){
       return;
     }
     const who=dupeMatch.reporterName&&dupeMatch.reporterName.trim()?escHtml(dupeMatch.reporterName.trim()):"anonymous";
-    el.innerHTML='<div class="idf-flag" style="border-color:#e8b923;color:#e8b923;margin-top:8px">'
+    el.innerHTML='<div class="idf-flag" style="border-color:var(--gold);color:var(--gold);margin-top:8px">'
       +'&#9888; A cell has already been reported '+(dupeMatch.dist<50?"right here":(dupeMatch.dist/1000).toFixed(2)+' &micro;m away')+' by '+who+' as <b>'+escHtml(dupeMatch.identified||"(no type given)")+'</b>'
       +(dupeMatch.certainty?' (certainty '+escHtml(dupeMatch.certainty)+'/5)':'')+'. Is this the same cell?'
       +'<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;font-weight:normal">'
@@ -8222,11 +8383,11 @@ function gamifyStyle(){
   var st=document.createElement("style");st.id="gameStyle";
   st.textContent=
     "#gameChip{position:fixed;top:10px;right:12px;z-index:9000;font:13px/1.3 -apple-system,Segoe UI,sans-serif}"
-   +"#gameChip .chipbtn{display:inline-flex;align-items:center;gap:8px;background:var(--panel,#161b22);color:var(--ink,#e6edf3);border:1px solid var(--accent,#27e0b3);border-radius:20px;padding:6px 13px;cursor:pointer;box-shadow:0 2px 12px rgba(39,224,179,.25)}"
+   +"#gameChip .chipbtn{display:inline-flex;align-items:center;gap:8px;background:var(--panel,#161b22);color:var(--ink,#e6edf3);border:1px solid var(--accent,#27e0b3);border-radius:20px;padding:6px 13px;cursor:pointer;box-shadow:0 2px 12px color-mix(in srgb,var(--accent,#27e0b3) 25%,transparent)}"
    +"#gameChip .lvl{font-weight:600;color:var(--accent,#3d6f92)}"
    +"#gameChip .pts{color:var(--mut,#8b949e)}"
-   +"#gameDash{position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:32px 12px}"
-   +"#gameDash .card{background:var(--panel,#161b22);color:var(--ink,#e6edf3);max-width:640px;width:100%;border-radius:14px;padding:22px 22px 26px;box-shadow:0 12px 40px rgba(0,0,0,.3)}"
+   +"#gameDash{position:fixed;inset:0;z-index:9500;background:var(--scrim,rgba(0,0,0,.45));display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:32px 12px}"
+   +"#gameDash .card{background:var(--panel,#161b22);color:var(--ink,#e6edf3);max-width:640px;width:100%;border-radius:14px;padding:22px 22px 26px;box-shadow:0 12px 40px var(--shadow,rgba(0,0,0,.3))}"
    +"#gameDash h2{margin:0 0 2px;font-size:20px}#gameDash h3{margin:18px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut,#8b949e)}"
    +"#gameDash .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}"
    +"#gameDash .stat{background:var(--panel,#161b22);border:1px solid var(--line,#2a313c);border-radius:10px;padding:10px 12px}"
@@ -8236,7 +8397,7 @@ function gamifyStyle(){
    +"#gameDash .lbrow{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line,#2a313c);font-size:14px}"
    +"#gameDash .favrow{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line,#2a313c);font-size:13px;flex-wrap:wrap}"
    +"#gameDash .x{position:absolute;top:14px;right:16px;cursor:pointer;font-size:22px;color:var(--mut,#8b949e)}"
-   +"#gameDash .dbtn{background:var(--accent,#3d6f92);color:#fff;border:none;border-radius:7px;padding:5px 12px;cursor:pointer}";
+   +"#gameDash .dbtn{background:var(--accent,#3d6f92);color:var(--on-accent,#06231c);border:none;border-radius:7px;padding:5px 12px;cursor:pointer}";
   document.head.appendChild(st);
 }
 function gamifyInjectUI(){
@@ -8350,7 +8511,7 @@ function openDashboard(){
       fl.innerHTML=favs.length?favs.map(function(f){
         return '<div class="favrow"><code>'+escHtml(f.nucleusId||f.coord)+'</code>'
           +(f.coord?'<button class="dbtn favjump" data-coord="'+escHtml(f.coord)+'" style="padding:2px 8px">jump</button>':'')
-          +'<button class="favdel" data-nid="'+escHtml(f.nucleusId)+'" data-coord="'+escHtml(f.coord)+'" style="padding:2px 8px;color:#c62828;background:none;border:1px solid var(--line,#ccc);border-radius:6px;cursor:pointer">remove</button></div>';
+          +'<button class="favdel" data-nid="'+escHtml(f.nucleusId)+'" data-coord="'+escHtml(f.coord)+'" style="padding:2px 8px;color:var(--danger);background:none;border:1px solid var(--line,#ccc);border-radius:6px;cursor:pointer">remove</button></div>';
       }).join(''):'<div style="color:var(--mut,#8b949e)">No favourites yet — use ☆ Save to favourites on a cell.</div>';
       fl.querySelectorAll(".favdel").forEach(function(b){b.addEventListener("click",function(){
         if(postReport({type:"remove_favourite",timestamp:new Date().toISOString(),nucleusId:b.dataset.nid,coord:b.dataset.coord},"Removed from favourites.")){
@@ -10341,7 +10502,9 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       layers,
       selectedLayer:{layer:layers.length?layers[0].name:"segmentation",visible:true},
       layout:{type:"3d",orthographicProjection:true},
-      showDefaultAnnotations:false
+      showDefaultAnnotations:false,
+      crossSectionBackgroundColor:"#ffffff",
+      perspectiveViewBackgroundColor:"#ffffff"
     };
   }
 
@@ -10603,7 +10766,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     const fullB0=rawB0-marginB,fullB1=rawB1+marginB;
     const sx=v=>pad+(v-fullA0)/(fullA1-fullA0)*(W-2*pad);
     const sy=v=>pad+(v-fullB0)/(fullB1-fullB0)*(H-2*pad);
-    let svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:320px;height:'+H+'px;background:#0d1117;border:1px solid var(--line);border-radius:6px;display:block">';
+    let svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:320px;height:'+H+'px;background:var(--bg);border:1px solid var(--line);border-radius:6px;display:block">';
     for(const e of extents){
       const ex0=sx(e.a0),ex1=sx(e.a1),ey0=sy(e.b0),ey1=sy(e.b1);
       svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"/>';

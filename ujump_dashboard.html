@@ -1,20 +1,41 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>/* Theme FOUC guard -- see ujump.html's own copy of this exact snippet for the full comment.
+   Same "ujump_theme" localStorage key as ujump.html, so opening this file standalone (or same-
+   origin, per the embedded-frame comment below) picks up whichever theme was last chosen there. */
+try{if(localStorage.getItem("ujump_theme")==="light")document.documentElement.setAttribute("data-theme","light");}catch(_fe){}
+</script>
 <meta charset="utf-8">
 <title>µJump dashboard — MICrONS cell classifier statistics</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  /* Dark theme (2026-08-02): matches ujump.html's :root exactly, byte-for-byte, so this page
-     reads as a continuation of the same app rather than a jump to a different site -- Søren:
-     "It should feel like you are not in a different environment, that the Jump and References
-     and Filter and show tabs are also there." If ujump.html's palette ever changes, copy the
-     new values here too (kept in sync manually -- these are two separate HTML files). */
+  /* Theme (2026-08-09, light-mode feature): matches ujump.html's :root exactly, byte-for-byte
+     (dark defaults + a [data-theme="light"] override block + a print block), so this page reads
+     as a continuation of the same app rather than a jump to a different site -- Søren: "It should
+     feel like you are not in a different environment, that the Jump and References and Filter and
+     show tabs are also there." If ujump.html's palette or theme module ever changes, copy the new
+     values/script here too (kept in sync manually -- these are two separate HTML files). New vars
+     (--ok/--danger/--gold/--inset/--disabled/--on-accent/--shadow/--scrim) mirror ujump.html's own
+     for the same reasons -- see that file's "THEME ARCHITECTURE" comment above its own :root. */
   :root{
     --bg:#0d1117; --panel:#161b22; --line:#2a313c; --ink:#e6edf3; --mut:#8b949e;
-    --accent:#27e0b3; --accent-dim:#176b57; --warn:#e3b341;
+    --accent:#27e0b3; --accent-dim:#176b57; --on-accent:#06231c; --warn:#e3b341;
+    --ok:#3fb950; --danger:#f85149; --gold:#e8b923; --inset:#0b0f14; --disabled:#21262d;
+    --shadow:rgba(0,0,0,.3); --scrim:rgba(0,0,0,.45);
     --card:var(--panel); --arteriole:#e08a8a; --venule:#7ab0ff;
     --grid-gap:18px;
+  }
+  :root[data-theme="light"]{
+    --bg:#ffffff; --panel:#f6f8fa; --line:#d0d7de; --ink:#1f2328; --mut:#57606a;
+    --accent:#0f766e; --accent-dim:#d7f3ee; --on-accent:#ffffff; --warn:#9a6700;
+    --ok:#1a7f37; --danger:#cf222e; --gold:#9a6700; --inset:#ffffff; --disabled:#eaeef2;
+    --shadow:rgba(140,149,159,.25); --scrim:rgba(140,149,159,.5);
+    --arteriole:#b23b3b; --venule:#1f6fb2;
+  }
+  @media print{
+    :root{--bg:#ffffff;--panel:#ffffff;--line:#c8ccd1;--ink:#000000;--mut:#3a3f45;--accent:#0f766e;--accent-dim:#eaf6f4;--on-accent:#ffffff;--warn:#7a5200;--ok:#136329;--danger:#a4001f;--gold:#7a5200;--inset:#ffffff;--disabled:#e5e5e5;--shadow:transparent;--scrim:transparent}
+    #themeToggleBtn,.tabbar,button.refresh{display:none!important}
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}
@@ -39,9 +60,9 @@
   .tabbtn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
   header{padding:0 0 10px;border-bottom:1px solid var(--line)}
   .toolbar{display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap}
-  button.refresh{background:var(--accent);color:#06231c;border:none;border-radius:7px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
+  button.refresh{background:var(--accent);color:var(--on-accent);border:none;border-radius:7px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
   button.refresh:hover{opacity:.9}
-  button.refresh:disabled{background:#21262d;color:var(--mut);cursor:not-allowed}
+  button.refresh:disabled{background:var(--disabled);color:var(--mut);cursor:not-allowed}
   .status{font-size:12px;color:var(--mut)}
   .grid{max-width:1400px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:var(--grid-gap);padding:20px 24px 60px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px 6px;min-width:0}
@@ -50,7 +71,9 @@
   .card .sub{font-size:11.5px;color:var(--mut);margin:0 0 8px;line-height:1.4}
   .plot{width:100%;height:360px}
   .plot.tall{height:430px}
-  select.picker{font-size:12px;padding:3px 6px;border-radius:5px;border:1px solid var(--line);background:#0b0f14;color:var(--ink);margin-left:6px}
+  select.picker{font-size:12px;padding:3px 6px;border-radius:5px;border:1px solid var(--line);background:var(--inset);color:var(--ink);margin-left:6px}
+  #themeToggleBtn{position:fixed;top:14px;right:14px;z-index:9998;display:flex;align-items:center;gap:6px;font:inherit;font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;cursor:pointer;box-shadow:0 2px 8px var(--shadow)}
+  #themeToggleBtn:hover{border-color:var(--accent)}
   .placeholder{display:flex;align-items:center;justify-content:center;height:360px;color:var(--mut);font-size:13px;text-align:center;padding:0 30px;line-height:1.5}
   .footnote{font-size:10.5px;color:var(--mut);margin:4px 0 10px;line-height:1.4}
   a{color:var(--accent)}
@@ -62,6 +85,45 @@
      just differing if the parent is ever cross-origin -- caught defensively, though in practice
      ujump.html and ujump_dashboard.html are always same-origin (both served from grubblab.com). -->
 <script>try{if(window.self!==window.top)document.documentElement.classList.add("embedded");}catch(e){}</script>
+<button type="button" id="themeToggleBtn" title="Switch between dark and light mode" aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span> <span id="themeToggleLabel">Dark</span></button>
+<script>
+/* Theme module -- see ujump.html's own copy for the full comment (this is the same code,
+   duplicated for this standalone file per the "two separate HTML files, kept in sync manually"
+   convention already used for the :root block above). liveThemeColors()/retintPlotlyCharts() are
+   plain function declarations so they're visible to BASE_LAYOUT's definition further down. */
+function liveThemeColors(){
+  var cs=getComputedStyle(document.documentElement);
+  return{ink:(cs.getPropertyValue("--ink")||"#e6edf3").trim(),line:(cs.getPropertyValue("--line")||"#2a313c").trim(),
+    panel:(cs.getPropertyValue("--panel")||"#161b22").trim()};
+}
+function retintPlotlyCharts(){
+  if(typeof Plotly==="undefined")return;
+  var c=liveThemeColors();
+  document.querySelectorAll(".js-plotly-plot").forEach(function(div){
+    try{Plotly.relayout(div,{"font.color":c.ink,"xaxis.gridcolor":c.line,"yaxis.gridcolor":c.line,
+      "hoverlabel.bgcolor":c.panel,"hoverlabel.font.color":c.ink,"hoverlabel.bordercolor":c.line});}catch(_rp){}
+  });
+}
+function currentTheme(){return document.documentElement.getAttribute("data-theme")==="light"?"light":"dark";}
+function setTheme(mode){
+  var light=mode==="light";
+  if(light)document.documentElement.setAttribute("data-theme","light");
+  else document.documentElement.removeAttribute("data-theme");
+  try{localStorage.setItem("ujump_theme",light?"light":"dark");}catch(_st){}
+  var icon=document.getElementById("themeToggleIcon"),label=document.getElementById("themeToggleLabel"),
+      btn=document.getElementById("themeToggleBtn");
+  if(icon)icon.textContent=light?"☀️":"🌙";
+  if(label)label.textContent=light?"Light":"Dark";
+  if(btn)btn.setAttribute("aria-pressed",light?"true":"false");
+  retintPlotlyCharts();
+}
+function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
+(function(){
+  var btn=document.getElementById("themeToggleBtn");
+  if(btn)btn.addEventListener("click",toggleTheme);
+  setTheme(currentTheme());
+})();
+</script>
 <div class="topwrap">
 <a href="ujump.html" target="_top" class="dashlogo" style="text-decoration:none;color:inherit;display:inline-block" title="Back to µJump"><h1 class="logo"><span class="mu">µ</span><span class="jm">Jump</span><span class="dash">Statistics dashboard</span></h1></a>
 <div class="tabbar" id="mainTabs" role="tablist">
@@ -277,18 +339,20 @@ const colorFor=(function(){
   };
 })();
 
-/* Dark-theme chart colors (2026-08-02) -- Plotly can't read CSS custom properties, so these are
-   hardcoded copies of the :root --ink/--mut/--line values above; keep them in sync manually if
-   the page's palette ever changes. */
-const AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:"#e6edf3"};
+/* Theme-aware chart colors (2026-08-09, light-mode feature) -- see ujump.html's own BASE_LAYOUT
+   comment for the full design; same pattern here (read live CSS vars once via liveThemeColors(),
+   then retintPlotlyCharts() keeps already-rendered charts in sync with a later theme toggle). */
+const THEME_CHART_COLORS=liveThemeColors();
+const AXIS_FONT={family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:THEME_CHART_COLORS.ink};
 const BASE_LAYOUT={
   margin:{l:56,r:16,t:8,b:110},
   font:AXIS_FONT,
   paper_bgcolor:"rgba(0,0,0,0)",
   plot_bgcolor:"rgba(0,0,0,0)",
   showlegend:false,
-  xaxis:{tickangle:-45,automargin:true,gridcolor:"#2a313c"},
-  yaxis:{gridcolor:"#2a313c",zeroline:false}
+  xaxis:{tickangle:-45,automargin:true,gridcolor:THEME_CHART_COLORS.line},
+  yaxis:{gridcolor:THEME_CHART_COLORS.line,zeroline:false},
+  hoverlabel:{bgcolor:THEME_CHART_COLORS.panel,font:{color:THEME_CHART_COLORS.ink},bordercolor:THEME_CHART_COLORS.line}
 };
 const PLOTLY_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d"]};
 

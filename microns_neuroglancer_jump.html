@@ -1,8 +1,22 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<html lang="en"><head><script>/* Theme FOUC guard -- see ujump.html's own copy of this exact snippet for the full comment.
+   Uses its own "mjump_theme" localStorage key (not "ujump_theme") since this is a separate tool
+   with its own identity, even though the CSS var architecture it drives is identical. */
+try{if(localStorage.getItem("mjump_theme")==="light")document.documentElement.setAttribute("data-theme","light");}catch(_fe){}
+</script><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>µJump — MICrONS cell explorer</title>
 <style>
-:root{--bg:#0d1117;--panel:#161b22;--line:#2a313c;--ink:#e6edf3;--mut:#8b949e;--accent:#27e0b3;--accent-dim:#176b57;--warn:#e3b341;--exc:#f0883e;--inh:#58a6ff;--non:#8957e5;--mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,monospace}
+/* THEME ARCHITECTURE (2026-08-09, light-mode feature) -- same design as ujump.html's own :root
+   (that file is the canonical copy; see its own long "THEME ARCHITECTURE" comment for the full
+   rationale). Kept in sync by hand across files, same convention already used elsewhere in this
+   codebase for shared CSS. */
+:root{--bg:#0d1117;--panel:#161b22;--line:#2a313c;--ink:#e6edf3;--mut:#8b949e;--accent:#27e0b3;--accent-dim:#176b57;--on-accent:#06231c;--warn:#e3b341;--exc:#f0883e;--inh:#58a6ff;--non:#8957e5;--ok:#3fb950;--danger:#f85149;--gold:#e8b923;--inset:#0b0f14;--disabled:#21262d;--shadow:rgba(0,0,0,.3);--scrim:rgba(0,0,0,.45);--mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,monospace}
+:root[data-theme="light"]{--bg:#ffffff;--panel:#f6f8fa;--line:#d0d7de;--ink:#1f2328;--mut:#57606a;--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff;--warn:#9a6700;--exc:#bc4c00;--inh:#0969da;--non:#8250df;--ok:#1a7f37;--danger:#cf222e;--gold:#9a6700;--inset:#ffffff;--disabled:#eaeef2;--shadow:rgba(140,149,159,.25);--scrim:rgba(140,149,159,.5)}
+@media print{
+  :root{--bg:#ffffff;--panel:#ffffff;--line:#c8ccd1;--ink:#000000;--mut:#3a3f45;--accent:#0f766e;--accent-dim:#eaf6f4;--on-accent:#ffffff;--warn:#7a5200;--exc:#8a3900;--inh:#07508f;--non:#6a3fb0;--ok:#136329;--danger:#a4001f;--gold:#7a5200;--inset:#ffffff;--disabled:#e5e5e5;--shadow:transparent;--scrim:transparent}
+  #themeToggleBtn{display:none!important}
+  body{padding:0}
+}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5;padding:24px}
 .wrap{max-width:760px;margin:0 auto}
@@ -12,34 +26,36 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
 .tabbtn{display:inline-block;font:inherit;font-size:12px;color:var(--mut);text-decoration:none;background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 11px;vertical-align:middle;cursor:pointer}
 .tabbtn:hover{color:var(--ink);border-color:var(--accent)}
 .tabbtn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+#themeToggleBtn{position:fixed;top:14px;right:14px;z-index:9998;display:flex;align-items:center;gap:6px;font:inherit;font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;cursor:pointer;box-shadow:0 2px 8px var(--shadow)}
+#themeToggleBtn:hover{border-color:var(--accent)}
 .tabpanel{display:none}
 .tabpanel.active{display:block}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
 label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:6px}
 .row{display:flex;gap:10px;flex-wrap:wrap}.coord{flex:1;min-width:90px}
-input[type=text],input[type=password],input[type=number],select,textarea{width:100%;background:#0b0f14;border:1px solid var(--line);border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:15px;padding:9px 10px}
+input[type=text],input[type=password],input[type=number],select,textarea{width:100%;background:var(--inset);border:1px solid var(--line);border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:15px;padding:9px 10px}
 textarea{min-height:64px;font-size:12px;resize:vertical}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .units{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
-.units button{background:#0b0f14;border:1px solid var(--line);color:var(--mut);padding:6px 12px;border-radius:6px;font-family:var(--mono);font-size:13px;cursor:pointer}
+.units button{background:var(--inset);border:1px solid var(--line);color:var(--mut);padding:6px 12px;border-radius:6px;font-family:var(--mono);font-size:13px;cursor:pointer}
 .units button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
 .toggles{display:flex;gap:16px;flex-wrap:wrap;margin-top:4px}
 .toggles label{display:flex;align-items:center;gap:7px;text-transform:none;letter-spacing:0;color:var(--ink);font-size:13px;cursor:pointer;margin:0}
 .hint{font-size:12px;color:var(--mut);margin:10px 0 0}
-.go{width:100%;margin-top:4px;background:var(--accent);color:#06231c;border:none;padding:13px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;letter-spacing:.02em}
+.go{width:100%;margin-top:4px;background:var(--accent);color:var(--on-accent);border:none;padding:13px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;letter-spacing:.02em}
 .go:hover{filter:brightness(1.08)}
 .go.inline{width:44px;flex:0 0 44px;margin-top:0;padding:0;font-size:19px;line-height:1}
 .out{margin-top:14px;display:none}.out.show{display:block}
-.urlbox{font-family:var(--mono);font-size:11px;word-break:break-all;background:#0b0f14;border:1px solid var(--line);border-radius:7px;padding:10px;max-height:120px;overflow:auto}
+.urlbox{font-family:var(--mono);font-size:11px;word-break:break-all;background:var(--inset);border:1px solid var(--line);border-radius:7px;padding:10px;max-height:120px;overflow:auto}
 .actions{display:flex;gap:10px;margin-top:10px}
 .actions a,.actions button{flex:1;text-align:center;text-decoration:none;border-radius:7px;padding:10px;font-size:14px;cursor:pointer;border:1px solid var(--line)}
-.copy{background:#0b0f14;color:var(--ink)}
+.copy{background:var(--inset);color:var(--ink)}
 details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-size:13px}details[open] summary{color:var(--ink);margin-bottom:10px}
 summary.card-toggle{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:0}
 details.card{padding-bottom:14px}details.card:not([open]){padding-bottom:18px}
 .err{color:var(--warn);font-size:12px;margin-top:8px;display:none}
 code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-size:12px}
-.nuc{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:16px;background:#0b0f14;display:none}.nuc.show{display:block}.nuc.oob{border-color:var(--warn)}
+.nuc{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--inset);display:none}.nuc.show{display:block}.nuc.oob{border-color:var(--warn)}
 /* #cellPanelCard wraps err/nucpanel/idfpanel/out and lives OUTSIDE the tab panels (so it shows
    under whichever tab is active -- Jump, Filter and show, or References -- instead of only being
    reachable from the Jump tab). All four children default to display:none until a cell is
@@ -58,9 +74,9 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .ids{margin-top:10px;display:flex;flex-direction:column;gap:6px}
 .idrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .idrow span.k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);min-width:74px}
-.idval{font-family:var(--mono);font-size:12px;background:#161b22;border:1px solid var(--line);padding:3px 8px;border-radius:5px;word-break:break-all;cursor:pointer}
+.idval{font-family:var(--mono);font-size:12px;background:var(--panel);border:1px solid var(--line);padding:3px 8px;border-radius:5px;word-break:break-all;cursor:pointer}
 .idval:hover{border-color:var(--accent)}
-.jump{background:#0b0f14;border:1px solid var(--accent);color:var(--accent);border-radius:7px;padding:7px 11px;font-size:13px;cursor:pointer;margin-top:12px}
+.jump{background:var(--inset);border:1px solid var(--accent);color:var(--accent);border-radius:7px;padding:7px 11px;font-size:13px;cursor:pointer;margin-top:12px}
 .oobmsg{color:var(--warn);font-size:14px}
 .neigh{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
 .neigh h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 6px}
@@ -68,8 +84,8 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .nleft{display:flex;align-items:center;gap:9px;min-width:0}
 .dot{width:9px;height:9px;border-radius:50%;flex:none}.dot.exc{background:var(--exc)}.dot.inh{background:var(--inh)}.dot.non{background:var(--non)}.dot.none{background:var(--mut)}
 .ntype{font-weight:600;font-size:14px}.nsub{font-family:var(--mono);font-size:11px;color:var(--mut)}
-.njump{background:#0b0f14;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;flex:none}.njump:hover{border-color:var(--accent);color:var(--accent)}
-.idcta{margin-top:14px;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:#0b0f14;display:flex;flex-direction:column;gap:10px}
+.njump{background:var(--inset);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;flex:none}.njump:hover{border-color:var(--accent);color:var(--accent)}
+.idcta{margin-top:14px;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--inset);display:flex;flex-direction:column;gap:10px}
 .idcta.warn{border-color:var(--warn)}
 .idcta-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .idcta-top span{font-size:13px;color:var(--ink)}
@@ -77,9 +93,9 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .idcta-search{border-top:1px dashed var(--line);padding-top:10px}
 .idcta-search .leaf-search label{margin-bottom:4px}
 .idbtn{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent);border-radius:7px;padding:8px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
-.idbtn:disabled{background:#21262d;color:var(--mut);border-color:var(--line);cursor:not-allowed}
-.idcta:not(.warn) .idbtn{background:#0b0f14;color:var(--ink);border-color:var(--line)}
-.idf{margin-top:16px;border:1px solid var(--accent);border-radius:10px;padding:18px;background:#0b0f14;display:none}.idf.show{display:block}
+.idbtn:disabled{background:var(--disabled);color:var(--mut);border-color:var(--line);cursor:not-allowed}
+.idcta:not(.warn) .idbtn{background:var(--inset);color:var(--ink);border-color:var(--line)}
+.idf{margin-top:16px;border:1px solid var(--accent);border-radius:10px;padding:18px;background:var(--inset);display:none}.idf.show{display:block}
 .idf-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
 .idf-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
 .idf-crumbs{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:3px}
@@ -87,7 +103,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .idf-back{color:var(--accent);cursor:pointer;text-decoration:underline;font-size:12px;margin-bottom:8px;display:inline-block}
 .idf-q{font-size:15px;font-weight:600;margin-bottom:12px;line-height:1.4}
 .idf-opts{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
-.idf-opt{text-align:left;background:#161b22;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:13px;cursor:pointer}
+.idf-opt{text-align:left;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:13px;cursor:pointer}
 .idf-opt:hover{border-color:var(--accent)}
 .idf-gal{border-top:1px solid var(--line);padding-top:12px}
 .idf-gal h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}
@@ -95,7 +111,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .idf-cell{width:120px}
 .idf-cell-name{font-size:12px;font-weight:600;margin-bottom:4px}
 .idf-thumbs{display:flex;gap:4px;flex-wrap:wrap}
-.idf-thumb{position:relative;width:56px;height:56px;border-radius:5px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:#161b22}
+.idf-thumb{position:relative;width:56px;height:56px;border-radius:5px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--panel)}
 .idf-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .idf-thumb .mod{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#fff;font-size:8px;text-align:center;letter-spacing:.03em}
 .idf-thumb.nocoord{opacity:.5;cursor:default}
@@ -106,21 +122,21 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .idf-actions{display:flex;gap:10px;margin-top:14px;justify-content:center}
 .idf-certainty{margin-top:14px}
 .cert-scale{display:flex;gap:8px;justify-content:center;margin-top:6px}
-.cert-opt{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:#161b22;color:var(--ink);font-family:var(--mono);font-size:14px;font-weight:600;cursor:pointer}
+.cert-opt{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:14px;font-weight:600;cursor:pointer}
 .cert-opt:hover{border-color:var(--accent)}
-.cert-opt.sel{background:var(--accent);color:#06231c;border-color:var(--accent)}
+.cert-opt.sel{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .cert-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--mut);margin-top:4px;max-width:200px;margin-left:auto;margin-right:auto}
 .idf-submitnote{font-size:11px;color:var(--mut);margin-top:10px}
-.idbtn-submit{background:var(--accent);color:#06231c;border-color:var(--accent);font-weight:600}
+.idbtn-submit{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
 .idbtn-submit:hover{filter:brightness(1.08)}
-.idbtn-submit:disabled{background:#21262d;color:var(--mut);border-color:var(--line);font-weight:400;cursor:not-allowed;filter:none}
+.idbtn-submit:disabled{background:var(--disabled);color:var(--mut);border-color:var(--line);font-weight:400;cursor:not-allowed;filter:none}
 .idbtn-submit:disabled:hover{filter:none}
 .cert-required{color:var(--warn);text-transform:none;letter-spacing:normal;font-weight:600}
 .hist-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
-.hist-chip{font-family:var(--mono);font-size:11px;background:#0b0f14;border:1px solid var(--line);color:var(--mut);border-radius:6px;padding:4px 9px;cursor:pointer}
+.hist-chip{font-family:var(--mono);font-size:11px;background:var(--inset);border:1px solid var(--line);color:var(--mut);border-radius:6px;padding:4px 9px;cursor:pointer}
 .hist-chip:hover{border-color:var(--accent);color:var(--accent)}
 .leaf-search{position:relative;margin-bottom:14px}
-.leaf-search-results{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#161b22;border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;z-index:5;display:none;box-shadow:0 6px 16px rgba(0,0,0,.35)}
+.leaf-search-results{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;z-index:5;display:none;box-shadow:0 6px 16px var(--shadow)}
 .leaf-search-results.show{display:block}
 .leaf-search-item{padding:8px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line)}
 .leaf-search-item:last-child{border-bottom:none}
@@ -131,8 +147,45 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 </head><body>
 <div class="wrap">
+<button type="button" id="themeToggleBtn" title="Switch between dark and light mode" aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span> <span id="themeToggleLabel">Dark</span></button>
 <a href="#" id="logoHome" style="text-decoration:none;color:inherit;display:inline-block" title="Reload µJump"><h1 class="logo"><span class="mu">µ</span><span class="jm">Jump</span></h1></a>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
+<script>
+/* Theme module -- see ujump.html's own copy for the full comment. "mjump_theme" localStorage key
+   (see the <head> FOUC guard above for why this tool uses its own key rather than "ujump_theme"). */
+function liveThemeColors(){
+  var cs=getComputedStyle(document.documentElement);
+  return{ink:(cs.getPropertyValue("--ink")||"#e6edf3").trim(),line:(cs.getPropertyValue("--line")||"#2a313c").trim(),
+    panel:(cs.getPropertyValue("--panel")||"#161b22").trim()};
+}
+function retintPlotlyCharts(){
+  if(typeof Plotly==="undefined")return;
+  var c=liveThemeColors();
+  document.querySelectorAll(".js-plotly-plot").forEach(function(div){
+    try{Plotly.relayout(div,{"font.color":c.ink,"xaxis.gridcolor":c.line,"yaxis.gridcolor":c.line,
+      "hoverlabel.bgcolor":c.panel,"hoverlabel.font.color":c.ink,"hoverlabel.bordercolor":c.line});}catch(_rp){}
+  });
+}
+function currentTheme(){return document.documentElement.getAttribute("data-theme")==="light"?"light":"dark";}
+function setTheme(mode){
+  var light=mode==="light";
+  if(light)document.documentElement.setAttribute("data-theme","light");
+  else document.documentElement.removeAttribute("data-theme");
+  try{localStorage.setItem("mjump_theme",light?"light":"dark");}catch(_st){}
+  var icon=document.getElementById("themeToggleIcon"),label=document.getElementById("themeToggleLabel"),
+      btn=document.getElementById("themeToggleBtn");
+  if(icon)icon.textContent=light?"☀️":"🌙";
+  if(label)label.textContent=light?"Light":"Dark";
+  if(btn)btn.setAttribute("aria-pressed",light?"true":"false");
+  retintPlotlyCharts();
+}
+function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
+(function(){
+  var btn=document.getElementById("themeToggleBtn");
+  if(btn)btn.addEventListener("click",toggleTheme);
+  setTheme(currentTheme());
+})();
+</script>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -978,7 +1031,7 @@ function renderTopViewDiagram(vx,vy,vz){
   const W=260,H=140,pad=6;
   const sx=v=>pad+(v-fullA0)/(fullA1-fullA0)*(W-2*pad);
   const sy=v=>pad+(v-fullB0)/(fullB1-fullB0)*(H-2*pad);
-  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:#0d1117;border:1px solid var(--line);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:var(--bg);border:1px solid var(--line);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
   for(const e of extents){
     const ex0=sx(e.a0),ex1=sx(e.a1),ey0=sy(e.b0),ey1=sy(e.b1);
     svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"/>';
@@ -1662,7 +1715,10 @@ function buildState(pos){
      NOT applied to the custom-base-state path above (the "paste your own Neuroglancer state"
      advanced option) -- that's an escape hatch for a state the user brought themselves, so its
      own settings are left alone rather than silently overridden. */
-  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false};
+  // crossSectionBackgroundColor/perspectiveViewBackgroundColor -- see ujump.html's buildState()
+  // for the full comment (Søren: white background in Neuroglancer, both 2D and 3D, independent
+  // of this page's own theme toggle since Neuroglancer opens in its own separate tab).
+  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:"#ffffff",perspectiveViewBackgroundColor:"#ffffff"};
 }
 function fail(m){const e=document.getElementById("err");e.textContent=m;e.style.display="block";document.getElementById("out").classList.remove("show");}
 document.getElementById("go").addEventListener("click",()=>{
@@ -2514,9 +2570,9 @@ function initGSI(retriesLeft,targetId){
 function showSubmitToast(ok,msg){
   var t=document.getElementById("submitToast");
   if(!t){t=document.createElement("div");t.id="submitToast";
-    t.style.cssText="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;max-width:90vw;padding:12px 18px;border-radius:10px;font:14px/1.4 -apple-system,Segoe UI,sans-serif;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.3);opacity:0;transition:opacity .2s";
+    t.style.cssText="position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;max-width:90vw;padding:12px 18px;border-radius:10px;font:14px/1.4 -apple-system,Segoe UI,sans-serif;color:#fff;box-shadow:0 6px 24px var(--shadow);opacity:0;transition:opacity .2s";
     document.body.appendChild(t);}
-  t.style.background=ok?"#2e7d32":"#c62828";
+  t.style.background=ok?"var(--ok)":"var(--danger)";
   t.textContent=(ok?"✓ ":"✗ ")+msg;
   t.style.opacity="1";
   clearTimeout(showSubmitToast._h);
@@ -2810,7 +2866,7 @@ function loadRootIdPanel(nid,containerEl){
           +'<button class="idbtn ridvote" data-rid="'+x.rootId+'" data-v="1" style="padding:1px 7px">▲</button>'
           +'<button class="idbtn ridvote" data-rid="'+x.rootId+'" data-v="-1" style="padding:1px 7px">▼</button>'
           +(x.by?'<span style="font-size:11px;color:var(--mut)">by '+String(x.by).replace(/</g,"&lt;")+'</span>':'')
-          +(isOwner?'<button class="idbtn ridremove" data-rid="'+x.rootId+'" style="padding:1px 7px;color:#c62828">remove</button>':'')
+          +(isOwner?'<button class="idbtn ridremove" data-rid="'+x.rootId+'" style="padding:1px 7px;color:var(--danger)">remove</button>':'')
           +'</div>';
         /* No per-row mesh/PowerPoint button here any more (removed 2026-07-28) -- these
            img65-segType extra root IDs are fragments of the SAME cell as the main root ID
@@ -2992,7 +3048,8 @@ function buildConnectivityState(centerPos,queryRootId,shown,points){
   return{dimensions:DIM,position:centerPos,crossSectionScale:3.0,
     projectionScale:Math.max(computeConnSpanNm(centerPos,shown,points)*0.3,10000),
     layers,selectedLayer:{layer:"cell + partners",visible:true},
-    layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false};
+    layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false,
+    crossSectionBackgroundColor:"#ffffff",perspectiveViewBackgroundColor:"#ffffff"};
 }
 /* Rough physical-nm span across the query cell + every rendered synapse point, so the initial
    zoom is wide enough to see scattered partners rather than defaulting to a single-soma zoom
@@ -3028,7 +3085,7 @@ function loadConnectivityPanel(containerId,rootId,centerPos){
     let savedToken="";try{savedToken=localStorage.getItem("cave_token")||"";}catch(_lse){}
     let h='<div style="font-size:12px;color:var(--mut);margin-bottom:8px">Looks up this cell\'s synaptic partners directly from the CAVE materialization API and opens the cell plus its partners in Neuroglancer, coloured by direction (input '
       +'<span style="color:#00b7ff">&#9679;</span> / output <span style="color:#ff4fa3">&#9679;</span>).</div>';
-    h+='<div style="font-size:11.5px;color:var(--mut);background:#0b0f14;border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
+    h+='<div style="font-size:11.5px;color:var(--mut);background:var(--inset);border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
       +'<b style="color:var(--ink)">Need a CAVE token?</b> Visit <a href="https://global.daf-apis.com/auth/api/v1/create_token" target="_blank" rel="noopener">global.daf-apis.com/auth/api/v1/create_token</a>, '
       +'sign in with the Google account you use for MICrONS, and copy the token shown on the page. '
       +'Paste just that string below \u2014 with or without quotes around it, both are fine, they\'re stripped automatically. '
@@ -4510,7 +4567,7 @@ function buildExampleState(pos,modality,rootOverride,isNeuron){
   }
   const hasSeg=layers.some(l=>l.name==="segmentation");
   layers.push(...buildLayerAnnotationLayers(pos));
-  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(isNeuron),layers,selectedLayer:{layer:hasSeg?"segmentation":"EM",visible:true},layout:{type:is3D?"3d":"xy",orthographicProjection:true},showDefaultAnnotations:false};
+  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(isNeuron),layers,selectedLayer:{layer:hasSeg?"segmentation":"EM",visible:true},layout:{type:is3D?"3d":"xy",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:"#ffffff",perspectiveViewBackgroundColor:"#ffffff"};
 }
 function exampleUrl(coord,modality,rootOverride,isNeuron){
   const state=buildExampleState(coord,modality,rootOverride,isNeuron);
@@ -5626,11 +5683,11 @@ function gamifyStyle(){
   var st=document.createElement("style");st.id="gameStyle";
   st.textContent=
     "#gameChip{position:fixed;top:10px;right:12px;z-index:9000;font:13px/1.3 -apple-system,Segoe UI,sans-serif}"
-   +"#gameChip .chipbtn{display:inline-flex;align-items:center;gap:8px;background:var(--panel,#161b22);color:var(--ink,#e6edf3);border:1px solid var(--accent,#27e0b3);border-radius:20px;padding:6px 13px;cursor:pointer;box-shadow:0 2px 12px rgba(39,224,179,.25)}"
+   +"#gameChip .chipbtn{display:inline-flex;align-items:center;gap:8px;background:var(--panel,#161b22);color:var(--ink,#e6edf3);border:1px solid var(--accent,#27e0b3);border-radius:20px;padding:6px 13px;cursor:pointer;box-shadow:0 2px 12px color-mix(in srgb,var(--accent,#27e0b3) 25%,transparent)}"
    +"#gameChip .lvl{font-weight:600;color:var(--accent,#3d6f92)}"
    +"#gameChip .pts{color:var(--mut,#8b949e)}"
-   +"#gameDash{position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:32px 12px}"
-   +"#gameDash .card{background:var(--panel,#161b22);color:var(--ink,#e6edf3);max-width:640px;width:100%;border-radius:14px;padding:22px 22px 26px;box-shadow:0 12px 40px rgba(0,0,0,.3)}"
+   +"#gameDash{position:fixed;inset:0;z-index:9500;background:var(--scrim,rgba(0,0,0,.45));display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:32px 12px}"
+   +"#gameDash .card{background:var(--panel,#161b22);color:var(--ink,#e6edf3);max-width:640px;width:100%;border-radius:14px;padding:22px 22px 26px;box-shadow:0 12px 40px var(--shadow,rgba(0,0,0,.3))}"
    +"#gameDash h2{margin:0 0 2px;font-size:20px}#gameDash h3{margin:18px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut,#8b949e)}"
    +"#gameDash .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}"
    +"#gameDash .stat{background:var(--panel,#161b22);border:1px solid var(--line,#2a313c);border-radius:10px;padding:10px 12px}"
@@ -5640,7 +5697,7 @@ function gamifyStyle(){
    +"#gameDash .lbrow{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line,#2a313c);font-size:14px}"
    +"#gameDash .favrow{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line,#2a313c);font-size:13px;flex-wrap:wrap}"
    +"#gameDash .x{position:absolute;top:14px;right:16px;cursor:pointer;font-size:22px;color:var(--mut,#8b949e)}"
-   +"#gameDash .dbtn{background:var(--accent,#3d6f92);color:#fff;border:none;border-radius:7px;padding:5px 12px;cursor:pointer}";
+   +"#gameDash .dbtn{background:var(--accent,#3d6f92);color:var(--on-accent,#06231c);border:none;border-radius:7px;padding:5px 12px;cursor:pointer}";
   document.head.appendChild(st);
 }
 function gamifyInjectUI(){
@@ -5754,7 +5811,7 @@ function openDashboard(){
       fl.innerHTML=favs.length?favs.map(function(f){
         return '<div class="favrow"><code>'+escHtml(f.nucleusId||f.coord)+'</code>'
           +(f.coord?'<button class="dbtn favjump" data-coord="'+escHtml(f.coord)+'" style="padding:2px 8px">jump</button>':'')
-          +'<button class="favdel" data-nid="'+escHtml(f.nucleusId)+'" data-coord="'+escHtml(f.coord)+'" style="padding:2px 8px;color:#c62828;background:none;border:1px solid var(--line,#ccc);border-radius:6px;cursor:pointer">remove</button></div>';
+          +'<button class="favdel" data-nid="'+escHtml(f.nucleusId)+'" data-coord="'+escHtml(f.coord)+'" style="padding:2px 8px;color:var(--danger);background:none;border:1px solid var(--line,#ccc);border-radius:6px;cursor:pointer">remove</button></div>';
       }).join(''):'<div style="color:var(--mut,#8b949e)">No favourites yet — use ☆ Save to favourites on a cell.</div>';
       fl.querySelectorAll(".favdel").forEach(function(b){b.addEventListener("click",function(){
         if(postReport({type:"remove_favourite",timestamp:new Date().toISOString(),nucleusId:b.dataset.nid,coord:b.dataset.coord},"Removed from favourites.")){
@@ -7618,7 +7675,9 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       layers,
       selectedLayer:{layer:layers.length?layers[0].name:"segmentation",visible:true},
       layout:{type:"3d",orthographicProjection:true},
-      showDefaultAnnotations:false
+      showDefaultAnnotations:false,
+      crossSectionBackgroundColor:"#ffffff",
+      perspectiveViewBackgroundColor:"#ffffff"
     };
   }
 
@@ -7871,7 +7930,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     const fullB0=rawB0-marginB,fullB1=rawB1+marginB;
     const sx=v=>pad+(v-fullA0)/(fullA1-fullA0)*(W-2*pad);
     const sy=v=>pad+(v-fullB0)/(fullB1-fullB0)*(H-2*pad);
-    let svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:320px;height:'+H+'px;background:#0d1117;border:1px solid var(--line);border-radius:6px;display:block">';
+    let svg='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;max-width:320px;height:'+H+'px;background:var(--bg);border:1px solid var(--line);border-radius:6px;display:block">';
     for(const e of extents){
       const ex0=sx(e.a0),ex1=sx(e.a1),ey0=sy(e.b0),ey1=sy(e.b1);
       svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"/>';
