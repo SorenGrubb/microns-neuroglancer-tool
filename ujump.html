@@ -8982,15 +8982,29 @@ if(GOOGLE_CLIENT_ID){gamifyInit(12);}
    cutoff). yLo/yHi (1st/99th percentile of member Y) give the drawn shape's vertical extent.
    Units are physical nm, matching this file's other geometry constants (e.g. MINNIE65_EM_BB).
    See buildV1ColumnLayer() below for how this is drawn.
-   axisSlopeX/axisSlopeZ/yMean (2026-08-10, Søren: "the V1 column visualization... should be
-   slanted to match biological reality rather than appearing perfectly vertical") -- the source
-   table is itself named allen_v1_column_types_SLANTED_ref: a true cortical column follows the
-   local surface normal, not this dataset's fixed Y axis, so a real column tilts relative to it
-   (cortex curves). The envelope this file drew was nonetheless a perfectly vertical cylinder
-   (every ring at the same cx/cz, only y differing) -- fixed below by fitting a simple linear
-   tilt, x(y) and z(y), through the REAL nm positions of all 1,899 members (read directly from
-   this tool's own NX/NY/NZ arrays via the member index keys -- no new/re-exported data needed).
-   This is a measured tilt from the actual point cloud, not a guessed angle. */
+   breakY/upperCx/upperCz/axisSlopeX/axisSlopeZ (2026-08-10, then corrected same day, Søren:
+   "the V1 column visualization... should be slanted to match biological reality rather than
+   appearing perfectly vertical" -- first pass fit ONE tilt through every member, top to bottom,
+   which over-slanted the shallow layers. Søren then pointed to Elabbady et al. 2025 Nature
+   (Methods, "Cortical column" / "Column selection", https://doi.org/10.1038/s41586-024-07765-7)
+   where the column is described exactly as a TWO-SEGMENT piecewise-linear shape: "A 100 x 100
+   um box was placed on layer 2/3 and was extended along the y axis... it was observed that
+   deep-layer neurons had apical dendrites that were not oriented along the most direct
+   pia-to-white-matter direction... Using a collection of layer 5 ET cells... The slant angle
+   was computed as two piecewise linear segments, one along the cortical depth to lower layer 5
+   where little slant was observed, and one along the direction defined by the vector-averaged
+   direction of the labelled axons." So: vertical from L1 down through upper layer 5 (Layer 5a),
+   then slanted from the Layer 5a/5b boundary down through Layer 5b/6/white matter -- matching
+   the source table's own name, allen_v1_column_types_SLANTED_ref. This tool already has a
+   pia/white-matter surface trace and Ledderose-scaled layer-depth model (layerBoundsForThickness,
+   defined earlier in this file) used elsewhere for cortical-layer lookups, so the Layer 5a/5b
+   boundary is computed here the same way, at the column's own (cx,cz), rather than guessed.
+   Below that depth, the tilt is fit (linear regression of x,z vs y, anchored so the line passes
+   through the vertical axis exactly at the breakpoint -- true piecewise-linear, no kink-free
+   blending) from the REAL nm positions of the deep-layer members only (read directly from this
+   tool's own NX/NY/NZ arrays via the member index keys -- no new/re-exported data needed). This
+   is a measured tilt from the actual point cloud, restricted to the depth range the paper says
+   it applies to -- not a guessed angle applied to the whole column. */
 (function(){
   const VC=JSON.parse(document.getElementById("v1columndata").textContent);
   const idxArr=new Uint32Array(b64(VC.IB).buffer);
@@ -9002,13 +9016,52 @@ if(GOOGLE_CLIENT_ID){gamifyInit(12);}
   }
   window.V1_COLUMN_MEMBERS=members;
   const boundary=JSON.parse(document.getElementById("v1columnboundary").textContent);
-  let sumX=0,sumY=0,sumZ=0,vn=0;
-  for(const key in members){const i=Number(key);sumX+=NX[i]*4;sumY+=NY[i]*4;sumZ+=NZ[i]*40;vn++;}
-  if(vn){
-    const mx=sumX/vn,my=sumY/vn,mz=sumZ/vn;
+  // Find the Layer 5a/5b boundary depth (nm) at the column's own (cx,cz) -- this is the
+  // "lower layer 5" breakpoint the paper describes, using the same pia/WM surface trace and
+  // Ledderose-scaled layer model used everywhere else in this file (see layerBoundsForThickness).
+  let breakY=null;
+  if(typeof PIA_X!=="undefined"&&PIA_N>0&&WM_N>0){
+    const piaY=idwSurfaceY(boundary.cx,boundary.cz,PIA_X,PIA_Y,PIA_Z,PIA_N,8);
+    const wmY=idwSurfaceY(boundary.cx,boundary.cz,WM_X,WM_Y,WM_Z,WM_N,8);
+    const thickness=wmY-piaY;
+    if(thickness>0){
+      const bounds=layerBoundsForThickness(thickness/1000);
+      const l5b=bounds.find(b=>b[0]==="Layer 5b");
+      if(l5b)breakY=piaY+l5b[1]*1000; // nm depth where Layer 5b (lower layer 5) begins
+    }
+  }
+  const upper=[],lower=[];
+  for(const key in members){
+    const i=Number(key),y=NY[i]*4;
+    (breakY!=null&&y>breakY?lower:upper).push(i);
+  }
+  // Vertical axis position for the unslanted upper segment: mean (x,z) of the upper-segment
+  // members (matches the paper's "little slant was observed" there, so their own mean position
+  // already traces a near-vertical line -- falls back to the envelope's overall centre if too
+  // few upper members exist to average sensibly).
+  let ux=boundary.cx,uz=boundary.cz;
+  if(upper.length>=5){
+    let sx=0,sz=0;
+    for(const i of upper){sx+=NX[i]*4;sz+=NZ[i]*40;}
+    ux=sx/upper.length;uz=sz/upper.length;
+  }
+  boundary.breakY=breakY;
+  boundary.upperCx=ux;
+  boundary.upperCz=uz;
+  boundary.axisSlopeX=0;
+  boundary.axisSlopeZ=0;
+  if(breakY!=null&&lower.length>=5){
+    // Regression anchored at the breakpoint (dy measured from breakY, not from the lower
+    // segment's own mean) so the fitted line passes exactly through (ux,uz) at y=breakY --
+    // true two-segment piecewise-linear, matching the paper's method, not two independently
+    // fitted lines that would leave a visible gap at the join.
     let sYY=0,sXY=0,sZY=0;
-    for(const key in members){const i=Number(key);const dy=NY[i]*4-my;sYY+=dy*dy;sXY+=dy*(NX[i]*4-mx);sZY+=dy*(NZ[i]*40-mz);}
-    boundary.yMean=my;
+    for(const i of lower){
+      const dy=NY[i]*4-breakY;
+      sYY+=dy*dy;
+      sXY+=dy*(NX[i]*4-ux);
+      sZY+=dy*(NZ[i]*40-uz);
+    }
     boundary.axisSlopeX=sYY?sXY/sYY:0;
     boundary.axisSlopeZ=sYY?sZY/sYY:0;
   }
@@ -9046,12 +9099,17 @@ function buildV1ColumnLayer(){
   if(!b)return null;
   const SEGS=32,VERT_STRIDE=4; // 32 points/ring, a strut every 4th point -> 8 struts
   const toVox=p=>[p[0]/4,p[1]/4,p[2]/40];
-  /* centerAt(y): the column's measured tilt (axisSlopeX/axisSlopeZ/yMean, fitted above from the
-     real member point cloud -- see that comment) -- x/z shift linearly with height instead of
-     staying fixed, so the drawn envelope actually slants like the real "slanted_ref" ground-truth
-     column it's derived from, rather than the perfectly vertical cylinder this used to draw.
-     Falls back to the untilted (b.cx,b.cz) if the fit wasn't available for some reason. */
-  const centerAt=y=>b.yMean==null?[b.cx,b.cz]:[b.cx+(b.axisSlopeX||0)*(y-b.yMean),b.cz+(b.axisSlopeZ||0)*(y-b.yMean)];
+  /* centerAt(y): two-segment piecewise-linear axis matching Elabbady et al. 2025's own
+     description of this column (see the doc comment above the V1-loading IIFE) -- vertical
+     (fixed b.upperCx/b.upperCz) from the top down to the measured Layer 5a/5b boundary
+     (b.breakY, "lower layer 5"), then tilting linearly below that using the slope fitted from
+     the real deep-layer member point cloud. Falls back to the untilted (b.cx,b.cz) if no fit
+     was available (e.g. no local pia/white-matter trace at this location). */
+  const centerAt=y=>{
+    if(b.breakY==null)return[b.cx,b.cz];
+    if(y<=b.breakY)return[b.upperCx,b.upperCz];
+    return[b.upperCx+(b.axisSlopeX||0)*(y-b.breakY),b.upperCz+(b.axisSlopeZ||0)*(y-b.breakY)];
+  };
   const ring=y=>{
     const [ccx,ccz]=centerAt(y);
     const pts=[];
@@ -9061,18 +9119,27 @@ function buildV1ColumnLayer(){
     }
     return pts;
   };
-  const top=ring(b.yLo),bot=ring(b.yHi);
   const anns=[];let k=0;
-  for(let i=0;i<SEGS;i++){
-    const j=(i+1)%SEGS;
-    anns.push({type:"line",id:"v1col-"+(k++),pointA:toVox(top[i]),pointB:toVox(top[j])});
-    anns.push({type:"line",id:"v1col-"+(k++),pointA:toVox(bot[i]),pointB:toVox(bot[j])});
+  const ringLines=pts=>{for(let i=0;i<SEGS;i++){const j=(i+1)%SEGS;anns.push({type:"line",id:"v1col-"+(k++),pointA:toVox(pts[i]),pointB:toVox(pts[j])});}};
+  const strutLines=(a,c)=>{for(let i=0;i<SEGS;i+=VERT_STRIDE)anns.push({type:"line",id:"v1col-"+(k++),pointA:toVox(a[i]),pointB:toVox(c[i])});};
+  // Draw a bend ring at the breakpoint too (when it falls within the drawn vertical range) so the
+  // wireframe's struts visibly kink there instead of interpolating a smooth diagonal straight
+  // through both layer groups -- true to the paper's two SEPARATE piecewise-linear segments.
+  const hasBend=b.breakY!=null&&b.breakY>b.yLo&&b.breakY<b.yHi;
+  const top=ring(b.yLo),bot=ring(b.yHi);
+  ringLines(top);ringLines(bot);
+  if(hasBend){
+    const mid=ring(b.breakY);
+    ringLines(mid);
+    strutLines(top,mid);
+    strutLines(mid,bot);
+  }else{
+    strutLines(top,bot);
   }
-  for(let i=0;i<SEGS;i+=VERT_STRIDE)anns.push({type:"line",id:"v1col-"+(k++),pointA:toVox(top[i]),pointB:toVox(bot[i])});
   return{type:"annotation",source:"local://annotations",
     annotations:anns,
     annotationColor:"#3fb950",
-    name:"V1 column (Allen, manually-annotated, derived+slanted envelope, n="+b.n+")"};
+    name:"V1 column (Allen, manually-annotated, derived envelope — vertical to lower L5, slanted below, n="+b.n+")"};
 }
 </script>
 <script type="application/json" id="vascdata2">{"FINE_NAMES":["3rd-order arterial capillary","2nd-order venous capillary","penetrating arteriole","ascending venule","1st-order arterial capillary","pial arteriole","pial venule","3rd-order venous capillary","2nd-order arterial capillary","1st-order venous capillary"],"OV_FINE_IDX":"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","OV_FINE_VAL":"AAECAwQFBQUBAwUFAAECBgEGAQEDBwEHAgMGBgAFBwYEBQMDAQQDBgEIBAUFAAIIBAUCBwECAAUHBQICBQMHAgIFBQMJAQIAAwYAAwEHCAICBgMDAwcCAQEHCAIHAAIDAgIHBgIDAggHBwEDAwgCAgIFBgUIAwICAQACBQMIAgIBCAcCAgUDAAUJAgQCAQUFAgMBAAIGBQICCAcDAAQHAgAFAwIFBQACBwcICAgBAgkBCQgGBQcEAgACAgEFBwUIBgIBBAIHAgUDAwIBBAUABwYBCAEFBwIFCAIHBwIFCAIIBQMJCQIAAAcCBQICAgcAAgQDBwkEBQACAwEDAgkCBwECAAABBAIBBAMIBwACBAIICAIABQgCBAAAAQICBggFBQkIAgcCAwQAAQEGAgACAgMCBQcHBwEIAggDAwMCAgMFBwYDCQYCBgECAQIBCAMCCQcBAQgIBQMCAgICBAkABggHAgYHAgQFAgIBAwIDCAMHBAYBCQMFBwABAAICBQABAQUACAQCAgUCAQMHCAAGAwICAggHBQgDAgAJAgMCAgUFBgEDAgQCAwUCBwICAwIDAgMGAQMHAQEFAAMDAAgBBQkBCAkBAQgBBQADAgMJBQEGAgECCQMHAwEHCAEDAwADAwkHBQEBCAcHAgcCAgYIAQQBBAcBCAcICQIFAwQAAQECBwEDAQIBBQcACAEBAgEHAQcCAgEABwIBAAIDAAADAAgDAQgJAAEHBwAHAgcIAgAFAgcAAQEAAwAHAAIBBQEBAQUJAgEBBQAJAQMBCAgIBwgIAQkJBwMBAAIHAAcCBAEBAQcCAQcHBwgBAgkIAwcJAgEIBwMHAQEDAAMICQkCAAkCAQEIAgIFCQIHAwEJAQUAAAMACQIHAQIBBQEAAgAJAgIDBwIBAAIIAwkBAAEHAAICAwICCAIABwcIAgMBAQICBQUICQgCBwICAgICBAcCAAgDBQEECQgFAAABAgUCAQECCAgFAgYJAAcCCAIDAQEDAgABBwIDBgIAAwICAwgJAgEAAgEABAIHCAUAAgEABgAFCAECCAIDAwcBAQcBAQAHCAQJAAgHBwIAAgIBAwIJBQAIAgMCAAEDAQgDAgMCBQACBwIFBwgFAwAFAAUCAwUABAcFAgMDBQgIAgcFCAcIAAMCBQMCAgIAAggCAgQDAggABQYDCAIHCQUBAwIBAwUCCAAHAgYBBwUCAgUCCAYFBwIAAgUCBQICAgICCAQEAwIBAwABAgUFAwEHBQIFAQYFBQcDBQUCAQUGAwMABAMCAgMFAgIIAgICAgUEAgICBQIHAwIIBQgCBQACCAkJAgIIBQgCCAUCBQIEAgEIBQICAAIICAUDBQIIAAMCAgcCCAgFAAACAgMCAwAHAgUDBQUCAAcAAgYCBAIFAgUAAQADAwgCAgIFCAgFAwUFAgUFAgUEBQUCBAUGBQICAgUAAgUCAwMCAgUCAgUFAgICAgICBQUCAgUFBQICAgQAAgYIAwICBQIDAgICBQUCBgUIAgICBQIIAgQGBgIIBQACAggGBgICAgIFBQICBQICAgYCAgICAgYHAgYCAwMIAwMJAQEBAQAGBAIDAwMFAAQFAAMDAQUB","ST_FINE_IDX":"LwEAADABAAAxAQAAMgEAADMBAAA0AQAANQEAADYBAAA3AQAAOAEAADkBAAA6AQAAOwEAADwBAAA9AQAAPgEAAD8BAABAAQAAQQEAAEIBAABDAQAARAEAAEUBAABGAQAARwEAAEgBAABJAQAASgEAAEsBAABMAQAATQEAAE4BAABPAQAAUAEAAFEBAABSAQAAUwEAAFQBAABVAQAAVgEAAFcBAABYAQAAWQEAAFoBAABbAQAAXAEAAF0BAABeAQAAXwEAAGABAABhAQAAYgEAAGMBAABkAQAAZQEAAGYBAABnAQAAaAEAAGkBAABqAQAAawEAAGwBAABtAQAAbgEAAG8BAABwAQAAcQEAAHIBAABzAQAAdAEAAHUBAAB2AQAAdwEAAHgBAAB5AQAAegEAAHsBAAB8AQAAfQEAAH4BAAB/AQAAgAEAAIEBAACCAQAAgwEAAIQBAACFAQAAhgEAAIcBAACIAQAAiQEAAIoBAACLAQAAjAEAAI0BAACOAQAAjwEAAJABAACRAQAAkgEAAJMBAACUAQAAlQEAAJYBAACXAQAAmAEAAJkBAACaAQAAmwEAAJwBAACdAQAAngEAAJ8BAACgAQAAoQEAAKIBAACjAQAApAEAAKUBAACmAQAApwEAAKgBAACpAQAAqgEAAKsBAACsAQAArQEAAK4BAACvAQAAsAEAALEBAACyAQAAswEAALQBAAC1AQAAtgEAALcBAAC4AQAAuQEAALoBAAC7AQAAvAEAAL0BAAC+AQAAvwEAAMABAADBAQAAwgEAAMMBAADEAQAAxQEAAMYBAADHAQAAyAEAAMkBAADKAQAAywEAAMwBAADNAQAAzgEAAM8BAADQAQAA0QEAANIBAADTAQAA1AEAANUBAADWAQAA1wEAANgBAADZAQAA2gEAANsBAADcAQAA3QEAAN4BAADfAQAA4AEAAOEBAADiAQAA4wEAAOQBAADlAQAA5gEAAOcBAADoAQAA6QEAAOoBAADrAQAA7AEAAO0BAADuAQAA7wEAAPABAADxAQAA8gEAAPMBAAD0AQAA9QEAAPYBAAD3AQAA+AEAAPkBAAD6AQAA+wEAAPwBAAD9AQAA/gEAAP8BAAAAAgAAAQIAAAICAAADAgAABAIAAAUCAAAGAgAABwIAAAgCAAAJAgAACgIAAAsCAAAMAgAADQIAAA4CAAAPAgAAEAIAABECAAASAgAAEwIAABQCAAAVAgAAFgIAABcCAAAYAgAAGQIAABoCAAAbAgAAHAIAAB0CAAAeAgAAHwIAACACAAAhAgAAIgIAACMCAAAkAgAAJQIAACYCAAAnAgAAKAIAACkCAAAqAgAAKwIAACwCAAAtAgAALgIAAC8CAAAwAgAAMQIAADICAAAzAgAANAIAADUCAAA2AgAANwIAADgCAAA5AgAAOgIAADsCAAA8AgAAPQIAAD4CAAA/AgAAQAIAAEECAABCAgAAQwIAAEQCAABFAgAARgIAAEcCAABIAgAASQIAAEoCAABLAgAATAIAAE0CAABOAgAATwIAAFACAABRAgAAUgIAAFMCAABUAgAAVQIAAFYCAABXAgAAWAIAAFkCAABaAgAAWwIAAFwCAABdAgAAXgIAAF8CAABgAgAAYQIAAGICAABjAgAAZAIAAGUCAABmAgAAZwIAAGgCAABpAgAAagIAAGsCAABsAgAAbQIAAG4CAABvAgAAcAIAAHECAAByAgAAcwIAAHQCAAB1AgAAdgIAAHcCAAB4AgAAeQIAAHoCAAB7AgAAfAIAAH0CAAB+AgAAfwIAAIACAACBAgAAggIAAIMCAACEAgAAhQIAAIYCAACHAgAAiAIAAIkCAACKAgAAiwIAAIwCAACNAgAAjgIAAI8CAACQAgAAkQIAAJICAACTAgAAlAIAAJUCAACWAgAAlwIAAJgCAACZAgAAmgIAAJsCAACcAgAAnQIAAJ4CAACfAgAAoAIAAKECAACiAgAAowIAAKQCAAClAgAApgIAAKcCAACoAgAAqQIAAKoCAACrAgAArAIAAK0CAACuAgAArwIAALACAACxAgAAsgIAALMCAAC0AgAAtQIAALYCAAC3AgAAuAIAALkCAAC6AgAAuwIAALwCAAC9AgAAvgIAAL8CAADAAgAAwQIAAMICAADDAgAAxAIAAMUCAADGAgAAxwIAAMgCAADJAgAAygIAAMsCAADMAgAAzQIAAM4CAADPAgAA0AIAANECAADSAgAA0wIAANQCAADVAgAA1gIAANcCAADYAgAA2QIAANoCAADbAgAA3AIAAN0CAADeAgAA3wIAAOACAADhAgAA4gIAAOMCAADkAgAA5QIAAOYCAADnAgAA6AIAAOkCAADqAgAA6wIAAOwCAADtAgAA7gIAAO8CAADwAgAA8QIAAPICAADzAgAA9AIAAPUCAAD2AgAA9wIAAPgCAAD5AgAA+gIAAPsCAAD8AgAA/QIAAP4CAAD/AgAAAAMAAAEDAAACAwAAAwMAAAQDAAAFAwAABgMAAAcDAAAIAwAACQMAAAoDAAALAwAADAMAAA0DAAAOAwAADwMAABADAAARAwAAEgMAABMDAAAUAwAAFQMAABYDAAAXAwAAGAMAABkDAAAaAwAAGwMAABwDAAAdAwAAHgMAAB8DAAAgAwAAIQMAACIDAAAjAwAAJAMAACUDAAAmAwAAJwMAACgDAAApAwAAKgMAACsDAAAsAwAALQMAAC4DAAAvAwAAMAMAADEDAAAyAwAAMwMAADQDAAA1AwAANgMAADcDAAA4AwAAOQMAADoDAAA7AwAAPAMAAD0DAAA+AwAAPwMAAEADAABBAwAAQgMAAEMDAABEAwAARQMAAEYDAABHAwAASAMAAEkDAABKAwAASwMAAEwDAABNAwAATgMAAE8DAABQAwAAUQMAAFIDAABTAwAAVAMAAFUDAABWAwAAVwMAAFgDAABZAwAAWgMAAFsDAABcAwAAXQMAAF4DAABfAwAAYAMAAGEDAABiAwAAYwMAAGQDAABlAwAAZgMAAGcDAABoAwAAaQMAAGoDAABrAwAAbAMAAG0DAABuAwAAbwMAAHADAABxAwAAcgMAAHMDAAB0AwAAdQMAAHYDAAB3AwAAeAMAAHoDAAB7AwAAfAMAAH0DAAB+AwAAfwMAAIADAACBAwAAggMAAIMDAACEAwAAUQwAAFIMAABTDAAAVAwAAFUMAABWDAAAVwwAAFgMAABZDAAAWgwAAFsMAABcDAAAXQwAAF4MAABfDAAAYAwAAGEMAABiDAAAYwwAAGQMAABlDAAAZgwAAGcMAABoDAAAaQwAAGoMAABrDAAAbAwAAG0MAABuDAAAbwwAAHAMAABxDAAAcgwAAHMMAAB0DAAAdQwAAHYMAAB3DAAAeAwAAHkMAAB6DAAAewwAAHwMAAB9DAAAfgwAAH8MAACADAAAgQwAAIIMAACDDAAAhAwAAIUMAACGDAAAhwwAAIgMAACJDAAAigwAAIsMAACMDAAAjQwAAI4MAACPDAAAkAwAAJEMAACSDAAAkwwAAJQMAACVDAAAlgwAAJcMAACYDAAAmQwAAJoMAACbDAAAnAwAAJ0MAACeDAAAnwwAAKAMAAChDAAAogwAAKMMAACkDAAApQwAAKYMAACnDAAAqAwAAKkMAACqDAAAqwwAAKwMAACtDAAArgwAAK8MAACwDAAAsQwAALIMAACzDAAAtAwAALUMAAC2DAAAtwwAALgMAAC5DAAAugwAALsMAAC8DAAAvQwAAL4MAAC/DAAAwAwAAMEMAADCDAAAwwwAAMQMAADFDAAAxgwAAMcMAADIDAAAyQwAAMoMAADLDAAAzAwAAM0MAADODAAAzwwAANAMAADRDAAA0gwAANMMAADUDAAA1QwAANYMAADXDAAA2AwAANkMAADaDAAA2wwAANwMAADdDAAA3gwAAN8MAADgDAAA4QwAAOIMAADjDAAA5AwAAOUMAADmDAAA5wwAAOgMAADpDAAA6gwAAOsMAADsDAAA7QwAAO4MAADvDAAA8AwAAPEMAADyDAAA8wwAAPQMAAD1DAAA9gwAAPcMAAD4DAAA+QwAAPoMAAD7DAAA/AwAAP0MAAD+DAAA/wwAAAANAAABDQAAAg0AAAMNAAAEDQAABQ0AAAYNAAAHDQAACA0AAAkNAAAKDQAACw0AAAwNAAANDQAADg0AAA8NAAAQDQAAEQ0AABINAAATDQAAFA0AABUNAAAWDQAAFw0AABgNAAAZDQAA","ST_FINE_VAL":"AwMDAwMDAwMDAwMDAwMDAwMDAwMBAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDCQUFAwMDAwMDAwYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYDAwYGBgMGBgYGBgMGBgYFBQUFBQYGBgYGBgYGBgICAgUFBQUFBQUFBQUFBQUFBQUFBQUFBQIFAgUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFAgICBQIFBQUFBQUFBQUFBgUFBQUEBAQIBAUCBQIFAgICAgUGBQICAgICBQYFBQUFBQUFBQUFBQUFAgUFBQUFBQUFAgIFBQUFBQUCBQUFBQUFBQUCBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQICAgIFAgICBQICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgUCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBQICAgICAgICAgICAgICAgICAgUCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIEAgQEAggEBAICAggCAgIEBAgEAgQEBAQCAgIIAgICAgICBAICBAICBAQEBAQECAIEAgICBAQFBAQEBgAICAgICAgIAggICAgAAgICAgIAAgIIAggIAAgICAgICAIABwgIAwgICAgCCAgIAAAAAAAAAAAAAAAAAAAAAAcAAAIAAAAAAAAACQEBAQkJAwMBAAkJAQEDAQEJCQkDCQkDCQMDAQMJAwEDCQEDCQEJCQkJAQEJAQEBAQcBAQEHAQEBBwEHAQEBAQcHAQEHAQEBAQEBBwEBCQEBAQEBBwEBAQEBAQEBAQEBBwEBAwEHAQEBAQcBAQEBAQEBAQcBAQEBAQcBAQcHBwEHBwEHAAcHBwcHBwcHBwcBBwcHBwcDBwcHBwcHBwcHBwgHBwcHBwcHBwcHBwcHBwcHBwcHBwYG","MERGED_FINE":{"15680":[{"i":0,"f":2}],"43631":[{"i":1,"f":2}],"97865":[{"i":2,"f":8}],"73868":[{"i":1,"f":3}],"90170":[{"i":0,"f":3}],"57736":[{"i":0,"f":3}],"71013":[{"i":0,"f":3},{"i":1,"f":3}],"32328":[{"i":1,"f":3}],"13805":[{"i":1,"f":3}],"9459":[{"i":0,"f":3},{"i":2,"f":3}],"43778":[{"i":0,"f":3}],"20623":[{"i":0,"f":3}],"17606":[{"i":0,"f":3}],"11573":[{"i":1,"f":3}],"3109":[{"i":0,"f":3}],"83862":[{"i":1,"f":3}],"60349":[{"i":1,"f":3}],"94299":[{"i":0,"f":3}],"9342":[{"i":1,"f":3}],"10190":[{"i":1,"f":3}],"65617":[{"i":0,"f":3}],"85134":[{"i":1,"f":9}],"15190":[{"i":1,"f":3}],"38033":[{"i":1,"f":3}],"94545":[{"i":1,"f":6}],"90194":[{"i":1,"f":6}],"72728":[{"i":1,"f":3}],"417":[{"i":1,"f":3}],"10028":[{"i":0,"f":6}],"88179":[{"i":0,"f":6}],"73397":[{"i":0,"f":6}],"16742":[{"i":1,"f":5}],"80265":[{"i":1,"f":5}],"55093":[{"i":0,"f":2},{"i":1,"f":2}],"82599":[{"i":0,"f":5}],"85081":[{"i":1,"f":5}],"20322":[{"i":1,"f":5}],"59823":[{"i":1,"f":5}],"522":[{"i":0,"f":5}],"52512":[{"i":1,"f":5}],"25857":[{"i":1,"f":5}],"95258":[{"i":1,"f":5}],"3065":[{"i":0,"f":5}],"102989":[{"i":1,"f":2}],"6349":[{"i":1,"f":2}],"16126":[{"i":1,"f":2}],"32049":[{"i":1,"f":2}],"6701":[{"i":0,"f":2}],"85545":[{"i":1,"f":2}],"79121":[{"i":1,"f":2}],"65282":[{"i":0,"f":2}],"29811":[{"i":0,"f":2}],"8190":[{"i":0,"f":5}],"63573":[{"i":0,"f":2}],"80346":[{"i":0,"f":2}],"37652":[{"i":0,"f":2}],"36217":[{"i":1,"f":2}],"59004":[{"i":1,"f":2}],"76761":[{"i":0,"f":2}],"14403":[{"i":1,"f":5}],"83623":[{"i":1,"f":5}],"86602":[{"i":1,"f":4}],"82816":[{"i":0,"f":4},{"i":1,"f":4}],"22242":[{"i":0,"f":8}],"94619":[{"i":0,"f":4}],"71242":[{"i":1,"f":8}],"33873":[{"i":0,"f":4}],"22667":[{"i":2,"f":8},{"i":3,"f":8}],"13961":[{"i":1,"f":8}],"40592":[{"i":1,"f":8}],"19140":[{"i":0,"f":8}],"28376":[{"i":0,"f":0}],"69681":[{"i":0,"f":0},{"i":1,"f":0}],"2415":[{"i":0,"f":7},{"i":1,"f":7}],"70023":[{"i":0,"f":0}],"43427":[{"i":0,"f":3}],"83574":[{"i":2,"f":9}],"45137":[{"i":0,"f":9}],"18125":[{"i":0,"f":9}],"79693":[{"i":1,"f":3}],"5405":[{"i":0,"f":3}],"78115":[{"i":0,"f":7}],"84978":[{"i":0,"f":9}],"8036":[{"i":1,"f":9}],"85456":[{"i":1,"f":3}],"46898":[{"i":1,"f":3}],"86439":[{"i":1,"f":1}],"81439":[{"i":0,"f":9}],"77469":[{"i":0,"f":1}],"308":[{"i":0,"f":1}],"73686":[{"i":0,"f":1}],"12264":[{"i":1,"f":1}],"75541":[{"i":0,"f":1}],"36437":[{"i":0,"f":1}],"62077":[{"i":0,"f":1}],"630":[{"i":0,"f":1}],"76216":[{"i":0,"f":1}],"84919":[{"i":1,"f":1}],"79952":[{"i":1,"f":1}],"76066":[{"i":0,"f":1}],"81143":[{"i":0,"f":1}],"17507":[{"i":1,"f":1}],"71093":[{"i":0,"f":1}],"77594":[{"i":1,"f":7}],"80089":[{"i":0,"f":1}],"39499":[{"i":0,"f":1}],"1214":[{"i":0,"f":1}],"88446":[{"i":0,"f":1}],"72584":[{"i":0,"f":1}],"17927":[{"i":0,"f":3}],"22805":[{"i":1,"f":1}],"70609":[{"i":0,"f":1}],"80552":[{"i":1,"f":1}],"46044":[{"i":0,"f":1}],"31948":[{"i":0,"f":7}],"239":[{"i":0,"f":3}],"79659":[{"i":0,"f":1}],"75668":[{"i":0,"f":1}],"73294":[{"i":0,"f":7}],"65812":[{"i":0,"f":7}],"4900":[{"i":0,"f":7}],"10691":[{"i":0,"f":7}],"34163":[{"i":1,"f":7}],"80436":[{"i":0,"f":7}],"11508":[{"i":1,"f":7}],"72798":[{"i":1,"f":7}],"69708":[{"i":0,"f":7}],"1042":[{"i":0,"f":7}],"81081":[{"i":0,"f":7}],"121":[{"i":0,"f":7}],"68379":[{"i":0,"f":7}],"78928":[{"i":1,"f":7}],"45736":[{"i":0,"f":1}],"30655":[{"i":1,"f":1}]}}</script>
