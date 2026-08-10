@@ -1485,11 +1485,13 @@ function renderConnectivity(conn){
    PRE-AVERAGED number per type per direction from connectivity_aggregate.json, Søren's own
    occasional offline Colab re-run (up to 40 sampled cells/type, his own CAVE token). That's a
    single aggregate number, not a distribution, so it was rendered as a grouped bar -- there was
-   nothing to jitter. Now driven entirely by connSamples (?connectivitySamples=1, one row per real
-   connectivity-panel query anyone on the site has ever run -- see saveConnectivitySample() near
-   loadConnectivityPanel()), which DOES carry one real value per query, so this can finally be a
-   real dot plot: groupedDotChart() (same function every other per-cell-type distribution on this
-   dashboard already uses, e.g. the nucleus/mesh volume charts) with two series, Input and Output.
+   nothing to jitter. Now driven entirely by connSamples (?connectivitySamples=1, one row per
+   DISTINCT cell anyone on the site has ever run a connectivity query on -- see
+   saveConnectivitySample() near loadConnectivityPanel(); backend UPSERTs by nucleusId, 2026-08-10,
+   so re-querying the same cell updates its existing sample instead of adding another), which DOES
+   carry one real value per cell, so this can finally be a real dot plot: groupedDotChart() (same
+   function every other per-cell-type distribution on this dashboard already uses, e.g. the
+   nucleus/mesh volume charts) with two series, Input and Output.
    connectivity_aggregate.json/conn.synapse_io is no longer read by this chart at all -- it's
    still used by the "by_synapse_count" chart above (renderConnectivity()), which this change
    doesn't touch. No synthetic seed points are mixed in from the old static average either: a
@@ -1616,9 +1618,11 @@ async function fetchLiveData(){
     if(r.ok)connectivity=await r.json();
   }catch(e){/* file not present -- fine, handled as "not generated yet" */}
 
-  // 2026-08-09 -- live, ever-growing per-query samples for renderSynapseIO()'s dot plot (see its
-  // own comment). Separate from `connectivity` above (still the static, offline-generated
-  // connectivity_aggregate.json, still used by renderConnectivity()'s "by_synapse_count" chart).
+  // 2026-08-09 -- live, ever-growing per-CELL samples for renderSynapseIO()'s dot plot (see its
+  // own comment; backend upserts by nucleusId as of 2026-08-10, so this is one row per distinct
+  // cell ever queried, not one row per query). Separate from `connectivity` above (still the
+  // static, offline-generated connectivity_aggregate.json, still used by renderConnectivity()'s
+  // "by_synapse_count" chart).
   try{
     const r=await fetch(REPORT_ENDPOINT+"?connectivitySamples=1");
     const d=await r.json();
