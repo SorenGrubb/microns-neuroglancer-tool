@@ -5448,8 +5448,24 @@ function saveConnectivitySample(nucleusId,rootId,cellType,centerPos,allPoints){
       layer=(est&&est.label)||"";
     }
   }catch(_elf){/* layer is optional -- an unlabeled sample still counts, just isn't filterable by layer */}
+  /* 2026-08-09 (Søren: "We should also save which cell types they are connecting with. So that we
+     can make the '3 cell types with the most synaptic connections' graph a live graph at some
+     point.") -- per-partner-cell-type synapse tally, {partnerType:{in:N,out:N}}, from the SAME
+     allPoints the input/output totals above come from. Partners with no resolved cell_type (see
+     loadConnectivityPanel's own partner-type lookup) are bucketed under "No Type", matching how the
+     connectivity panel's own charts already label them. This doesn't wire up a live version of that
+     chart yet (renderConnectivity() still reads the static connectivity_aggregate.json) -- it just
+     captures the data now, in a shape close to that file's own by_synapse_count[type][partnerType]
+     structure, so building the live version later is a read-and-sum, not a re-instrumentation. */
+  const byType={};
+  allPoints.forEach(function(p){
+    const t=p.cell_type||"No Type";
+    const e=byType[t]||(byType[t]={in:0,out:0});
+    if(p.direction==="input")e.in++;else if(p.direction==="output")e.out++;
+  });
   const payload={type:"connectivity_sample",nucleusId:nucleusId||"",rootId:rootId||"",
     cellType:cellType||"Unclassified",layer:layer,inputCount:inputCount,outputCount:outputCount,
+    byType:JSON.stringify(byType),
     reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
   fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
