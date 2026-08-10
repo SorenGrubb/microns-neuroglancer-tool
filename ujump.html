@@ -452,6 +452,19 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; jump to it in minnie65, identify the nearest cell &amp; its neighbours, and load the cell + nucleus in 3D</span></label>
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Jump to this coordinate, build the Neuroglancer link and enable identification">&#8594;</button></div>
 <p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.</p>
+<!-- 2026-08-10 (Søren: "a search function for a root ID or a nucleus ID below the coordinates
+     input, which is possible to expand or collapse and is collapsed by default, but the user
+     choice is remembered") -- native <details>/<summary> (same element "Recently viewed cells"
+     below already uses for its own collapse/expand), open state persisted separately via
+     ujump_rootnuc_search_open (see the wiring near jumpToNucleusIndex()/nidToIndex() further down,
+     where the actual lookup happens -- both this dataset's own nucleus IDs and MICrONS root IDs
+     are searchable; a purely community-PROPOSED root ID that never became this cell's own root ID
+     is not, since there's no reverse index for that without a new backend endpoint. -->
+<details class="rv-panel" id="rootNucSearchPanel">
+<summary>Search by Root ID or Nucleus ID</summary>
+<div class="row" style="margin-top:8px"><div class="coord" style="flex:1 1 auto"><input type="text" id="rootNucSearchInput" inputmode="numeric" placeholder="Root ID or Nucleus ID (number)"></div><button class="idbtn" id="rootNucSearchGo">Go</button></div>
+<p class="hint" id="rootNucSearchStatus"></p>
+</details>
 <div class="hist-row" id="searchHistory"></div>
 <div class="navctrl">
 <button class="idbtn" id="navBackBtn" type="button" title="Go back to the previous cell you viewed" disabled>&#8592; Back</button>
@@ -461,9 +474,12 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <summary>Recently viewed cells</summary>
 <div class="rv-list" id="recentlyViewedList"></div>
 </details>
-<div style="margin-top:14px">
-<label>Or browse a random cell</label>
-<button class="idbtn" id="randomUnclassified" style="width:100%;margin-bottom:8px">Random unassigned cell &mdash; help identify one</button>
+<!-- 2026-08-10 (Søren: "'Or browse a random cell' can also be collapsed by default and remembered
+     if expanded by user") -- same <details>/toggle-persistence pattern as the Root/Nucleus ID
+     search panel above (see its own comment); wiring is in the same place. -->
+<details class="rv-panel" id="randomCellPanel" style="margin-top:14px">
+<summary>Or browse a random cell</summary>
+<button class="idbtn" id="randomUnclassified" style="width:100%;margin-bottom:8px;margin-top:8px">Random unassigned cell &mdash; help identify one</button>
 <p class="hint" id="unclCount" style="margin-top:-4px;margin-bottom:8px"></p>
 <button class="idbtn" id="randomCommunityId" style="width:100%;margin-bottom:8px" title="Jump to a random cell that MICrONS never predicted but the community has since identified — useful for reviewing, confirming or challenging other people's calls">Random community-identified cell &mdash; review someone's call</button>
 <div class="row" style="gap:8px">
@@ -471,7 +487,7 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <button class="idbtn" id="randomOfType">Random example</button>
 </div>
 <p class="hint">Great for learning what a cell type looks like (a new random example loads each click), or for quickly finding a cell that still needs a first identification.</p>
-</div>
+</details>
 <div style="margin-top:14px"><label>Layers</label>
 <div class="toggles"><label><input type="checkbox" id="em" checked> EM imagery</label><label><input type="checkbox" id="seg" checked> Segmentation (flat v1300)</label><label><input type="checkbox" id="nuc" checked> Nuclei</label></div>
 <p class="hint">On identify, the cell (root ID) and its nucleus are loaded automatically, so both segmentation layers switch on even if unchecked.</p></div>
@@ -2501,6 +2517,63 @@ function jumpToVoxel(x,y,z){
   document.getElementById("go").click();
 }
 function jumpToNucleusIndex(i){jumpToVoxel(NX[i],NY[i],NZ[i]);}
+
+/* 2026-08-10 (Søren: two separate requests, handled together since they're the same UI pattern) --
+   (1) "a search function for a root ID or a nucleus ID below the coordinates input, which is
+   possible to expand or collapse and is collapsed by default, but the user choice is remembered";
+   (2) "'Or browse a random cell' can also be collapsed by default and remembered if expanded by
+   user". Both panels are plain <details>/<summary> (see their own HTML, same element "Recently
+   viewed cells" already uses for collapse/expand) -- persistDetailsOpen() just remembers each one's
+   OWN open/closed state in localStorage, independently, via the native "toggle" event, and restores
+   it on load. Placed here (not right after the HTML) because it needs N/rootId()/NID -- all defined
+   above this point -- for the search half below. */
+function persistDetailsOpen(id,storageKey){
+  const det=document.getElementById(id);
+  if(!det)return;
+  let saved=null;try{saved=localStorage.getItem(storageKey);}catch(e){}
+  if(saved==="1")det.open=true;
+  det.addEventListener("toggle",()=>{try{localStorage.setItem(storageKey,det.open?"1":"0");}catch(e){}});
+}
+persistDetailsOpen("rootNucSearchPanel","ujump_rootnuc_search_open");
+persistDetailsOpen("randomCellPanel","ujump_random_panel_open");
+
+/* Root ID / Nucleus ID search (see the HTML comment above #rootNucSearchPanel for the request).
+   Nucleus ID uses the existing nidToIndex() reverse map; root ID gets its own lazy reverse map
+   here (rootId() only ever goes index->id elsewhere in this file, same situation nidToIndex's own
+   comment describes for nucleus IDs) -- built once, on first root ID search, not at page load,
+   since most sessions may never use it. Only searches this dataset's OWN root ID for each nucleus
+   (the same one rootId(i)/the "root ID" row on the cell panel show) and nucleus IDs -- a root ID
+   that only exists as a community PROPOSAL (via the "additional root / nucleus IDs" panel) and
+   never became this tool's own resolved root ID for that cell isn't in this index, since building
+   a reverse map for those would need a new backend endpoint (bulk community root IDs aren't
+   currently a bulk-readable list, only per-nucleus). */
+let ROOT_ID_INDEX=null;
+function rootIdToIndex(rid){
+  if(!ROOT_ID_INDEX){
+    ROOT_ID_INDEX=new Map();
+    for(let k=0;k<N;k++){const r=rootId(k);if(r)ROOT_ID_INDEX.set(r,k);}
+  }
+  return ROOT_ID_INDEX.has(String(rid))?ROOT_ID_INDEX.get(String(rid)):-1;
+}
+(function(){
+  const inputEl=document.getElementById("rootNucSearchInput");
+  const goBtn=document.getElementById("rootNucSearchGo");
+  const statusEl=document.getElementById("rootNucSearchStatus");
+  if(!inputEl||!goBtn)return;
+  function runSearch(){
+    const raw=(inputEl.value||"").trim();
+    if(!/^\d+$/.test(raw)){if(statusEl)statusEl.textContent="Enter a numeric root ID or nucleus ID.";return;}
+    // Nucleus IDs and root IDs never collide in practice (very different magnitudes/encodings in
+    // this dataset), so trying nucleus ID first and falling back to root ID is safe either way.
+    let i=nidToIndex(raw);
+    if(i<0)i=rootIdToIndex(raw);
+    if(i<0){if(statusEl)statusEl.textContent="No cell in this dataset has that as its nucleus ID or root ID (community-proposed root IDs aren't searchable here yet).";return;}
+    if(statusEl)statusEl.textContent="";
+    jumpToNucleusIndex(i);
+  }
+  goBtn.addEventListener("click",runSearch);
+  inputEl.addEventListener("keydown",(e)=>{if(e.key==="Enter")runSearch();});
+})();
 
 /* Cell types Soren's own verified dataset introduced, INCLUDING Astrocyte and Microglia even
    though MICrONS also has native "astrocyte"/"microglia" buckets above — Soren trusts and wants
