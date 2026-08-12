@@ -8852,9 +8852,10 @@ function openDashboard(){
       +(s.rank?(' &middot; rank #'+s.rank+' of '+s.totalUsers+' (top '+pct+'%)'):'')+'</div>';
     if(s.nextLevel){h+='<div class="bar"><i style="width:'+prog+'%"></i></div><div style="font-size:11px;color:var(--mut,#8b949e)">'+(s.nextLevelAt-s.points)+' pts to '+escHtml(s.nextLevel)+'</div>';}
     h+='<h3>Your activity</h3><div class="grid">'
-      +stat(s.reports,"total reports")+stat(s.daysActive,"days active")+stat(s.streak,"day streak")
+      +stat(s.reports,"total reports","Reported or confirmed cell identities only (New identification / Discrepancy / Confirmation reports, plus identified new cells and merged-nucleus sub-cell splits). Computed volumes, root ID proposals, votes, and \"not a nucleus\" flags are real contributions too, but aren't cell-identity reports — see the separate stats below for those.")+stat(s.daysActive,"days active")+stat(s.streak,"day streak")
       +stat(s.longestStreak,"longest streak")+stat(s.newCells,"new cells found")+stat(s.organelles,"organelles","Every centriole, primary cilium, microglia plug, astrocyte hole, and other logged organelle/extracellular structure counts here — cilia and centrioles just earn more points per report (see the point-system notes), they're not the only thing tallied.")
-      +stat(s.rootProposals,"root IDs proposed")+stat(s.upvotesReceived,"upvotes received")+stat(s.favourites,"favourites")+'</div>';
+      +stat(s.rootProposals,"root IDs proposed")+stat(s.computedVolumes,"volumes computed")+stat(s.votesGiven,"votes given","Identity or root-ID votes you've cast on other people's reports — distinct from \"upvotes received\" below, which counts votes cast BY OTHERS on your own reports.")+stat(s.notNucleusFlags,"\"not a nucleus\" flags","Detections you flagged as segmentation artifacts rather than real cells — no cell identity is given for these, so they aren't counted in \"total reports\".")
+      +stat(s.upvotesReceived,"upvotes received")+stat(s.favourites,"favourites")+'</div>';
     if(s.cellTypes&&s.cellTypes.length){h+='<h3>Cell types you identify most</h3><div style="font-size:13px">'
       +s.cellTypes.map(function(c){return escHtml(c[0])+' <b>'+c[1]+'</b>';}).join(' &nbsp; ')+'</div>';}
     // handle setter
