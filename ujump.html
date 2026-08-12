@@ -9365,6 +9365,7 @@ async function loadCellContactsPanel(containerId,i,rootIdStr,cellType,nucleusId)
   renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId);
 }
 function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
+  const uid=escHtml(el.id||"cc")+"_type";
   let h='<div class="neigh"><h4>Cell contacts <span class="nsub" title="Physical mesh proximity (touching membranes), NOT the synapse-based Connectivity panel above. Computed on demand by fetching this cell’s and nearby cells’ 3D meshes, same as “Compute volume” — costs real mesh fetches, so only the '+CELL_CONTACT_CANDIDATES+' nearest cells (by soma position, any type) are checked per click. Threshold ('+(CELL_CONTACT_THRESHOLD_UM*1000)+' nm) is provisional.">(mesh proximity, not synapses)</span></h4>';
   if(known&&known.length){
     h+=known.map(cellContactRowHtml).join('');
@@ -9372,6 +9373,23 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
     h+='<div class="nsub">No cell contacts computed for this cell yet.</div>';
   }
   h+='<button class="idbtn meshcontact" data-root="'+(rootIdStr||"")+'" data-i="'+i+'" data-nucid="'+escHtml(String(nucleusId||""))+'" data-celltype="'+escHtml(cellType||"")+'" data-container="'+escHtml(el.id||"")+'" style="margin-top:6px;padding:3px 10px;font-size:12px">Find cell contacts (checks '+CELL_CONTACT_CANDIDATES+' nearest cells)</button>';
+  /* "Find contacts with a specific cell type" (2026-08-12) -- see the doc comment above
+     cellTypeOptionsForContactSearch()/findWithinRadiusOfType() for scope. All controls here are
+     wired LOCALLY right below (not via a document-level delegated listener), matching this same
+     function's own existing ".jump" wiring pattern just below -- simplest option given every
+     element referenced already exists in `el` at this point, and keeps everything in one place. */
+  h+='<div class="neigh" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">'
+    +'<h4 style="margin-bottom:4px">Find contacts with a specific cell type</h4>'
+    +'<div class="row" style="gap:8px;align-items:center">'
+    +'<select id="'+uid+'" style="flex:1 1 auto"></select>'
+    +'<input type="number" id="'+uid+'_radius" value="'+CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM+'" min="1" step="10" style="width:70px" title="Search radius around this cell">'
+    +'<span class="nsub">&micro;m</span></div>'
+    +'<p class="nsub" id="'+uid+'_count" style="margin:4px 0">Pick a cell type to see how many are nearby.</p>'
+    +'<div class="row" style="gap:8px;margin-top:4px;flex-wrap:wrap">'
+    +'<button class="idbtn" id="'+uid+'_check" disabled style="padding:3px 10px;font-size:12px">Check contacts with this type</button>'
+    +'<button class="idbtn" id="'+uid+'_ngl" disabled style="padding:3px 10px;font-size:12px" title="Opens a 3D view: this cell, every checked cell of the chosen type, and a point at every place their meshes actually touch.">Open in Neuroglancer</button>'
+    +'<button class="idbtn" id="'+uid+'_xlsx" disabled style="padding:3px 10px;font-size:12px" title="Downloads every evaluated pair (touching or not) with its coordinates, if any.">Download as Excel</button>'
+    +'</div><div id="'+uid+'_results" style="margin-top:6px"></div></div>';
   h+='</div>';
   el.innerHTML=h;
   el.querySelectorAll(".jump").forEach(function(b){
@@ -9380,17 +9398,79 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
       document.getElementById("x").value=b.dataset.x;document.getElementById("y").value=b.dataset.y;document.getElementById("z").value=b.dataset.z;document.getElementById("go").click();
     });
   });
+  const typeSel=document.getElementById(uid),radiusEl=document.getElementById(uid+"_radius"),
+    countEl=document.getElementById(uid+"_count"),checkBtn=document.getElementById(uid+"_check"),
+    nglBtn=document.getElementById(uid+"_ngl"),xlsxBtn=document.getElementById(uid+"_xlsx"),
+    resultsEl=document.getElementById(uid+"_results");
+  if(!typeSel)return; // shouldn't happen, but keeps this defensive like the rest of the file
+  const opts=cellTypeOptionsForContactSearch();
+  typeSel.innerHTML='<option value="">Choose a cell type…</option>'
+    +opts.map(o=>'<option value="'+escHtml(o.label)+'">'+escHtml(o.label)+' ('+o.total+' in whole dataset)</option>').join('');
+  let curRows=[]; // whichever result set is currently "live" for the Neuroglancer/Excel buttons -- either
+    // rows already known (filtered to the selected type, from a past click by anyone) or a fresh
+    // compute from the "Check contacts with this type" button below, whichever is more recent.
+  function refreshCountAndKnown(){
+    const label=typeSel.value;
+    nglBtn.disabled=true;xlsxBtn.disabled=true;checkBtn.disabled=true;curRows=[];
+    if(!label){countEl.textContent="Pick a cell type to see how many are nearby.";resultsEl.innerHTML="";return;}
+    const radius=Math.max(1,Number(radiusEl.value)||CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM);
+    const nearby=findWithinRadiusOfType(i,label,radius);
+    const alreadyKnown=(known||[]).filter(k=>k.contactCellType===label);
+    countEl.textContent=nearby.length+" "+label+(nearby.length===1?"":"s")+" found within "+radius+" µm"
+      +(alreadyKnown.length?" — "+alreadyKnown.length+" already checked":"");
+    checkBtn.disabled=nearby.length===0;
+    if(alreadyKnown.length){
+      curRows=alreadyKnown.map(k=>({nucleusId:k.contactNucleusId,rootId:k.contactRootId,cellType:k.contactCellType,
+        distNm:Number(k.minDistanceNm)||0,voxel:(k.contactVoxelX!=null&&k.contactVoxelX!=="")?[k.contactVoxelX,k.contactVoxelY,k.contactVoxelZ]:null}));
+      resultsEl.innerHTML=curRows.map(cellContactRowHtml).join('');
+      nglBtn.disabled=false;xlsxBtn.disabled=false;
+    }else{
+      resultsEl.innerHTML='<div class="nsub">Not checked yet.</div>';
+    }
+  }
+  typeSel.addEventListener("change",refreshCountAndKnown);
+  radiusEl.addEventListener("input",refreshCountAndKnown);
+  checkBtn.addEventListener("click",async function(){
+    const label=typeSel.value;if(!label)return;
+    const radius=Math.max(1,Number(radiusEl.value)||CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM);
+    const orig=checkBtn.textContent;checkBtn.disabled=true;typeSel.disabled=true;radiusEl.disabled=true;
+    try{
+      const{results,totalFound,checked}=await computeCellContactsOfType(rootIdStr,i,label,radius,function(frac,msg){
+        checkBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";
+      });
+      curRows=results;
+      maybeSaveCellContacts(nucleusId,rootIdStr,cellType,results);
+      resultsEl.innerHTML=results.length?results.map(cellContactRowHtml).join(''):'<div class="nsub">No cells of that type had a resolvable root ID to check.</div>';
+      countEl.textContent=totalFound+" "+label+(totalFound===1?"":"s")+" found within "+radius+" µm"
+        +(checked<totalFound?" — checked nearest "+checked+" (limit "+CELL_CONTACT_TYPE_MAX_FETCH+")":" — all checked");
+      nglBtn.disabled=!results.length;xlsxBtn.disabled=!results.length;
+    }catch(err){
+      console.warn("[uJump cell contacts by type]",err);
+      resultsEl.innerHTML='<div class="nsub" style="color:#f0883e">Failed: '+escHtml(String((err&&err.message)||err))+'</div>';
+    }finally{
+      checkBtn.textContent=orig;checkBtn.disabled=false;typeSel.disabled=false;radiusEl.disabled=false;
+    }
+  });
+  nglBtn.addEventListener("click",function(){
+    if(!curRows.length)return;
+    openCellContactsTypeViewer(i,rootIdStr,cellType,typeSel.value,curRows);
+  });
+  xlsxBtn.addEventListener("click",function(){
+    if(!curRows.length)return;
+    downloadCellContactsTypeExcel(nucleusId,rootIdStr,cellType,typeSel.value,curRows);
+  });
 }
-/* The actual compute -- fetches the query cell's own mesh, gets CELL_CONTACT_CANDIDATES nearest
-   cells of ANY type by soma position (kNearest(), same lookup the "3 nearest neighbouring cells"
-   panel already uses), fetches each candidate's mesh (skipping any with no resolvable root ID --
-   nothing to fetch), and runs the grid-based min-distance test against each. Progress callback
-   mirrors MeshDL's own (frac 0..1, message string) so the button can show the same "message NN%"
-   pattern the volume/PowerPoint buttons already use. */
-async function computeCellContacts(rootIdStr,i,onProgress){
+/* Shared core of the mesh-contact compute, extracted 2026-08-12 so BOTH "check the N nearest
+   cells (any type)" and the newer "check every cell of a specific type within a radius" (see
+   computeCellContactsOfType below) run through the exact same, already-tested fetch/compare loop
+   rather than two near-duplicate copies drifting apart over time. Takes an already-built
+   candidate list (array of {i,dist}, master-array indices -- exactly kNearest()'s own return
+   shape, which findWithinRadiusOfType() below also deliberately matches) rather than computing
+   it itself, so the two callers can supply completely different candidate-selection logic
+   (nearest-K vs. same-type-within-radius) while sharing everything after that. */
+async function computeCellContactsForCandidates(rootIdStr,candidates,onProgress){
   onProgress&&onProgress(0,"fetching this cell's mesh…");
   const own=await MeshDL.fetchCombinedMesh(rootIdStr);
-  const candidates=kNearest(NX[i],NY[i],NZ[i],CELL_CONTACT_CANDIDATES,i);
   const results=[];
   for(let ci=0;ci<candidates.length;ci++){
     const nb=candidates[ci];
@@ -9412,6 +9492,150 @@ async function computeCellContacts(rootIdStr,i,onProgress){
   }
   onProgress&&onProgress(1,"done");
   return results;
+}
+/* The original compute -- fetches the query cell's own mesh, gets CELL_CONTACT_CANDIDATES nearest
+   cells of ANY type by soma position (kNearest(), same lookup the "3 nearest neighbouring cells"
+   panel already uses), fetches each candidate's mesh (skipping any with no resolvable root ID --
+   nothing to fetch), and runs the grid-based min-distance test against each. Progress callback
+   mirrors MeshDL's own (frac 0..1, message string) so the button can show the same "message NN%"
+   pattern the volume/PowerPoint buttons already use. */
+async function computeCellContacts(rootIdStr,i,onProgress){
+  return computeCellContactsForCandidates(rootIdStr,kNearest(NX[i],NY[i],NZ[i],CELL_CONTACT_CANDIDATES,i),onProgress);
+}
+/* ---- "Find contacts with a specific cell type" (2026-08-12, Soren: "I wanted to find the cell
+   contacts with a specific cell type ... instead of saying how many cells there are of this kind
+   in the whole dataset, it should say how many there are within 100 um (this should be a factor
+   that can be varied)") ----
+   Scoped, same as the rest of this "Cell contacts" feature, to the MAIN in-region nucleus array
+   only (own-verified overrides included, since those still live at a real main-array index --
+   see ownOverride()'s own doc comment -- but NOT community-only identifications that were never
+   promoted to an override, and NOT merged-nucleus sub-cells or standalone Img35 points, neither of
+   which has a single stable index/position pair this radius scan can use). This deliberately
+   differs from the "random example of type X" picker's own type list (randomTypeSelect), which
+   DOES include those other sources -- reusing it here couldn't guarantee every option resolves to
+   a fetchable mesh, whereas this scan only offers types that could actually be checked. */
+let __mainArrayTypeIndexCache=null;
+function buildMainArrayTypeIndex(){
+  if(__mainArrayTypeIndexCache)return __mainArrayTypeIndexCache;
+  const idx=new Array(N);
+  for(let j=0;j<N;j++){
+    const nOwn=ownOverride(j);
+    idx[j]=nOwn?nOwn.type:longName(typeInfo(j).name);
+  }
+  __mainArrayTypeIndexCache=idx;
+  return idx;
+}
+/* Flat, alphabetically-sorted {label,total} list for the type-picker dropdown -- "total" here is
+   still the whole-dataset count (there is no single cell to measure "within Rum" from until one
+   is picked), just to give the list some initial context; the live, per-selection "N within Rum"
+   figure the user actually asked for is computed separately by findWithinRadiusOfType() below,
+   every time the dropdown or the radius field changes. Cells with no prediction ("Unclassified")
+   are excluded -- nothing meaningful to search "contacts with Unclassified" for. */
+function cellTypeOptionsForContactSearch(){
+  const idx=buildMainArrayTypeIndex();
+  const counts={};
+  for(let j=0;j<N;j++){const t=idx[j];if(!t||t==="Unclassified")continue;counts[t]=(counts[t]||0)+1;}
+  return Object.keys(counts).sort((a,b)=>a.localeCompare(b)).map(t=>({label:t,total:counts[t]}));
+}
+/* Every main-array cell of typeLabel within radiusUm of nucleus i (excluding i itself), nearest
+   first -- same {i,dist} shape as kNearest()'s own return value (dist in physical nm), so it can
+   be handed straight to computeCellContactsForCandidates() exactly like a kNearest() result. A
+   single O(N) pass; cheap enough (a few tens of ms over ~144k nuclei) to re-run on every dropdown/
+   radius change rather than needing a spatial index, since this only runs on direct user input,
+   not in a hot loop. */
+function findWithinRadiusOfType(i,typeLabel,radiusUm){
+  const idx=buildMainArrayTypeIndex();
+  const radiusNm=radiusUm*1000;
+  const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
+  const out=[];
+  for(let j=0;j<N;j++){
+    if(j===i||idx[j]!==typeLabel)continue;
+    const dx=NX[j]*4-cx,dy=NY[j]*4-cy,dz=NZ[j]*40-cz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    if(d<=radiusNm)out.push({i:j,dist:d});
+  }
+  out.sort((a,b)=>a.dist-b.dist);
+  return out;
+}
+const CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM=100; // Soren's own default; the radius field lets this be changed per search
+const CELL_CONTACT_TYPE_MAX_FETCH=60; // hard cap on how many meshes one "Check contacts with this
+    // type" click can trigger, regardless of how many matches the radius contains -- protects the
+    // browser/session from an accidental "check 3000 meshes" click; nearest-first (see
+    // findWithinRadiusOfType's own sort) so a truncated run still checks the closest, most likely
+    // candidates first. Tunable, same "provisional constant" treatment as CELL_CONTACT_CANDIDATES.
+async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,onProgress){
+  const all=findWithinRadiusOfType(i,typeLabel,radiusUm);
+  const candidates=all.slice(0,CELL_CONTACT_TYPE_MAX_FETCH);
+  const results=await computeCellContactsForCandidates(rootIdStr,candidates,onProgress);
+  return{results,totalFound:all.length,checked:candidates.length};
+}
+/* Builds a minimal Neuroglancer 3D state for "Open in Neuroglancer" on the type-contact results:
+   this cell's own segmentation, a second segmentation layer for every matched cell of typeLabel
+   that has a resolvable root ID, and a local point-annotation layer at every RESOLVED touch
+   coordinate (rows with no voxel -- i.e. evaluated but not touching -- contribute no point, since
+   there is no "place they touch" to mark for those). Deliberately does not add EM imagery or a
+   separate nuclei layer (keeps the view light and focused on the two things actually asked for:
+   which cells, and where they touch) -- see the "Cell contacts" panel's own scope note for why
+   this whole feature is main-in-region-nucleus-only. SRC/DIM are re-declared here as small local
+   literals rather than reused from their own top-level declaration elsewhere in this file, because
+   top-level const/let bindings do not cross <script> tag boundaries in this document (see the
+   organelle-groups comment earlier in this file for the same note) -- duplicating two static,
+   never-changing literals is simpler and safer than trying to reach across that boundary. */
+function buildCellContactsTypeViewerState(i,rootIdStr,cellType,typeLabel,rows){
+  const SRC_SEG="precomputed://gs://iarpa_microns/minnie/minnie65/seg_m1300";
+  const DIM_LOCAL={x:[4e-9,"m"],y:[4e-9,"m"],z:[4e-8,"m"]};
+  const touchRows=rows.filter(r=>r.voxel&&r.rootId);
+  const matchedRootIds=Array.from(new Set(rows.filter(r=>r.rootId).map(r=>String(r.rootId))));
+  const layers=[];
+  layers.push({type:"segmentation",source:SRC_SEG,tab:"source",name:cellType||"This cell",
+    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+  if(matchedRootIds.length){
+    const colors={};matchedRootIds.forEach(r=>colors[r]="#3fb950");
+    layers.push({type:"segmentation",source:SRC_SEG,tab:"source",name:typeLabel+" (contacts checked)",
+      segments:matchedRootIds,segmentColors:colors,objectAlpha:0.85});
+  }
+  if(touchRows.length){
+    const anns=touchRows.map((r,idx)=>({type:"point",id:"touch_"+idx,point:[r.voxel[0],r.voxel[1],r.voxel[2]]}));
+    layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:"#ffd21a",
+      name:"Touch points ("+cellType+" ↔ "+typeLabel+")"});
+  }
+  const posVox=[NX[i],NY[i],NZ[i]];
+  let span=20000; // physical nm, fallback if there's nothing else to size the view on
+  if(touchRows.length){
+    const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
+    span=Math.max(...touchRows.map(r=>{const dx=r.voxel[0]*4-cx,dy=r.voxel[1]*4-cy,dz=r.voxel[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
+  }
+  return{dimensions:DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
+    layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},
+    showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
+}
+function openCellContactsTypeViewer(i,rootIdStr,cellType,typeLabel,rows){
+  const state=buildCellContactsTypeViewerState(i,rootIdStr,cellType,typeLabel,rows);
+  const viewerEl=document.getElementById("viewer");
+  const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
+  window.open(base+"#!"+encodeURIComponent(JSON.stringify(state)),"_blank","noopener");
+}
+/* "Download the coordinates of all the places the cell touches the other cells of the specified
+   cell type in an excel file" -- one row per evaluated pair (not just touching ones, same
+   "record every checked pair" convention as maybeSaveCellContacts' own comment above explains),
+   with the touch coordinate columns left blank for pairs that were checked but found not to be
+   touching, so the sheet still reads as a complete audit of what was checked, not just a bare
+   coordinate list. Same SheetJS pattern (XLSX.utils.aoa_to_sheet/book_new/book_append_sheet/
+   writeFile) every other Excel export in this file already uses. */
+function downloadCellContactsTypeExcel(centerNucId,centerRootId,centerType,typeLabel,rows){
+  const thresholdNm=CELL_CONTACT_THRESHOLD_UM*1000;
+  const data=[["Center nucleus ID","Center root ID","Center cell type","Contact cell type",
+    "Contact nucleus ID","Contact root ID","Mesh gap (nm)","Touching (<"+thresholdNm+" nm)",
+    "Touch point voxel X","Touch point voxel Y","Touch point voxel Z"]];
+  rows.forEach(r=>{
+    const touching=r.distNm<thresholdNm;
+    data.push([centerNucId,centerRootId,centerType,typeLabel,r.nucleusId,r.rootId,
+      Math.round(r.distNm*10)/10,touching?"yes":"no",
+      r.voxel?r.voxel[0]:"",r.voxel?r.voxel[1]:"",r.voxel?r.voxel[2]:""]);
+  });
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Contacts");
+  XLSX.writeFile(wb,"cell_contacts_"+centerNucId+"_vs_"+String(typeLabel).replace(/[^a-z0-9]+/gi,"_")+".xlsx");
 }
 </script>
 <script type="application/json" id="vascdata2">{"FINE_NAMES":["3rd-order arterial capillary","2nd-order venous capillary","penetrating arteriole","ascending venule","1st-order arterial capillary","pial arteriole","pial venule","3rd-order venous capillary","2nd-order arterial capillary","1st-order venous capillary"],"OV_FINE_IDX":"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","OV_FINE_VAL":"AAECAwQFBQUBAwUFAAECBgEGAQEDBwEHAgMGBgAFBwYEBQMDAQQDBgEIBAUFAAIIBAUCBwECAAUHBQICBQMHAgIFBQMJAQIAAwYAAwEHCAICBgMDAwcCAQEHCAIHAAIDAgIHBgIDAggHBwEDAwgCAgIFBgUIAwICAQACBQMIAgIBCAcCAgUDAAUJAgQCAQUFAgMBAAIGBQICCAcDAAQHAgAFAwIFBQACBwcICAgBAgkBCQgGBQcEAgACAgEFBwUIBgIBBAIHAgUDAwIBBAUABwYBCAEFBwIFCAIHBwIFCAIIBQMJCQIAAAcCBQICAgcAAgQDBwkEBQACAwEDAgkCBwECAAABBAIBBAMIBwACBAIICAIABQgCBAAAAQICBggFBQkIAgcCAwQAAQEGAgACAgMCBQcHBwEIAggDAwMCAgMFBwYDCQYCBgECAQIBCAMCCQcBAQgIBQMCAgICBAkABggHAgYHAgQFAgIBAwIDCAMHBAYBCQMFBwABAAICBQABAQUACAQCAgUCAQMHCAAGAwICAggHBQgDAgAJAgMCAgUFBgEDAgQCAwUCBwICAwIDAgMGAQMHAQEFAAMDAAgBBQkBCAkBAQgBBQADAgMJBQEGAgECCQMHAwEHCAEDAwADAwkHBQEBCAcHAgcCAgYIAQQBBAcBCAcICQIFAwQAAQECBwEDAQIBBQcACAEBAgEHAQcCAgEABwIBAAIDAAADAAgDAQgJAAEHBwAHAgcIAgAFAgcAAQEAAwAHAAIBBQEBAQUJAgEBBQAJAQMBCAgIBwgIAQkJBwMBAAIHAAcCBAEBAQcCAQcHBwgBAgkIAwcJAgEIBwMHAQEDAAMICQkCAAkCAQEIAgIFCQIHAwEJAQUAAAMACQIHAQIBBQEAAgAJAgIDBwIBAAIIAwkBAAEHAAICAwICCAIABwcIAgMBAQICBQUICQgCBwICAgICBAcCAAgDBQEECQgFAAABAgUCAQECCAgFAgYJAAcCCAIDAQEDAgABBwIDBgIAAwICAwgJAgEAAgEABAIHCAUAAgEABgAFCAECCAIDAwcBAQcBAQAHCAQJAAgHBwIAAgIBAwIJBQAIAgMCAAEDAQgDAgMCBQACBwIFBwgFAwAFAAUCAwUABAcFAgMDBQgIAgcFCAcIAAMCBQMCAgIAAggCAgQDAggABQYDCAIHCQUBAwIBAwUCCAAHAgYBBwUCAgUCCAYFBwIAAgUCBQICAgICCAQEAwIBAwABAgUFAwEHBQIFAQYFBQcDBQUCAQUGAwMABAMCAgMFAgIIAgICAgUEAgICBQIHAwIIBQgCBQACCAkJAgIIBQgCCAUCBQIEAgEIBQICAAIICAUDBQIIAAMCAgcCCAgFAAACAgMCAwAHAgUDBQUCAAcAAgYCBAIFAgUAAQADAwgCAgIFCAgFAwUFAgUFAgUEBQUCBAUGBQICAgUAAgUCAwMCAgUCAgUFAgICAgICBQUCAgUFBQICAgQAAgYIAwICBQIDAgICBQUCBgUIAgICBQIIAgQGBgIIBQACAggGBgICAgIFBQICBQICAgYCAgICAgYHAgYCAwMIAwMJAQEBAQAGBAIDAwMFAAQFAAMDAQUB","ST_FINE_IDX":"LwEAADABAAAxAQAAMgEAADMBAAA0AQAANQEAADYBAAA3AQAAOAEAADkBAAA6AQAAOwEAADwBAAA9AQAAPgEAAD8BAABAAQAAQQEAAEIBAABDAQAARAEAAEUBAABGAQAARwEAAEgBAABJAQAASgEAAEsBAABMAQAATQEAAE4BAABPAQAAUAEAAFEBAABSAQAAUwEAAFQBAABVAQAAVgEAAFcBAABYAQAAWQEAAFoBAABbAQAAXAEAAF0BAABeAQAAXwEAAGABAABhAQAAYgEAAGMBAABkAQAAZQEAAGYBAABnAQAAaAEAAGkBAABqAQAAawEAAGwBAABtAQAAbgEAAG8BAABwAQAAcQEAAHIBAABzAQAAdAEAAHUBAAB2AQAAdwEAAHgBAAB5AQAAegEAAHsBAAB8AQAAfQEAAH4BAAB/AQAAgAEAAIEBAACCAQAAgwEAAIQBAACFAQAAhgEAAIcBAACIAQAAiQEAAIoBAACLAQAAjAEAAI0BAACOAQAAjwEAAJABAACRAQAAkgEAAJMBAACUAQAAlQEAAJYBAACXAQAAmAEAAJkBAACaAQAAmwEAAJwBAACdAQAAngEAAJ8BAACgAQAAoQEAAKIBAACjAQAApAEAAKUBAACmAQAApwEAAKgBAACpAQAAqgEAAKsBAACsAQAArQEAAK4BAACvAQAAsAEAALEBAACyAQAAswEAALQBAAC1AQAAtgEAALcBAAC4AQAAuQEAALoBAAC7AQAAvAEAAL0BAAC+AQAAvwEAAMABAADBAQAAwgEAAMMBAADEAQAAxQEAAMYBAADHAQAAyAEAAMkBAADKAQAAywEAAMwBAADNAQAAzgEAAM8BAADQAQAA0QEAANIBAADTAQAA1AEAANUBAADWAQAA1wEAANgBAADZAQAA2gEAANsBAADcAQAA3QEAAN4BAADfAQAA4AEAAOEBAADiAQAA4wEAAOQBAADlAQAA5gEAAOcBAADoAQAA6QEAAOoBAADrAQAA7AEAAO0BAADuAQAA7wEAAPABAADxAQAA8gEAAPMBAAD0AQAA9QEAAPYBAAD3AQAA+AEAAPkBAAD6AQAA+wEAAPwBAAD9AQAA/gEAAP8BAAAAAgAAAQIAAAICAAADAgAABAIAAAUCAAAGAgAABwIAAAgCAAAJAgAACgIAAAsCAAAMAgAADQIAAA4CAAAPAgAAEAIAABECAAASAgAAEwIAABQCAAAVAgAAFgIAABcCAAAYAgAAGQIAABoCAAAbAgAAHAIAAB0CAAAeAgAAHwIAACACAAAhAgAAIgIAACMCAAAkAgAAJQIAACYCAAAnAgAAKAIAACkCAAAqAgAAKwIAACwCAAAtAgAALgIAAC8CAAAwAgAAMQIAADICAAAzAgAANAIAADUCAAA2AgAANwIAADgCAAA5AgAAOgIAADsCAAA8AgAAPQIAAD4CAAA/AgAAQAIAAEECAABCAgAAQwIAAEQCAABFAgAARgIAAEcCAABIAgAASQIAAEoCAABLAgAATAIAAE0CAABOAgAATwIAAFACAABRAgAAUgIAAFMCAABUAgAAVQIAAFYCAABXAgAAWAIAAFkCAABaAgAAWwIAAFwCAABdAgAAXgIAAF8CAABgAgAAYQIAAGICAABjAgAAZAIAAGUCAABmAgAAZwIAAGgCAABpAgAAagIAAGsCAABsAgAAbQIAAG4CAABvAgAAcAIAAHECAAByAgAAcwIAAHQCAAB1AgAAdgIAAHcCAAB4AgAAeQIAAHoCAAB7AgAAfAIAAH0CAAB+AgAAfwIAAIACAACBAgAAggIAAIMCAACEAgAAhQIAAIYCAACHAgAAiAIAAIkCAACKAgAAiwIAAIwCAACNAgAAjgIAAI8CAACQAgAAkQIAAJICAACTAgAAlAIAAJUCAACWAgAAlwIAAJgCAACZAgAAmgIAAJsCAACcAgAAnQIAAJ4CAACfAgAAoAIAAKECAACiAgAAowIAAKQCAAClAgAApgIAAKcCAACoAgAAqQIAAKoCAACrAgAArAIAAK0CAACuAgAArwIAALACAACxAgAAsgIAALMCAAC0AgAAtQIAALYCAAC3AgAAuAIAALkCAAC6AgAAuwIAALwCAAC9AgAAvgIAAL8CAADAAgAAwQIAAMICAADDAgAAxAIAAMUCAADGAgAAxwIAAMgCAADJAgAAygIAAMsCAADMAgAAzQIAAM4CAADPAgAA0AIAANECAADSAgAA0wIAANQCAADVAgAA1gIAANcCAADYAgAA2QIAANoCAADbAgAA3AIAAN0CAADeAgAA3wIAAOACAADhAgAA4gIAAOMCAADkAgAA5QIAAOYCAADnAgAA6AIAAOkCAADqAgAA6wIAAOwCAADtAgAA7gIAAO8CAADwAgAA8QIAAPICAADzAgAA9AIAAPUCAAD2AgAA9wIAAPgCAAD5AgAA+gIAAPsCAAD8AgAA/QIAAP4CAAD/AgAAAAMAAAEDAAACAwAAAwMAAAQDAAAFAwAABgMAAAcDAAAIAwAACQMAAAoDAAALAwAADAMAAA0DAAAOAwAADwMAABADAAARAwAAEgMAABMDAAAUAwAAFQMAABYDAAAXAwAAGAMAABkDAAAaAwAAGwMAABwDAAAdAwAAHgMAAB8DAAAgAwAAIQMAACIDAAAjAwAAJAMAACUDAAAmAwAAJwMAACgDAAApAwAAKgMAACsDAAAsAwAALQMAAC4DAAAvAwAAMAMAADEDAAAyAwAAMwMAADQDAAA1AwAANgMAADcDAAA4AwAAOQMAADoDAAA7AwAAPAMAAD0DAAA+AwAAPwMAAEADAABBAwAAQgMAAEMDAABEAwAARQMAAEYDAABHAwAASAMAAEkDAABKAwAASwMAAEwDAABNAwAATgMAAE8DAABQAwAAUQMAAFIDAABTAwAAVAMAAFUDAABWAwAAVwMAAFgDAABZAwAAWgMAAFsDAABcAwAAXQMAAF4DAABfAwAAYAMAAGEDAABiAwAAYwMAAGQDAABlAwAAZgMAAGcDAABoAwAAaQMAAGoDAABrAwAAbAMAAG0DAABuAwAAbwMAAHADAABxAwAAcgMAAHMDAAB0AwAAdQMAAHYDAAB3AwAAeAMAAHoDAAB7AwAAfAMAAH0DAAB+AwAAfwMAAIADAACBAwAAggMAAIMDAACEAwAAUQwAAFIMAABTDAAAVAwAAFUMAABWDAAAVwwAAFgMAABZDAAAWgwAAFsMAABcDAAAXQwAAF4MAABfDAAAYAwAAGEMAABiDAAAYwwAAGQMAABlDAAAZgwAAGcMAABoDAAAaQwAAGoMAABrDAAAbAwAAG0MAABuDAAAbwwAAHAMAABxDAAAcgwAAHMMAAB0DAAAdQwAAHYMAAB3DAAAeAwAAHkMAAB6DAAAewwAAHwMAAB9DAAAfgwAAH8MAACADAAAgQwAAIIMAACDDAAAhAwAAIUMAACGDAAAhwwAAIgMAACJDAAAigwAAIsMAACMDAAAjQwAAI4MAACPDAAAkAwAAJEMAACSDAAAkwwAAJQMAACVDAAAlgwAAJcMAACYDAAAmQwAAJoMAACbDAAAnAwAAJ0MAACeDAAAnwwAAKAMAAChDAAAogwAAKMMAACkDAAApQwAAKYMAACnDAAAqAwAAKkMAACqDAAAqwwAAKwMAACtDAAArgwAAK8MAACwDAAAsQwAALIMAACzDAAAtAwAALUMAAC2DAAAtwwAALgMAAC5DAAAugwAALsMAAC8DAAAvQwAAL4MAAC/DAAAwAwAAMEMAADCDAAAwwwAAMQMAADFDAAAxgwAAMcMAADIDAAAyQwAAMoMAADLDAAAzAwAAM0MAADODAAAzwwAANAMAADRDAAA0gwAANMMAADUDAAA1QwAANYMAADXDAAA2AwAANkMAADaDAAA2wwAANwMAADdDAAA3gwAAN8MAADgDAAA4QwAAOIMAADjDAAA5AwAAOUMAADmDAAA5wwAAOgMAADpDAAA6gwAAOsMAADsDAAA7QwAAO4MAADvDAAA8AwAAPEMAADyDAAA8wwAAPQMAAD1DAAA9gwAAPcMAAD4DAAA+QwAAPoMAAD7DAAA/AwAAP0MAAD+DAAA/wwAAAANAAABDQAAAg0AAAMNAAAEDQAABQ0AAAYNAAAHDQAACA0AAAkNAAAKDQAACw0AAAwNAAANDQAADg0AAA8NAAAQDQAAEQ0AABINAAATDQAAFA0AABUNAAAWDQAAFw0AABgNAAAZDQAA","ST_FINE_VAL":"AwMDAwMDAwMDAwMDAwMDAwMDAwMBAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDCQUFAwMDAwMDAwYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYDAwYGBgMGBgYGBgMGBgYFBQUFBQYGBgYGBgYGBgICAgUFBQUFBQUFBQUFBQUFBQUFBQUFBQIFAgUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFAgICBQIFBQUFBQUFBQUFBgUFBQUEBAQIBAUCBQIFAgICAgUGBQICAgICBQYFBQUFBQUFBQUFBQUFAgUFBQUFBQUFAgIFBQUFBQUCBQUFBQUFBQUCBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQICAgIFAgICBQICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgUCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBQICAgICAgICAgICAgICAgICAgUCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIEAgQEAggEBAICAggCAgIEBAgEAgQEBAQCAgIIAgICAgICBAICBAICBAQEBAQECAIEAgICBAQFBAQEBgAICAgICAgIAggICAgAAgICAgIAAgIIAggIAAgICAgICAIABwgIAwgICAgCCAgIAAAAAAAAAAAAAAAAAAAAAAcAAAIAAAAAAAAACQEBAQkJAwMBAAkJAQEDAQEJCQkDCQkDCQMDAQMJAwEDCQEDCQEJCQkJAQEJAQEBAQcBAQEHAQEBBwEHAQEBAQcHAQEHAQEBAQEBBwEBCQEBAQEBBwEBAQEBAQEBAQEBBwEBAwEHAQEBAQcBAQEBAQEBAQcBAQEBAQcBAQcHBwEHBwEHAAcHBwcHBwcHBwcBBwcHBwcDBwcHBwcHBwcHBwgHBwcHBwcHBwcHBwcHBwcHBwcHBwYG","MERGED_FINE":{"15680":[{"i":0,"f":2}],"43631":[{"i":1,"f":2}],"97865":[{"i":2,"f":8}],"73868":[{"i":1,"f":3}],"90170":[{"i":0,"f":3}],"57736":[{"i":0,"f":3}],"71013":[{"i":0,"f":3},{"i":1,"f":3}],"32328":[{"i":1,"f":3}],"13805":[{"i":1,"f":3}],"9459":[{"i":0,"f":3},{"i":2,"f":3}],"43778":[{"i":0,"f":3}],"20623":[{"i":0,"f":3}],"17606":[{"i":0,"f":3}],"11573":[{"i":1,"f":3}],"3109":[{"i":0,"f":3}],"83862":[{"i":1,"f":3}],"60349":[{"i":1,"f":3}],"94299":[{"i":0,"f":3}],"9342":[{"i":1,"f":3}],"10190":[{"i":1,"f":3}],"65617":[{"i":0,"f":3}],"85134":[{"i":1,"f":9}],"15190":[{"i":1,"f":3}],"38033":[{"i":1,"f":3}],"94545":[{"i":1,"f":6}],"90194":[{"i":1,"f":6}],"72728":[{"i":1,"f":3}],"417":[{"i":1,"f":3}],"10028":[{"i":0,"f":6}],"88179":[{"i":0,"f":6}],"73397":[{"i":0,"f":6}],"16742":[{"i":1,"f":5}],"80265":[{"i":1,"f":5}],"55093":[{"i":0,"f":2},{"i":1,"f":2}],"82599":[{"i":0,"f":5}],"85081":[{"i":1,"f":5}],"20322":[{"i":1,"f":5}],"59823":[{"i":1,"f":5}],"522":[{"i":0,"f":5}],"52512":[{"i":1,"f":5}],"25857":[{"i":1,"f":5}],"95258":[{"i":1,"f":5}],"3065":[{"i":0,"f":5}],"102989":[{"i":1,"f":2}],"6349":[{"i":1,"f":2}],"16126":[{"i":1,"f":2}],"32049":[{"i":1,"f":2}],"6701":[{"i":0,"f":2}],"85545":[{"i":1,"f":2}],"79121":[{"i":1,"f":2}],"65282":[{"i":0,"f":2}],"29811":[{"i":0,"f":2}],"8190":[{"i":0,"f":5}],"63573":[{"i":0,"f":2}],"80346":[{"i":0,"f":2}],"37652":[{"i":0,"f":2}],"36217":[{"i":1,"f":2}],"59004":[{"i":1,"f":2}],"76761":[{"i":0,"f":2}],"14403":[{"i":1,"f":5}],"83623":[{"i":1,"f":5}],"86602":[{"i":1,"f":4}],"82816":[{"i":0,"f":4},{"i":1,"f":4}],"22242":[{"i":0,"f":8}],"94619":[{"i":0,"f":4}],"71242":[{"i":1,"f":8}],"33873":[{"i":0,"f":4}],"22667":[{"i":2,"f":8},{"i":3,"f":8}],"13961":[{"i":1,"f":8}],"40592":[{"i":1,"f":8}],"19140":[{"i":0,"f":8}],"28376":[{"i":0,"f":0}],"69681":[{"i":0,"f":0},{"i":1,"f":0}],"2415":[{"i":0,"f":7},{"i":1,"f":7}],"70023":[{"i":0,"f":0}],"43427":[{"i":0,"f":3}],"83574":[{"i":2,"f":9}],"45137":[{"i":0,"f":9}],"18125":[{"i":0,"f":9}],"79693":[{"i":1,"f":3}],"5405":[{"i":0,"f":3}],"78115":[{"i":0,"f":7}],"84978":[{"i":0,"f":9}],"8036":[{"i":1,"f":9}],"85456":[{"i":1,"f":3}],"46898":[{"i":1,"f":3}],"86439":[{"i":1,"f":1}],"81439":[{"i":0,"f":9}],"77469":[{"i":0,"f":1}],"308":[{"i":0,"f":1}],"73686":[{"i":0,"f":1}],"12264":[{"i":1,"f":1}],"75541":[{"i":0,"f":1}],"36437":[{"i":0,"f":1}],"62077":[{"i":0,"f":1}],"630":[{"i":0,"f":1}],"76216":[{"i":0,"f":1}],"84919":[{"i":1,"f":1}],"79952":[{"i":1,"f":1}],"76066":[{"i":0,"f":1}],"81143":[{"i":0,"f":1}],"17507":[{"i":1,"f":1}],"71093":[{"i":0,"f":1}],"77594":[{"i":1,"f":7}],"80089":[{"i":0,"f":1}],"39499":[{"i":0,"f":1}],"1214":[{"i":0,"f":1}],"88446":[{"i":0,"f":1}],"72584":[{"i":0,"f":1}],"17927":[{"i":0,"f":3}],"22805":[{"i":1,"f":1}],"70609":[{"i":0,"f":1}],"80552":[{"i":1,"f":1}],"46044":[{"i":0,"f":1}],"31948":[{"i":0,"f":7}],"239":[{"i":0,"f":3}],"79659":[{"i":0,"f":1}],"75668":[{"i":0,"f":1}],"73294":[{"i":0,"f":7}],"65812":[{"i":0,"f":7}],"4900":[{"i":0,"f":7}],"10691":[{"i":0,"f":7}],"34163":[{"i":1,"f":7}],"80436":[{"i":0,"f":7}],"11508":[{"i":1,"f":7}],"72798":[{"i":1,"f":7}],"69708":[{"i":0,"f":7}],"1042":[{"i":0,"f":7}],"81081":[{"i":0,"f":7}],"121":[{"i":0,"f":7}],"68379":[{"i":0,"f":7}],"78928":[{"i":1,"f":7}],"45736":[{"i":0,"f":1}],"30655":[{"i":1,"f":1}]}}</script>
