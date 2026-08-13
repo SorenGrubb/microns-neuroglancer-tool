@@ -9276,21 +9276,24 @@ function buildV1ColumnLayer(){
    anything touching, and if so where", not "exactly how far apart are two cells that clearly
    aren't touching". Verified against a synthetic point-cloud test (including exact grid-boundary
    cases) before being ported into this file. */
-const CELL_CONTACT_THRESHOLD_UM=0.25; // 250 nm (2026-08-14, lowered from 500nm per Soren: "we need
-    // to be more conservative about the points we include") -- provisional, same "flag as
-    // to-be-refined" treatment as the pericyte subtype criteria elsewhere in this project: true
-    // extracellular space between touching membranes is ~20nm, but mesh simplification/
-    // segmentation can leave a larger apparent gap, so SOME slack beyond 20nm is still needed to
-    // catch real contacts on a decimated mesh. 500nm was generous enough to also catch pairs of
-    // vertices that are merely nearby in 3D without the two surfaces actually being apposed (two
-    // processes passing close by, not really touching) -- exactly the "points that aren't near
-    // where the cells touch" Soren flagged. 250nm is a tighter, still-not-final compromise; see
-    // also the mutual-nearest-neighbour filter in allContactPointsWithinThreshold() below, which
-    // targets the SAME complaint from a different angle (rejecting one-sided matches regardless of
-    // distance, not just shrinking the distance cutoff). Kept in µm (not nm) to match MeshDL's own
-    // output units directly. Changing this does not require re-fetching any meshes for a FRESH
-    // client-side compute, but does not retroactively re-tag rows already saved to the shared
-    // sheet under the old threshold.
+const CELL_CONTACT_THRESHOLD_UM=0.001; // 1 nm (2026-08-14, Soren: "I sometimes see a point in
+    // between two meshes that are around 150 nm apart ... the points should only be where the
+    // meshes are actually touching, meaning that the meshes are less than 1 nm apart") -- this is
+    // now the UI field's PREFILLED DEFAULT only (same convention as CELL_CONTACT_POINT_CLUSTER_UM
+    // below), not a hard-coded cutoff -- see the "_threshold" input in renderCellContactsPanel(),
+    // threaded through computeCellContactsOfType/computeCellContactsForCandidates as an explicit
+    // parameter rather than read from this constant directly.
+    // IMPORTANT CAVEAT (flagging this rather than silently picking a "safer" number instead of
+    // what was asked for): this dataset's native voxel size is 4x4x40nm (see meshUmToVoxel's own
+    // nm/4, nm/40 scaling elsewhere in this file) -- segmentation, and therefore the meshes
+    // generated from it, cannot resolve detail finer than that. Two INDEPENDENTLY segmented,
+    // genuinely touching cells will often still have mesh surfaces several nm to a few tens of nm
+    // apart simply because each mesh is generated from its own object's voxel mask, not from a
+    // single continuous surface -- a literal 1nm requirement may end up excluding some contacts
+    // that a person looking at the EM would call clearly touching, or return zero points for a
+    // pair that IS touching. Made UI-adjustable specifically so this can be judged/loosened per
+    // search from what's actually seen, rather than guessed at here in advance. Kept in µm (not
+    // nm) to match MeshDL's own output units directly.
 const CELL_CONTACT_MIN_CLUSTER_HITS=3; // 2026-08-14 (Soren: "more conservative about the points we
     // include") -- a cluster bucket with only 1-2 raw vertex-pair hits is as likely to be mesh
     // noise (a stray decimated vertex that happens to fall within threshold) as a genuine patch of
@@ -9461,21 +9464,24 @@ function meshUmToVoxel(px,py,pz){
    why keeping every evaluated distance (not just "touching" ones) matters for future retuning:
    a "not touching" row still means the pair was CHECKED, which is worth knowing so a future
    visitor doesn't re-click for nothing.
-   clusterUm (2026-08-14, Soren: "save the number of contact points ... only used for the graph if
-   the default settings are used, so that they are comparable") -- the touch-point COUNT for a pair
-   is only meaningful to average across many different users/cells if everyone used the same
-   clustering bucket size: a smaller bucket always reports more, smaller points for the exact same
-   physical patch, so mixing search settings into one average would be comparing different units,
-   not a real biological difference between cell-type pairs. usedDefaultSettings records whether
-   THIS click used the tool's current default (CELL_CONTACT_POINT_CLUSTER_UM) so the backend's
+   clusterUm/thresholdUm (2026-08-14, Soren: "save the number of contact points ... only used for
+   the graph if the default settings are used, so that they are comparable") -- the touch-point
+   COUNT for a pair is only meaningful to average across many different users/cells if everyone
+   used the same clustering bucket size AND the same touch-gap threshold: a smaller bucket always
+   reports more, smaller points for the exact same physical patch, and a looser threshold always
+   reports more/farther-apart points too, so mixing either search setting into one average would be
+   comparing different units, not a real biological difference between cell-type pairs.
+   usedDefaultSettings records whether THIS click used BOTH of the tool's current defaults
+   (CELL_CONTACT_POINT_CLUSTER_UM and CELL_CONTACT_THRESHOLD_UM) so the backend's
    aggregate-for-the-dot-plot read can filter to only comparable rows, while every row (default or
    not) is still saved and still shown to this user individually -- same "always save, filter only
    at the point of use" principle as minDistanceNm's own "not touching" rows above. */
-function maybeSaveCellContacts(nucleusId,rootId,cellType,pairs,clusterUm){
+function maybeSaveCellContacts(nucleusId,rootId,cellType,pairs,clusterUm,thresholdUm){
   if(!REPORT_ENDPOINT||!pairs.length)return;
   if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
   if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
-  const usedDefault=Math.abs((Number(clusterUm)||0)-CELL_CONTACT_POINT_CLUSTER_UM)<1e-9;
+  const usedDefault=Math.abs((Number(clusterUm)||0)-CELL_CONTACT_POINT_CLUSTER_UM)<1e-9
+    &&Math.abs((Number(thresholdUm)||0)-CELL_CONTACT_THRESHOLD_UM)<1e-9;
   const payload={type:"cell_contacts_batch",nucleusId:nucleusId||"",rootId:rootId||"",cellType:cellType||"",
     usedDefaultSettings:usedDefault,
     pairs:pairs.map(function(p){return{contactNucleusId:p.nucleusId||"",contactRootId:p.rootId||"",
@@ -9563,7 +9569,7 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
      contact for this nucleus, from ANY past search -- generic or type-specific) is kept around
      purely to pre-populate "already checked" counts per type below; it's no longer rendered as
      its own flat list here. */
-  let h='<div class="neigh"><h4>Cell contacts <span class="nsub" title="Physical mesh proximity (touching membranes), NOT the synapse-based Connectivity panel above. Computed on demand by fetching cell meshes, same as “Compute volume”. Threshold ('+(CELL_CONTACT_THRESHOLD_UM*1000)+' nm) is provisional.">(mesh proximity, not synapses)</span></h4>';
+  let h='<div class="neigh"><h4>Cell contacts <span class="nsub" title="Physical mesh proximity (touching membranes), NOT the synapse-based Connectivity panel above. Computed on demand by fetching cell meshes, same as “Compute volume”. Max gap counted as touching is adjustable below (provisional default).">(mesh proximity, not synapses)</span></h4>';
   /* "Find contacts with a specific cell type" (2026-08-12) -- see the doc comment above
      cellTypeOptionsForContactSearch()/findWithinRadiusOfType() for scope. All controls here are
      wired LOCALLY right below (not via a document-level delegated listener), matching this same
@@ -9573,6 +9579,10 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
     +'<select id="'+uid+'" style="flex:1 1 auto"></select>'
     +'<input type="number" id="'+uid+'_radius" value="'+CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM+'" min="1" step="10" style="width:70px" title="Search radius around this cell">'
     +'<span class="nsub">&micro;m</span></div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="nsub" style="flex:1 1 auto" for="'+uid+'_threshold">Max gap counted as touching</label>'
+    +'<input type="number" id="'+uid+'_threshold" value="'+Math.round(CELL_CONTACT_THRESHOLD_UM*1000*10)/10+'" min="0.1" step="1" style="width:70px" title="Two mesh points closer than this are treated as a touching pair. Smaller = fewer, stricter points closer to a real membrane apposition; larger = more points but some may just be nearby, not truly touching. This dataset\'s voxel size is 4nm (x/y) x 40nm (z), so independently segmented meshes rarely get closer than a few nm even where they truly touch -- if a very small value returns nothing for a pair you expect to be touching, try loosening it. Only affects a fresh \'Check\' click -- not already-known results.">'
+    +'<span class="nsub">nm</span></div>'
     +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
     +'<label class="nsub" style="flex:1 1 auto" for="'+uid+'_cluster">Min. spacing between reported touch points</label>'
     +'<input type="number" id="'+uid+'_cluster" value="'+Math.round(CELL_CONTACT_POINT_CLUSTER_UM*1000)+'" min="20" step="50" style="width:70px" title="A broad contact patch can have hundreds of mesh vertices within the touch threshold; only one point is kept per this distance so the result stays readable. Smaller = more (and more detailed) points. Only affects a fresh \'Check\' click -- not already-known results.">'
@@ -9586,7 +9596,7 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
   h+='</div>';
   el.innerHTML=h;
   const typeSel=document.getElementById(uid),radiusEl=document.getElementById(uid+"_radius"),
-    clusterEl=document.getElementById(uid+"_cluster"),
+    clusterEl=document.getElementById(uid+"_cluster"),thresholdEl=document.getElementById(uid+"_threshold"),
     countEl=document.getElementById(uid+"_count"),checkBtn=document.getElementById(uid+"_check"),
     nglBtn=document.getElementById(uid+"_ngl"),xlsxBtn=document.getElementById(uid+"_xlsx"),
     resultsEl=document.getElementById(uid+"_results");
@@ -9594,6 +9604,12 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
   let curRows=[]; // whichever result set is currently "live" -- declared here (before the delegated
     // listener below, which closes over it) so both the listener and every handler further down
     // always see the CURRENT rows, not a stale copy from whenever the listener was first attached.
+  // Tracks the threshold actually used to produce curRows (2026-08-14) -- needed by
+  // downloadCellContactsTypeExcel's "Touching (<X nm)" column, which must label rows by whatever
+  // gap cutoff genuinely produced them, not by the module-level default constant (which no longer
+  // reliably matches once the threshold field itself became user-adjustable -- see thresholdEl's
+  // own comment). Starts at the current field value (the default, until a fresh "Check" updates it).
+  let curThresholdNm=Math.round(CELL_CONTACT_THRESHOLD_UM*1000*10)/10;
   /* One delegated click listener, bound ONCE on `el` itself -- handles ".jump" (a row's cell-name
      link) and ".ccOpenOne" (a row's own "Open in Neuroglancer" button) no matter how many times
      resultsEl's contents get replaced afterwards (refreshCountAndKnown / the "Check" button both
@@ -9659,13 +9675,14 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
     const label=typeSel.value;if(!label||!rootId0)return;
     const radius=Math.max(1,Number(radiusEl.value)||CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM);
     const clusterNm=Math.max(20,Number(clusterEl.value)||Math.round(CELL_CONTACT_POINT_CLUSTER_UM*1000));
-    const orig=checkBtn.textContent;checkBtn.disabled=true;typeSel.disabled=true;radiusEl.disabled=true;clusterEl.disabled=true;
+    const thresholdNm=Math.max(0.1,Number(thresholdEl.value)||Math.round(CELL_CONTACT_THRESHOLD_UM*1000*10)/10);
+    const orig=checkBtn.textContent;checkBtn.disabled=true;typeSel.disabled=true;radiusEl.disabled=true;clusterEl.disabled=true;thresholdEl.disabled=true;
     try{
-      const{results,totalFound,checked}=await computeCellContactsOfType(rootId0,i,label,radius,clusterNm/1000,function(frac,msg){
+      const{results,totalFound,checked}=await computeCellContactsOfType(rootId0,i,label,radius,clusterNm/1000,thresholdNm/1000,function(frac,msg){
         checkBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";
       });
-      curRows=results;
-      maybeSaveCellContacts(nucleusId,rootId0,cellType,results,clusterNm/1000);
+      curRows=results;curThresholdNm=thresholdNm;
+      maybeSaveCellContacts(nucleusId,rootId0,cellType,results,clusterNm/1000,thresholdNm/1000);
       resultsEl.innerHTML=results.length?results.map(cellContactCandidateRowHtml).join(''):'<div class="nsub">No cells of that type had a resolvable root ID to check.</div>';
       countEl.textContent=totalFound+" "+label+(totalFound===1?"":"s")+" found within "+radius+" µm"
         +(checked<totalFound?" — checked nearest "+checked+" (limit "+CELL_CONTACT_TYPE_MAX_FETCH+")":" — all checked");
@@ -9674,7 +9691,7 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
       console.warn("[uJump cell contacts by type]",err);
       resultsEl.innerHTML='<div class="nsub" style="color:#f0883e">Failed: '+escHtml(String((err&&err.message)||err))+'</div>';
     }finally{
-      checkBtn.textContent=orig;checkBtn.disabled=false;typeSel.disabled=false;radiusEl.disabled=false;clusterEl.disabled=false;
+      checkBtn.textContent=orig;checkBtn.disabled=false;typeSel.disabled=false;radiusEl.disabled=false;clusterEl.disabled=false;thresholdEl.disabled=false;
     }
   });
   nglBtn.addEventListener("click",function(){
@@ -9683,7 +9700,7 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
   });
   xlsxBtn.addEventListener("click",function(){
     if(!curRows.length)return;
-    downloadCellContactsTypeExcel(nucleusId,rootId0,cellType,typeSel.value,curRows);
+    downloadCellContactsTypeExcel(nucleusId,rootId0,cellType,typeSel.value,curRows,curThresholdNm);
   });
 }
 /* Shared core of the mesh-contact compute, extracted 2026-08-12 so BOTH "check the N nearest
@@ -9694,7 +9711,7 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
    shape, which findWithinRadiusOfType() below also deliberately matches) rather than computing
    it itself, so the two callers can supply completely different candidate-selection logic
    (nearest-K vs. same-type-within-radius) while sharing everything after that. */
-async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,onProgress){
+async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,thresholdUm,onProgress){
   /* Guard added 2026-08-13 after a real crash: MeshDL.fetchCombinedMesh() stringifies whatever
      it's given (String(null)==="null"), so a literal JS null/undefined rootIdStr silently became
      the TEXT "null", passed MeshDL's own "is this id non-empty" filter, and only failed deep
@@ -9720,8 +9737,10 @@ async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,o
        near-duplicate points. clusterUm is caller-supplied (2026-08-13, Soren: "you should be able
        to choose how near the contact points should maximally be, like you are thinning to 300nm
        ... the user should be able to choose this") rather than the fixed CELL_CONTACT_POINT_-
-       CLUSTER_UM constant -- that constant now only serves as the UI's prefilled default value. */
-    const pts=allContactPointsWithinThreshold(own.positions,candMesh.positions,CELL_CONTACT_THRESHOLD_UM,clusterUm);
+       CLUSTER_UM constant -- that constant now only serves as the UI's prefilled default value.
+       thresholdUm is likewise caller-supplied (2026-08-14, same reasoning -- see
+       CELL_CONTACT_THRESHOLD_UM's own comment) rather than read from that constant directly. */
+    const pts=allContactPointsWithinThreshold(own.positions,candMesh.positions,thresholdUm,clusterUm);
     const nt=typeInfo(nb.i),nOwn=ownOverride(nb.i);
     const candCellType=nOwn?nOwn.type:longName(nt.name);
     const cellVoxel=[NX[nb.i],NY[nb.i],NZ[nb.i]]; // the candidate's OWN position (soma/nucleus), for the
@@ -9734,7 +9753,7 @@ async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,o
       results.push({nucleusId:NID[nb.i],rootId:candRoot,cellType:candCellType,distNm:pts[0].dist*1000,
         voxel:touchPoints[0],touchPoints,cellVoxel});
     }else{
-      results.push({nucleusId:NID[nb.i],rootId:candRoot,cellType:candCellType,distNm:CELL_CONTACT_THRESHOLD_UM*1000+1,
+      results.push({nucleusId:NID[nb.i],rootId:candRoot,cellType:candCellType,distNm:thresholdUm*1000+1,
         voxel:null,touchPoints:[],cellVoxel});
     }
   }
@@ -9808,10 +9827,10 @@ const CELL_CONTACT_TYPE_MAX_FETCH=60; // hard cap on how many meshes one "Check 
     // browser/session from an accidental "check 3000 meshes" click; nearest-first (see
     // findWithinRadiusOfType's own sort) so a truncated run still checks the closest, most likely
     // candidates first. Tunable, same "provisional constant" treatment as CELL_CONTACT_CANDIDATES.
-async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,clusterUm,onProgress){
+async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,clusterUm,thresholdUm,onProgress){
   const all=findWithinRadiusOfType(i,typeLabel,radiusUm);
   const candidates=all.slice(0,CELL_CONTACT_TYPE_MAX_FETCH);
-  const results=await computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,onProgress);
+  const results=await computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,thresholdUm,onProgress);
   return{results,totalFound:all.length,checked:candidates.length};
 }
 /* Shared static literals (SRC/DIM/EM shader controls) for both viewer builders below -- re-
@@ -9934,8 +9953,12 @@ function openCellContactsSingleViewer(i,rootIdStr,cellType,row){
    was checked, not just a bare coordinate list -- same "record every checked pair" convention as
    maybeSaveCellContacts' own comment above explains. Same SheetJS pattern (XLSX.utils.aoa_to_sheet/
    book_new/book_append_sheet/writeFile) every other Excel export in this file already uses. */
-function downloadCellContactsTypeExcel(centerNucId,centerRootId,centerType,typeLabel,rows){
-  const thresholdNm=CELL_CONTACT_THRESHOLD_UM*1000;
+function downloadCellContactsTypeExcel(centerNucId,centerRootId,centerType,typeLabel,rows,thresholdNmUsed){
+  // thresholdNmUsed (2026-08-14): the ACTUAL gap threshold that produced `rows` (tracked by the
+  // caller as curThresholdNm -- see its own comment), not the module-level default constant, which
+  // no longer reliably matches now that the threshold field is user-adjustable. Falls back to the
+  // current default only if the caller genuinely has nothing better (shouldn't normally happen).
+  const thresholdNm=(typeof thresholdNmUsed==="number"&&thresholdNmUsed>0)?thresholdNmUsed:Math.round(CELL_CONTACT_THRESHOLD_UM*1000*10)/10;
   const data=[["Center nucleus ID","Center root ID","Center cell type","Contact cell type",
     "Contact nucleus ID","Contact root ID","Closest mesh gap (nm)","Touching (<"+thresholdNm+" nm)",
     "Touch point index","Touch points on this pair","Touch point voxel X","Touch point voxel Y","Touch point voxel Z"]];
