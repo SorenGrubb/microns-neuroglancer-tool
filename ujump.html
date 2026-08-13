@@ -6703,43 +6703,14 @@ document.addEventListener("click",(e)=>{
       });
     return;
   }
-  /* "Find cell contacts" -- see computeCellContacts()/renderCellContactsPanel()'s own doc
-     comments for what this does. Same delegated-listener, disable/re-enable, then/catch pattern
-     as the .meshvol handler just above (progress text via the SAME onProgress(frac,msg) shape
-     MeshDL's own functions already use), so this reads as "the same kind of button" rather than
-     a one-off. Re-renders the panel from THIS click's own results immediately on success rather
-     than re-fetching from the sheet it just wrote to -- the freshest data is already in hand. */
-  const contactBtn=e.target.closest(".meshcontact");
-  if(contactBtn){
-    e.preventDefault();
-    if(contactBtn.disabled)return;
-    const cRootId=contactBtn.dataset.root||"";
-    const cMasterIdx=Number(contactBtn.dataset.i);
-    const cNucId=contactBtn.dataset.nucid||"";
-    const cCellType=contactBtn.dataset.celltype||"";
-    const cContainerId=contactBtn.dataset.container||"";
-    const cOrig=contactBtn.dataset.origLabel||contactBtn.textContent;
-    contactBtn.dataset.origLabel=cOrig;
-    contactBtn.disabled=true;
-    computeCellContacts(cRootId,cMasterIdx,(frac,msg)=>{contactBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";})
-      .then(function(results){
-        maybeSaveCellContacts(cNucId,cRootId,cCellType,results);
-        const known=results.map(function(r){
-          return{contactNucleusId:r.nucleusId,contactRootId:r.rootId,contactCellType:r.cellType,
-            minDistanceNm:r.distNm,contactVoxelX:r.voxel?r.voxel[0]:"",
-            contactVoxelY:r.voxel?r.voxel[1]:"",contactVoxelZ:r.voxel?r.voxel[2]:""};
-        });
-        const panelEl=document.getElementById(cContainerId);
-        if(panelEl)renderCellContactsPanel(panelEl,known,cMasterIdx,cRootId,cCellType,cNucId);
-      })
-      .catch(function(err){
-        console.warn("[uJump cell contacts]",err);
-        contactBtn.textContent="✗ failed: "+String((err&&err.message)||err);
-        contactBtn.title=String((err&&err.message)||err);
-        setTimeout(function(){contactBtn.textContent=cOrig;contactBtn.disabled=false;},5000);
-      });
-    return;
-  }
+  /* The generic "Find cell contacts (checks 8 nearest cells, any type)" button/panel was removed
+     2026-08-13 (Soren: "does not make sense to include anymore") in favour of the "Find contacts
+     with a specific cell type" search below it, which is strictly more useful (a chosen type +
+     adjustable radius, rather than an opaque "whichever 8 happen to be nearest") and writes to
+     the exact same "Mesh contacts" sheet/endpoints -- see renderCellContactsPanel()'s own comment.
+     This delegated .meshcontact handler is intentionally gone with it; the underlying save/read
+     machinery (maybeSaveCellContacts, fetchCellContacts, computeCellContactsForCandidates) is
+     unchanged and still used by the type-specific search. */
   const btn=e.target.closest(".meshdl,.pptxdl");
   if(!btn)return;
   e.preventDefault();
@@ -9365,39 +9336,53 @@ async function loadCellContactsPanel(containerId,i,rootIdStr,cellType,nucleusId)
   renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId);
 }
 function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
+  /* rootIdStr sanitized here, once, at the top -- every other reference in this function reads
+     from this local rather than the raw parameter, so a cell with no resolvable root ID
+     (rootIdStr null/undefined) can never reach MeshDL as the literal string "null" the way it did
+     before 2026-08-13 (see computeCellContactsForCandidates' own guard/comment for the full story
+     of that bug). */
+  const rootId0=rootIdStr||"";
   const uid=escHtml(el.id||"cc")+"_type";
-  let h='<div class="neigh"><h4>Cell contacts <span class="nsub" title="Physical mesh proximity (touching membranes), NOT the synapse-based Connectivity panel above. Computed on demand by fetching this cell’s and nearby cells’ 3D meshes, same as “Compute volume” — costs real mesh fetches, so only the '+CELL_CONTACT_CANDIDATES+' nearest cells (by soma position, any type) are checked per click. Threshold ('+(CELL_CONTACT_THRESHOLD_UM*1000)+' nm) is provisional.">(mesh proximity, not synapses)</span></h4>';
-  if(known&&known.length){
-    h+=known.map(cellContactRowHtml).join('');
-  }else{
-    h+='<div class="nsub">No cell contacts computed for this cell yet.</div>';
-  }
-  h+='<button class="idbtn meshcontact" data-root="'+(rootIdStr||"")+'" data-i="'+i+'" data-nucid="'+escHtml(String(nucleusId||""))+'" data-celltype="'+escHtml(cellType||"")+'" data-container="'+escHtml(el.id||"")+'" style="margin-top:6px;padding:3px 10px;font-size:12px">Find cell contacts (checks '+CELL_CONTACT_CANDIDATES+' nearest cells)</button>';
+  /* The old generic "Find cell contacts (checks 8 nearest cells, any type)" button/panel was
+     removed 2026-08-13 (Soren: "does not make sense to include anymore") in favour of the
+     type-specific search below, which is strictly more useful. `known` (every already-saved
+     contact for this nucleus, from ANY past search -- generic or type-specific) is kept around
+     purely to pre-populate "already checked" counts per type below; it's no longer rendered as
+     its own flat list here. */
+  let h='<div class="neigh"><h4>Cell contacts <span class="nsub" title="Physical mesh proximity (touching membranes), NOT the synapse-based Connectivity panel above. Computed on demand by fetching cell meshes, same as “Compute volume”. Threshold ('+(CELL_CONTACT_THRESHOLD_UM*1000)+' nm) is provisional.">(mesh proximity, not synapses)</span></h4>';
   /* "Find contacts with a specific cell type" (2026-08-12) -- see the doc comment above
      cellTypeOptionsForContactSearch()/findWithinRadiusOfType() for scope. All controls here are
      wired LOCALLY right below (not via a document-level delegated listener), matching this same
      function's own existing ".jump" wiring pattern just below -- simplest option given every
      element referenced already exists in `el` at this point, and keeps everything in one place. */
-  h+='<div class="neigh" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">'
-    +'<h4 style="margin-bottom:4px">Find contacts with a specific cell type</h4>'
-    +'<div class="row" style="gap:8px;align-items:center">'
+  h+='<div class="row" style="gap:8px;align-items:center">'
     +'<select id="'+uid+'" style="flex:1 1 auto"></select>'
     +'<input type="number" id="'+uid+'_radius" value="'+CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM+'" min="1" step="10" style="width:70px" title="Search radius around this cell">'
     +'<span class="nsub">&micro;m</span></div>'
     +'<p class="nsub" id="'+uid+'_count" style="margin:4px 0">Pick a cell type to see how many are nearby.</p>'
     +'<div class="row" style="gap:8px;margin-top:4px;flex-wrap:wrap">'
     +'<button class="idbtn" id="'+uid+'_check" disabled style="padding:3px 10px;font-size:12px">Check contacts with this type</button>'
-    +'<button class="idbtn" id="'+uid+'_ngl" disabled style="padding:3px 10px;font-size:12px" title="Opens a 3D view: this cell, every checked cell of the chosen type, and a point at every place their meshes actually touch.">Open in Neuroglancer</button>'
+    +'<button class="idbtn" id="'+uid+'_ngl" disabled style="padding:3px 10px;font-size:12px" title="Opens a 3D view (with EM imagery) of this cell, every checked cell of the chosen type, and a point at every place their meshes actually touch.">Open in Neuroglancer</button>'
     +'<button class="idbtn" id="'+uid+'_xlsx" disabled style="padding:3px 10px;font-size:12px" title="Downloads every evaluated pair (touching or not) with its coordinates, if any.">Download as Excel</button>'
-    +'</div><div id="'+uid+'_results" style="margin-top:6px"></div></div>';
+    +'</div><div id="'+uid+'_results" style="margin-top:6px"></div>';
   h+='</div>';
   el.innerHTML=h;
-  el.querySelectorAll(".jump").forEach(function(b){
-    b.addEventListener("click",function(){
-      unit="voxel";[...unitsEl.children].forEach(function(c){c.classList.toggle("on",c.dataset.u==="voxel");});
-      document.getElementById("x").value=b.dataset.x;document.getElementById("y").value=b.dataset.y;document.getElementById("z").value=b.dataset.z;document.getElementById("go").click();
+  /* Wires every ".jump" contact-point pill currently inside `el` -- called once right after the
+     initial render, and again after every resultsEl.innerHTML reassignment below (refreshCountAndKnown
+     and the "Check" handler both replace resultsEl's contents with freshly-built cellContactRowHtml()
+     rows, which carry their own ".jump" pills that wouldn't otherwise be wired -- a real gap this
+     function had before 2026-08-13: only the rows present at the FIRST render ever got a listener). */
+  function wireJumps(){
+    el.querySelectorAll(".jump").forEach(function(b){
+      if(b.dataset.wired)return; // avoid double-binding a pill that survives across a re-render
+      b.dataset.wired="1";
+      b.addEventListener("click",function(){
+        unit="voxel";[...unitsEl.children].forEach(function(c){c.classList.toggle("on",c.dataset.u==="voxel");});
+        document.getElementById("x").value=b.dataset.x;document.getElementById("y").value=b.dataset.y;document.getElementById("z").value=b.dataset.z;document.getElementById("go").click();
+      });
     });
-  });
+  }
+  wireJumps();
   const typeSel=document.getElementById(uid),radiusEl=document.getElementById(uid+"_radius"),
     countEl=document.getElementById(uid+"_count"),checkBtn=document.getElementById(uid+"_check"),
     nglBtn=document.getElementById(uid+"_ngl"),xlsxBtn=document.getElementById(uid+"_xlsx"),
@@ -9418,29 +9403,31 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
     const alreadyKnown=(known||[]).filter(k=>k.contactCellType===label);
     countEl.textContent=nearby.length+" "+label+(nearby.length===1?"":"s")+" found within "+radius+" µm"
       +(alreadyKnown.length?" — "+alreadyKnown.length+" already checked":"");
-    checkBtn.disabled=nearby.length===0;
+    checkBtn.disabled=nearby.length===0||!rootId0;
     if(alreadyKnown.length){
       curRows=alreadyKnown.map(k=>({nucleusId:k.contactNucleusId,rootId:k.contactRootId,cellType:k.contactCellType,
         distNm:Number(k.minDistanceNm)||0,voxel:(k.contactVoxelX!=null&&k.contactVoxelX!=="")?[k.contactVoxelX,k.contactVoxelY,k.contactVoxelZ]:null}));
       resultsEl.innerHTML=curRows.map(cellContactRowHtml).join('');
+      wireJumps();
       nglBtn.disabled=false;xlsxBtn.disabled=false;
     }else{
-      resultsEl.innerHTML='<div class="nsub">Not checked yet.</div>';
+      resultsEl.innerHTML=rootId0?'<div class="nsub">Not checked yet.</div>':'<div class="nsub">This cell has no resolvable root ID yet, so contacts can\'t be checked here (past results from others can still show above, if any).</div>';
     }
   }
   typeSel.addEventListener("change",refreshCountAndKnown);
   radiusEl.addEventListener("input",refreshCountAndKnown);
   checkBtn.addEventListener("click",async function(){
-    const label=typeSel.value;if(!label)return;
+    const label=typeSel.value;if(!label||!rootId0)return;
     const radius=Math.max(1,Number(radiusEl.value)||CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM);
     const orig=checkBtn.textContent;checkBtn.disabled=true;typeSel.disabled=true;radiusEl.disabled=true;
     try{
-      const{results,totalFound,checked}=await computeCellContactsOfType(rootIdStr,i,label,radius,function(frac,msg){
+      const{results,totalFound,checked}=await computeCellContactsOfType(rootId0,i,label,radius,function(frac,msg){
         checkBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";
       });
       curRows=results;
-      maybeSaveCellContacts(nucleusId,rootIdStr,cellType,results);
+      maybeSaveCellContacts(nucleusId,rootId0,cellType,results);
       resultsEl.innerHTML=results.length?results.map(cellContactRowHtml).join(''):'<div class="nsub">No cells of that type had a resolvable root ID to check.</div>';
+      wireJumps();
       countEl.textContent=totalFound+" "+label+(totalFound===1?"":"s")+" found within "+radius+" µm"
         +(checked<totalFound?" — checked nearest "+checked+" (limit "+CELL_CONTACT_TYPE_MAX_FETCH+")":" — all checked");
       nglBtn.disabled=!results.length;xlsxBtn.disabled=!results.length;
@@ -9452,12 +9439,12 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
     }
   });
   nglBtn.addEventListener("click",function(){
-    if(!curRows.length)return;
-    openCellContactsTypeViewer(i,rootIdStr,cellType,typeSel.value,curRows);
+    if(!curRows.length||!rootId0)return;
+    openCellContactsTypeViewer(i,rootId0,cellType,typeSel.value,curRows);
   });
   xlsxBtn.addEventListener("click",function(){
     if(!curRows.length)return;
-    downloadCellContactsTypeExcel(nucleusId,rootIdStr,cellType,typeSel.value,curRows);
+    downloadCellContactsTypeExcel(nucleusId,rootId0,cellType,typeSel.value,curRows);
   });
 }
 /* Shared core of the mesh-contact compute, extracted 2026-08-12 so BOTH "check the N nearest
@@ -9469,6 +9456,13 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
    it itself, so the two callers can supply completely different candidate-selection logic
    (nearest-K vs. same-type-within-radius) while sharing everything after that. */
 async function computeCellContactsForCandidates(rootIdStr,candidates,onProgress){
+  /* Guard added 2026-08-13 after a real crash: MeshDL.fetchCombinedMesh() stringifies whatever
+     it's given (String(null)==="null"), so a literal JS null/undefined rootIdStr silently became
+     the TEXT "null", passed MeshDL's own "is this id non-empty" filter, and only failed deep
+     inside fetchMesh()'s BigInt(rootIdStr) conversion -- surfacing as the deeply unhelpful
+     "Cannot convert null to a BigInt" instead of a clear message here, at the one place that
+     actually knows what went wrong. */
+  if(!rootIdStr)throw new Error("This cell has no resolvable root ID yet — nothing to check contacts against.");
   onProgress&&onProgress(0,"fetching this cell's mesh…");
   const own=await MeshDL.fetchCombinedMesh(rootIdStr);
   const results=[];
@@ -9493,15 +9487,13 @@ async function computeCellContactsForCandidates(rootIdStr,candidates,onProgress)
   onProgress&&onProgress(1,"done");
   return results;
 }
-/* The original compute -- fetches the query cell's own mesh, gets CELL_CONTACT_CANDIDATES nearest
-   cells of ANY type by soma position (kNearest(), same lookup the "3 nearest neighbouring cells"
-   panel already uses), fetches each candidate's mesh (skipping any with no resolvable root ID --
-   nothing to fetch), and runs the grid-based min-distance test against each. Progress callback
-   mirrors MeshDL's own (frac 0..1, message string) so the button can show the same "message NN%"
-   pattern the volume/PowerPoint buttons already use. */
-async function computeCellContacts(rootIdStr,i,onProgress){
-  return computeCellContactsForCandidates(rootIdStr,kNearest(NX[i],NY[i],NZ[i],CELL_CONTACT_CANDIDATES,i),onProgress);
-}
+/* The original "check the CELL_CONTACT_CANDIDATES nearest cells, any type" compute
+   (computeCellContacts(rootIdStr,i,onProgress), built on kNearest()) was removed 2026-08-13 along
+   with its button/panel -- see the comment above the old .meshcontact click handler for why.
+   computeCellContactsForCandidates() above is the part that survived: it's still the shared core
+   the type-specific search below calls with its own candidate list. CELL_CONTACT_CANDIDATES stays
+   defined (a few lines up) only because it's still referenced in this block's own doc comments;
+   nothing calls kNearest() for "any type" contacts anymore. */
 /* ---- "Find contacts with a specific cell type" (2026-08-12, Soren: "I wanted to find the cell
    contacts with a specific cell type ... instead of saying how many cells there are of this kind
    in the whole dataset, it should say how many there are within 100 um (this should be a factor
@@ -9572,21 +9564,31 @@ async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,onProgre
    this cell's own segmentation, a second segmentation layer for every matched cell of typeLabel
    that has a resolvable root ID, and a local point-annotation layer at every RESOLVED touch
    coordinate (rows with no voxel -- i.e. evaluated but not touching -- contribute no point, since
-   there is no "place they touch" to mark for those). Deliberately does not add EM imagery or a
-   separate nuclei layer (keeps the view light and focused on the two things actually asked for:
-   which cells, and where they touch) -- see the "Cell contacts" panel's own scope note for why
-   this whole feature is main-in-region-nucleus-only. SRC/DIM are re-declared here as small local
-   literals rather than reused from their own top-level declaration elsewhere in this file, because
-   top-level const/let bindings do not cross <script> tag boundaries in this document (see the
-   organelle-groups comment earlier in this file for the same note) -- duplicating two static,
-   never-changing literals is simpler and safer than trying to reach across that boundary. */
+   there is no "place they touch" to mark for those). Includes the Img65 EM layer (2026-08-13,
+   Soren: "the find contacts neuroglancer instance should include the EM data, so that I can
+   verify that they are actually touching") -- always Img65, never Img35, since this whole feature
+   is scoped to the main in-region nucleus array only (see cellTypeOptionsForContactSearch()'s own
+   comment), so both the center cell and every candidate are guaranteed to be in-region; no need
+   for buildFilterViewerState()'s own any-region-mix handling here. Deliberately still does not add
+   a separate nuclei layer (the two segmentation layers below already make clear which cell is
+   which; a third layer just for nuclei outlines would add fetch cost without adding anything
+   needed to verify a MESH contact specifically). SRC/DIM/the EM shader controls are re-declared
+   here as small local literals rather than reused from their own top-level declarations elsewhere
+   in this file, because top-level const/let bindings do not cross <script> tag boundaries in this
+   document (see the organelle-groups comment earlier in this file for the same note) --
+   duplicating these static, never-changing literals is simpler and safer than trying to reach
+   across that boundary. */
 function buildCellContactsTypeViewerState(i,rootIdStr,cellType,typeLabel,rows){
   const SRC_SEG="precomputed://gs://iarpa_microns/minnie/minnie65/seg_m1300";
+  const SRC_EM="precomputed://https://storage.googleapis.com/iarpa_microns/minnie/minnie65/em";
+  const EM_SHADER_CONTROLS_LOCAL={normalized:{range:[86,172]}};
   const DIM_LOCAL={x:[4e-9,"m"],y:[4e-9,"m"],z:[4e-8,"m"]};
   const touchRows=rows.filter(r=>r.voxel&&r.rootId);
   const matchedRootIds=Array.from(new Set(rows.filter(r=>r.rootId).map(r=>String(r.rootId))));
   const layers=[];
-  layers.push({type:"segmentation",source:SRC_SEG,tab:"source",name:cellType||"This cell",
+  layers.push({type:"image",source:SRC_EM,tab:"rendering",name:"EM",shaderControls:EM_SHADER_CONTROLS_LOCAL});
+  const centerLayerName=cellType||"This cell";
+  layers.push({type:"segmentation",source:SRC_SEG,tab:"source",name:centerLayerName,
     segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
   if(matchedRootIds.length){
     const colors={};matchedRootIds.forEach(r=>colors[r]="#3fb950");
@@ -9605,7 +9607,7 @@ function buildCellContactsTypeViewerState(i,rootIdStr,cellType,typeLabel,rows){
     span=Math.max(...touchRows.map(r=>{const dx=r.voxel[0]*4-cx,dy=r.voxel[1]*4-cy,dz=r.voxel[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
   }
   return{dimensions:DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
-    layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},
+    layers,selectedLayer:{layer:centerLayerName,visible:true},layout:{type:"xy-3d",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function openCellContactsTypeViewer(i,rootIdStr,cellType,typeLabel,rows){
