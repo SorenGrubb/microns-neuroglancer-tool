@@ -6327,8 +6327,16 @@ const MeshDL=(()=>{
      failure on one ID doesn't get silently mislabelled as a cache hit. mainUnavailable on the
      returned object flags the "main root ID's own mesh didn't resolve, this used one or more
      proposed/community root IDs instead" case so callers can tell the user what happened. */
-  async function fetchCombinedMesh(mainRootIdStr,onProgress,forceRecheck){
-    const rootIds=[String(mainRootIdStr)].concat(extraImg65RootIds(mainRootIdStr)).filter(function(id){return id&&id!=="";});
+  async function fetchCombinedMesh(mainRootIdStr,onProgress,forceRecheck,extraRootIdsOverride){
+    /* extraRootIdsOverride (2026-08-14, Soren: "In cases where root IDs have been suggested by the
+       user, the contact points should be calculated for all root IDs combined") -- every existing
+       caller omits this and keeps the old behaviour (extraImg65RootIds(mainRootIdStr), which reads
+       the CUR_EXTRA_ROOTS global -- only ever populated for whichever cell's own panel is currently
+       open on screen). The Cell contacts feature needs this for CANDIDATE cells too, not just the
+       one currently displayed, so it passes an explicitly-fetched list here instead (see
+       fetchExtraRootIdsFor() in the Cell contacts script block) rather than relying on that global,
+       which would silently stay empty for every cell except the one on screen. */
+    const rootIds=[String(mainRootIdStr)].concat(extraRootIdsOverride!==undefined?extraRootIdsOverride:extraImg65RootIds(mainRootIdStr)).filter(function(id){return id&&id!=="";});
     if(!rootIds.length)throw new Error("No root IDs available for this cell yet \u2014 propose one below, then try again.");
     const n=rootIds.length,meshes=[],usedIds=[],failures=[];
     for(let i=0;i<n;i++){
@@ -9276,24 +9284,24 @@ function buildV1ColumnLayer(){
    anything touching, and if so where", not "exactly how far apart are two cells that clearly
    aren't touching". Verified against a synthetic point-cloud test (including exact grid-boundary
    cases) before being ported into this file. */
-const CELL_CONTACT_THRESHOLD_UM=0.001; // 1 nm (2026-08-14, Soren: "I sometimes see a point in
-    // between two meshes that are around 150 nm apart ... the points should only be where the
-    // meshes are actually touching, meaning that the meshes are less than 1 nm apart") -- this is
-    // now the UI field's PREFILLED DEFAULT only (same convention as CELL_CONTACT_POINT_CLUSTER_UM
-    // below), not a hard-coded cutoff -- see the "_threshold" input in renderCellContactsPanel(),
-    // threaded through computeCellContactsOfType/computeCellContactsForCandidates as an explicit
-    // parameter rather than read from this constant directly.
-    // IMPORTANT CAVEAT (flagging this rather than silently picking a "safer" number instead of
-    // what was asked for): this dataset's native voxel size is 4x4x40nm (see meshUmToVoxel's own
+const CELL_CONTACT_THRESHOLD_UM=0.04; // 40 nm (2026-08-14 -- first tried 1nm per Soren's original
+    // "I sometimes see a point in between two meshes that are around 150 nm apart ... the points
+    // should only be where the meshes are actually touching" request; Soren then asked to "keep the
+    // default Max gap counted as touching at 40 nm" after trying it, which lines up with this
+    // dataset's native voxel size -- see below) -- this is the UI field's PREFILLED DEFAULT only
+    // (same convention as CELL_CONTACT_POINT_CLUSTER_UM below), not a hard-coded cutoff -- see the
+    // "_threshold" input in renderCellContactsPanel(), threaded through computeCellContactsOfType/
+    // computeCellContactsForCandidates as an explicit parameter rather than read from this constant
+    // directly.
+    // Why 40nm specifically: this dataset's native voxel size is 4x4x40nm (see meshUmToVoxel's own
     // nm/4, nm/40 scaling elsewhere in this file) -- segmentation, and therefore the meshes
     // generated from it, cannot resolve detail finer than that. Two INDEPENDENTLY segmented,
     // genuinely touching cells will often still have mesh surfaces several nm to a few tens of nm
     // apart simply because each mesh is generated from its own object's voxel mask, not from a
-    // single continuous surface -- a literal 1nm requirement may end up excluding some contacts
-    // that a person looking at the EM would call clearly touching, or return zero points for a
-    // pair that IS touching. Made UI-adjustable specifically so this can be judged/loosened per
-    // search from what's actually seen, rather than guessed at here in advance. Kept in µm (not
-    // nm) to match MeshDL's own output units directly.
+    // single continuous surface -- 40nm (one z-voxel) is roughly the finest gap two such meshes can
+    // be expected to agree on for a genuine contact. Still UI-adjustable so this can be judged/
+    // loosened per search from what's actually seen. Kept in µm (not nm) to match MeshDL's own
+    // output units directly.
 const CELL_CONTACT_MIN_CLUSTER_HITS=3; // 2026-08-14 (Soren: "more conservative about the points we
     // include") -- a cluster bucket with only 1-2 raw vertex-pair hits is as likely to be mesh
     // noise (a stray decimated vertex that happens to fall within threshold) as a genuine patch of
@@ -9397,10 +9405,15 @@ function minMeshDistanceWithinThreshold(posA,posB,threshold){
       b) Minimum-hits-per-bucket (see CELL_CONTACT_MIN_CLUSTER_HITS's own comment): a bucket with
          only 1-2 raw hits is dropped as likely mesh noise rather than reported as a touch point,
          since a genuine patch of apposed membrane on even a coarse mesh almost always produces
-         several nearby vertex-pair hits, not just one. */
-function allContactPointsWithinThreshold(posA,posB,threshold,clusterUm){
+         several nearby vertex-pair hits, not just one.
+   gridA is now a REQUIRED parameter, not built inside this function (2026-08-14 perf fix, Soren:
+   "it is loading a lot longer time, is that a bug?") -- posA is the QUERYING cell's own mesh, the
+   same on every one of the (up to CELL_CONTACT_TYPE_MAX_FETCH) candidate calls in one "Check"
+   click, but this function was rebuilding gridA from scratch on EVERY call regardless -- O(own mesh
+   vertex count) work repeated up to 60x for no reason, since nothing about gridA depends on posB.
+   The caller (computeCellContactsForCandidates) now builds it ONCE and passes it in. */
+function allContactPointsWithinThreshold(posA,gridA,posB,threshold,clusterUm){
   const gridB=buildContactGrid(posB,threshold);
-  const gridA=buildContactGrid(posA,threshold); // for the reciprocity check below
   const buckets=new Map(); // key -> array of {mx,my,mz,dist} (every real observed midpoint in this bucket)
   const nA=posA.length/3;
   const reciprocityTolerance=threshold*0.5;
@@ -9456,6 +9469,36 @@ function allContactPointsWithinThreshold(posA,posB,threshold,clusterUm){
    every other coordinate this tool shows. */
 function meshUmToVoxel(px,py,pz){
   return[Math.round(px*1000/4),Math.round(py*1000/4),Math.round(pz*1000/40)];
+}
+/* Live per-nucleus lookup of community-PROPOSED extra root IDs (2026-08-14, Soren: "In cases where
+   root IDs have been suggested by the user, the contact points should be calculated for all root
+   IDs combined") -- MeshDL.fetchCombinedMesh() already folds extra root IDs into one mesh, but its
+   normal path (extraImg65RootIds()) only ever looks at CUR_EXTRA_ROOTS, a GLOBAL populated by
+   loadRootIdPanel() for whichever single cell's own panel happens to be open on screen right now.
+   That's fine for the cell currently being viewed, but every CANDIDATE cell in a Cell contacts
+   search is a DIFFERENT nucleus -- CUR_EXTRA_ROOTS would still hold the on-screen cell's own
+   extras (or none), never the candidate's. This does the same "?rootIds=" lookup loadRootIdPanel()
+   itself uses, but for an arbitrary nucleus ID on demand, and passes the result into
+   fetchCombinedMesh's new extraRootIdsOverride parameter instead. Same img65-only restriction as
+   extraImg65RootIds (Seg35 lives in a different bucket fetchMesh() can't read; a bare nucleus ID
+   has no mesh at all). Best-effort: any failure just means this cell is checked with its main root
+   ID alone, same as before this feature existed. */
+async function fetchExtraRootIdsFor(nucleusId,mainRootIdStr){
+  if(!REPORT_ENDPOINT||!nucleusId)return[];
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(nucleusId));
+    const d=await r.json();
+    const list=(d&&d.rootIds)||[];
+    const seen={};seen[String(mainRootIdStr)]=1;
+    const out=[];
+    list.forEach(function(x){
+      const id=x&&x.rootId,st=x&&x.segType;
+      if(!id||seen[String(id)])return;
+      if(st&&st!=="img65")return;
+      seen[String(id)]=1;out.push(String(id));
+    });
+    return out;
+  }catch(e){console.warn("[uJump cell contacts] extra root IDs fetch failed",nucleusId,e);return[];}
 }
 /* Silent, best-effort save -- same convention as maybeSaveComputedVolume() (only saves when
    already signed in this session; a never-signed-in user sees no prompt, no error, nothing
@@ -9569,7 +9612,15 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
      contact for this nucleus, from ANY past search -- generic or type-specific) is kept around
      purely to pre-populate "already checked" counts per type below; it's no longer rendered as
      its own flat list here. */
-  let h='<div class="neigh"><h4>Cell contacts <span class="nsub" title="Physical mesh proximity (touching membranes), NOT the synapse-based Connectivity panel above. Computed on demand by fetching cell meshes, same as “Compute volume”. Max gap counted as touching is adjustable below (provisional default).">(mesh proximity, not synapses)</span></h4>';
+  /* Collapsed by default, remembered if expanded (2026-08-14, Soren) -- same native <details>/
+     <summary> + persistDetailsOpen() pattern as the Root/Nucleus ID search and "Or browse a random
+     cell" panels (see persistDetailsOpen's own comment for the full rationale). el.id is always the
+     same fixed "cellContactsPanel" string (see loadCellContactsPanel's caller) even though this
+     whole block is re-rendered on every cell view, so detailsId is stable across renders and
+     persistDetailsOpen's localStorage-backed open state carries over from one cell to the next, not
+     just within one cell's view. */
+  const detailsId=escHtml(el.id||"cc")+"_details";
+  let h='<details class="rv-panel neigh" id="'+detailsId+'"><summary>Cell contacts <span class="nsub" title="Physical mesh proximity (touching membranes), NOT the synapse-based Connectivity panel above. Computed on demand by fetching cell meshes, same as “Compute volume”. Max gap counted as touching is adjustable below (provisional default).">(mesh proximity, not synapses)</span></summary>';
   /* "Find contacts with a specific cell type" (2026-08-12) -- see the doc comment above
      cellTypeOptionsForContactSearch()/findWithinRadiusOfType() for scope. All controls here are
      wired LOCALLY right below (not via a document-level delegated listener), matching this same
@@ -9593,8 +9644,9 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
     +'<button class="idbtn" id="'+uid+'_ngl" disabled style="padding:3px 10px;font-size:12px" title="Opens a 3D view (with EM imagery) of this cell and every checked cell of the chosen type -- segmentation only, no touch points (use the per-cell \'Open in Neuroglancer\' button in the list below for that -- opening every cell\'s points together got overwhelming with more than a few cells).">Open all in Neuroglancer</button>'
     +'<button class="idbtn" id="'+uid+'_xlsx" disabled style="padding:3px 10px;font-size:12px" title="Downloads every evaluated pair (touching or not) with its coordinates, if any.">Download as Excel</button>'
     +'</div><div id="'+uid+'_results" style="margin-top:6px"></div>';
-  h+='</div>';
+  h+='</details>';
   el.innerHTML=h;
+  persistDetailsOpen(detailsId,"ujump_cell_contacts_open");
   const typeSel=document.getElementById(uid),radiusEl=document.getElementById(uid+"_radius"),
     clusterEl=document.getElementById(uid+"_cluster"),thresholdEl=document.getElementById(uid+"_threshold"),
     countEl=document.getElementById(uid+"_count"),checkBtn=document.getElementById(uid+"_check"),
@@ -9633,9 +9685,19 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
       if(row&&rootId0)openCellContactsSingleViewer(i,rootId0,cellType,row);
     }
   });
+  // 2026-08-14 (Soren: "I don't understand why there are 8887 astrocytes in this list, but 9911 in
+  // the random example list") -- this count is intentionally narrower than the random-cell picker's
+  // own type counts, not a bug: this list only counts cells in the main, in-region nucleus array
+  // (own-verified overrides included), because a radius/mesh-fetch scan needs a single stable
+  // array index + position per cell to work from. The random picker's counts additionally include
+  // community-identified standalone (out-of-region) reports and individually-identified sub-cells
+  // of merged-nucleus blobs -- real identified cells, but none of them has that stable index/
+  // position, so they can't be offered here. See cellTypeOptionsForContactSearch()'s own comment
+  // for the full reasoning. Explained in the dropdown's own title so this doesn't need re-asking.
+  typeSel.title="Counts here are narrower than the random-cell picker's: only cells in the main, in-region nucleus array are searchable for contacts (a radius scan needs each cell to have a single stable position). Community-identified standalone reports and individually-split merged-nucleus sub-cells count toward the random picker's totals but not this list, since neither has that stable position.";
   const opts=cellTypeOptionsForContactSearch();
   typeSel.innerHTML='<option value="">Choose a cell type…</option>'
-    +opts.map(o=>'<option value="'+escHtml(o.label)+'">'+escHtml(o.label)+' ('+o.total+' in whole dataset)</option>').join('');
+    +opts.map(o=>'<option value="'+escHtml(o.label)+'">'+escHtml(o.label)+' ('+o.total+' in this list)</option>').join('');
   function refreshCountAndKnown(){
     const label=typeSel.value;
     nglBtn.disabled=true;xlsxBtn.disabled=true;checkBtn.disabled=true;curRows=[];
@@ -9711,7 +9773,7 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
    shape, which findWithinRadiusOfType() below also deliberately matches) rather than computing
    it itself, so the two callers can supply completely different candidate-selection logic
    (nearest-K vs. same-type-within-radius) while sharing everything after that. */
-async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,thresholdUm,onProgress){
+async function computeCellContactsForCandidates(rootIdStr,ownNucleusId,candidates,clusterUm,thresholdUm,onProgress){
   /* Guard added 2026-08-13 after a real crash: MeshDL.fetchCombinedMesh() stringifies whatever
      it's given (String(null)==="null"), so a literal JS null/undefined rootIdStr silently became
      the TEXT "null", passed MeshDL's own "is this id non-empty" filter, and only failed deep
@@ -9720,7 +9782,17 @@ async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,t
      actually knows what went wrong. */
   if(!rootIdStr)throw new Error("This cell has no resolvable root ID yet — nothing to check contacts against.");
   onProgress&&onProgress(0,"fetching this cell's mesh…");
-  const own=await MeshDL.fetchCombinedMesh(rootIdStr);
+  /* Community-proposed extra root IDs, combined in (2026-08-14, Soren: "In cases where root IDs
+     have been suggested by the user, the contact points should be calculated for all root IDs
+     combined") -- see fetchExtraRootIdsFor()'s own comment for why this can't just rely on
+     MeshDL's normal CUR_EXTRA_ROOTS-based path. */
+  const ownExtras=await fetchExtraRootIdsFor(ownNucleusId,rootIdStr);
+  const own=await MeshDL.fetchCombinedMesh(rootIdStr,undefined,undefined,ownExtras);
+  // Built ONCE here, not inside allContactPointsWithinThreshold -- see that function's own comment
+  // for the perf bug this fixes (2026-08-14, Soren: "loading a lot longer time, is that a bug?").
+  // own.positions and thresholdUm are both fixed for this whole candidate loop, so this grid is
+  // valid to reuse for every candidate below.
+  const ownGrid=buildContactGrid(own.positions,thresholdUm);
   const results=[];
   for(let ci=0;ci<candidates.length;ci++){
     const nb=candidates[ci];
@@ -9728,7 +9800,10 @@ async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,t
     onProgress&&onProgress((ci+0.5)/candidates.length,"checking nearby cell "+(ci+1)+"/"+candidates.length+"…");
     if(!candRoot)continue; // nothing to fetch a mesh for -- this candidate has no MICrONS root ID
     let candMesh;
-    try{candMesh=await MeshDL.fetchCombinedMesh(candRoot);}
+    try{
+      const candExtras=await fetchExtraRootIdsFor(NID[nb.i],candRoot);
+      candMesh=await MeshDL.fetchCombinedMesh(candRoot,undefined,undefined,candExtras);
+    }
     catch(e){console.warn("[uJump cell contacts] candidate mesh fetch failed",candRoot,e&&e.message);continue;}
     /* Every touching point, not just the closest one (2026-08-13, Soren: "I only get a single
        touching point per astrocyte ... I want it to find all the touching points between the
@@ -9740,7 +9815,7 @@ async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,t
        CLUSTER_UM constant -- that constant now only serves as the UI's prefilled default value.
        thresholdUm is likewise caller-supplied (2026-08-14, same reasoning -- see
        CELL_CONTACT_THRESHOLD_UM's own comment) rather than read from that constant directly. */
-    const pts=allContactPointsWithinThreshold(own.positions,candMesh.positions,thresholdUm,clusterUm);
+    const pts=allContactPointsWithinThreshold(own.positions,ownGrid,candMesh.positions,thresholdUm,clusterUm);
     const nt=typeInfo(nb.i),nOwn=ownOverride(nb.i);
     const candCellType=nOwn?nOwn.type:longName(nt.name);
     const cellVoxel=[NX[nb.i],NY[nb.i],NZ[nb.i]]; // the candidate's OWN position (soma/nucleus), for the
@@ -9830,7 +9905,7 @@ const CELL_CONTACT_TYPE_MAX_FETCH=60; // hard cap on how many meshes one "Check 
 async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,clusterUm,thresholdUm,onProgress){
   const all=findWithinRadiusOfType(i,typeLabel,radiusUm);
   const candidates=all.slice(0,CELL_CONTACT_TYPE_MAX_FETCH);
-  const results=await computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,thresholdUm,onProgress);
+  const results=await computeCellContactsForCandidates(rootIdStr,NID[i],candidates,clusterUm,thresholdUm,onProgress);
   return{results,totalFound:all.length,checked:candidates.length};
 }
 /* Shared static literals (SRC/DIM/EM shader controls) for both viewer builders below -- re-
