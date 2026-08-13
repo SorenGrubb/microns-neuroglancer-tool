@@ -9234,6 +9234,12 @@ const CELL_CONTACT_THRESHOLD_UM=0.5; // 500 nm -- provisional, same "flag as to-
 const CELL_CONTACT_CANDIDATES=8; // how many nearest-by-soma-position cells (ANY type) to test
     // per click -- bounds the number of extra mesh fetches a single button click can trigger.
     // Tunable; raise later if 8 turns out to miss real neighbours for some cell types/densities.
+const CELL_CONTACT_POINT_CLUSTER_UM=0.3; // 300 nm -- how close two touch points on the SAME
+    // candidate pair have to be before allContactPointsWithinThreshold() treats them as "the same
+    // spot" and only keeps one. Smaller than CELL_CONTACT_THRESHOLD_UM (500nm) on purpose, so a
+    // contact patch that's genuinely wider than one cluster still yields multiple distinct points
+    // tracing its extent, rather than collapsing the whole patch into a single dot. Tunable, same
+    // provisional-constant treatment as the threshold itself.
 function buildContactGrid(positions,cellSize){
   const map=new Map();
   const n=positions.length/3;
@@ -9262,7 +9268,11 @@ function nearestInContactGrid(grid,qx,qy,qz){
 }
 /* Returns {dist,aVertex,bVertex} for the closest vertex pair within threshold, or null if none
    found (see the algorithm comment above for why "null" here is a real, useful answer, not a
-   failure). */
+   failure). Superseded 2026-08-13 by allContactPointsWithinThreshold() below as the one actually
+   used by computeCellContactsForCandidates (Soren: "I only get a single touching point per
+   astrocyte ... I want it to find all the touching points"), but left in place -- still a valid,
+   independently-tested "just the closest point" primitive, and removing it isn't needed to fix
+   anything. */
 function minMeshDistanceWithinThreshold(posA,posB,threshold){
   const grid=buildContactGrid(posB,threshold);
   let best=null;
@@ -9272,6 +9282,34 @@ function minMeshDistanceWithinThreshold(posA,posB,threshold){
     if(r&&(!best||r.dist<best.dist))best={dist:r.dist,aVertex:v,bVertex:r.vertexIdx};
   }
   return best;
+}
+/* Returns EVERY vertex of mesh A within `threshold` of mesh B's surface (not just the single
+   closest one) -- {dist,aVertex}[], sorted nearest-first. A contact patch between two large glial
+   domains can easily have hundreds of mesh vertices within the same 500nm gap, so the raw hit list
+   is thinned with a coarse spatial-hash dedupe (clusterUm): only the FIRST hit encountered per
+   clusterUm-sized bucket of A's own surface is kept, so the returned points still trace out the
+   shape/extent of the contact region without flooding the UI or Neuroglancer with near-duplicate
+   dots at every individual vertex. This is a representativeness thinning, not a "find every single
+   contact vertex" guarantee -- deliberately so, same trade-off already made by the "3x3x3 grid
+   neighbourhood" approximation in nearestInContactGrid() itself (see its own comment). */
+function allContactPointsWithinThreshold(posA,posB,threshold,clusterUm){
+  const grid=buildContactGrid(posB,threshold);
+  const hits=[];
+  const nA=posA.length/3;
+  for(let v=0;v<nA;v++){
+    const r=nearestInContactGrid(grid,posA[v*3],posA[v*3+1],posA[v*3+2]);
+    if(r)hits.push({dist:r.dist,aVertex:v});
+  }
+  if(!hits.length)return[];
+  const seen=new Set(),out=[];
+  for(const h of hits){
+    const x=posA[h.aVertex*3],y=posA[h.aVertex*3+1],z=posA[h.aVertex*3+2];
+    const key=Math.floor(x/clusterUm)+","+Math.floor(y/clusterUm)+","+Math.floor(z/clusterUm);
+    if(seen.has(key))continue;
+    seen.add(key);out.push(h);
+  }
+  out.sort((a,b)=>a.dist-b.dist);
+  return out;
 }
 /* Converts a mesh vertex position (µm, real-world frame) into this tool's own voxel coordinate
    convention -- same nm/4 (x,y) and nm/40 (z) scaling used throughout the rest of this file (see
@@ -9311,15 +9349,31 @@ async function fetchCellContacts(nucleusId){
     return(d&&d.contacts)||[];
   }catch(e){console.warn("[uJump cell contacts]",e);return[];}
 }
-function cellContactRowHtml(c){
-  const touching=Number(c.minDistanceNm)<CELL_CONTACT_THRESHOLD_UM*1000;
-  const jid=c.contactNucleusId||"";
-  const hasPoint=c.contactVoxelX!=null&&c.contactVoxelX!=="";
-  return '<div class="nrow"><div class="nleft"><span class="dot" style="background:'+(touching?"#3fb950":"#6e7681")+'"></span><div>'
-    +'<div class="ntype">'+escHtml(c.contactCellType||"Unclassified")+(touching?' <span style="color:#3fb950">touching</span>':' <span class="nsub">not touching</span>')+'</div>'
-    +'<div class="nsub">'+Number(c.minDistanceNm).toFixed(0)+' nm mesh gap &middot; nuc '+idSpan(jid)+(c.contactRootId?' &middot; root '+idSpan(c.contactRootId):'')
-    +(hasPoint?' &middot; contact point <span class="idval jump" title="Jump to this point" data-x="'+c.contactVoxelX+'" data-y="'+c.contactVoxelY+'" data-z="'+c.contactVoxelZ+'">'+coordSpan(c.contactVoxelX,c.contactVoxelY,c.contactVoxelZ)+'</span>':'')
-    +'</div></div></div>';
+/* Renders ONE ROW PER NEARBY CELL (not per touching point -- Soren, 2026-08-13: "I want the list
+   to be showing the nearby astrocytes, not the touching points, and they should each be a link to
+   the cell identity, so that the user can jump to that astrocyte"). Forced block-level layout with
+   its own margin (rather than reusing the "nrow"/"nleft" flex classes the old per-touching-point
+   row used) specifically to fix the overlap Soren saw once there were more than 2-3 rows -- those
+   classes were built for a different, narrower context elsewhere in this file and didn't reserve
+   enough vertical space here.
+   Takes the ONE canonical row shape this whole feature now uses everywhere -- computeCellContacts-
+   ForCandidates() and the "already known" bootstrap in renderCellContactsPanel() both produce
+   {nucleusId,rootId,cellType,distNm,cellVoxel,touchPoints} objects; there is no second, backend-
+   column-named shape rendered directly anymore (that mismatch -- passing backend column names
+   into a renderer that expected these field names, and vice versa -- was the actual cause of the
+   "Unclassified"/"NaN nm"/blank-nucleus rows Soren saw: every field read back as undefined). */
+function cellContactCandidateRowHtml(r){
+  const touchN=(r.touchPoints||[]).length;
+  const touching=touchN>0;
+  const label=escHtml(r.cellType||"Unclassified")+" &middot; nuc "+escHtml(String(r.nucleusId||""));
+  const nameHtml=r.cellVoxel
+    ?'<a href="#" class="jump" title="Jump to this cell" data-x="'+r.cellVoxel[0]+'" data-y="'+r.cellVoxel[1]+'" data-z="'+r.cellVoxel[2]+'" style="color:var(--accent);text-decoration:none;font-weight:600">'+label+'</a>'
+    :'<span style="font-weight:600">'+label+'</span>';
+  return '<div style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">'
+    +'<span class="dot" style="background:'+(touching?"#3fb950":"#6e7681")+';flex:0 0 auto;margin-top:5px"></span>'
+    +'<div style="flex:1 1 auto;min-width:0">'+nameHtml
+    +'<div class="nsub">'+(touching?(touchN+" touch point"+(touchN===1?"":"s")+", closest "+Number(r.distNm).toFixed(0)+" nm"):("not touching ("+Number(r.distNm).toFixed(0)+" nm gap)"))
+    +(r.rootId?' &middot; root '+idSpan(r.rootId):'')+'</div></div></div>';
 }
 /* Renders already-known contacts (fetched live) plus the "Find cell contacts" trigger button.
    containerId is a plain div left in the panel HTML (see showNucleus), same wiring pattern as
@@ -9367,11 +9421,12 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
     +'</div><div id="'+uid+'_results" style="margin-top:6px"></div>';
   h+='</div>';
   el.innerHTML=h;
-  /* Wires every ".jump" contact-point pill currently inside `el` -- called once right after the
+  /* Wires every ".jump" cell-name link currently inside `el` -- called once right after the
      initial render, and again after every resultsEl.innerHTML reassignment below (refreshCountAndKnown
-     and the "Check" handler both replace resultsEl's contents with freshly-built cellContactRowHtml()
-     rows, which carry their own ".jump" pills that wouldn't otherwise be wired -- a real gap this
-     function had before 2026-08-13: only the rows present at the FIRST render ever got a listener). */
+     and the "Check" handler both replace resultsEl's contents with freshly-built
+     cellContactCandidateRowHtml() rows, which carry their own ".jump" links that wouldn't
+     otherwise be wired -- a real gap this function had before 2026-08-13: only the rows present
+     at the FIRST render ever got a listener). */
   function wireJumps(){
     el.querySelectorAll(".jump").forEach(function(b){
       if(b.dataset.wired)return; // avoid double-binding a pill that survives across a re-render
@@ -9405,9 +9460,23 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
       +(alreadyKnown.length?" — "+alreadyKnown.length+" already checked":"");
     checkBtn.disabled=nearby.length===0||!rootId0;
     if(alreadyKnown.length){
-      curRows=alreadyKnown.map(k=>({nucleusId:k.contactNucleusId,rootId:k.contactRootId,cellType:k.contactCellType,
-        distNm:Number(k.minDistanceNm)||0,voxel:(k.contactVoxelX!=null&&k.contactVoxelX!=="")?[k.contactVoxelX,k.contactVoxelY,k.contactVoxelZ]:null}));
-      resultsEl.innerHTML=curRows.map(cellContactRowHtml).join('');
+      /* Converts the BACKEND row shape (contactNucleusId/contactCellType/minDistanceNm/
+         contactVoxelX..., one row per unordered pair) into the SAME canonical shape
+         computeCellContactsForCandidates() produces -- see cellContactCandidateRowHtml's own
+         comment for why this shape must be consistent everywhere. The backend only ever stores
+         ONE point per pair (the closest one, from whichever click saved it), so touchPoints here
+         is a single-element array, not the full multi-point set a fresh "Check" click can find;
+         cellVoxel (needed for the "click the name to jump" link) isn't stored on the pair row at
+         all, so it's resolved live via nidToIndex()+NX/NY/NZ, same reverse-lookup pattern used
+         elsewhere in this file for a nucleus ID with no known array index handy. */
+      curRows=alreadyKnown.map(k=>{
+        const voxel=(k.contactVoxelX!=null&&k.contactVoxelX!=="")?[k.contactVoxelX,k.contactVoxelY,k.contactVoxelZ]:null;
+        const kIdx=nidToIndex(k.contactNucleusId);
+        const cellVoxel=kIdx>=0?[NX[kIdx],NY[kIdx],NZ[kIdx]]:null;
+        return{nucleusId:k.contactNucleusId,rootId:k.contactRootId,cellType:k.contactCellType,
+          distNm:Number(k.minDistanceNm)||0,voxel,touchPoints:voxel?[voxel]:[],cellVoxel};
+      });
+      resultsEl.innerHTML=curRows.map(cellContactCandidateRowHtml).join('');
       wireJumps();
       nglBtn.disabled=false;xlsxBtn.disabled=false;
     }else{
@@ -9426,7 +9495,7 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
       });
       curRows=results;
       maybeSaveCellContacts(nucleusId,rootId0,cellType,results);
-      resultsEl.innerHTML=results.length?results.map(cellContactRowHtml).join(''):'<div class="nsub">No cells of that type had a resolvable root ID to check.</div>';
+      resultsEl.innerHTML=results.length?results.map(cellContactCandidateRowHtml).join(''):'<div class="nsub">No cells of that type had a resolvable root ID to check.</div>';
       wireJumps();
       countEl.textContent=totalFound+" "+label+(totalFound===1?"":"s")+" found within "+radius+" µm"
         +(checked<totalFound?" — checked nearest "+checked+" (limit "+CELL_CONTACT_TYPE_MAX_FETCH+")":" — all checked");
@@ -9474,14 +9543,23 @@ async function computeCellContactsForCandidates(rootIdStr,candidates,onProgress)
     let candMesh;
     try{candMesh=await MeshDL.fetchCombinedMesh(candRoot);}
     catch(e){console.warn("[uJump cell contacts] candidate mesh fetch failed",candRoot,e&&e.message);continue;}
-    const best=minMeshDistanceWithinThreshold(own.positions,candMesh.positions,CELL_CONTACT_THRESHOLD_UM);
+    /* Every touching point, not just the closest one (2026-08-13, Soren: "I only get a single
+       touching point per astrocyte ... I want it to find all the touching points between the
+       target astrocyte and each of the nearby astrocytes") -- see allContactPointsWithinThreshold's
+       own comment for the clustering that keeps a broad contact patch from becoming hundreds of
+       near-duplicate points. */
+    const pts=allContactPointsWithinThreshold(own.positions,candMesh.positions,CELL_CONTACT_THRESHOLD_UM,CELL_CONTACT_POINT_CLUSTER_UM);
     const nt=typeInfo(nb.i),nOwn=ownOverride(nb.i);
     const candCellType=nOwn?nOwn.type:longName(nt.name);
-    if(best){
-      const voxel=meshUmToVoxel(own.positions[best.aVertex*3],own.positions[best.aVertex*3+1],own.positions[best.aVertex*3+2]);
-      results.push({nucleusId:NID[nb.i],rootId:candRoot,cellType:candCellType,distNm:best.dist*1000,voxel});
+    const cellVoxel=[NX[nb.i],NY[nb.i],NZ[nb.i]]; // the candidate's OWN position (soma/nucleus), for the
+      // "click the cell's name to jump to it" link -- distinct from the touch-point coordinates below.
+    if(pts.length){
+      const touchPoints=pts.map(p=>meshUmToVoxel(own.positions[p.aVertex*3],own.positions[p.aVertex*3+1],own.positions[p.aVertex*3+2]));
+      results.push({nucleusId:NID[nb.i],rootId:candRoot,cellType:candCellType,distNm:pts[0].dist*1000,
+        voxel:touchPoints[0],touchPoints,cellVoxel});
     }else{
-      results.push({nucleusId:NID[nb.i],rootId:candRoot,cellType:candCellType,distNm:CELL_CONTACT_THRESHOLD_UM*1000+1,voxel:null});
+      results.push({nucleusId:NID[nb.i],rootId:candRoot,cellType:candCellType,distNm:CELL_CONTACT_THRESHOLD_UM*1000+1,
+        voxel:null,touchPoints:[],cellVoxel});
     }
   }
   onProgress&&onProgress(1,"done");
@@ -9578,12 +9656,25 @@ async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,onProgre
    document (see the organelle-groups comment earlier in this file for the same note) --
    duplicating these static, never-changing literals is simpler and safer than trying to reach
    across that boundary. */
+/* Golden-angle (137.508°) hue stepping -- gives N maximally-distinct colours without hand-picking
+   a palette, same technique ORG_POINT_COLORS uses elsewhere in this file for its ~50 organelle
+   kinds (see that code's own comment) -- reimplemented as a small LOCAL function here rather than
+   reused from there, because top-level const/let AND function-scoped helpers inside that other
+   script block's own IIFE don't cross <script> tag boundaries in this document (see the
+   organelle-groups comment earlier in this file for the same rule). */
+function cellContactPaletteColor(idx){
+  const h=(idx*137.508)%360,s=0.72,l=0.58;
+  const k=n=>(n+h/30)%12,a=s*Math.min(l,1-l);
+  const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+  const toHex=x=>Math.round(255*x).toString(16).padStart(2,"0");
+  return "#"+toHex(f(0))+toHex(f(8))+toHex(f(4));
+}
 function buildCellContactsTypeViewerState(i,rootIdStr,cellType,typeLabel,rows){
   const SRC_SEG="precomputed://gs://iarpa_microns/minnie/minnie65/seg_m1300";
   const SRC_EM="precomputed://https://storage.googleapis.com/iarpa_microns/minnie/minnie65/em";
   const EM_SHADER_CONTROLS_LOCAL={normalized:{range:[86,172]}};
   const DIM_LOCAL={x:[4e-9,"m"],y:[4e-9,"m"],z:[4e-8,"m"]};
-  const touchRows=rows.filter(r=>r.voxel&&r.rootId);
+  const touchRows=rows.filter(r=>r.rootId&&r.touchPoints&&r.touchPoints.length);
   const matchedRootIds=Array.from(new Set(rows.filter(r=>r.rootId).map(r=>String(r.rootId))));
   const layers=[];
   layers.push({type:"image",source:SRC_EM,tab:"rendering",name:"EM",shaderControls:EM_SHADER_CONTROLS_LOCAL});
@@ -9595,16 +9686,25 @@ function buildCellContactsTypeViewerState(i,rootIdStr,cellType,typeLabel,rows){
     layers.push({type:"segmentation",source:SRC_SEG,tab:"source",name:typeLabel+" (contacts checked)",
       segments:matchedRootIds,segmentColors:colors,objectAlpha:0.85});
   }
-  if(touchRows.length){
-    const anns=touchRows.map((r,idx)=>({type:"point",id:"touch_"+idx,point:[r.voxel[0],r.voxel[1],r.voxel[2]]}));
-    layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:"#ffd21a",
-      name:"Touch points ("+cellType+" ↔ "+typeLabel+")"});
-  }
+  /* One annotation layer PER nearby cell, each its own golden-angle colour (2026-08-13, Soren: "if
+     you can make the points for the different nearby cells different color in neuroglancer, that
+     would be great"), carrying EVERY touch point for that cell (not just the closest -- see
+     allContactPointsWithinThreshold's own comment) -- separate layers rather than one shared layer
+     with a colour property so each nearby cell's points can also be toggled on/off independently
+     from Neuroglancer's own layer panel, same convenience the per-organelle-kind point layers
+     elsewhere in this file already give. */
+  touchRows.forEach((r,idx)=>{
+    const color=cellContactPaletteColor(idx);
+    const anns=r.touchPoints.map((v,pidx)=>({type:"point",id:"touch_"+idx+"_"+pidx,point:v}));
+    layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:color,
+      name:"Touch pts: nuc "+r.nucleusId+" ("+anns.length+")"});
+  });
   const posVox=[NX[i],NY[i],NZ[i]];
   let span=20000; // physical nm, fallback if there's nothing else to size the view on
   if(touchRows.length){
     const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
-    span=Math.max(...touchRows.map(r=>{const dx=r.voxel[0]*4-cx,dy=r.voxel[1]*4-cy,dz=r.voxel[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
+    const allPts=touchRows.reduce((a,r)=>a.concat(r.touchPoints),[]);
+    span=Math.max(...allPts.map(v=>{const dx=v[0]*4-cx,dy=v[1]*4-cy,dz=v[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
   }
   return{dimensions:DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
     layers,selectedLayer:{layer:centerLayerName,visible:true},layout:{type:"xy-3d",orthographicProjection:true},
@@ -9617,22 +9717,27 @@ function openCellContactsTypeViewer(i,rootIdStr,cellType,typeLabel,rows){
   window.open(base+"#!"+encodeURIComponent(JSON.stringify(state)),"_blank","noopener");
 }
 /* "Download the coordinates of all the places the cell touches the other cells of the specified
-   cell type in an excel file" -- one row per evaluated pair (not just touching ones, same
-   "record every checked pair" convention as maybeSaveCellContacts' own comment above explains),
-   with the touch coordinate columns left blank for pairs that were checked but found not to be
-   touching, so the sheet still reads as a complete audit of what was checked, not just a bare
-   coordinate list. Same SheetJS pattern (XLSX.utils.aoa_to_sheet/book_new/book_append_sheet/
-   writeFile) every other Excel export in this file already uses. */
+   cell type in an excel file" -- 2026-08-13: one row per TOUCH POINT now (was one row per pair,
+   back when only the single closest point was ever known -- see allContactPointsWithinThreshold's
+   own comment for why a pair can have several). A non-touching pair still gets exactly one row
+   (blank coordinate/point-index columns) so the sheet remains a complete audit of every pair that
+   was checked, not just a bare coordinate list -- same "record every checked pair" convention as
+   maybeSaveCellContacts' own comment above explains. Same SheetJS pattern (XLSX.utils.aoa_to_sheet/
+   book_new/book_append_sheet/writeFile) every other Excel export in this file already uses. */
 function downloadCellContactsTypeExcel(centerNucId,centerRootId,centerType,typeLabel,rows){
   const thresholdNm=CELL_CONTACT_THRESHOLD_UM*1000;
   const data=[["Center nucleus ID","Center root ID","Center cell type","Contact cell type",
-    "Contact nucleus ID","Contact root ID","Mesh gap (nm)","Touching (<"+thresholdNm+" nm)",
-    "Touch point voxel X","Touch point voxel Y","Touch point voxel Z"]];
+    "Contact nucleus ID","Contact root ID","Closest mesh gap (nm)","Touching (<"+thresholdNm+" nm)",
+    "Touch point index","Touch points on this pair","Touch point voxel X","Touch point voxel Y","Touch point voxel Z"]];
   rows.forEach(r=>{
     const touching=r.distNm<thresholdNm;
-    data.push([centerNucId,centerRootId,centerType,typeLabel,r.nucleusId,r.rootId,
-      Math.round(r.distNm*10)/10,touching?"yes":"no",
-      r.voxel?r.voxel[0]:"",r.voxel?r.voxel[1]:"",r.voxel?r.voxel[2]:""]);
+    const pts=(r.touchPoints&&r.touchPoints.length)?r.touchPoints:[null];
+    pts.forEach((v,pidx)=>{
+      data.push([centerNucId,centerRootId,centerType,typeLabel,r.nucleusId,r.rootId,
+        Math.round(r.distNm*10)/10,touching?"yes":"no",
+        v?pidx+1:"",v?pts.length:"",
+        v?v[0]:"",v?v[1]:"",v?v[2]:""]);
+    });
   });
   const ws=XLSX.utils.aoa_to_sheet(data);
   const wb=XLSX.utils.book_new();
