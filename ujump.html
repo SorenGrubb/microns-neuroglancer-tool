@@ -9234,12 +9234,16 @@ const CELL_CONTACT_THRESHOLD_UM=0.5; // 500 nm -- provisional, same "flag as to-
 const CELL_CONTACT_CANDIDATES=8; // how many nearest-by-soma-position cells (ANY type) to test
     // per click -- bounds the number of extra mesh fetches a single button click can trigger.
     // Tunable; raise later if 8 turns out to miss real neighbours for some cell types/densities.
-const CELL_CONTACT_POINT_CLUSTER_UM=0.3; // 300 nm -- how close two touch points on the SAME
-    // candidate pair have to be before allContactPointsWithinThreshold() treats them as "the same
-    // spot" and only keeps one. Smaller than CELL_CONTACT_THRESHOLD_UM (500nm) on purpose, so a
-    // contact patch that's genuinely wider than one cluster still yields multiple distinct points
-    // tracing its extent, rather than collapsing the whole patch into a single dot. Tunable, same
-    // provisional-constant treatment as the threshold itself.
+const CELL_CONTACT_POINT_CLUSTER_UM=1.0; // 1000 nm (2026-08-14, raised from 300nm per Soren) --
+    // bucket size allContactPointsWithinThreshold() averages touch-point locations over (see its
+    // own comment) before reporting one representative point per bucket. Larger than
+    // CELL_CONTACT_THRESHOLD_UM (500nm) on purpose now -- a wider averaging bucket means each
+    // reported point is the centroid of a bigger patch of contact, which is what actually fixed
+    // "points close to the location but not exactly in the plane / not exactly at the spot" (the
+    // averaging, not just the bucket size, is what moved points onto the contact plane -- see the
+    // function's own comment) -- but a wider bucket also means fewer, more stable points per
+    // contact, which is itself an improvement for a patch that's mostly one contiguous area rather
+    // than several separate ones. Tunable per search via the UI field this only prefills.
 function buildContactGrid(positions,cellSize){
   const map=new Map();
   const n=positions.length/3;
@@ -9283,30 +9287,47 @@ function minMeshDistanceWithinThreshold(posA,posB,threshold){
   }
   return best;
 }
-/* Returns EVERY vertex of mesh A within `threshold` of mesh B's surface (not just the single
-   closest one) -- {dist,aVertex}[], sorted nearest-first. A contact patch between two large glial
-   domains can easily have hundreds of mesh vertices within the same 500nm gap, so the raw hit list
-   is thinned with a coarse spatial-hash dedupe (clusterUm): only the FIRST hit encountered per
-   clusterUm-sized bucket of A's own surface is kept, so the returned points still trace out the
-   shape/extent of the contact region without flooding the UI or Neuroglancer with near-duplicate
-   dots at every individual vertex. This is a representativeness thinning, not a "find every single
-   contact vertex" guarantee -- deliberately so, same trade-off already made by the "3x3x3 grid
-   neighbourhood" approximation in nearestInContactGrid() itself (see its own comment). */
+/* Returns representative contact-patch locations between mesh A and mesh B within `threshold`
+   -- {dist,point:[x,y,z]}[] (point in µm, real-world frame), sorted nearest-first.
+   Reworked 2026-08-14 (Soren: "I am often seeing the points being close to the location that they
+   are touching, but not really in the correct plane and not really at the exact location ... I
+   want the points to be in the middle of the area where they are touching") -- two changes from
+   the original version:
+   1. MIDPOINT, not A's own vertex: each raw hit is now the midpoint between the closest vertex of
+      A and its matched closest vertex of B, not A's vertex alone. A's own surface sits up to
+      `threshold` away from B's, so reporting A's raw vertex position put the point systematically
+      off to one side (and, since mesh normals aren't purely in the gap direction, often out of the
+      true contact plane) -- the midpoint sits ON the seam between the two surfaces instead, which
+      is the "correct plane" Soren was missing.
+   2. CENTROID per cluster, not "first hit wins": a contact patch between two large glial domains
+      can have hundreds of mesh vertices within the same 500nm gap. Previously only the FIRST raw
+      hit encountered in vertex-scan order was kept per clusterUm-sized bucket -- an arbitrary
+      pick, not necessarily anywhere near the middle of that region. Now every hit in a bucket is
+      AVERAGED, so the reported point is the actual centroid of that patch of contact -- "the
+      middle of the area where they are touching", not a scan-order artefact. */
 function allContactPointsWithinThreshold(posA,posB,threshold,clusterUm){
   const grid=buildContactGrid(posB,threshold);
-  const hits=[];
+  const buckets=new Map(); // key -> {sx,sy,sz,sDist,n,minDist}
   const nA=posA.length/3;
   for(let v=0;v<nA;v++){
-    const r=nearestInContactGrid(grid,posA[v*3],posA[v*3+1],posA[v*3+2]);
-    if(r)hits.push({dist:r.dist,aVertex:v});
+    const ax=posA[v*3],ay=posA[v*3+1],az=posA[v*3+2];
+    const r=nearestInContactGrid(grid,ax,ay,az);
+    if(!r)continue;
+    const bx=posB[r.vertexIdx*3],by=posB[r.vertexIdx*3+1],bz=posB[r.vertexIdx*3+2];
+    const mx=(ax+bx)/2,my=(ay+by)/2,mz=(az+bz)/2; // midpoint between the two surfaces
+    const key=Math.floor(mx/clusterUm)+","+Math.floor(my/clusterUm)+","+Math.floor(mz/clusterUm);
+    let b=buckets.get(key);
+    if(!b){b={sx:0,sy:0,sz:0,sDist:0,n:0,minDist:Infinity};buckets.set(key,b);}
+    b.sx+=mx;b.sy+=my;b.sz+=mz;b.sDist+=r.dist;b.n++;
+    if(r.dist<b.minDist)b.minDist=r.dist;
   }
-  if(!hits.length)return[];
-  const seen=new Set(),out=[];
-  for(const h of hits){
-    const x=posA[h.aVertex*3],y=posA[h.aVertex*3+1],z=posA[h.aVertex*3+2];
-    const key=Math.floor(x/clusterUm)+","+Math.floor(y/clusterUm)+","+Math.floor(z/clusterUm);
-    if(seen.has(key))continue;
-    seen.add(key);out.push(h);
+  if(!buckets.size)return[];
+  const out=[];
+  for(const b of buckets.values()){
+    // dist reported is this bucket's CLOSEST raw gap (not the averaged one) -- keeps "closest
+    // touch point" sorting/labelling meaningful (how tight is the tightest part of this patch),
+    // while the POSITION itself is the full-bucket average (how wide/centered is the patch).
+    out.push({dist:b.minDist,point:[b.sx/b.n,b.sy/b.n,b.sz/b.n]});
   }
   out.sort((a,b)=>a.dist-b.dist);
   return out;
@@ -9578,7 +9599,10 @@ async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,o
     const cellVoxel=[NX[nb.i],NY[nb.i],NZ[nb.i]]; // the candidate's OWN position (soma/nucleus), for the
       // "click the cell's name to jump to it" link -- distinct from the touch-point coordinates below.
     if(pts.length){
-      const touchPoints=pts.map(p=>meshUmToVoxel(own.positions[p.aVertex*3],own.positions[p.aVertex*3+1],own.positions[p.aVertex*3+2]));
+      // p.point is already a real-world µm position (the midpoint/centroid computed inside
+      // allContactPointsWithinThreshold -- see its own comment) -- no more indexing into
+      // own.positions by vertex, since these points no longer correspond 1:1 to a single vertex.
+      const touchPoints=pts.map(p=>meshUmToVoxel(p.point[0],p.point[1],p.point[2]));
       results.push({nucleusId:NID[nb.i],rootId:candRoot,cellType:candCellType,distNm:pts[0].dist*1000,
         voxel:touchPoints[0],touchPoints,cellVoxel});
     }else{
