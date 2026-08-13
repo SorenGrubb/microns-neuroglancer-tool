@@ -10134,14 +10134,40 @@ const TRIPARTITE_CANDIDATE_RADIUS_UM=30; // How far around each SYNAPSE to look 
     // proximity criterion). 30µm is comfortably larger than a single astrocyte's own domain radius,
     // chosen the same way CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM was -- a reasonable starting default,
     // adjustable per search.
-const TRIPARTITE_MAX_SYNAPSES=20; // Hard cap on synapses checked per "Check" click -- unlike
+const TRIPARTITE_MAX_SYNAPSES=10; // Hard cap on synapses checked per "Check" click -- unlike
     // Connectivity's CAVE_MAX_SYN_POINTS=400 (cheap, just plotting/coloring already-fetched rows),
     // EVERY synapse checked here can trigger several astrocyte MESH fetches, so this needs to be
     // far smaller to keep one click's cost bounded. Nearest-astrocyte meshes are cached across
     // synapses within one run (see computeTripartiteSynapses's own comment), so this mainly bounds
     // how many DISTINCT synapse locations get tested, not how many mesh fetches happen per se.
-const TRIPARTITE_MAX_CANDIDATES_PER_SYNAPSE=8; // Same "protect the browser from an accidental
+    // Lowered from 20 (2026-08-15, Soren: "the page crashes when I try to load the tripartite
+    // synapses") -- see TRIPARTITE_MAX_UNIQUE_ASTROCYTES' own comment for the fuller explanation.
+const TRIPARTITE_MAX_CANDIDATES_PER_SYNAPSE=5; // Same "protect the browser from an accidental
     // huge click" reasoning as CELL_CONTACT_TYPE_MAX_FETCH, scoped per-synapse instead of per-click.
+    // Lowered from 8, same 2026-08-15 change as TRIPARTITE_MAX_SYNAPSES above.
+const TRIPARTITE_MAX_UNIQUE_ASTROCYTES=6; // 2026-08-15 (Soren: "the page crashes when I try to
+    // load the tripartite synapses with 200 or 100 nm max astrocyte synapse gap") -- a genuine
+    // circuit breaker on how many DISTINCT astrocyte meshes one "Check" click will fetch, not just
+    // how many synapses/candidates it considers. This matters specifically for astrocytes: they
+    // have unusually large, sprawling meshes (a single astrocyte's territory can be far bigger than
+    // a typical cell contacts candidate), and unlike Cell contacts (which reuses ONE already-
+    // fetched "own" mesh against many candidates), this feature can end up fetching MANY different
+    // full astrocyte meshes in one click if a cell's synapses are spread across different
+    // processes/regions -- each one is cached (see computeTripartiteSynapses), but caching doesn't
+    // help the FIRST time each distinct one is fetched. Investigated but could not confirm the
+    // smaller-threshold correlation Soren reported is a deterministic effect of the gap value
+    // itself (candidate/mesh-fetch counts in this code don't depend on the gap threshold) -- most
+    // likely explanation is cumulative memory across several large, distinct astrocyte fetches in
+    // one session, which this cap bounds regardless of the precise trigger. Once this many DISTINCT
+    // astrocytes have been fetched in one run, remaining unfetched candidates are skipped (reported
+    // as "not checked" rather than silently ignored) instead of triggering further large fetches.
+const TRIPARTITE_MAX_MESH_VERTICES=400000; // 2026-08-15, same crash-safety motivation -- an
+    // astrocyte candidate whose combined mesh (main root ID + any community-proposed extras) comes
+    // back larger than this is skipped rather than risking a slow/heavy grid build over it. 400k
+    // vertices is a generous ceiling for what this feature actually needs (a single nearest-point
+    // lookup, not full visual detail) -- a provisional number, not derived from a measured crash
+    // threshold, since the crash couldn't be reproduced directly here; tune down further if large
+    // astrocyte meshes are still causing trouble.
 /* Same shape/reasoning as findWithinRadiusOfType() above, but centred on an arbitrary voxel POINT
    (a synapse location) instead of a master-array cell index -- no self-exclusion needed since a
    synapse coordinate is never itself a nucleus index. */
@@ -10173,14 +10199,32 @@ function voxelToMeshUm(vx,vy,vz){
    local to this call), since the SAME nearby astrocyte is often the closest candidate for several
    different synapses of one cell -- refetching/regridding it each time would be wasteful. */
 async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,onProgress){
-  const meshCache=new Map(); // rootIdStr -> {mesh,grid} | null (null = fetch failed, don't retry)
+  const meshCache=new Map(); // rootIdStr -> {mesh,grid}|null|"skipped_limit"|"skipped_toolarge"
+  const fetchedRoots=new Set(); // distinct astrocyte root IDs actually mesh-fetched this run (circuit breaker)
+  let limitHit=false; // once true, no NEW distinct astrocyte is fetched for the rest of this run
   async function getAstroMeshGrid(candRootStr,candNucleusId){
     if(meshCache.has(candRootStr))return meshCache.get(candRootStr);
+    // Circuit breaker (2026-08-15, Soren reported repeated crashes at 100/200nm gap; exact mechanism
+    // unconfirmed from code alone -- candidate/mesh-fetch counts don't depend on the gap value itself,
+    // so the most defensible mitigation is a hard ceiling on how many DISTINCT, potentially-large
+    // astrocyte meshes get fetched+gridded in one run, regardless of what triggers the crash):
+    if(!fetchedRoots.has(candRootStr)&&fetchedRoots.size>=TRIPARTITE_MAX_UNIQUE_ASTROCYTES){
+      limitHit=true;
+      meshCache.set(candRootStr,"skipped_limit");
+      return "skipped_limit";
+    }
     let entry=null;
     try{
       const extras=await fetchExtraRootIdsFor(candNucleusId,candRootStr);
       const mesh=await MeshDL.fetchCombinedMesh(candRootStr,undefined,undefined,extras);
-      entry={mesh,grid:buildContactGrid(mesh.positions,thresholdUm)};
+      fetchedRoots.add(candRootStr);
+      const vertCount=mesh.positions.length/3;
+      if(vertCount>TRIPARTITE_MAX_MESH_VERTICES){
+        console.warn("[uJump tripartite] astrocyte mesh too large, skipping",candRootStr,vertCount,"vertices");
+        entry="skipped_toolarge";
+      }else{
+        entry={mesh,grid:buildContactGrid(mesh.positions,thresholdUm)};
+      }
     }catch(e){console.warn("[uJump tripartite] astrocyte mesh fetch failed",candRootStr,e&&e.message);entry=null;}
     meshCache.set(candRootStr,entry);
     return entry;
@@ -10193,11 +10237,13 @@ async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,on
     const[vx,vy,vz]=syn.pos.map(Number);
     const candidates=findWithinRadiusOfTypeAtPoint(vx,vy,vz,"Astrocyte",candidateRadiusUm).slice(0,TRIPARTITE_MAX_CANDIDATES_PER_SYNAPSE);
     const[sx,sy,sz]=voxelToMeshUm(vx,vy,vz);
-    let best=null;
+    let best=null,anySkippedLimit=false,anySkippedTooLarge=false;
     for(const c of candidates){
       const candRoot=rootId(c.i);
       if(!candRoot)continue;
       const entry=await getAstroMeshGrid(candRoot,NID[c.i]);
+      if(entry==="skipped_limit"){anySkippedLimit=true;continue;}
+      if(entry==="skipped_toolarge"){anySkippedTooLarge=true;continue;}
       if(!entry)continue;
       const r=nearestInContactGrid(entry.grid,sx,sy,sz);
       if(!r)continue;
@@ -10208,7 +10254,8 @@ async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,on
       }
     }
     results.push({pos:syn.pos,partner:syn.partner,direction:syn.direction,size:syn.size,
-      astro:best,tripartite:!!(best&&best.distUm<=thresholdUm),checkedCount:candidates.length});
+      astro:best,tripartite:!!(best&&best.distUm<=thresholdUm),checkedCount:candidates.length,
+      skippedLimit:anySkippedLimit,skippedTooLarge:anySkippedTooLarge});
   }
   onProgress&&onProgress(1,"done");
   return results;
@@ -10224,6 +10271,10 @@ function tripartiteRowHtml(r,idx,thresholdNm){
       ?'<a href="#" class="jump" title="Jump to this astrocyte" data-x="'+a.cellVoxel[0]+'" data-y="'+a.cellVoxel[1]+'" data-z="'+a.cellVoxel[2]+'" style="color:var(--accent);text-decoration:none">'+label+'</a>'
       :label;
     if(!r.tripartite)astroHtml+=' <span class="nsub">(closest checked, outside '+thresholdNm+' nm threshold)</span>';
+  }else if(r.skippedLimit){
+    astroHtml='<span class="nsub">not checked &mdash; distinct-astrocyte fetch limit ('+TRIPARTITE_MAX_UNIQUE_ASTROCYTES+') reached this run</span>';
+  }else if(r.skippedTooLarge){
+    astroHtml='<span class="nsub">not checked &mdash; nearby astrocyte mesh too large to load safely</span>';
   }else{
     astroHtml=r.checkedCount?'no astrocyte mesh resolvable among '+r.checkedCount+' checked':'no astrocyte found within the search radius';
   }
@@ -10265,7 +10316,7 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
     if(!foundAstroByRoot.has(key))foundAstroByRoot.set(key,{nucleusId:r.astro.nucleusId,rows:[]});
     foundAstroByRoot.get(key).rows.push(r);
   });
-  let colorIdx=0,firstAnnLayerName=null;
+  let colorIdx=0;
   const allSynPts=[],allTouchPts=[];
   const synAnnsIn=[],synAnnsOut=[];
   rows.forEach((r,ri)=>{
@@ -10273,14 +10324,15 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
     const ann={type:"point",id:"syn_"+ri,point:r.pos.map(Number),description:r.direction+" synapse · partner "+r.partner+(r.astro?(" · nearest astrocyte "+Number(r.astro.distNm).toFixed(0)+" nm"):"")};
     (r.direction==="input"?synAnnsIn:synAnnsOut).push(ann);
   });
-  if(synAnnsIn.length){
-    layers.push({type:"annotation",source:"local://annotations",annotations:synAnnsIn,annotationColor:"#00b7ff",name:"Input synapses ("+synAnnsIn.length+")"});
-    if(firstAnnLayerName===null)firstAnnLayerName="Input synapses ("+synAnnsIn.length+")";
-  }
-  if(synAnnsOut.length){
-    layers.push({type:"annotation",source:"local://annotations",annotations:synAnnsOut,annotationColor:"#ff4fa3",name:"Output synapses ("+synAnnsOut.length+")"});
-    if(firstAnnLayerName===null)firstAnnLayerName="Output synapses ("+synAnnsOut.length+")";
-  }
+  const inLayerName="Input synapses ("+synAnnsIn.length+")",outLayerName="Output synapses ("+synAnnsOut.length+")";
+  if(synAnnsIn.length)layers.push({type:"annotation",source:"local://annotations",annotations:synAnnsIn,annotationColor:"#00b7ff",name:inLayerName});
+  if(synAnnsOut.length)layers.push({type:"annotation",source:"local://annotations",annotations:synAnnsOut,annotationColor:"#ff4fa3",name:outLayerName});
+  /* 2026-08-15, Soren: "the neuroglancer view should always open with the input synapses open" --
+     explicit priority (input, then output, then the center cell) rather than "whichever came
+     first" so this is unambiguous regardless of layer-push order above. Falls through to output
+     only when there are no input synapses at all (e.g. "outputs" was the only checkbox ticked, or
+     a single-row "Open in Neuroglancer" click on one output synapse). */
+  const selectedLayerName=synAnnsIn.length?inLayerName:(synAnnsOut.length?outLayerName:centerLayerName);
   for(const[rootStr,info]of foundAstroByRoot){
     const color=cellContactPaletteColor(colorIdx++);
     layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:"Astrocyte (nuc "+info.nucleusId+")",
@@ -10289,13 +10341,27 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
     const layerName="Astrocyte nuc "+info.nucleusId+" process points ("+anns.length+")";
     layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:color,name:layerName});
   }
+  /* 2026-08-15, Soren: "...and centered on the first tripartite synapse" -- was the centroid of
+     every point shown (self cell + every synapse + every astrocyte touch point), which put the
+     initial view somewhere in the middle of everything rather than actually AT a real synapse.
+     Now centers on the first row that qualified as tripartite (r.tripartite===true), falling back
+     to the old "centroid of everything" only when nothing qualified (e.g. every checked synapse
+     came back "checked, not close enough" -- there's no single tripartite synapse to center on in
+     that case, so the wide overview is still the more useful default). Span/zoom below is
+     unchanged -- still sized to encompass every point shown, only WHERE the camera starts differs. */
+  const firstTripartite=rows.find(r=>r.tripartite);
   const pts=[[NX[i],NY[i],NZ[i]]].concat(allSynPts).concat(allTouchPts);
-  let sx=0,sy=0,sz=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];sz+=p[2];});
-  const posVox=[sx/pts.length,sy/pts.length,sz/pts.length];
+  let posVox;
+  if(firstTripartite){
+    posVox=firstTripartite.pos.map(Number);
+  }else{
+    let sx=0,sy=0,sz=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];sz+=p[2];});
+    posVox=[sx/pts.length,sy/pts.length,sz/pts.length];
+  }
   const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
   const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
   return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
-    layers,selectedLayer:firstAnnLayerName?{layer:firstAnnLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
+    layers,selectedLayer:{layer:selectedLayerName,visible:true,tab:selectedLayerName===centerLayerName?undefined:"annotations"},
     layout:{type:"4panel",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
