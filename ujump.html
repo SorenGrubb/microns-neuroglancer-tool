@@ -9627,8 +9627,10 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
      function's own existing ".jump" wiring pattern just below -- simplest option given every
      element referenced already exists in `el` at this point, and keeps everything in one place. */
   h+='<div class="row" style="gap:8px;align-items:center">'
-    +'<select id="'+uid+'" style="flex:1 1 auto"></select>'
-    +'<input type="number" id="'+uid+'_radius" value="'+CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM+'" min="1" step="10" style="width:70px" title="Search radius around this cell">'
+    +'<select id="'+uid+'" style="flex:1 1 auto"></select></div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="nsub" style="flex:1 1 auto" for="'+uid+'_radius">Search radius</label>'
+    +'<input type="number" id="'+uid+'_radius" value="'+CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM+'" min="1" step="10" style="width:70px" title="How far around this cell (in µm) to search for cells of the chosen type. Only cells within this radius are counted/offered for checking below.">'
     +'<span class="nsub">&micro;m</span></div>'
     +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
     +'<label class="nsub" style="flex:1 1 auto" for="'+uid+'_threshold">Max gap counted as touching</label>'
@@ -9972,14 +9974,20 @@ function buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows){
   }
   let colorIdx=0;
   const allTouchPoints=[];
+  let firstAnnLayerName=null; // 2026-08-14, Soren: "the list of the annotations should be open ...
+    // if there is more than one list ... it should be the list of the first one that is open" --
+    // captured on the first row that actually produces an annotation layer, used below to select
+    // it (with its Annotations tab active) instead of the red center-cell segmentation layer.
   rows.forEach(r=>{
     const pts=r.touchPoints||[];
     if(!pts.length)return;
     allTouchPoints.push(...pts);
     const color=cellContactPaletteColor(colorIdx++);
     const anns=pts.map((v,pidx)=>({type:"point",id:"touch_"+r.nucleusId+"_"+pidx,point:v}));
+    const layerName=(r.cellType||"Nearby cell")+" touch points (nuc "+r.nucleusId+", "+anns.length+")";
+    if(firstAnnLayerName===null)firstAnnLayerName=layerName;
     layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:color,
-      name:(r.cellType||"Nearby cell")+" touch points (nuc "+r.nucleusId+", "+anns.length+")"});
+      name:layerName});
   });
   /* Position/zoom sized off the matched cells' own soma positions PLUS every touch point now shown
      (not just soma positions, back when this view showed no points at all) -- centroid of every
@@ -9989,8 +9997,15 @@ function buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows){
   const posVox=[sx/pts.length,sy/pts.length,sz/pts.length];
   const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
   const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
+  /* layout "4panel" (2026-08-14, Soren: "it should have all the 3 EM views open as well as the 3D
+     view") -- Neuroglancer's standard 4-pane layout (xy/xz/yz cross-sections + 3D), replacing the
+     2-pane "xy-3d" both cell-contacts viewers used before. selectedLayer opens the first touch-
+     point annotation layer's own Annotations tab when one exists (see firstAnnLayerName above), so
+     its coordinate list is showing immediately -- falls back to the red center-cell segmentation
+     layer only when nothing is touching (no annotation layers exist at all). */
   return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
-    layers,selectedLayer:{layer:centerLayerName,visible:true},layout:{type:"xy-3d",orthographicProjection:true},
+    layers,selectedLayer:firstAnnLayerName?{layer:firstAnnLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
+    layout:{type:"4panel",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function openCellContactsAllViewer(i,rootIdStr,cellType,typeLabel,rows){
@@ -10018,10 +10033,11 @@ function buildCellContactsSingleViewerState(i,rootIdStr,cellType,row){
       segments:[String(row.rootId)],segmentColors:{[String(row.rootId)]:"#3fb950"},objectAlpha:0.85});
   }
   const touchPoints=row.touchPoints||[];
+  const annLayerName="Touch points ("+touchPoints.length+")";
   if(touchPoints.length){
     const anns=touchPoints.map((v,pidx)=>({type:"point",id:"touch_"+pidx,point:v}));
     layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:cellContactPaletteColor(0),
-      name:"Touch points ("+anns.length+")"});
+      name:annLayerName});
   }
   const pts=[[NX[i],NY[i],NZ[i]]];
   if(row.cellVoxel)pts.push(row.cellVoxel);
@@ -10030,8 +10046,12 @@ function buildCellContactsSingleViewerState(i,rootIdStr,cellType,row){
   const posVox=touchPoints.length?touchPoints[0]:[sx/pts.length,sy/pts.length,sz/pts.length];
   const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
   const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),3000)*2.4;
+  /* 4panel layout + annotation-tab selection, same as buildCellContactsAllViewerState above and
+     for the same reason (2026-08-14, Soren) -- see that function's own comment. Only one possible
+     annotation layer here, so no "first of several" logic is needed. */
   return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,4000),
-    layers,selectedLayer:{layer:centerLayerName,visible:true},layout:{type:"xy-3d",orthographicProjection:true},
+    layers,selectedLayer:touchPoints.length?{layer:annLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
+    layout:{type:"4panel",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function openCellContactsSingleViewer(i,rootIdStr,cellType,row){
