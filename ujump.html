@@ -3350,6 +3350,7 @@ function showNucleus(pos){
   h+='</div>';
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
   h+='<div id="connPanel" style="margin:6px 0"></div>';
+  h+='<div id="tripartitePanel" style="margin:6px 0"></div>';
   h+='<div id="cellContactsPanel" style="margin:6px 0"></div>';
   h+='<div id="classHistoryPanel" style="margin:6px 0"></div>';
   h+='<button class="jump" data-x="'+NX[i]+'" data-y="'+NY[i]+'" data-z="'+NZ[i]+'">Jump to this nucleus &#8599;</button>';
@@ -3397,6 +3398,10 @@ function showNucleus(pos){
      samples bucket into the SAME type label its computed-volume samples do. See
      saveConnectivitySample() near loadConnectivityPanel() for what these feed into. */
   if(typeof loadConnectivityPanel==="function")loadConnectivityPanel("connPanel",root,[NX[i],NY[i],NZ[i]],own?own.type:(ti.cls?longName(ti.name):"Unclassified"),nid);
+  /* "Astrocyte-synapse proximity" (2026-08-15) -- reuses this cell's synapses (own CAVE query,
+     same as Connectivity above) + the Cell contacts mesh-proximity engine to flag synapses with a
+     nearby astrocyte process. Same call-site pattern as loadConnectivityPanel/loadCellContactsPanel. */
+  if(typeof loadTripartitePanel==="function")loadTripartitePanel("tripartitePanel",i,root,own?own.type:(ti.cls?longName(ti.name):"Unclassified"),nid);
   /* "Cell contacts" (2026-08-10) -- physical mesh proximity to nearby cells of ANY type, NOT
      synapses (see loadCellContactsPanel()'s own doc comment). Same call-site pattern as
      loadConnectivityPanel() just above -- i is this render's own master array index, needed for
@@ -10091,6 +10096,334 @@ function downloadCellContactsTypeExcel(centerNucId,centerRootId,centerType,typeL
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,"Contacts");
   XLSX.writeFile(wb,"cell_contacts_"+centerNucId+"_vs_"+String(typeLabel).replace(/[^a-z0-9]+/gi,"_")+".xlsx");
+}
+
+/* ============================================================================================
+   Astrocyte-synapse proximity ("tripartite synapses") -- 2026-08-15, Soren: "I was thinking if
+   we could locate the astrocyte processes that are very near these synapses by using the method
+   we used for cell contacts. I imagine seeing in neuroglancer the input, output synapses together
+   with the astrocyte process in 3D and 2D." Placed in ITS OWN panel (Soren's choice, not nested in
+   either existing one) but built almost entirely from parts that already exist in the other two:
+   the Connectivity panel's CAVE synapse query (caveApiQuery/caveSynFilter/caveAggregate/
+   mergeSelfRootIds/fetchCommunityRootIds -- all plain `function` declarations, so they're callable
+   here across the <script> tag boundary same as every other cross-script function reuse in this
+   file) supplies the synapse coordinates; the Cell contacts machinery just above in THIS script
+   block (buildContactGrid/nearestInContactGrid, MeshDL.fetchCombinedMesh, fetchExtraRootIdsFor,
+   cellContactPaletteColor, cellContactsViewerBase, meshUmToVoxel) supplies the proximity test and
+   the viewer. A few small CAVE-related string constants ARE re-declared locally below (CAVE_SYN_TABLE
+   etc. are `const`, which does NOT cross the script-tag boundary -- see this file's own repeated
+   note on that) rather than reached across.
+   IMPORTANT SCIENTIFIC CAVEAT (flagged rather than silently asserted, same "to be refined"
+   treatment as the pericyte-subtype criteria elsewhere in this project): "an astrocyte mesh vertex
+   within TRIPARTITE_ASTRO_DIST_UM of a synapse point" is a REASONABLE STRUCTURAL PROXY for a
+   tripartite synapse, not an authoritative identification -- the literature's actual definition
+   also requires the astrocytic process to ensheathe the synaptic cleft, which a single nearest-
+   point distance can't confirm. EM literature puts astrocyte processes at roughly 50nm from
+   synapses on average, with most contacts (~89% in one dataset) falling between about 10 and
+   1100nm -- a wide range, not one clean cutoff -- see:
+   https://pmc.ncbi.nlm.nih.gov/articles/PMC7123847/ ,
+   https://www.sciencedirect.com/science/article/abs/pii/S0896627318301806 ,
+   https://pubmed.ncbi.nlm.nih.gov/36779013/
+   TRIPARTITE_ASTRO_DIST_UM's default is picked to sit inside that range, not derived from a single
+   authoritative source -- shown as adjustable and provisional in its own UI tooltip, same
+   convention as CELL_CONTACT_THRESHOLD_UM above. */
+const TRIPARTITE_ASTRO_DIST_UM=0.5; // 500nm default -- see the caveat above; adjustable per search.
+const TRIPARTITE_CANDIDATE_RADIUS_UM=30; // How far around each SYNAPSE to look for astrocyte somas
+    // worth mesh-fetching -- purely a "don't miss a real nearby astrocyte" search net, not a
+    // scientific parameter itself (unlike TRIPARTITE_ASTRO_DIST_UM above, which IS the actual
+    // proximity criterion). 30µm is comfortably larger than a single astrocyte's own domain radius,
+    // chosen the same way CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM was -- a reasonable starting default,
+    // adjustable per search.
+const TRIPARTITE_MAX_SYNAPSES=20; // Hard cap on synapses checked per "Check" click -- unlike
+    // Connectivity's CAVE_MAX_SYN_POINTS=400 (cheap, just plotting/coloring already-fetched rows),
+    // EVERY synapse checked here can trigger several astrocyte MESH fetches, so this needs to be
+    // far smaller to keep one click's cost bounded. Nearest-astrocyte meshes are cached across
+    // synapses within one run (see computeTripartiteSynapses's own comment), so this mainly bounds
+    // how many DISTINCT synapse locations get tested, not how many mesh fetches happen per se.
+const TRIPARTITE_MAX_CANDIDATES_PER_SYNAPSE=8; // Same "protect the browser from an accidental
+    // huge click" reasoning as CELL_CONTACT_TYPE_MAX_FETCH, scoped per-synapse instead of per-click.
+/* Same shape/reasoning as findWithinRadiusOfType() above, but centred on an arbitrary voxel POINT
+   (a synapse location) instead of a master-array cell index -- no self-exclusion needed since a
+   synapse coordinate is never itself a nucleus index. */
+function findWithinRadiusOfTypeAtPoint(vx,vy,vz,typeLabel,radiusUm){
+  const idx=buildMainArrayTypeIndex();
+  const radiusNm=radiusUm*1000;
+  const cx=vx*4,cy=vy*4,cz=vz*40;
+  const out=[];
+  for(let j=0;j<N;j++){
+    if(idx[j]!==typeLabel)continue;
+    const dx=NX[j]*4-cx,dy=NY[j]*4-cy,dz=NZ[j]*40-cz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    if(d<=radiusNm)out.push({i:j,dist:d});
+  }
+  out.sort((a,b)=>a.dist-b.dist);
+  return out;
+}
+/* Inverse of meshUmToVoxel() above -- a synapse's ctr_pt_position_x/y/z (from CAVE, in this
+   dataset's native voxel frame, same as NX/NY/NZ -- confirmed by buildConnectivityState() using
+   these positions directly as annotation points with no conversion) needs to be in the SAME
+   real-world-µm frame as mesh vertex positions before it can be compared against one. */
+function voxelToMeshUm(vx,vy,vz){
+  return[vx*4/1000,vy*4/1000,vz*40/1000];
+}
+/* Core compute: for each synapse point, find the nearest ASTROCYTE mesh vertex among candidate
+   astrocytes within TRIPARTITE_CANDIDATE_RADIUS_UM, reporting whichever candidate came closest
+   (even if it didn't end up within thresholdUm -- "checked, not close enough" is still a real,
+   useful result, same "always report the closest evaluated pair" convention as Cell contacts'
+   maybeSaveCellContacts). Astrocyte meshes/grids are cached by root ID for the whole run (a `Map`
+   local to this call), since the SAME nearby astrocyte is often the closest candidate for several
+   different synapses of one cell -- refetching/regridding it each time would be wasteful. */
+async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,onProgress){
+  const meshCache=new Map(); // rootIdStr -> {mesh,grid} | null (null = fetch failed, don't retry)
+  async function getAstroMeshGrid(candRootStr,candNucleusId){
+    if(meshCache.has(candRootStr))return meshCache.get(candRootStr);
+    let entry=null;
+    try{
+      const extras=await fetchExtraRootIdsFor(candNucleusId,candRootStr);
+      const mesh=await MeshDL.fetchCombinedMesh(candRootStr,undefined,undefined,extras);
+      entry={mesh,grid:buildContactGrid(mesh.positions,thresholdUm)};
+    }catch(e){console.warn("[uJump tripartite] astrocyte mesh fetch failed",candRootStr,e&&e.message);entry=null;}
+    meshCache.set(candRootStr,entry);
+    return entry;
+  }
+  const capped=points.slice(0,TRIPARTITE_MAX_SYNAPSES);
+  const results=[];
+  for(let si=0;si<capped.length;si++){
+    const syn=capped[si];
+    onProgress&&onProgress(si/capped.length,"checking synapse "+(si+1)+"/"+capped.length+"…");
+    const[vx,vy,vz]=syn.pos.map(Number);
+    const candidates=findWithinRadiusOfTypeAtPoint(vx,vy,vz,"Astrocyte",candidateRadiusUm).slice(0,TRIPARTITE_MAX_CANDIDATES_PER_SYNAPSE);
+    const[sx,sy,sz]=voxelToMeshUm(vx,vy,vz);
+    let best=null;
+    for(const c of candidates){
+      const candRoot=rootId(c.i);
+      if(!candRoot)continue;
+      const entry=await getAstroMeshGrid(candRoot,NID[c.i]);
+      if(!entry)continue;
+      const r=nearestInContactGrid(entry.grid,sx,sy,sz);
+      if(!r)continue;
+      if(!best||r.dist<best.distUm){
+        const vp=[entry.mesh.positions[r.vertexIdx*3],entry.mesh.positions[r.vertexIdx*3+1],entry.mesh.positions[r.vertexIdx*3+2]];
+        best={distUm:r.dist,distNm:r.dist*1000,nucleusId:NID[c.i],rootId:candRoot,
+          touchVoxel:meshUmToVoxel(vp[0],vp[1],vp[2]),cellVoxel:[NX[c.i],NY[c.i],NZ[c.i]]};
+      }
+    }
+    results.push({pos:syn.pos,partner:syn.partner,direction:syn.direction,size:syn.size,
+      astro:best,tripartite:!!(best&&best.distUm<=thresholdUm),checkedCount:candidates.length});
+  }
+  onProgress&&onProgress(1,"done");
+  return results;
+}
+function tripartiteRowHtml(r,idx,thresholdNm){
+  const dirColor=r.direction==="input"?"#00b7ff":"#ff4fa3";
+  const dirLabel=r.direction==="input"?"Input":"Output";
+  const a=r.astro;
+  let astroHtml;
+  if(a){
+    const label="Astrocyte &middot; nuc "+escHtml(String(a.nucleusId))+" &middot; "+Number(a.distNm).toFixed(0)+" nm";
+    astroHtml=a.cellVoxel
+      ?'<a href="#" class="jump" title="Jump to this astrocyte" data-x="'+a.cellVoxel[0]+'" data-y="'+a.cellVoxel[1]+'" data-z="'+a.cellVoxel[2]+'" style="color:var(--accent);text-decoration:none">'+label+'</a>'
+      :label;
+    if(!r.tripartite)astroHtml+=' <span class="nsub">(closest checked, outside '+thresholdNm+' nm threshold)</span>';
+  }else{
+    astroHtml=r.checkedCount?'no astrocyte mesh resolvable among '+r.checkedCount+' checked':'no astrocyte found within the search radius';
+  }
+  const openBtn='<button class="idbtn tpOpenOne" data-idx="'+idx+'" style="margin-left:8px;padding:1px 8px;font-size:11px;vertical-align:middle" title="Opens a 4-panel Neuroglancer view (3 EM cross-sections + 3D) of this synapse, its pre/post partner, and the nearest astrocyte found, with the annotation list open.">Open in Neuroglancer</button>';
+  return '<div style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">'
+    +'<span class="dot" style="background:'+(r.tripartite?"#3fb950":"#6e7681")+';flex:0 0 auto;margin-top:5px"></span>'
+    +'<div style="flex:1 1 auto;min-width:0"><span style="color:'+dirColor+';font-weight:600">'+dirLabel+'</span>'
+    +' &middot; partner root '+idSpan(r.partner)+openBtn
+    +'<div class="nsub">'+astroHtml+'</div></div></div>';
+}
+/* Neuroglancer state builders -- same 4panel + annotation-tab-selected convention Cell contacts'
+   own two viewers just adopted (2026-08-14), for the same reason: opening straight to a coordinate
+   list you can click through beats hunting for it after the fact. buildTripartiteViewerState
+   covers BOTH "one synapse" (rows=[oneRow]) and "open all" (rows=every checked synapse) -- unlike
+   Cell contacts' two separate builders, one shape covers both cases cleanly here since there's
+   only ever one query cell + its partners + whichever astrocytes were found, not a combinatorial
+   per-candidate explosion. */
+function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
+  const B=cellContactsViewerBase();
+  const layers=[];
+  layers.push({type:"image",source:B.SRC_EM,tab:"rendering",name:"EM",shaderControls:B.EM_SHADER_CONTROLS_LOCAL});
+  const centerLayerName=cellType||"This cell";
+  layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:centerLayerName,
+    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+  const inPartners=Array.from(new Set(rows.filter(r=>r.direction==="input").map(r=>String(r.partner))));
+  const outPartners=Array.from(new Set(rows.filter(r=>r.direction==="output").map(r=>String(r.partner))));
+  if(inPartners.length){
+    const colors={};inPartners.forEach(p=>colors[p]="#00b7ff");
+    layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:"Input partners",segments:inPartners,segmentColors:colors,objectAlpha:0.75});
+  }
+  if(outPartners.length){
+    const colors={};outPartners.forEach(p=>colors[p]="#ff4fa3");
+    layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:"Output partners",segments:outPartners,segmentColors:colors,objectAlpha:0.75});
+  }
+  const foundAstroByRoot=new Map(); // rootId -> {nucleusId,rows:[row,...]}
+  rows.forEach(r=>{
+    if(!r.astro||!r.tripartite)return;
+    const key=String(r.astro.rootId);
+    if(!foundAstroByRoot.has(key))foundAstroByRoot.set(key,{nucleusId:r.astro.nucleusId,rows:[]});
+    foundAstroByRoot.get(key).rows.push(r);
+  });
+  let colorIdx=0,firstAnnLayerName=null;
+  const allSynPts=[],allTouchPts=[];
+  const synAnnsIn=[],synAnnsOut=[];
+  rows.forEach((r,ri)=>{
+    allSynPts.push(r.pos);
+    const ann={type:"point",id:"syn_"+ri,point:r.pos.map(Number),description:r.direction+" synapse · partner "+r.partner+(r.astro?(" · nearest astrocyte "+Number(r.astro.distNm).toFixed(0)+" nm"):"")};
+    (r.direction==="input"?synAnnsIn:synAnnsOut).push(ann);
+  });
+  if(synAnnsIn.length){
+    layers.push({type:"annotation",source:"local://annotations",annotations:synAnnsIn,annotationColor:"#00b7ff",name:"Input synapses ("+synAnnsIn.length+")"});
+    if(firstAnnLayerName===null)firstAnnLayerName="Input synapses ("+synAnnsIn.length+")";
+  }
+  if(synAnnsOut.length){
+    layers.push({type:"annotation",source:"local://annotations",annotations:synAnnsOut,annotationColor:"#ff4fa3",name:"Output synapses ("+synAnnsOut.length+")"});
+    if(firstAnnLayerName===null)firstAnnLayerName="Output synapses ("+synAnnsOut.length+")";
+  }
+  for(const[rootStr,info]of foundAstroByRoot){
+    const color=cellContactPaletteColor(colorIdx++);
+    layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:"Astrocyte (nuc "+info.nucleusId+")",
+      segments:[rootStr],segmentColors:{[rootStr]:color},objectAlpha:0.85});
+    const anns=info.rows.map((r,pidx)=>{allTouchPts.push(r.astro.touchVoxel);return{type:"point",id:"astro_"+rootStr+"_"+pidx,point:r.astro.touchVoxel};});
+    const layerName="Astrocyte nuc "+info.nucleusId+" process points ("+anns.length+")";
+    layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:color,name:layerName});
+  }
+  const pts=[[NX[i],NY[i],NZ[i]]].concat(allSynPts).concat(allTouchPts);
+  let sx=0,sy=0,sz=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];sz+=p[2];});
+  const posVox=[sx/pts.length,sy/pts.length,sz/pts.length];
+  const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
+  const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
+  return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
+    layers,selectedLayer:firstAnnLayerName?{layer:firstAnnLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
+    layout:{type:"4panel",orthographicProjection:true},
+    showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
+}
+function openTripartiteViewer(i,rootIdStr,cellType,rows){
+  const state=buildTripartiteViewerState(i,rootIdStr,cellType,rows);
+  const viewerEl=document.getElementById("viewer");
+  const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
+  window.open(base+"#!"+encodeURIComponent(JSON.stringify(state)),"_blank","noopener");
+}
+/* Panel entry point -- same call-site signature/shape as loadCellContactsPanel (containerId,i,
+   rootIdStr,cellType,nucleusId), called alongside it from showNucleus(). Collapsed by default,
+   remembered if expanded -- same persistDetailsOpen() pattern as every other collapsible panel in
+   this file. No backend persistence in this first version (Soren's own scoping: "per-synapse
+   check + viewer only" first) -- purely a live, on-demand client compute, nothing saved/shared
+   across users yet. */
+function loadTripartitePanel(containerId,i,rootIdStr,cellType,nucleusId){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  const rootId0=rootIdStr||"";
+  const uid=escHtml(el.id||"tp")+"_x";
+  const detailsId=escHtml(el.id||"tp")+"_details";
+  let savedToken="";try{savedToken=localStorage.getItem("cave_token")||"";}catch(_lse){}
+  let h='<details class="rv-panel neigh" id="'+detailsId+'"><summary>Astrocyte&ndash;synapse proximity <span class="nsub" title="Structural proxy for tripartite synapses: finds astrocyte mesh processes near this cell\'s synapses, using the same mesh-proximity method as Cell contacts. Distance-only -- does not confirm the process actually ensheathes the synapse. Uses the CAVE synapse data below, same as Connectivity.">(experimental)</span></summary>';
+  h+='<div style="font-size:12px;color:var(--mut);margin:6px 0 8px">Checks this cell\'s synapses (via CAVE, same query as Connectivity above) for a nearby astrocyte mesh process, then opens the synapses and the nearest astrocyte together in Neuroglancer. A proximity match is a structural proxy for a tripartite synapse, not a confirmed one — see this panel\'s own tooltip.</div>';
+  h+='<div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:flex-end;margin-bottom:8px;overflow-x:auto">'
+    +'<div style="flex:1 1 auto;min-width:90px"><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">CAVE token</label>'
+    +'<input type="password" id="'+uid+'_token" placeholder="paste token" value="'+escHtml(savedToken)+'" style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;padding:6px 8px;font-size:13px"></div>'
+    +'<div style="flex:0 0 auto"><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px" title="1300 matches this tool\'s own segmentation snapshot">Version</label>'
+    +'<select id="'+uid+'_version" style="width:62px;padding:6px 4px;font-size:13px">'+["1300","1822","1718","1621","1507","943"].map(v=>'<option value="'+v+'"'+(v==="1300"?" selected":"")+'>'+v+'</option>').join("")+'</select></div></div>'
+    +'<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin-bottom:8px">'
+    +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="'+uid+'_in" checked> inputs</label>'
+    +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="'+uid+'_out" checked> outputs</label>'
+    +'<label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="'+uid+'_remember"'+(savedToken?" checked":"")+'> remember token in this browser</label></div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="nsub" style="flex:1 1 auto" for="'+uid+'_astrodist">Max astrocyte&ndash;synapse gap</label>'
+    +'<input type="number" id="'+uid+'_astrodist" value="'+Math.round(TRIPARTITE_ASTRO_DIST_UM*1000)+'" min="10" step="50" style="width:70px" title="Two points closer than this count as a proximity match. EM literature puts most astrocyte-synapse contacts between roughly 10 and 1100nm (average ~50nm) -- this default sits inside that range but is not derived from one authoritative source; adjust and see what the data actually shows. See this panel\'s own comment/citations in the source for the exact references.">'
+    +'<span class="nsub">nm</span></div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="nsub" style="flex:1 1 auto" for="'+uid+'_radius">Astrocyte search radius</label>'
+    +'<input type="number" id="'+uid+'_radius" value="'+TRIPARTITE_CANDIDATE_RADIUS_UM+'" min="1" step="5" style="width:70px" title="How far around each synapse to look for astrocyte somas worth checking -- just a search net, not the actual proximity criterion (that\'s the gap field above). Larger catches more candidates at the cost of more mesh fetches.">'
+    +'<span class="nsub">&micro;m</span></div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="nsub" style="flex:1 1 auto" for="'+uid+'_max">Max synapses to check</label>'
+    +'<input type="number" id="'+uid+'_max" value="'+TRIPARTITE_MAX_SYNAPSES+'" min="1" max="100" style="width:70px" title="Hard cap per click -- every synapse checked can trigger several astrocyte mesh fetches, so this bounds how expensive one click can get. Nearest synapses are not prioritized (CAVE\'s own row order is used); re-running with a higher cap checks more.">'
+    +'<span class="nsub">synapses</span></div>'
+    +'<div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">'
+    +'<button class="idbtn" id="'+uid+'_check">Check for nearby astrocyte processes</button>'
+    +'<button class="idbtn" id="'+uid+'_ngl" disabled title="Opens every checked synapse, its partner, and every astrocyte process found, together in one 4-panel Neuroglancer view.">Open all in Neuroglancer</button>'
+    +'</div><span id="'+uid+'_status" style="font-size:12px;color:var(--mut)"></span>'
+    +'<div id="'+uid+'_results" style="margin-top:6px"></div>';
+  h+='</details>';
+  el.innerHTML=h;
+  persistDetailsOpen(detailsId,"ujump_tripartite_open");
+  const tokenEl=document.getElementById(uid+"_token"),versionEl=document.getElementById(uid+"_version"),
+    inEl=document.getElementById(uid+"_in"),outEl=document.getElementById(uid+"_out"),
+    rememberEl=document.getElementById(uid+"_remember"),astroDistEl=document.getElementById(uid+"_astrodist"),
+    radiusEl=document.getElementById(uid+"_radius"),maxEl=document.getElementById(uid+"_max"),
+    checkBtn=document.getElementById(uid+"_check"),nglBtn=document.getElementById(uid+"_ngl"),
+    statusEl=document.getElementById(uid+"_status"),resultsEl=document.getElementById(uid+"_results");
+  if(!checkBtn)return;
+  let curRows=[],curThresholdNm=Math.round(TRIPARTITE_ASTRO_DIST_UM*1000);
+  el.addEventListener("click",function(e){
+    const jumpBtn=e.target.closest(".jump");
+    if(jumpBtn){
+      e.preventDefault();
+      unit="voxel";[...unitsEl.children].forEach(function(c){c.classList.toggle("on",c.dataset.u==="voxel");});
+      document.getElementById("x").value=jumpBtn.dataset.x;document.getElementById("y").value=jumpBtn.dataset.y;document.getElementById("z").value=jumpBtn.dataset.z;document.getElementById("go").click();
+      return;
+    }
+    const openBtn=e.target.closest(".tpOpenOne");
+    if(openBtn){
+      e.preventDefault();
+      const row=curRows[Number(openBtn.dataset.idx)];
+      if(row&&rootId0)openTripartiteViewer(i,rootId0,cellType,[row]);
+    }
+  });
+  checkBtn.addEventListener("click",async function(){
+    const token=sanitizeCaveToken(tokenEl.value);
+    const version=versionEl.value;
+    const doIn=inEl.checked,doOut=outEl.checked;
+    const remember=rememberEl.checked;
+    const thresholdUm=Math.max(0.01,Number(astroDistEl.value)||Math.round(TRIPARTITE_ASTRO_DIST_UM*1000))/1000;
+    const radiusUm=Math.max(1,Number(radiusEl.value)||TRIPARTITE_CANDIDATE_RADIUS_UM);
+    const maxSyn=Math.min(100,Math.max(1,Number(maxEl.value)||TRIPARTITE_MAX_SYNAPSES));
+    if(!token){statusEl.textContent="Enter your CAVE token — see the Connectivity panel above for how to get one.";statusEl.style.color="#ff7a7a";return;}
+    if(!doIn&&!doOut){statusEl.textContent="Pick inputs, outputs, or both.";statusEl.style.color="#ff7a7a";return;}
+    if(!rootId0){statusEl.textContent="This cell has no resolvable root ID yet.";statusEl.style.color="#ff7a7a";return;}
+    try{remember?localStorage.setItem("cave_token",token):localStorage.removeItem("cave_token");}catch(_lse2){}
+    checkBtn.disabled=true;statusEl.style.color="var(--mut)";
+    try{
+      statusEl.textContent="Fetching synapses…";
+      const communityRoots=await fetchCommunityRootIds(nucleusId);
+      const selfIds=mergeSelfRootIds(rootId0,communityRoots);
+      const dirs=[];if(doIn)dirs.push("input");if(doOut)dirs.push("output");
+      let allPoints=[];
+      for(const dir of dirs){
+        const rows=await caveApiQuery("synapses_pni_2",caveSynFilter(selfIds,dir),token,version);
+        const agg=caveAggregate(rows,selfIds,dir);
+        allPoints.push(...agg.points);
+      }
+      if(!allPoints.length){
+        resultsEl.innerHTML='<div class="nsub">No synapses found for this direction/token/version combination.</div>';
+        nglBtn.disabled=true;curRows=[];
+        return;
+      }
+      const capped=allPoints.slice(0,maxSyn);
+      const results=await computeTripartiteSynapses(capped,thresholdUm,radiusUm,function(frac,msg){
+        statusEl.textContent=(msg||"")+" "+Math.round(frac*100)+"%";
+      });
+      curRows=results;curThresholdNm=Math.round(thresholdUm*1000);
+      const nTri=results.filter(r=>r.tripartite).length;
+      resultsEl.innerHTML=results.map((r,ri)=>tripartiteRowHtml(r,ri,curThresholdNm)).join('');
+      statusEl.textContent=nTri+" of "+results.length+" checked synapse"+(results.length===1?"":"s")+" have an astrocyte process within "+curThresholdNm+" nm"+(allPoints.length>capped.length?" (checked first "+capped.length+" of "+allPoints.length+" synapses found — raise the cap above to check more)":"");
+      statusEl.style.color="var(--mut)";
+      nglBtn.disabled=!results.length;
+    }catch(err){
+      console.warn("[uJump tripartite]",err);
+      resultsEl.innerHTML='<div class="nsub" style="color:#f0883e">Failed: '+escHtml(String((err&&err.message)||err))+'</div>';
+      statusEl.textContent="";
+      curRows=[];nglBtn.disabled=true;
+    }finally{
+      checkBtn.disabled=false;
+    }
+  });
+  nglBtn.addEventListener("click",function(){
+    if(!curRows.length||!rootId0)return;
+    openTripartiteViewer(i,rootId0,cellType,curRows);
+  });
 }
 </script>
 <script type="application/json" id="vascdata2">{"FINE_NAMES":["3rd-order arterial capillary","2nd-order venous capillary","penetrating arteriole","ascending venule","1st-order arterial capillary","pial arteriole","pial venule","3rd-order venous capillary","2nd-order arterial capillary","1st-order venous capillary"],"OV_FINE_IDX":"PwAAAFgAAACOAAAA5QEAAAkCAAAQAgAAPgIAAFgCAACmAgAAsgIAAOYCAADpAgAAFwMAACgDAACcAwAA9wMAAGAEAABuBAAAdQQAAPsEAABsBQAAzAUAAAMGAAC4BgAAPAcAAHEHAACOBwAAmAcAAPkHAABTCAAAjwgAAKYIAADdCAAA8QgAABIJAABuCQAAvQkAAN0JAADjCQAADwoAAM8KAADrCwAAHQ0AAKUNAACwDQAAuA0AANkNAAClDgAApg4AAL0OAAAFDwAAkA8AAC0QAAB7EAAA5BAAAEIRAABGEQAAmhEAAOARAAAJEgAAfhIAAN0SAAAdEwAALxMAADgTAABXEwAA5hMAABoUAAD/FAAAKhUAAFIVAAB5FQAAthUAAOwVAAD2FQAALBYAAEkWAABAFwAApRcAAGEYAAAeGQAA6hkAAAIaAAC2GgAA8BoAABcbAACeGwAArhsAAOcbAAD9GwAAOBwAAJcdAADnHQAAQh8AAHAfAADTHwAA1x8AAJYiAADfIgAAjyMAAJMjAAC+IwAAKyQAAIokAACsJAAA/CQAADslAABRJQAAayUAANAlAAAjJgAARyYAAKImAAByJwAApCcAAK0nAACwJwAA2icAAKcoAABJKQAAXykAAJYpAACYKQAAmikAAAMqAAAJKgAAkSoAAAEsAACELAAAoSwAAA0tAADoLgAAKC8AAIYvAADgLwAAKzAAAD0wAACAMAAA5DAAAJcxAAB6MgAAQzMAAOYzAAAkNAAA3DQAAPE0AAAFNQAAXjUAAJE1AACSNQAAmjUAAJw1AACzNQAA6jUAAPY1AAAsNgAAmzYAAAo3AABxNwAAojcAAPI3AAAgOAAAkDgAAA85AAAkOQAANjkAAJw5AAB6OgAAkDoAAFg7AABZOwAAMzwAALA8AACyPAAADj0AAMY9AAAePgAA1j4AAFM/AABePwAA+T8AAKRAAAC1QAAAbkIAAKRDAAC0QwAAwEMAABlEAABaRAAAXUQAADxFAABaRQAAhUUAAJBFAADgRQAAnEYAAKtGAADbRgAAlUcAAANJAAAnSQAAlUkAANBJAAD9SQAASEsAAE9LAADsSwAADkwAAElMAACJTAAAwUwAADVNAABPTQAAXk0AAGJNAADCTQAAnE4AAJ9OAABETwAAoU8AAOJPAACqUAAA11AAAPdQAAAhUQAAZlEAAIJRAABFUgAAW1IAAKRSAAAHUwAAj1MAAKRTAABIVAAAZVQAAJ9UAADmVAAAT1YAAHVWAAB9VgAAf1YAAIlWAACkVgAAqVYAAPtWAABjVwAAclcAAHVYAACPWAAApVgAAPRZAAAoWgAAK1oAADNaAAA4WgAAWFoAAIZaAACHWgAAxVoAAANcAAArXQAAsF0AAP5dAACQXgAAZ18AALNfAAA4YAAAkGAAAMtgAADmYAAA8mAAAI1jAADeYwAA32MAAGpkAACDZQAADGYAABlmAAB0ZgAAh2YAACRnAABIZwAA/WcAAARoAAAyaAAAOGgAAJJoAAD5aAAACWkAACFpAABSaQAAV2kAALZpAAAcagAAXWoAAAlrAABKawAAT2sAAIJrAADrawAAAGwAACJsAADIbAAAgm4AAKJuAAAGbwAAiW8AALxvAAD0bwAAEnAAACBxAAAjcQAA7HEAACJyAABEcgAAg3IAAAVzAACCcwAA53MAAGN0AABwdAAAj3QAAAh1AABOdQAApXUAAOV1AAAAdgAAqnYAAMN2AADadgAA6HYAABp3AABxdwAANHgAAEp4AADXeAAA+ngAAEZ5AABHeQAA1HkAAJp6AAASewAAL3sAADR7AABfewAAkHsAAJR7AADxewAAInwAAFd8AACWfAAA3HwAAOl8AAACfgAAD34AADx+AABpfgAAin4AAN9+AAALfwAAmH8AAL1/AAD7fwAAHIAAAK+BAAC0gQAAdoIAAIOCAACIggAAqYIAALqCAADPggAA04MAADCEAABphAAAcIQAAJyEAACkhAAAw4QAADyFAABQhgAA4oYAAB2HAACAhwAAwYcAAM2HAAD4hwAAI4gAAMKIAACwiQAA6IkAAECLAAB8iwAA+IsAAAaMAABsjAAApYwAAM+NAADOjgAAKY8AAF6QAACLkAAAj5AAAJ+QAACrkAAAOJEAAFGRAAA3kgAAPpIAAKKSAABekwAAhJMAAFuUAACHlAAAoJQAAFmVAADFlgAAsJcAANyXAADhlwAA8ZcAAKuYAADBmQAA9JkAAJmaAADtmgAANZsAADqbAAABngAAIJ8AAHCfAADvnwAAZqAAADykAAD3pAAAlKUAAFyoAAC/qQAA66kAAOiqAACLqwAAsKsAALOrAAAUrAAAF6wAACWsAABOrAAAcqwAAA2tAAAzrQAAI64AAEWuAACZrgAAqK4AAAuvAAAwrwAAT68AAG6vAACcrwAAnq8AAKivAAACsAAAsLAAAOuwAAAZsQAAiLEAAJGxAACisQAAU7IAAFWyAABisgAAarIAAPSyAAAZswAAQLMAAG2zAAB+swAAgrMAAOmzAAABtAAAGLQAACG0AACCtAAAjrQAABa1AABHtQAAXLUAAG21AAC2tQAAM7YAAE62AABotgAAs7YAABi3AAAZtwAAILcAAEu3AACHtwAAo7cAAKy3AADHtwAA7LcAABG4AACIuAAAqrgAAMK4AADjuAAA/rgAAEG5AABFuQAATrkAAJ+5AACjuQAAu7kAAMC5AADZuQAADroAABq6AABDugAAV7oAAFm6AACAugAAmboAAKe6AADDugAA/boAACu7AABeuwAAm7sAAM+7AAD1uwAAALwAAKa8AADSvAAAEr0AAEO9AABMvQAAd70AAH69AADhvQAA8r0AAMu+AADavgAALL8AAGa/AAB0vwAAwr8AADbAAABbwAAAfMAAAIzAAACQwAAAmsAAAKjAAAC4wAAA18AAADPBAACYwQAAt8EAAN/BAAD0wQAAGMIAAC7CAABBwgAAQsIAAFjCAACLwgAAzcIAANDCAADpwgAA88IAACLDAAAvwwAAZcMAAN7DAADwwwAAAMQAACTEAAAuxAAAMcQAAJPEAADQxAAA0cQAANbEAADXxAAA28QAAO/EAAD8xAAAD8UAABvFAABTxQAAdcUAAHrFAADcxQAA7MUAABLGAABhxgAAnsYAAOrGAAAGxwAAF8cAADjHAAA7xwAAbscAAInHAACrxwAA7ccAAP7HAAAKyAAAP8gAAEfIAABiyAAAkMgAAKvIAAD0yAAAJ8kAAC7JAABMyQAAaskAAIvJAACMyQAAj8kAANTJAAAQygAAHcoAAG/KAAB0ygAAg8oAAI/KAACTygAAqMoAALvKAADGygAA4MoAAOnKAAD3ygAAEcsAADHLAAA+ywAAT8sAAFzLAABtywAAccsAAHbLAACbywAArMsAABfMAAAmzAAAJ8wAAE7MAABQzAAAWMwAAGnMAAB+zAAAhcwAAKvMAADQzAAACs0AAA/NAAAQzQAAE80AADDNAABKzQAAgs0AAJ/NAAClzQAAqs0AAM3NAAALzgAAUc4AAFjOAAB+zgAAms4AAKXOAAC9zgAA184AAPHOAAA9zwAAfM8AAILPAACXzwAAnM8AAKrPAAC4zwAAxM8AAM3PAADSzwAA2M8AAPDPAADyzwAA+M8AAB3QAAAe0AAAe9AAAILQAACH0AAApNAAAKnQAADS0AAA7tAAAP3QAAD+0AAAHNEAACTRAABF0QAAWNEAAHrRAACc0QAAndEAAJ7RAACm0QAAwNEAAOvRAAD60QAAAdIAABvSAAAf0gAAKtIAADfSAABH0gAAStIAAG/SAACI0gAAmdIAAJ/SAAC40gAA49IAAO/SAAD60gAAAtMAACDTAAAy0wAAaNMAAHbTAAB70wAAfNMAAILTAACV0wAApNMAANLTAADa0wAA3NMAAN7TAAAC1AAAI9QAACjUAABP1AAAUNQAAG7UAADS1AAADNUAABHVAAAn1QAAKNUAADrVAABS1QAAXdUAAGXVAACM1QAAoNUAAK3VAADF1QAA39UAAOLVAAAX1gAAJdYAACzWAAAx1gAAWNYAAG/WAAB+1gAA09YAANvWAADz1gAA9dYAAP/WAAAM1wAAF9cAADTXAAA31wAAStcAAGTXAABq1wAAi9cAAKvXAAC11wAAx9cAANbXAADg1wAAPdgAAEPYAABQ2AAAZdgAAHnYAACf2AAAwtgAAO7YAADz2AAAF9kAAC7ZAABz2QAAfdkAAH7ZAACE2QAAi9kAAJbZAADF2QAAz9kAANLZAADc2QAA89kAADXaAAA/2gAAg9oAAKraAAC/2gAAx9oAANPaAADU2gAA3NoAAODaAADi2gAA9NoAAATbAAAH2wAAONsAAEHbAABI2wAAadsAAGzbAACZ2wAAwNsAAMnbAADw2wAA+tsAABzcAAB53AAAidwAAKDcAACm3AAAqdwAANXcAAD33AAADd0AAFjdAACO3QAAmN0AALDdAADD3QAAyN0AANrdAADf3QAAAd4AAATeAAAL3gAADN4AACbeAAAp3gAALd4AAEzeAABQ3gAAb94AAHneAACp3gAArN4AAMTeAADN3gAAC98AACjfAAA/3wAAQ98AAEvfAACF3wAAkt8AAJXfAACc3wAAt98AAMPfAADd3wAA698AAO7fAAD03wAA+N8AAPrfAAAN4AAAJuAAADvgAABE4AAAXOAAAGPgAABu4AAAeOAAAIPgAACH4AAAj+AAAJbgAACd4AAApOAAAKrgAACw4AAAzuAAAOvgAAD84AAAAeEAAAbhAAAu4QAAMuEAADzhAABS4QAAV+EAAG/hAABz4QAAdOEAAH7hAACH4QAAjOEAAOHhAAAC4gAAKeIAAC3iAAAv4gAAS+IAAFDiAABq4gAAgOIAAJ3iAACo4gAAr+IAALLiAAD34gAAE+MAABfjAAAs4wAAL+MAADrjAACH4wAAjuMAAJXjAACW4wAAoOMAALfjAAC84wAAwOMAAOHjAADk4wAAC+QAABfkAAAd5AAAO+QAAGHkAABo5AAAduQAAJXkAACc5AAAreQAANXkAADe5AAA3+QAAP/kAAAC5QAAG+UAACflAAAo5QAAMuUAADnlAABY5QAAWuUAAHDlAAB65QAAgOUAAJHlAACp5QAAwuUAAArmAAAM5gAAKeYAADTmAABL5gAATeYAAFrmAABz5gAAdOYAAI7mAACh5gAA3uYAAOPmAADv5gAA/eYAAArnAAA75wAAP+cAAEnnAABR5wAAiecAAJrnAAC+5wAAxOcAANDnAAD25wAA/OcAAA3oAAAp6AAAQOgAAEnoAABe6AAAX+gAAHDoAABy6AAAgugAALDoAADR6AAA3OgAAO3oAADz6AAA/OgAAAjpAAAQ6QAAQOkAAFnpAAB96QAAhukAAIjpAADd6QAA4ekAADvqAABN6gAAWeoAAFrqAABl6gAAe+oAAI3qAACZ6gAApeoAAKjqAACq6gAArOoAALHqAAC06gAA4OoAAOnqAAAs6wAAUesAALbrAAD56wAAB+wAABvsAABG7AAATOwAAG7sAACJ7AAAm+wAAK3sAAC97AAAwuwAAM/sAADT7AAAFO0AAB3tAAAl7QAATu0AAHftAAB97QAAs+0AAOXtAAB07gAA1u4AAPjuAABZ7wAAnu8AAJ/vAAC77wAA0O8AAADwAAAH8AAAE/AAAC3wAABC8AAAd/AAAH7wAACL8AAAqPAAALnwAADA8AAAKfEAACrxAAAr8QAAOfEAAKjxAADR8QAA2vEAACnyAABE8gAATfIAAGvyAADW8gAA5fIAAPvyAAD/8gAAF/MAAFLzAACa8wAAsPMAAN/zAAAC9AAAE/QAAEr0AACn9AAA3fQAAOf0AAD49AAAY/UAALf1AADC9QAA5/UAABX2AAAW9gAAZvYAALv2AADG9gAAHPcAAB/3AADE9wAAzvcAAC34AABA+AAAUPgAANv4AABJ+QAAXfkAAPL5AAAL+gAAL/oAAEL6AADF+gAA7voAANP7AAAw/AAASPwAAI78AADF/AAAIP0AAHn9AAD5/QAAEf4AANf+AACZAAEASgEBALkBAQAqAgEAdAIBAOUDAQAaBAEAggQBALUEAQDxBAEAPgUBAA4GAQAZBwEAlAcBAP0HAQDOCAEA3wgBAI0JAQClCQEAqQkBABMKAQDGCwEAmgwBALYOAQBxEAEA8RABADkRAQCgFgEACBkBALYZAQBUHQEAFiQBAEQnAQDgKQEAsyoBAMgsAQDvLAEA5i0BAGkwAQCFNQEA1kABAHZDAQDGRAEAHkgBAClLAQCbUwEAbFgBAL9eAQDlaQEArGoBALtvAQB6dAEAlHoBAN+FAQAqmQEAZZ8BAPO0AQACAQIA","OV_FINE_VAL":"AAECAwQFBQUBAwUFAAECBgEGAQEDBwEHAgMGBgAFBwYEBQMDAQQDBgEIBAUFAAIIBAUCBwECAAUHBQICBQMHAgIFBQMJAQIAAwYAAwEHCAICBgMDAwcCAQEHCAIHAAIDAgIHBgIDAggHBwEDAwgCAgIFBgUIAwICAQACBQMIAgIBCAcCAgUDAAUJAgQCAQUFAgMBAAIGBQICCAcDAAQHAgAFAwIFBQACBwcICAgBAgkBCQgGBQcEAgACAgEFBwUIBgIBBAIHAgUDAwIBBAUABwYBCAEFBwIFCAIHBwIFCAIIBQMJCQIAAAcCBQICAgcAAgQDBwkEBQACAwEDAgkCBwECAAABBAIBBAMIBwACBAIICAIABQgCBAAAAQICBggFBQkIAgcCAwQAAQEGAgACAgMCBQcHBwEIAggDAwMCAgMFBwYDCQYCBgECAQIBCAMCCQcBAQgIBQMCAgICBAkABggHAgYHAgQFAgIBAwIDCAMHBAYBCQMFBwABAAICBQABAQUACAQCAgUCAQMHCAAGAwICAggHBQgDAgAJAgMCAgUFBgEDAgQCAwUCBwICAwIDAgMGAQMHAQEFAAMDAAgBBQkBCAkBAQgBBQADAgMJBQEGAgECCQMHAwEHCAEDAwADAwkHBQEBCAcHAgcCAgYIAQQBBAcBCAcICQIFAwQAAQECBwEDAQIBBQcACAEBAgEHAQcCAgEABwIBAAIDAAADAAgDAQgJAAEHBwAHAgcIAgAFAgcAAQEAAwAHAAIBBQEBAQUJAgEBBQAJAQMBCAgIBwgIAQkJBwMBAAIHAAcCBAEBAQcCAQcHBwgBAgkIAwcJAgEIBwMHAQEDAAMICQkCAAkCAQEIAgIFCQIHAwEJAQUAAAMACQIHAQIBBQEAAgAJAgIDBwIBAAIIAwkBAAEHAAICAwICCAIABwcIAgMBAQICBQUICQgCBwICAgICBAcCAAgDBQEECQgFAAABAgUCAQECCAgFAgYJAAcCCAIDAQEDAgABBwIDBgIAAwICAwgJAgEAAgEABAIHCAUAAgEABgAFCAECCAIDAwcBAQcBAQAHCAQJAAgHBwIAAgIBAwIJBQAIAgMCAAEDAQgDAgMCBQACBwIFBwgFAwAFAAUCAwUABAcFAgMDBQgIAgcFCAcIAAMCBQMCAgIAAggCAgQDAggABQYDCAIHCQUBAwIBAwUCCAAHAgYBBwUCAgUCCAYFBwIAAgUCBQICAgICCAQEAwIBAwABAgUFAwEHBQIFAQYFBQcDBQUCAQUGAwMABAMCAgMFAgIIAgICAgUEAgICBQIHAwIIBQgCBQACCAkJAgIIBQgCCAUCBQIEAgEIBQICAAIICAUDBQIIAAMCAgcCCAgFAAACAgMCAwAHAgUDBQUCAAcAAgYCBAIFAgUAAQADAwgCAgIFCAgFAwUFAgUFAgUEBQUCBAUGBQICAgUAAgUCAwMCAgUCAgUFAgICAgICBQUCAgUFBQICAgQAAgYIAwICBQIDAgICBQUCBgUIAgICBQIIAgQGBgIIBQACAggGBgICAgIFBQICBQICAgYCAgICAgYHAgYCAwMIAwMJAQEBAQAGBAIDAwMFAAQFAAMDAQUB","ST_FINE_IDX":"LwEAADABAAAxAQAAMgEAADMBAAA0AQAANQEAADYBAAA3AQAAOAEAADkBAAA6AQAAOwEAADwBAAA9AQAAPgEAAD8BAABAAQAAQQEAAEIBAABDAQAARAEAAEUBAABGAQAARwEAAEgBAABJAQAASgEAAEsBAABMAQAATQEAAE4BAABPAQAAUAEAAFEBAABSAQAAUwEAAFQBAABVAQAAVgEAAFcBAABYAQAAWQEAAFoBAABbAQAAXAEAAF0BAABeAQAAXwEAAGABAABhAQAAYgEAAGMBAABkAQAAZQEAAGYBAABnAQAAaAEAAGkBAABqAQAAawEAAGwBAABtAQAAbgEAAG8BAABwAQAAcQEAAHIBAABzAQAAdAEAAHUBAAB2AQAAdwEAAHgBAAB5AQAAegEAAHsBAAB8AQAAfQEAAH4BAAB/AQAAgAEAAIEBAACCAQAAgwEAAIQBAACFAQAAhgEAAIcBAACIAQAAiQEAAIoBAACLAQAAjAEAAI0BAACOAQAAjwEAAJABAACRAQAAkgEAAJMBAACUAQAAlQEAAJYBAACXAQAAmAEAAJkBAACaAQAAmwEAAJwBAACdAQAAngEAAJ8BAACgAQAAoQEAAKIBAACjAQAApAEAAKUBAACmAQAApwEAAKgBAACpAQAAqgEAAKsBAACsAQAArQEAAK4BAACvAQAAsAEAALEBAACyAQAAswEAALQBAAC1AQAAtgEAALcBAAC4AQAAuQEAALoBAAC7AQAAvAEAAL0BAAC+AQAAvwEAAMABAADBAQAAwgEAAMMBAADEAQAAxQEAAMYBAADHAQAAyAEAAMkBAADKAQAAywEAAMwBAADNAQAAzgEAAM8BAADQAQAA0QEAANIBAADTAQAA1AEAANUBAADWAQAA1wEAANgBAADZAQAA2gEAANsBAADcAQAA3QEAAN4BAADfAQAA4AEAAOEBAADiAQAA4wEAAOQBAADlAQAA5gEAAOcBAADoAQAA6QEAAOoBAADrAQAA7AEAAO0BAADuAQAA7wEAAPABAADxAQAA8gEAAPMBAAD0AQAA9QEAAPYBAAD3AQAA+AEAAPkBAAD6AQAA+wEAAPwBAAD9AQAA/gEAAP8BAAAAAgAAAQIAAAICAAADAgAABAIAAAUCAAAGAgAABwIAAAgCAAAJAgAACgIAAAsCAAAMAgAADQIAAA4CAAAPAgAAEAIAABECAAASAgAAEwIAABQCAAAVAgAAFgIAABcCAAAYAgAAGQIAABoCAAAbAgAAHAIAAB0CAAAeAgAAHwIAACACAAAhAgAAIgIAACMCAAAkAgAAJQIAACYCAAAnAgAAKAIAACkCAAAqAgAAKwIAACwCAAAtAgAALgIAAC8CAAAwAgAAMQIAADICAAAzAgAANAIAADUCAAA2AgAANwIAADgCAAA5AgAAOgIAADsCAAA8AgAAPQIAAD4CAAA/AgAAQAIAAEECAABCAgAAQwIAAEQCAABFAgAARgIAAEcCAABIAgAASQIAAEoCAABLAgAATAIAAE0CAABOAgAATwIAAFACAABRAgAAUgIAAFMCAABUAgAAVQIAAFYCAABXAgAAWAIAAFkCAABaAgAAWwIAAFwCAABdAgAAXgIAAF8CAABgAgAAYQIAAGICAABjAgAAZAIAAGUCAABmAgAAZwIAAGgCAABpAgAAagIAAGsCAABsAgAAbQIAAG4CAABvAgAAcAIAAHECAAByAgAAcwIAAHQCAAB1AgAAdgIAAHcCAAB4AgAAeQIAAHoCAAB7AgAAfAIAAH0CAAB+AgAAfwIAAIACAACBAgAAggIAAIMCAACEAgAAhQIAAIYCAACHAgAAiAIAAIkCAACKAgAAiwIAAIwCAACNAgAAjgIAAI8CAACQAgAAkQIAAJICAACTAgAAlAIAAJUCAACWAgAAlwIAAJgCAACZAgAAmgIAAJsCAACcAgAAnQIAAJ4CAACfAgAAoAIAAKECAACiAgAAowIAAKQCAAClAgAApgIAAKcCAACoAgAAqQIAAKoCAACrAgAArAIAAK0CAACuAgAArwIAALACAACxAgAAsgIAALMCAAC0AgAAtQIAALYCAAC3AgAAuAIAALkCAAC6AgAAuwIAALwCAAC9AgAAvgIAAL8CAADAAgAAwQIAAMICAADDAgAAxAIAAMUCAADGAgAAxwIAAMgCAADJAgAAygIAAMsCAADMAgAAzQIAAM4CAADPAgAA0AIAANECAADSAgAA0wIAANQCAADVAgAA1gIAANcCAADYAgAA2QIAANoCAADbAgAA3AIAAN0CAADeAgAA3wIAAOACAADhAgAA4gIAAOMCAADkAgAA5QIAAOYCAADnAgAA6AIAAOkCAADqAgAA6wIAAOwCAADtAgAA7gIAAO8CAADwAgAA8QIAAPICAADzAgAA9AIAAPUCAAD2AgAA9wIAAPgCAAD5AgAA+gIAAPsCAAD8AgAA/QIAAP4CAAD/AgAAAAMAAAEDAAACAwAAAwMAAAQDAAAFAwAABgMAAAcDAAAIAwAACQMAAAoDAAALAwAADAMAAA0DAAAOAwAADwMAABADAAARAwAAEgMAABMDAAAUAwAAFQMAABYDAAAXAwAAGAMAABkDAAAaAwAAGwMAABwDAAAdAwAAHgMAAB8DAAAgAwAAIQMAACIDAAAjAwAAJAMAACUDAAAmAwAAJwMAACgDAAApAwAAKgMAACsDAAAsAwAALQMAAC4DAAAvAwAAMAMAADEDAAAyAwAAMwMAADQDAAA1AwAANgMAADcDAAA4AwAAOQMAADoDAAA7AwAAPAMAAD0DAAA+AwAAPwMAAEADAABBAwAAQgMAAEMDAABEAwAARQMAAEYDAABHAwAASAMAAEkDAABKAwAASwMAAEwDAABNAwAATgMAAE8DAABQAwAAUQMAAFIDAABTAwAAVAMAAFUDAABWAwAAVwMAAFgDAABZAwAAWgMAAFsDAABcAwAAXQMAAF4DAABfAwAAYAMAAGEDAABiAwAAYwMAAGQDAABlAwAAZgMAAGcDAABoAwAAaQMAAGoDAABrAwAAbAMAAG0DAABuAwAAbwMAAHADAABxAwAAcgMAAHMDAAB0AwAAdQMAAHYDAAB3AwAAeAMAAHoDAAB7AwAAfAMAAH0DAAB+AwAAfwMAAIADAACBAwAAggMAAIMDAACEAwAAUQwAAFIMAABTDAAAVAwAAFUMAABWDAAAVwwAAFgMAABZDAAAWgwAAFsMAABcDAAAXQwAAF4MAABfDAAAYAwAAGEMAABiDAAAYwwAAGQMAABlDAAAZgwAAGcMAABoDAAAaQwAAGoMAABrDAAAbAwAAG0MAABuDAAAbwwAAHAMAABxDAAAcgwAAHMMAAB0DAAAdQwAAHYMAAB3DAAAeAwAAHkMAAB6DAAAewwAAHwMAAB9DAAAfgwAAH8MAACADAAAgQwAAIIMAACDDAAAhAwAAIUMAACGDAAAhwwAAIgMAACJDAAAigwAAIsMAACMDAAAjQwAAI4MAACPDAAAkAwAAJEMAACSDAAAkwwAAJQMAACVDAAAlgwAAJcMAACYDAAAmQwAAJoMAACbDAAAnAwAAJ0MAACeDAAAnwwAAKAMAAChDAAAogwAAKMMAACkDAAApQwAAKYMAACnDAAAqAwAAKkMAACqDAAAqwwAAKwMAACtDAAArgwAAK8MAACwDAAAsQwAALIMAACzDAAAtAwAALUMAAC2DAAAtwwAALgMAAC5DAAAugwAALsMAAC8DAAAvQwAAL4MAAC/DAAAwAwAAMEMAADCDAAAwwwAAMQMAADFDAAAxgwAAMcMAADIDAAAyQwAAMoMAADLDAAAzAwAAM0MAADODAAAzwwAANAMAADRDAAA0gwAANMMAADUDAAA1QwAANYMAADXDAAA2AwAANkMAADaDAAA2wwAANwMAADdDAAA3gwAAN8MAADgDAAA4QwAAOIMAADjDAAA5AwAAOUMAADmDAAA5wwAAOgMAADpDAAA6gwAAOsMAADsDAAA7QwAAO4MAADvDAAA8AwAAPEMAADyDAAA8wwAAPQMAAD1DAAA9gwAAPcMAAD4DAAA+QwAAPoMAAD7DAAA/AwAAP0MAAD+DAAA/wwAAAANAAABDQAAAg0AAAMNAAAEDQAABQ0AAAYNAAAHDQAACA0AAAkNAAAKDQAACw0AAAwNAAANDQAADg0AAA8NAAAQDQAAEQ0AABINAAATDQAAFA0AABUNAAAWDQAAFw0AABgNAAAZDQAA","ST_FINE_VAL":"AwMDAwMDAwMDAwMDAwMDAwMDAwMBAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDCQUFAwMDAwMDAwYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYDAwYGBgMGBgYGBgMGBgYFBQUFBQYGBgYGBgYGBgICAgUFBQUFBQUFBQUFBQUFBQUFBQUFBQIFAgUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFAgICBQIFBQUFBQUFBQUFBgUFBQUEBAQIBAUCBQIFAgICAgUGBQICAgICBQYFBQUFBQUFBQUFBQUFAgUFBQUFBQUFAgIFBQUFBQUCBQUFBQUFBQUCBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQICAgIFAgICBQICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgUCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBQICAgICAgICAgICAgICAgICAgUCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIEAgQEAggEBAICAggCAgIEBAgEAgQEBAQCAgIIAgICAgICBAICBAICBAQEBAQECAIEAgICBAQFBAQEBgAICAgICAgIAggICAgAAgICAgIAAgIIAggIAAgICAgICAIABwgIAwgICAgCCAgIAAAAAAAAAAAAAAAAAAAAAAcAAAIAAAAAAAAACQEBAQkJAwMBAAkJAQEDAQEJCQkDCQkDCQMDAQMJAwEDCQEDCQEJCQkJAQEJAQEBAQcBAQEHAQEBBwEHAQEBAQcHAQEHAQEBAQEBBwEBCQEBAQEBBwEBAQEBAQEBAQEBBwEBAwEHAQEBAQcBAQEBAQEBAQcBAQEBAQcBAQcHBwEHBwEHAAcHBwcHBwcHBwcBBwcHBwcDBwcHBwcHBwcHBwgHBwcHBwcHBwcHBwcHBwcHBwcHBwYG","MERGED_FINE":{"15680":[{"i":0,"f":2}],"43631":[{"i":1,"f":2}],"97865":[{"i":2,"f":8}],"73868":[{"i":1,"f":3}],"90170":[{"i":0,"f":3}],"57736":[{"i":0,"f":3}],"71013":[{"i":0,"f":3},{"i":1,"f":3}],"32328":[{"i":1,"f":3}],"13805":[{"i":1,"f":3}],"9459":[{"i":0,"f":3},{"i":2,"f":3}],"43778":[{"i":0,"f":3}],"20623":[{"i":0,"f":3}],"17606":[{"i":0,"f":3}],"11573":[{"i":1,"f":3}],"3109":[{"i":0,"f":3}],"83862":[{"i":1,"f":3}],"60349":[{"i":1,"f":3}],"94299":[{"i":0,"f":3}],"9342":[{"i":1,"f":3}],"10190":[{"i":1,"f":3}],"65617":[{"i":0,"f":3}],"85134":[{"i":1,"f":9}],"15190":[{"i":1,"f":3}],"38033":[{"i":1,"f":3}],"94545":[{"i":1,"f":6}],"90194":[{"i":1,"f":6}],"72728":[{"i":1,"f":3}],"417":[{"i":1,"f":3}],"10028":[{"i":0,"f":6}],"88179":[{"i":0,"f":6}],"73397":[{"i":0,"f":6}],"16742":[{"i":1,"f":5}],"80265":[{"i":1,"f":5}],"55093":[{"i":0,"f":2},{"i":1,"f":2}],"82599":[{"i":0,"f":5}],"85081":[{"i":1,"f":5}],"20322":[{"i":1,"f":5}],"59823":[{"i":1,"f":5}],"522":[{"i":0,"f":5}],"52512":[{"i":1,"f":5}],"25857":[{"i":1,"f":5}],"95258":[{"i":1,"f":5}],"3065":[{"i":0,"f":5}],"102989":[{"i":1,"f":2}],"6349":[{"i":1,"f":2}],"16126":[{"i":1,"f":2}],"32049":[{"i":1,"f":2}],"6701":[{"i":0,"f":2}],"85545":[{"i":1,"f":2}],"79121":[{"i":1,"f":2}],"65282":[{"i":0,"f":2}],"29811":[{"i":0,"f":2}],"8190":[{"i":0,"f":5}],"63573":[{"i":0,"f":2}],"80346":[{"i":0,"f":2}],"37652":[{"i":0,"f":2}],"36217":[{"i":1,"f":2}],"59004":[{"i":1,"f":2}],"76761":[{"i":0,"f":2}],"14403":[{"i":1,"f":5}],"83623":[{"i":1,"f":5}],"86602":[{"i":1,"f":4}],"82816":[{"i":0,"f":4},{"i":1,"f":4}],"22242":[{"i":0,"f":8}],"94619":[{"i":0,"f":4}],"71242":[{"i":1,"f":8}],"33873":[{"i":0,"f":4}],"22667":[{"i":2,"f":8},{"i":3,"f":8}],"13961":[{"i":1,"f":8}],"40592":[{"i":1,"f":8}],"19140":[{"i":0,"f":8}],"28376":[{"i":0,"f":0}],"69681":[{"i":0,"f":0},{"i":1,"f":0}],"2415":[{"i":0,"f":7},{"i":1,"f":7}],"70023":[{"i":0,"f":0}],"43427":[{"i":0,"f":3}],"83574":[{"i":2,"f":9}],"45137":[{"i":0,"f":9}],"18125":[{"i":0,"f":9}],"79693":[{"i":1,"f":3}],"5405":[{"i":0,"f":3}],"78115":[{"i":0,"f":7}],"84978":[{"i":0,"f":9}],"8036":[{"i":1,"f":9}],"85456":[{"i":1,"f":3}],"46898":[{"i":1,"f":3}],"86439":[{"i":1,"f":1}],"81439":[{"i":0,"f":9}],"77469":[{"i":0,"f":1}],"308":[{"i":0,"f":1}],"73686":[{"i":0,"f":1}],"12264":[{"i":1,"f":1}],"75541":[{"i":0,"f":1}],"36437":[{"i":0,"f":1}],"62077":[{"i":0,"f":1}],"630":[{"i":0,"f":1}],"76216":[{"i":0,"f":1}],"84919":[{"i":1,"f":1}],"79952":[{"i":1,"f":1}],"76066":[{"i":0,"f":1}],"81143":[{"i":0,"f":1}],"17507":[{"i":1,"f":1}],"71093":[{"i":0,"f":1}],"77594":[{"i":1,"f":7}],"80089":[{"i":0,"f":1}],"39499":[{"i":0,"f":1}],"1214":[{"i":0,"f":1}],"88446":[{"i":0,"f":1}],"72584":[{"i":0,"f":1}],"17927":[{"i":0,"f":3}],"22805":[{"i":1,"f":1}],"70609":[{"i":0,"f":1}],"80552":[{"i":1,"f":1}],"46044":[{"i":0,"f":1}],"31948":[{"i":0,"f":7}],"239":[{"i":0,"f":3}],"79659":[{"i":0,"f":1}],"75668":[{"i":0,"f":1}],"73294":[{"i":0,"f":7}],"65812":[{"i":0,"f":7}],"4900":[{"i":0,"f":7}],"10691":[{"i":0,"f":7}],"34163":[{"i":1,"f":7}],"80436":[{"i":0,"f":7}],"11508":[{"i":1,"f":7}],"72798":[{"i":1,"f":7}],"69708":[{"i":0,"f":7}],"1042":[{"i":0,"f":7}],"81081":[{"i":0,"f":7}],"121":[{"i":0,"f":7}],"68379":[{"i":0,"f":7}],"78928":[{"i":1,"f":7}],"45736":[{"i":0,"f":1}],"30655":[{"i":1,"f":1}]}}</script>
