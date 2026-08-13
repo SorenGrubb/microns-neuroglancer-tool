@@ -781,6 +781,12 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
   </div>
 
   <div class="card wide">
+    <h2>Mesh contacts — average touch points between cell types</h2>
+    <p class="sub" title="Every &quot;Check&quot; click in a cell's Cell contacts panel saves how many touch points that pair had. Only rows saved with the tool's DEFAULT settings (500 nm touch threshold, 1000 nm point spacing) are averaged here -- a smaller point-spacing always reports more, smaller points for the exact same physical patch, so mixing settings would compare different units, not a real difference between cell types. Custom-setting searches still show in that cell's own panel, they just don't feed this shared average.">One dot per cell-type pair — dot size scales with how many pairs of that type have been checked. LIVE, default-settings searches only.</p>
+    <div id="meshContactStatsArea"></div>
+  </div>
+
+  <div class="card wide">
     <h2>Cumulative community reports over time</h2>
     <p class="sub">Every report type (identifications, discrepancies, merged-nucleus splits, organelle reports, root-ID proposals/votes, computed volumes), cumulative by day. LIVE.</p>
     <div class="plot tall" id="plotReportsOverTime"></div>
@@ -1571,6 +1577,41 @@ function renderSynapseIO(connSamples){
   renderOne();
 }
 
+/* One dot per cell-type pair -- 2026-08-14, Soren: "save the number of contact points between the
+   cell types, so that we can make a live-updating dot-plot graph showing the average number of
+   contact points between two cell types." Fed by ?meshContactTypeStats=1, which already does the
+   averaging server-side (unlike dotMedianChart/groupedDotChart above, there's no raw per-sample
+   distribution to plot here -- see that endpoint's own comment in Code.gs.txt) and already applies
+   the "default settings only" comparability filter Soren asked for, so every pair this function
+   sees is safe to plot as-is. A genuine ordinary scatter trace (not a box trace with hidden
+   whiskers like dotMedianChart) since there's exactly one value per pair, not a distribution --
+   marker AREA (not radius) scales with sample count n, the standard bubble-chart convention for
+   reading relative sample size correctly. */
+function renderMeshContactStats(pairs){
+  const area=document.getElementById("meshContactStatsArea");
+  const list=(pairs||[]).filter(function(p){return p&&p.n>0&&p.typeA&&p.typeB;});
+  if(!list.length){
+    area.innerHTML="<div class='placeholder'>No comparable data yet — every time someone runs the Cell contacts “Check” button with the tool's default settings (500 nm touch threshold, 1000 nm point spacing), that pair's touch-point count is added here. Searches with custom settings still work and save in that cell's own panel, they just aren't averaged into this shared chart.</div>";
+    return;
+  }
+  area.innerHTML='<div class="plot" id="plotMeshContactStats"></div>';
+  const sorted=list.slice().sort(function(a,b){return b.avgTouchPointCount-a.avgTouchPointCount;});
+  const labels=sorted.map(function(p){return p.typeA+" × "+p.typeB;});
+  const y=sorted.map(function(p){return p.avgTouchPointCount;});
+  const n=sorted.map(function(p){return p.n;});
+  const sizes=n.map(function(v){return 6+Math.sqrt(v)*4;});
+  const bl=baseLayout(),c=liveThemeColors();
+  Plotly.newPlot("plotMeshContactStats",[{
+    type:"scatter",mode:"markers",x:labels,y,
+    marker:{size:sizes,color:labels.map(colorFor),line:{width:1,color:c.line}},
+    text:n.map(function(v){return v+" pair"+(v===1?"":"s")+" checked";}),
+    hovertemplate:"%{x}<br>avg %{y} touch points<br>%{text}<extra></extra>"
+  }],Object.assign({},bl,{
+    xaxis:Object.assign({},bl.xaxis,{categoryorder:"array",categoryarray:labels}),
+    yaxis:Object.assign({},bl.yaxis,{title:"average touch points per pair (default settings only)"})
+  }),PLOTLY_CFG);
+}
+
 function setStatus(msg){document.getElementById("statusLine").textContent=msg;}
 
 /* On-demand live refresh (2026-08-02) -- Soren: "All of the graphs should live update with user
@@ -1610,7 +1651,7 @@ function writeLiveCache(data){
    EVENT timeline, not a per-cell current-state view) are unrelated to Master cell list and
    still fetched directly, same as before. */
 async function fetchLiveData(){
-  let live={ready:false,note:"Could not reach the backend."}, computedVolumes=[], reportsDaily=[], connectivity=null, connSamples=[];
+  let live={ready:false,note:"Could not reach the backend."}, computedVolumes=[], reportsDaily=[], connectivity=null, connSamples=[], meshContactStats=[];
   try{
     const r=await fetch(REPORT_ENDPOINT+"?dashboardLive=1");
     live=await r.json();
@@ -1644,7 +1685,17 @@ async function fetchLiveData(){
     connSamples=(d&&d.connectivitySamples)||[];
   }catch(e){console.warn("[dashboard] connectivitySamples fetch failed",e);}
 
-  return {live,computedVolumes,reportsDaily,connectivity,connSamples};
+  // 2026-08-14 -- pre-aggregated (server-side) average touch-point count per cell-type pair, for
+  // renderMeshContactStats()'s dot plot. Unlike connectivitySamples above, this already comes back
+  // averaged and pre-filtered to default-settings-only rows (see ?meshContactTypeStats=1's own
+  // comment in Code.gs.txt), so there's no raw per-sample array to keep here.
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?meshContactTypeStats=1");
+    const d=await r.json();
+    meshContactStats=(d&&d.pairs)||[];
+  }catch(e){console.warn("[dashboard] meshContactTypeStats fetch failed",e);}
+
+  return {live,computedVolumes,reportsDaily,connectivity,connSamples,meshContactStats};
 }
 
 /* Renders every live-fed chart from an already-fetched (or cached) data bundle -- no network
@@ -1660,6 +1711,7 @@ function applyLiveData(d){
   renderReportsOverTime(d.reportsDaily||[]);
   renderConnectivity(d.connectivity);
   renderSynapseIO(d.connSamples);
+  renderMeshContactStats(d.meshContactStats);
 }
 
 /* force=true (the Refresh button) always hits the network, no matter how fresh the cache is.
@@ -9299,15 +9351,21 @@ function minMeshDistanceWithinThreshold(posA,posB,threshold){
       off to one side (and, since mesh normals aren't purely in the gap direction, often out of the
       true contact plane) -- the midpoint sits ON the seam between the two surfaces instead, which
       is the "correct plane" Soren was missing.
-   2. CENTROID per cluster, not "first hit wins": a contact patch between two large glial domains
-      can have hundreds of mesh vertices within the same 500nm gap. Previously only the FIRST raw
-      hit encountered in vertex-scan order was kept per clusterUm-sized bucket -- an arbitrary
-      pick, not necessarily anywhere near the middle of that region. Now every hit in a bucket is
-      AVERAGED, so the reported point is the actual centroid of that patch of contact -- "the
-      middle of the area where they are touching", not a scan-order artefact. */
+   2. MEDOID per cluster, not centroid, not "first hit wins" (reworked AGAIN same day -- Soren:
+      "still quite an offset ... in the correct area, they are just not very precise"). A contact
+      seam that curves or bends within one clusterUm-sized bucket (very visible in Soren's
+      screenshot -- the red process is not straight) breaks a plain arithmetic-mean centroid: the
+      MEAN of points spread along an arc is the CHORD's midpoint, which sits off both real
+      surfaces, inside the bend -- "in the correct area" (average position is roughly right) but
+      "not very precise" (that exact spot was never actually observed on either mesh). Fixed by
+      picking the medoid instead: compute the same mean as before to find the bucket's rough
+      center, then report whichever ACTUAL observed midpoint (an A-vertex/B-vertex pair that was
+      really found) lies closest to that center. The reported point is therefore always a REAL
+      midpoint between two REAL mesh vertices -- it can't drift into empty space the way a
+      synthetic average can, while still being the most central/representative one in the patch. */
 function allContactPointsWithinThreshold(posA,posB,threshold,clusterUm){
   const grid=buildContactGrid(posB,threshold);
-  const buckets=new Map(); // key -> {sx,sy,sz,sDist,n,minDist}
+  const buckets=new Map(); // key -> array of {mx,my,mz,dist} (every real observed midpoint in this bucket)
   const nA=posA.length/3;
   for(let v=0;v<nA;v++){
     const ax=posA[v*3],ay=posA[v*3+1],az=posA[v*3+2];
@@ -9316,18 +9374,27 @@ function allContactPointsWithinThreshold(posA,posB,threshold,clusterUm){
     const bx=posB[r.vertexIdx*3],by=posB[r.vertexIdx*3+1],bz=posB[r.vertexIdx*3+2];
     const mx=(ax+bx)/2,my=(ay+by)/2,mz=(az+bz)/2; // midpoint between the two surfaces
     const key=Math.floor(mx/clusterUm)+","+Math.floor(my/clusterUm)+","+Math.floor(mz/clusterUm);
-    let b=buckets.get(key);
-    if(!b){b={sx:0,sy:0,sz:0,sDist:0,n:0,minDist:Infinity};buckets.set(key,b);}
-    b.sx+=mx;b.sy+=my;b.sz+=mz;b.sDist+=r.dist;b.n++;
-    if(r.dist<b.minDist)b.minDist=r.dist;
+    let arr=buckets.get(key);
+    if(!arr){arr=[];buckets.set(key,arr);}
+    arr.push({mx,my,mz,dist:r.dist});
   }
   if(!buckets.size)return[];
   const out=[];
-  for(const b of buckets.values()){
-    // dist reported is this bucket's CLOSEST raw gap (not the averaged one) -- keeps "closest
+  for(const arr of buckets.values()){
+    // Mean is only used to FIND the medoid, not reported directly (see function comment above).
+    let cx=0,cy=0,cz=0;
+    for(const p of arr){cx+=p.mx;cy+=p.my;cz+=p.mz;}
+    cx/=arr.length;cy/=arr.length;cz/=arr.length;
+    let best=arr[0],bestD2=Infinity,minDist=Infinity;
+    for(const p of arr){
+      const dx=p.mx-cx,dy=p.my-cy,dz=p.mz-cz,d2=dx*dx+dy*dy+dz*dz;
+      if(d2<bestD2){bestD2=d2;best=p;}
+      if(p.dist<minDist)minDist=p.dist;
+    }
+    // dist reported is this bucket's CLOSEST raw gap (not the medoid's own gap) -- keeps "closest
     // touch point" sorting/labelling meaningful (how tight is the tightest part of this patch),
-    // while the POSITION itself is the full-bucket average (how wide/centered is the patch).
-    out.push({dist:b.minDist,point:[b.sx/b.n,b.sy/b.n,b.sz/b.n]});
+    // while the POSITION is the medoid (a real, central, actually-observed point in the patch).
+    out.push({dist:minDist,point:[best.mx,best.my,best.mz]});
   }
   out.sort((a,b)=>a.dist-b.dist);
   return out;
@@ -9345,15 +9412,28 @@ function meshUmToVoxel(px,py,pz){
    evaluated (not just ones under threshold) -- see CELL_CONTACT_THRESHOLD_UM's own comment for
    why keeping every evaluated distance (not just "touching" ones) matters for future retuning:
    a "not touching" row still means the pair was CHECKED, which is worth knowing so a future
-   visitor doesn't re-click for nothing. */
-function maybeSaveCellContacts(nucleusId,rootId,cellType,pairs){
+   visitor doesn't re-click for nothing.
+   clusterUm (2026-08-14, Soren: "save the number of contact points ... only used for the graph if
+   the default settings are used, so that they are comparable") -- the touch-point COUNT for a pair
+   is only meaningful to average across many different users/cells if everyone used the same
+   clustering bucket size: a smaller bucket always reports more, smaller points for the exact same
+   physical patch, so mixing search settings into one average would be comparing different units,
+   not a real biological difference between cell-type pairs. usedDefaultSettings records whether
+   THIS click used the tool's current default (CELL_CONTACT_POINT_CLUSTER_UM) so the backend's
+   aggregate-for-the-dot-plot read can filter to only comparable rows, while every row (default or
+   not) is still saved and still shown to this user individually -- same "always save, filter only
+   at the point of use" principle as minDistanceNm's own "not touching" rows above. */
+function maybeSaveCellContacts(nucleusId,rootId,cellType,pairs,clusterUm){
   if(!REPORT_ENDPOINT||!pairs.length)return;
   if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
   if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
+  const usedDefault=Math.abs((Number(clusterUm)||0)-CELL_CONTACT_POINT_CLUSTER_UM)<1e-9;
   const payload={type:"cell_contacts_batch",nucleusId:nucleusId||"",rootId:rootId||"",cellType:cellType||"",
+    usedDefaultSettings:usedDefault,
     pairs:pairs.map(function(p){return{contactNucleusId:p.nucleusId||"",contactRootId:p.rootId||"",
       contactCellType:p.cellType||"",minDistanceNm:Math.round(p.distNm*10)/10,
-      contactVoxelX:p.voxel?p.voxel[0]:"",contactVoxelY:p.voxel?p.voxel[1]:"",contactVoxelZ:p.voxel?p.voxel[2]:""};}),
+      contactVoxelX:p.voxel?p.voxel[0]:"",contactVoxelY:p.voxel?p.voxel[1]:"",contactVoxelZ:p.voxel?p.voxel[2]:"",
+      touchPointCount:(p.touchPoints||[]).length};}),
     reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
   fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
@@ -9537,7 +9617,7 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
         checkBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";
       });
       curRows=results;
-      maybeSaveCellContacts(nucleusId,rootId0,cellType,results);
+      maybeSaveCellContacts(nucleusId,rootId0,cellType,results,clusterNm/1000);
       resultsEl.innerHTML=results.length?results.map(cellContactCandidateRowHtml).join(''):'<div class="nsub">No cells of that type had a resolvable root ID to check.</div>';
       countEl.textContent=totalFound+" "+label+(totalFound===1?"":"s")+" found within "+radius+" µm"
         +(checked<totalFound?" — checked nearest "+checked+" (limit "+CELL_CONTACT_TYPE_MAX_FETCH+")":" — all checked");
