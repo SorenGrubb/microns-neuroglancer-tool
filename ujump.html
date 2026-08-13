@@ -9276,13 +9276,27 @@ function buildV1ColumnLayer(){
    anything touching, and if so where", not "exactly how far apart are two cells that clearly
    aren't touching". Verified against a synthetic point-cloud test (including exact grid-boundary
    cases) before being ported into this file. */
-const CELL_CONTACT_THRESHOLD_UM=0.5; // 500 nm -- provisional, same "flag as to-be-refined"
-    // treatment as the pericyte subtype criteria elsewhere in this project: true extracellular
-    // space between touching membranes is ~20nm, but mesh simplification/segmentation can leave
-    // a larger apparent gap, so a looser threshold trades some false positives for fewer missed
-    // real contacts. Kept in µm (not nm) to match MeshDL's own output units directly. Changing
-    // this does not require re-fetching any meshes for a FRESH client-side compute, but does not
-    // retroactively re-tag rows already saved to the shared sheet under the old threshold.
+const CELL_CONTACT_THRESHOLD_UM=0.25; // 250 nm (2026-08-14, lowered from 500nm per Soren: "we need
+    // to be more conservative about the points we include") -- provisional, same "flag as
+    // to-be-refined" treatment as the pericyte subtype criteria elsewhere in this project: true
+    // extracellular space between touching membranes is ~20nm, but mesh simplification/
+    // segmentation can leave a larger apparent gap, so SOME slack beyond 20nm is still needed to
+    // catch real contacts on a decimated mesh. 500nm was generous enough to also catch pairs of
+    // vertices that are merely nearby in 3D without the two surfaces actually being apposed (two
+    // processes passing close by, not really touching) -- exactly the "points that aren't near
+    // where the cells touch" Soren flagged. 250nm is a tighter, still-not-final compromise; see
+    // also the mutual-nearest-neighbour filter in allContactPointsWithinThreshold() below, which
+    // targets the SAME complaint from a different angle (rejecting one-sided matches regardless of
+    // distance, not just shrinking the distance cutoff). Kept in µm (not nm) to match MeshDL's own
+    // output units directly. Changing this does not require re-fetching any meshes for a FRESH
+    // client-side compute, but does not retroactively re-tag rows already saved to the shared
+    // sheet under the old threshold.
+const CELL_CONTACT_MIN_CLUSTER_HITS=3; // 2026-08-14 (Soren: "more conservative about the points we
+    // include") -- a cluster bucket with only 1-2 raw vertex-pair hits is as likely to be mesh
+    // noise (a stray decimated vertex that happens to fall within threshold) as a genuine patch of
+    // apposed membrane; requiring at least this many independent hits before a bucket is reported
+    // as a touch point drops those isolated flukes without needing a smaller threshold (which would
+    // also start missing real, but genuinely small, contact patches).
 const CELL_CONTACT_CANDIDATES=8; // how many nearest-by-soma-position cells (ANY type) to test
     // per click -- bounds the number of extra mesh fetches a single button click can trigger.
     // Tunable; raise later if 8 turns out to miss real neighbours for some cell types/densities.
@@ -9362,15 +9376,48 @@ function minMeshDistanceWithinThreshold(posA,posB,threshold){
       center, then report whichever ACTUAL observed midpoint (an A-vertex/B-vertex pair that was
       really found) lies closest to that center. The reported point is therefore always a REAL
       midpoint between two REAL mesh vertices -- it can't drift into empty space the way a
-      synthetic average can, while still being the most central/representative one in the patch. */
+      synthetic average can, while still being the most central/representative one in the patch.
+   3. Reworked a THIRD time same day (Soren: "I see points that are not near the places where the
+      cells touch. I think we need to be more conservative about the points we include") -- the
+      first two reworks only changed WHERE a reported point sits; this is the first change to
+      WHICH candidate hits are allowed to become a point at all, adding two independent filters:
+      a) Mutual-nearest-neighbour (reciprocity) check: a raw hit (A-vertex v matched to its
+         nearest B-vertex w) is only kept if w's OWN nearest A-vertex lands back close to v. A
+         loose one-way "nearest B within threshold" test can match v to a w that is actually much
+         closer to some completely different part of A -- that happens on thin/folded geometry,
+         where v sits near a fold and the truly-nearest-seeming B vertex belongs to a different
+         patch of B that only LOOKS close in straight-line distance. Requiring the round trip
+         (A-vertex -> nearest B -> nearest A again) to land back within half a threshold-width of
+         where it started keeps only matches where both meshes agree that's a genuinely local,
+         mutually-closest pair -- exactly "not really near where the cells touch" gets filtered out
+         here, independent of distance (a one-sided match can still be well within threshold).
+      b) Minimum-hits-per-bucket (see CELL_CONTACT_MIN_CLUSTER_HITS's own comment): a bucket with
+         only 1-2 raw hits is dropped as likely mesh noise rather than reported as a touch point,
+         since a genuine patch of apposed membrane on even a coarse mesh almost always produces
+         several nearby vertex-pair hits, not just one. */
 function allContactPointsWithinThreshold(posA,posB,threshold,clusterUm){
-  const grid=buildContactGrid(posB,threshold);
+  const gridB=buildContactGrid(posB,threshold);
+  const gridA=buildContactGrid(posA,threshold); // for the reciprocity check below
   const buckets=new Map(); // key -> array of {mx,my,mz,dist} (every real observed midpoint in this bucket)
   const nA=posA.length/3;
+  const reciprocityTolerance=threshold*0.5;
+  const revCache=new Map(); // bVertexIdx -> {dist,vertexIdx} in A -- memoized since many A vertices
+    // can legitimately share the same nearest-B match on a coarse/decimated mesh, and the reverse
+    // lookup gives the identical answer every time for the same B vertex.
   for(let v=0;v<nA;v++){
     const ax=posA[v*3],ay=posA[v*3+1],az=posA[v*3+2];
-    const r=nearestInContactGrid(grid,ax,ay,az);
+    const r=nearestInContactGrid(gridB,ax,ay,az);
     if(!r)continue;
+    let rev=revCache.get(r.vertexIdx);
+    if(rev===undefined){
+      const bx0=posB[r.vertexIdx*3],by0=posB[r.vertexIdx*3+1],bz0=posB[r.vertexIdx*3+2];
+      rev=nearestInContactGrid(gridA,bx0,by0,bz0);
+      revCache.set(r.vertexIdx,rev);
+    }
+    if(!rev)continue;
+    const rvx=posA[rev.vertexIdx*3],rvy=posA[rev.vertexIdx*3+1],rvz=posA[rev.vertexIdx*3+2];
+    const backDist=Math.hypot(rvx-ax,rvy-ay,rvz-az);
+    if(backDist>reciprocityTolerance)continue; // one-sided match -- not a genuinely local pair, discard
     const bx=posB[r.vertexIdx*3],by=posB[r.vertexIdx*3+1],bz=posB[r.vertexIdx*3+2];
     const mx=(ax+bx)/2,my=(ay+by)/2,mz=(az+bz)/2; // midpoint between the two surfaces
     const key=Math.floor(mx/clusterUm)+","+Math.floor(my/clusterUm)+","+Math.floor(mz/clusterUm);
@@ -9381,6 +9428,7 @@ function allContactPointsWithinThreshold(posA,posB,threshold,clusterUm){
   if(!buckets.size)return[];
   const out=[];
   for(const arr of buckets.values()){
+    if(arr.length<CELL_CONTACT_MIN_CLUSTER_HITS)continue; // likely noise -- see that constant's comment
     // Mean is only used to FIND the medoid, not reported directly (see function comment above).
     let cx=0,cy=0,cz=0;
     for(const p of arr){cx+=p.mx;cy+=p.my;cz+=p.mz;}
