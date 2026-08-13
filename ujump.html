@@ -9362,16 +9362,27 @@ async function fetchCellContacts(nucleusId){
    column-named shape rendered directly anymore (that mismatch -- passing backend column names
    into a renderer that expected these field names, and vice versa -- was the actual cause of the
    "Unclassified"/"NaN nm"/blank-nucleus rows Soren saw: every field read back as undefined). */
-function cellContactCandidateRowHtml(r){
+/* Renders ONE ROW PER NEARBY CELL, plus (2026-08-13, Soren: "there are way too many contact points
+   to open it in neuroglancer ... make a neuroglancer link for each of the nearby cells to show
+   that cell together with the target cell and all of their contact points") a per-row "Open in
+   Neuroglancer" button scoped to JUST this one nearby cell's touch points -- opening every nearby
+   cell's points together in one view (the old behaviour) is exactly what got overwhelming once
+   there were more than a few cells, each potentially contributing many clustered points. The
+   button carries data-idx (this row's position in the caller's curRows array) rather than trying
+   to serialize touchPoints/cellVoxel into HTML attributes -- the click is handled by a single
+   delegated listener in renderCellContactsPanel() that reads the live curRows array by index, see
+   its own comment for why delegation (bind once, on `el`) replaced the old per-render rewiring. */
+function cellContactCandidateRowHtml(r,idx){
   const touchN=(r.touchPoints||[]).length;
   const touching=touchN>0;
   const label=escHtml(r.cellType||"Unclassified")+" &middot; nuc "+escHtml(String(r.nucleusId||""));
   const nameHtml=r.cellVoxel
     ?'<a href="#" class="jump" title="Jump to this cell" data-x="'+r.cellVoxel[0]+'" data-y="'+r.cellVoxel[1]+'" data-z="'+r.cellVoxel[2]+'" style="color:var(--accent);text-decoration:none;font-weight:600">'+label+'</a>'
     :'<span style="font-weight:600">'+label+'</span>';
+  const openBtn=r.rootId?'<button class="idbtn ccOpenOne" data-idx="'+idx+'" style="margin-left:8px;padding:1px 8px;font-size:11px;vertical-align:middle" title="Opens a 3D view (with EM imagery) of just this cell and the target cell, with a point at every place they actually touch.">Open in Neuroglancer</button>':'';
   return '<div style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">'
     +'<span class="dot" style="background:'+(touching?"#3fb950":"#6e7681")+';flex:0 0 auto;margin-top:5px"></span>'
-    +'<div style="flex:1 1 auto;min-width:0">'+nameHtml
+    +'<div style="flex:1 1 auto;min-width:0">'+nameHtml+openBtn
     +'<div class="nsub">'+(touching?(touchN+" touch point"+(touchN===1?"":"s")+", closest "+Number(r.distNm).toFixed(0)+" nm"):("not touching ("+Number(r.distNm).toFixed(0)+" nm gap)"))
     +(r.rootId?' &middot; root '+idSpan(r.rootId):'')+'</div></div></div>';
 }
@@ -9413,42 +9424,53 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
     +'<select id="'+uid+'" style="flex:1 1 auto"></select>'
     +'<input type="number" id="'+uid+'_radius" value="'+CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM+'" min="1" step="10" style="width:70px" title="Search radius around this cell">'
     +'<span class="nsub">&micro;m</span></div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="nsub" style="flex:1 1 auto" for="'+uid+'_cluster">Min. spacing between reported touch points</label>'
+    +'<input type="number" id="'+uid+'_cluster" value="'+Math.round(CELL_CONTACT_POINT_CLUSTER_UM*1000)+'" min="20" step="50" style="width:70px" title="A broad contact patch can have hundreds of mesh vertices within the touch threshold; only one point is kept per this distance so the result stays readable. Smaller = more (and more detailed) points. Only affects a fresh \'Check\' click -- not already-known results.">'
+    +'<span class="nsub">nm</span></div>'
     +'<p class="nsub" id="'+uid+'_count" style="margin:4px 0">Pick a cell type to see how many are nearby.</p>'
     +'<div class="row" style="gap:8px;margin-top:4px;flex-wrap:wrap">'
     +'<button class="idbtn" id="'+uid+'_check" disabled style="padding:3px 10px;font-size:12px">Check contacts with this type</button>'
-    +'<button class="idbtn" id="'+uid+'_ngl" disabled style="padding:3px 10px;font-size:12px" title="Opens a 3D view (with EM imagery) of this cell, every checked cell of the chosen type, and a point at every place their meshes actually touch.">Open in Neuroglancer</button>'
+    +'<button class="idbtn" id="'+uid+'_ngl" disabled style="padding:3px 10px;font-size:12px" title="Opens a 3D view (with EM imagery) of this cell and every checked cell of the chosen type -- segmentation only, no touch points (use the per-cell \'Open in Neuroglancer\' button in the list below for that -- opening every cell\'s points together got overwhelming with more than a few cells).">Open all in Neuroglancer</button>'
     +'<button class="idbtn" id="'+uid+'_xlsx" disabled style="padding:3px 10px;font-size:12px" title="Downloads every evaluated pair (touching or not) with its coordinates, if any.">Download as Excel</button>'
     +'</div><div id="'+uid+'_results" style="margin-top:6px"></div>';
   h+='</div>';
   el.innerHTML=h;
-  /* Wires every ".jump" cell-name link currently inside `el` -- called once right after the
-     initial render, and again after every resultsEl.innerHTML reassignment below (refreshCountAndKnown
-     and the "Check" handler both replace resultsEl's contents with freshly-built
-     cellContactCandidateRowHtml() rows, which carry their own ".jump" links that wouldn't
-     otherwise be wired -- a real gap this function had before 2026-08-13: only the rows present
-     at the FIRST render ever got a listener). */
-  function wireJumps(){
-    el.querySelectorAll(".jump").forEach(function(b){
-      if(b.dataset.wired)return; // avoid double-binding a pill that survives across a re-render
-      b.dataset.wired="1";
-      b.addEventListener("click",function(){
-        unit="voxel";[...unitsEl.children].forEach(function(c){c.classList.toggle("on",c.dataset.u==="voxel");});
-        document.getElementById("x").value=b.dataset.x;document.getElementById("y").value=b.dataset.y;document.getElementById("z").value=b.dataset.z;document.getElementById("go").click();
-      });
-    });
-  }
-  wireJumps();
   const typeSel=document.getElementById(uid),radiusEl=document.getElementById(uid+"_radius"),
+    clusterEl=document.getElementById(uid+"_cluster"),
     countEl=document.getElementById(uid+"_count"),checkBtn=document.getElementById(uid+"_check"),
     nglBtn=document.getElementById(uid+"_ngl"),xlsxBtn=document.getElementById(uid+"_xlsx"),
     resultsEl=document.getElementById(uid+"_results");
   if(!typeSel)return; // shouldn't happen, but keeps this defensive like the rest of the file
+  let curRows=[]; // whichever result set is currently "live" -- declared here (before the delegated
+    // listener below, which closes over it) so both the listener and every handler further down
+    // always see the CURRENT rows, not a stale copy from whenever the listener was first attached.
+  /* One delegated click listener, bound ONCE on `el` itself -- handles ".jump" (a row's cell-name
+     link) and ".ccOpenOne" (a row's own "Open in Neuroglancer" button) no matter how many times
+     resultsEl's contents get replaced afterwards (refreshCountAndKnown / the "Check" button both
+     do that). Replaced the old "re-run querySelectorAll + dataset.wired dedup flag after every
+     render" approach 2026-08-13 -- delegation needs no re-wiring step at all, which also fixes the
+     class of bug that approach was prone to (a render path that forgets to call the re-wire
+     function leaves its buttons dead). ".ccOpenOne" reads curRows[idx] rather than trying to carry
+     touchPoints/cellVoxel through HTML data-* attributes. */
+  el.addEventListener("click",function(e){
+    const jumpBtn=e.target.closest(".jump");
+    if(jumpBtn){
+      e.preventDefault();
+      unit="voxel";[...unitsEl.children].forEach(function(c){c.classList.toggle("on",c.dataset.u==="voxel");});
+      document.getElementById("x").value=jumpBtn.dataset.x;document.getElementById("y").value=jumpBtn.dataset.y;document.getElementById("z").value=jumpBtn.dataset.z;document.getElementById("go").click();
+      return;
+    }
+    const openBtn=e.target.closest(".ccOpenOne");
+    if(openBtn){
+      e.preventDefault();
+      const row=curRows[Number(openBtn.dataset.idx)];
+      if(row&&rootId0)openCellContactsSingleViewer(i,rootId0,cellType,row);
+    }
+  });
   const opts=cellTypeOptionsForContactSearch();
   typeSel.innerHTML='<option value="">Choose a cell type…</option>'
     +opts.map(o=>'<option value="'+escHtml(o.label)+'">'+escHtml(o.label)+' ('+o.total+' in whole dataset)</option>').join('');
-  let curRows=[]; // whichever result set is currently "live" for the Neuroglancer/Excel buttons -- either
-    // rows already known (filtered to the selected type, from a past click by anyone) or a fresh
-    // compute from the "Check contacts with this type" button below, whichever is more recent.
   function refreshCountAndKnown(){
     const label=typeSel.value;
     nglBtn.disabled=true;xlsxBtn.disabled=true;checkBtn.disabled=true;curRows=[];
@@ -9477,7 +9499,6 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
           distNm:Number(k.minDistanceNm)||0,voxel,touchPoints:voxel?[voxel]:[],cellVoxel};
       });
       resultsEl.innerHTML=curRows.map(cellContactCandidateRowHtml).join('');
-      wireJumps();
       nglBtn.disabled=false;xlsxBtn.disabled=false;
     }else{
       resultsEl.innerHTML=rootId0?'<div class="nsub">Not checked yet.</div>':'<div class="nsub">This cell has no resolvable root ID yet, so contacts can\'t be checked here (past results from others can still show above, if any).</div>';
@@ -9488,15 +9509,15 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
   checkBtn.addEventListener("click",async function(){
     const label=typeSel.value;if(!label||!rootId0)return;
     const radius=Math.max(1,Number(radiusEl.value)||CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM);
-    const orig=checkBtn.textContent;checkBtn.disabled=true;typeSel.disabled=true;radiusEl.disabled=true;
+    const clusterNm=Math.max(20,Number(clusterEl.value)||Math.round(CELL_CONTACT_POINT_CLUSTER_UM*1000));
+    const orig=checkBtn.textContent;checkBtn.disabled=true;typeSel.disabled=true;radiusEl.disabled=true;clusterEl.disabled=true;
     try{
-      const{results,totalFound,checked}=await computeCellContactsOfType(rootId0,i,label,radius,function(frac,msg){
+      const{results,totalFound,checked}=await computeCellContactsOfType(rootId0,i,label,radius,clusterNm/1000,function(frac,msg){
         checkBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";
       });
       curRows=results;
       maybeSaveCellContacts(nucleusId,rootId0,cellType,results);
       resultsEl.innerHTML=results.length?results.map(cellContactCandidateRowHtml).join(''):'<div class="nsub">No cells of that type had a resolvable root ID to check.</div>';
-      wireJumps();
       countEl.textContent=totalFound+" "+label+(totalFound===1?"":"s")+" found within "+radius+" µm"
         +(checked<totalFound?" — checked nearest "+checked+" (limit "+CELL_CONTACT_TYPE_MAX_FETCH+")":" — all checked");
       nglBtn.disabled=!results.length;xlsxBtn.disabled=!results.length;
@@ -9504,12 +9525,12 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
       console.warn("[uJump cell contacts by type]",err);
       resultsEl.innerHTML='<div class="nsub" style="color:#f0883e">Failed: '+escHtml(String((err&&err.message)||err))+'</div>';
     }finally{
-      checkBtn.textContent=orig;checkBtn.disabled=false;typeSel.disabled=false;radiusEl.disabled=false;
+      checkBtn.textContent=orig;checkBtn.disabled=false;typeSel.disabled=false;radiusEl.disabled=false;clusterEl.disabled=false;
     }
   });
   nglBtn.addEventListener("click",function(){
     if(!curRows.length||!rootId0)return;
-    openCellContactsTypeViewer(i,rootId0,cellType,typeSel.value,curRows);
+    openCellContactsAllViewer(i,rootId0,cellType,typeSel.value,curRows);
   });
   xlsxBtn.addEventListener("click",function(){
     if(!curRows.length)return;
@@ -9524,7 +9545,7 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
    shape, which findWithinRadiusOfType() below also deliberately matches) rather than computing
    it itself, so the two callers can supply completely different candidate-selection logic
    (nearest-K vs. same-type-within-radius) while sharing everything after that. */
-async function computeCellContactsForCandidates(rootIdStr,candidates,onProgress){
+async function computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,onProgress){
   /* Guard added 2026-08-13 after a real crash: MeshDL.fetchCombinedMesh() stringifies whatever
      it's given (String(null)==="null"), so a literal JS null/undefined rootIdStr silently became
      the TEXT "null", passed MeshDL's own "is this id non-empty" filter, and only failed deep
@@ -9547,8 +9568,11 @@ async function computeCellContactsForCandidates(rootIdStr,candidates,onProgress)
        touching point per astrocyte ... I want it to find all the touching points between the
        target astrocyte and each of the nearby astrocytes") -- see allContactPointsWithinThreshold's
        own comment for the clustering that keeps a broad contact patch from becoming hundreds of
-       near-duplicate points. */
-    const pts=allContactPointsWithinThreshold(own.positions,candMesh.positions,CELL_CONTACT_THRESHOLD_UM,CELL_CONTACT_POINT_CLUSTER_UM);
+       near-duplicate points. clusterUm is caller-supplied (2026-08-13, Soren: "you should be able
+       to choose how near the contact points should maximally be, like you are thinning to 300nm
+       ... the user should be able to choose this") rather than the fixed CELL_CONTACT_POINT_-
+       CLUSTER_UM constant -- that constant now only serves as the UI's prefilled default value. */
+    const pts=allContactPointsWithinThreshold(own.positions,candMesh.positions,CELL_CONTACT_THRESHOLD_UM,clusterUm);
     const nt=typeInfo(nb.i),nOwn=ownOverride(nb.i);
     const candCellType=nOwn?nOwn.type:longName(nt.name);
     const cellVoxel=[NX[nb.i],NY[nb.i],NZ[nb.i]]; // the candidate's OWN position (soma/nucleus), for the
@@ -9632,36 +9656,39 @@ const CELL_CONTACT_TYPE_MAX_FETCH=60; // hard cap on how many meshes one "Check 
     // browser/session from an accidental "check 3000 meshes" click; nearest-first (see
     // findWithinRadiusOfType's own sort) so a truncated run still checks the closest, most likely
     // candidates first. Tunable, same "provisional constant" treatment as CELL_CONTACT_CANDIDATES.
-async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,onProgress){
+async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,clusterUm,onProgress){
   const all=findWithinRadiusOfType(i,typeLabel,radiusUm);
   const candidates=all.slice(0,CELL_CONTACT_TYPE_MAX_FETCH);
-  const results=await computeCellContactsForCandidates(rootIdStr,candidates,onProgress);
+  const results=await computeCellContactsForCandidates(rootIdStr,candidates,clusterUm,onProgress);
   return{results,totalFound:all.length,checked:candidates.length};
 }
-/* Builds a minimal Neuroglancer 3D state for "Open in Neuroglancer" on the type-contact results:
-   this cell's own segmentation, a second segmentation layer for every matched cell of typeLabel
-   that has a resolvable root ID, and a local point-annotation layer at every RESOLVED touch
-   coordinate (rows with no voxel -- i.e. evaluated but not touching -- contribute no point, since
-   there is no "place they touch" to mark for those). Includes the Img65 EM layer (2026-08-13,
-   Soren: "the find contacts neuroglancer instance should include the EM data, so that I can
-   verify that they are actually touching") -- always Img65, never Img35, since this whole feature
-   is scoped to the main in-region nucleus array only (see cellTypeOptionsForContactSearch()'s own
-   comment), so both the center cell and every candidate are guaranteed to be in-region; no need
-   for buildFilterViewerState()'s own any-region-mix handling here. Deliberately still does not add
-   a separate nuclei layer (the two segmentation layers below already make clear which cell is
-   which; a third layer just for nuclei outlines would add fetch cost without adding anything
-   needed to verify a MESH contact specifically). SRC/DIM/the EM shader controls are re-declared
-   here as small local literals rather than reused from their own top-level declarations elsewhere
-   in this file, because top-level const/let bindings do not cross <script> tag boundaries in this
-   document (see the organelle-groups comment earlier in this file for the same note) --
-   duplicating these static, never-changing literals is simpler and safer than trying to reach
-   across that boundary. */
+/* Shared static literals (SRC/DIM/EM shader controls) for both viewer builders below -- re-
+   declared as small local literals rather than reused from their own top-level declarations
+   elsewhere in this file, because top-level const/let bindings do not cross <script> tag
+   boundaries in this document (see the organelle-groups comment earlier in this file for the same
+   note) -- duplicating these static, never-changing literals is simpler and safer than trying to
+   reach across that boundary. Both builders always use the Img65 EM layer (2026-08-13, Soren:
+   "the find contacts neuroglancer instance should include the EM data, so that I can verify that
+   they are actually touching") -- never Img35, since this whole feature is scoped to the main
+   in-region nucleus array only (see cellTypeOptionsForContactSearch()'s own comment), so every
+   cell involved is guaranteed in-region; no need for buildFilterViewerState()'s own any-region-mix
+   handling here. */
+function cellContactsViewerBase(){
+  return{
+    SRC_SEG:"precomputed://gs://iarpa_microns/minnie/minnie65/seg_m1300",
+    SRC_EM:"precomputed://https://storage.googleapis.com/iarpa_microns/minnie/minnie65/em",
+    EM_SHADER_CONTROLS_LOCAL:{normalized:{range:[86,172]}},
+    DIM_LOCAL:{x:[4e-9,"m"],y:[4e-9,"m"],z:[4e-8,"m"]}
+  };
+}
 /* Golden-angle (137.508°) hue stepping -- gives N maximally-distinct colours without hand-picking
    a palette, same technique ORG_POINT_COLORS uses elsewhere in this file for its ~50 organelle
    kinds (see that code's own comment) -- reimplemented as a small LOCAL function here rather than
    reused from there, because top-level const/let AND function-scoped helpers inside that other
    script block's own IIFE don't cross <script> tag boundaries in this document (see the
-   organelle-groups comment earlier in this file for the same rule). */
+   organelle-groups comment earlier in this file for the same rule). Only actually used by the
+   single-cell viewer now (its touch points get one colour) -- kept general/by-index anyway in case
+   a future caller needs more than one palette colour again. */
 function cellContactPaletteColor(idx){
   const h=(idx*137.508)%360,s=0.72,l=0.58;
   const k=n=>(n+h/30)%12,a=s*Math.min(l,1-l);
@@ -9669,49 +9696,80 @@ function cellContactPaletteColor(idx){
   const toHex=x=>Math.round(255*x).toString(16).padStart(2,"0");
   return "#"+toHex(f(0))+toHex(f(8))+toHex(f(4));
 }
-function buildCellContactsTypeViewerState(i,rootIdStr,cellType,typeLabel,rows){
-  const SRC_SEG="precomputed://gs://iarpa_microns/minnie/minnie65/seg_m1300";
-  const SRC_EM="precomputed://https://storage.googleapis.com/iarpa_microns/minnie/minnie65/em";
-  const EM_SHADER_CONTROLS_LOCAL={normalized:{range:[86,172]}};
-  const DIM_LOCAL={x:[4e-9,"m"],y:[4e-9,"m"],z:[4e-8,"m"]};
-  const touchRows=rows.filter(r=>r.rootId&&r.touchPoints&&r.touchPoints.length);
+/* "Open all in Neuroglancer" (renamed 2026-08-13 from "Open in Neuroglancer" -- Soren: "there are
+   way too many contact points to open it in neuroglancer ... The neuroglancer link that is there
+   already should be called 'Open all in Neuroglancer' and should only show the nearby astrocytes
+   and not their contact points"). SEGMENTATION ONLY: this cell + every matched cell of typeLabel
+   that has a resolvable root ID -- deliberately no touch-point annotation layers at all anymore
+   (that's what made this view unusable with more than a handful of nearby cells, each contributing
+   many clustered points). Use openCellContactsSingleViewer() below for one cell's own points. */
+function buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows){
+  const B=cellContactsViewerBase();
   const matchedRootIds=Array.from(new Set(rows.filter(r=>r.rootId).map(r=>String(r.rootId))));
   const layers=[];
-  layers.push({type:"image",source:SRC_EM,tab:"rendering",name:"EM",shaderControls:EM_SHADER_CONTROLS_LOCAL});
+  layers.push({type:"image",source:B.SRC_EM,tab:"rendering",name:"EM",shaderControls:B.EM_SHADER_CONTROLS_LOCAL});
   const centerLayerName=cellType||"This cell";
-  layers.push({type:"segmentation",source:SRC_SEG,tab:"source",name:centerLayerName,
+  layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:centerLayerName,
     segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
   if(matchedRootIds.length){
     const colors={};matchedRootIds.forEach(r=>colors[r]="#3fb950");
-    layers.push({type:"segmentation",source:SRC_SEG,tab:"source",name:typeLabel+" (contacts checked)",
+    layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:typeLabel+" (contacts checked)",
       segments:matchedRootIds,segmentColors:colors,objectAlpha:0.85});
   }
-  /* One annotation layer PER nearby cell, each its own golden-angle colour (2026-08-13, Soren: "if
-     you can make the points for the different nearby cells different color in neuroglancer, that
-     would be great"), carrying EVERY touch point for that cell (not just the closest -- see
-     allContactPointsWithinThreshold's own comment) -- separate layers rather than one shared layer
-     with a colour property so each nearby cell's points can also be toggled on/off independently
-     from Neuroglancer's own layer panel, same convenience the per-organelle-kind point layers
-     elsewhere in this file already give. */
-  touchRows.forEach((r,idx)=>{
-    const color=cellContactPaletteColor(idx);
-    const anns=r.touchPoints.map((v,pidx)=>({type:"point",id:"touch_"+idx+"_"+pidx,point:v}));
-    layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:color,
-      name:"Touch pts: nuc "+r.nucleusId+" ("+anns.length+")"});
-  });
-  const posVox=[NX[i],NY[i],NZ[i]];
-  let span=20000; // physical nm, fallback if there's nothing else to size the view on
-  if(touchRows.length){
-    const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
-    const allPts=touchRows.reduce((a,r)=>a.concat(r.touchPoints),[]);
-    span=Math.max(...allPts.map(v=>{const dx=v[0]*4-cx,dy=v[1]*4-cy,dz=v[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
-  }
-  return{dimensions:DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
+  /* Position/zoom sized off the matched cells' own soma positions (not touch points, since this
+     view no longer shows any) -- centroid of every matched candidate plus the query cell itself. */
+  const pts=[[NX[i],NY[i],NZ[i]]].concat(rows.filter(r=>r.cellVoxel).map(r=>r.cellVoxel));
+  let sx=0,sy=0,sz=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];sz+=p[2];});
+  const posVox=[sx/pts.length,sy/pts.length,sz/pts.length];
+  const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
+  const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
+  return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
     layers,selectedLayer:{layer:centerLayerName,visible:true},layout:{type:"xy-3d",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
-function openCellContactsTypeViewer(i,rootIdStr,cellType,typeLabel,rows){
-  const state=buildCellContactsTypeViewerState(i,rootIdStr,cellType,typeLabel,rows);
+function openCellContactsAllViewer(i,rootIdStr,cellType,typeLabel,rows){
+  const state=buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows);
+  const viewerEl=document.getElementById("viewer");
+  const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
+  window.open(base+"#!"+encodeURIComponent(JSON.stringify(state)),"_blank","noopener");
+}
+/* Per-cell "Open in Neuroglancer" (2026-08-13, Soren: "make a neuroglancer link for each of the
+   nearby cells to show that cell together with the target cell and all of their contact points") --
+   the query cell + JUST this one nearby cell's segmentation, plus every one of THIS pair's own
+   touch points (all in one colour, since there's only one nearby cell in view -- no need for the
+   "all" viewer's old per-cell palette). This is the view meant to actually inspect a contact
+   closely; buildCellContactsAllViewerState above is deliberately lightweight instead. */
+function buildCellContactsSingleViewerState(i,rootIdStr,cellType,row){
+  const B=cellContactsViewerBase();
+  const layers=[];
+  layers.push({type:"image",source:B.SRC_EM,tab:"rendering",name:"EM",shaderControls:B.EM_SHADER_CONTROLS_LOCAL});
+  const centerLayerName=cellType||"This cell";
+  layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:centerLayerName,
+    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+  const otherLayerName=(row.cellType||"Nearby cell")+" (nuc "+row.nucleusId+")";
+  if(row.rootId){
+    layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:otherLayerName,
+      segments:[String(row.rootId)],segmentColors:{[String(row.rootId)]:"#3fb950"},objectAlpha:0.85});
+  }
+  const touchPoints=row.touchPoints||[];
+  if(touchPoints.length){
+    const anns=touchPoints.map((v,pidx)=>({type:"point",id:"touch_"+pidx,point:v}));
+    layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:cellContactPaletteColor(0),
+      name:"Touch points ("+anns.length+")"});
+  }
+  const pts=[[NX[i],NY[i],NZ[i]]];
+  if(row.cellVoxel)pts.push(row.cellVoxel);
+  pts.push(...touchPoints);
+  let sx=0,sy=0,sz=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];sz+=p[2];});
+  const posVox=touchPoints.length?touchPoints[0]:[sx/pts.length,sy/pts.length,sz/pts.length];
+  const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
+  const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),3000)*2.4;
+  return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,4000),
+    layers,selectedLayer:{layer:centerLayerName,visible:true},layout:{type:"xy-3d",orthographicProjection:true},
+    showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
+}
+function openCellContactsSingleViewer(i,rootIdStr,cellType,row){
+  const state=buildCellContactsSingleViewerState(i,rootIdStr,cellType,row);
   const viewerEl=document.getElementById("viewer");
   const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
   window.open(base+"#!"+encodeURIComponent(JSON.stringify(state)),"_blank","noopener");
