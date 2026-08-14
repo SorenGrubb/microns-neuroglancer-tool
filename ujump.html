@@ -1577,19 +1577,21 @@ function renderSynapseIO(connSamples){
   renderOne();
 }
 
-/* One dot per cell-type pair -- 2026-08-14, Soren: "save the number of contact points between the
-   cell types, so that we can make a live-updating dot-plot graph showing the average number of
-   contact points between two cell types." Fed by ?meshContactTypeStats=1, which already does the
-   averaging server-side (unlike dotMedianChart/groupedDotChart above, there's no raw per-sample
-   distribution to plot here -- see that endpoint's own comment in Code.gs.txt) and already applies
-   the "default settings only" comparability filter Soren asked for, so every pair this function
-   sees is safe to plot as-is. A genuine ordinary scatter trace (not a box trace with hidden
-   whiskers like dotMedianChart) since there's exactly one value per pair, not a distribution --
-   marker AREA (not radius) scales with sample count n, the standard bubble-chart convention for
-   reading relative sample size correctly. */
+/* Jittered dot plot (one dot per CHECKED PAIR, not one dot per cell-type) of touch-point counts
+   between cell types -- 2026-08-14, Soren: "save the number of contact points between the cell
+   types, so that we can make a live-updating dot-plot graph showing the average number of contact
+   points between two cell types." REVISED 2026-08-16 (Soren: "I don't want the dot size scale, I
+   want the dot plot, like this" -- pointing at the nucleus-volume-share chart's box+jitter style)
+   -- the original version was a bubble chart with one pre-averaged point per cell-type pair, sized
+   by sample count. Now matches dotMedianChart()'s style exactly: ?meshContactTypeStats=1 returns
+   the raw touchPointCount VALUES per pair (see its own comment in Code.gs.txt for why that moved
+   server-side aggregation to the client), and this builds the same {category: [values]} shape
+   dotMedianChart() expects elsewhere on this dashboard, reusing it directly rather than
+   duplicating its box-trace styling. dotMedianChart() itself already drops any category with
+   fewer than 3 points (too few to show a meaningful box), so no separate filtering needed here. */
 function renderMeshContactStats(pairs){
   const area=document.getElementById("meshContactStatsArea");
-  const list=(pairs||[]).filter(function(p){return p&&p.n>0&&p.typeA&&p.typeB;});
+  const list=(pairs||[]).filter(function(p){return p&&p.typeA&&p.typeB&&Array.isArray(p.values)&&p.values.length;});
   if(!list.length){
     // 2026-08-16, Soren caught this text stuck at a stale "500 nm" from before
     // CELL_CONTACT_THRESHOLD_UM was changed to 40nm on 2026-08-15 -- updated to match. NOTE: can't
@@ -1603,22 +1605,14 @@ function renderMeshContactStats(pairs){
     area.innerHTML="<div class='placeholder'>No comparable data yet — every time someone runs the Cell contacts “Check” button with the tool's default settings (40 nm touch threshold, 1000 nm point spacing), that pair's touch-point count is added here. Searches with custom settings still work and save in that cell's own panel, they just aren't averaged into this shared chart.</div>";
     return;
   }
+  const dataObj={};
+  list.forEach(function(p){dataObj[p.typeA+" × "+p.typeB]=p.values;});
+  if(!Object.keys(dataObj).some(function(t){return dataObj[t].length>=3;})){
+    area.innerHTML="<div class='placeholder'>Not enough checks yet for any one cell-type pair to plot a distribution (need at least 3 default-settings checks of the SAME pair). "+list.length+" pair"+(list.length===1?"":"s")+" checked so far, none with 3+ yet.</div>";
+    return;
+  }
   area.innerHTML='<div class="plot" id="plotMeshContactStats"></div>';
-  const sorted=list.slice().sort(function(a,b){return b.avgTouchPointCount-a.avgTouchPointCount;});
-  const labels=sorted.map(function(p){return p.typeA+" × "+p.typeB;});
-  const y=sorted.map(function(p){return p.avgTouchPointCount;});
-  const n=sorted.map(function(p){return p.n;});
-  const sizes=n.map(function(v){return 6+Math.sqrt(v)*4;});
-  const bl=baseLayout(),c=liveThemeColors();
-  Plotly.newPlot("plotMeshContactStats",[{
-    type:"scatter",mode:"markers",x:labels,y,
-    marker:{size:sizes,color:labels.map(colorFor),line:{width:1,color:c.line}},
-    text:n.map(function(v){return v+" pair"+(v===1?"":"s")+" checked";}),
-    hovertemplate:"%{x}<br>avg %{y} touch points<br>%{text}<extra></extra>"
-  }],Object.assign({},bl,{
-    xaxis:Object.assign({},bl.xaxis,{categoryorder:"array",categoryarray:labels}),
-    yaxis:Object.assign({},bl.yaxis,{title:"average touch points per pair (default settings only)"})
-  }),PLOTLY_CFG);
+  dotMedianChart("plotMeshContactStats",dataObj,"touch points per pair (default settings only)");
 }
 
 function setStatus(msg){document.getElementById("statusLine").textContent=msg;}
@@ -1694,10 +1688,10 @@ async function fetchLiveData(){
     connSamples=(d&&d.connectivitySamples)||[];
   }catch(e){console.warn("[dashboard] connectivitySamples fetch failed",e);}
 
-  // 2026-08-14 -- pre-aggregated (server-side) average touch-point count per cell-type pair, for
-  // renderMeshContactStats()'s dot plot. Unlike connectivitySamples above, this already comes back
-  // averaged and pre-filtered to default-settings-only rows (see ?meshContactTypeStats=1's own
-  // comment in Code.gs.txt), so there's no raw per-sample array to keep here.
+  // 2026-08-14, revised 2026-08-16 (Soren: "I don't want the dot size scale, I want the dot plot")
+  // -- raw touchPointCount VALUES per cell-type pair (same shape as connSamples above, pre-filtered
+  // server-side to default-settings-only rows -- see ?meshContactTypeStats=1's own comment in
+  // Code.gs.txt), fed to renderMeshContactStats()'s box+jitter chart. No longer pre-averaged.
   try{
     const r=await fetch(REPORT_ENDPOINT+"?meshContactTypeStats=1");
     const d=await r.json();
