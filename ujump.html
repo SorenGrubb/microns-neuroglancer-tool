@@ -10146,12 +10146,11 @@ function downloadCellContactsTypeExcel(centerNucId,centerRootId,centerType,typeL
    authoritative source -- shown as adjustable and provisional in its own UI tooltip, same
    convention as CELL_CONTACT_THRESHOLD_UM above. */
 const TRIPARTITE_ASTRO_DIST_UM=0.5; // 500nm default -- see the caveat above; adjustable per search.
-const TRIPARTITE_CANDIDATE_RADIUS_UM=30; // How far around each SYNAPSE to look for astrocyte somas
-    // worth mesh-fetching -- purely a "don't miss a real nearby astrocyte" search net, not a
+const TRIPARTITE_CANDIDATE_RADIUS_UM=100; // How far around each SYNAPSE to look for astrocyte
+    // somas worth mesh-fetching -- purely a "don't miss a real nearby astrocyte" search net, not a
     // scientific parameter itself (unlike TRIPARTITE_ASTRO_DIST_UM above, which IS the actual
-    // proximity criterion). 30µm is comfortably larger than a single astrocyte's own domain radius,
-    // chosen the same way CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM was -- a reasonable starting default,
-    // adjustable per search.
+    // proximity criterion). Raised from 30 to 100 (2026-08-16, Soren's own request) to match
+    // CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM's default -- adjustable per search either way.
 const TRIPARTITE_MAX_SYNAPSES=10; // Hard cap on synapses checked per "Check" click -- unlike
     // Connectivity's CAVE_MAX_SYN_POINTS=400 (cheap, just plotting/coloring already-fetched rows),
     // EVERY synapse checked here can trigger several astrocyte MESH fetches, so this needs to be
