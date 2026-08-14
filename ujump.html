@@ -9986,14 +9986,24 @@ function cellContactPaletteColor(idx){
    viewer (openCellContactsSingleViewer below), which only ever shows one neighbour at a time and
    so never needed more than one colour. Segmentation-only fallback still applies when nothing is
    touching (no annotation layers added at all in that case). */
-function buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows){
+function buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows,ownExtraRootIds){
   const B=cellContactsViewerBase();
   const matchedRootIds=Array.from(new Set(rows.filter(r=>r.rootId).map(r=>String(r.rootId))));
   const layers=[];
   layers.push({type:"image",source:B.SRC_EM,tab:"rendering",name:"EM",shaderControls:B.EM_SHADER_CONTROLS_LOCAL});
   const centerLayerName=cellType||"This cell";
+  /* ownExtraRootIds (2026-08-16, Soren: "if a root ID is proposed, then I find it is not showing up
+     activated in the Neuroglancer windows") -- the touch-point COMPUTE already combines the main
+     root ID with any community-proposed extras (see computeCellContactsForCandidates' own
+     ownExtras/fetchExtraRootIdsFor), but the viewer's center segmentation layer was only ever
+     listing the single main root ID as "segments" -- meaning even when a proposed root ID's mesh
+     was used to find a touch point, that proposed segment never actually appeared activated/
+     highlighted in Neuroglancer. Now the center layer includes every root ID the compute step
+     actually used, deduplicated, all the same colour (they represent one cell). */
+  const centerRootIds=[String(rootIdStr)].concat((ownExtraRootIds||[]).filter(Boolean).map(String)).filter(function(v,idx,arr){return v&&arr.indexOf(v)===idx;});
+  const centerColors={};centerRootIds.forEach(function(r){centerColors[r]="#ff3b3b";});
   layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:centerLayerName,
-    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+    segments:centerRootIds,segmentColors:centerColors,objectAlpha:0.85});
   if(matchedRootIds.length){
     const colors={};matchedRootIds.forEach(r=>colors[r]="#3fb950");
     layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:typeLabel+" (contacts checked)",
@@ -10037,11 +10047,19 @@ function buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows){
     layout:{type:"4panel",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
-function openCellContactsAllViewer(i,rootIdStr,cellType,typeLabel,rows){
-  const state=buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows);
+async function openCellContactsAllViewer(i,rootIdStr,cellType,typeLabel,rows){
+  /* Opens the blank tab SYNCHRONOUSLY, before the fetchExtraRootIdsFor() await below, so this still
+     counts as a direct response to the click for popup-blocker purposes (2026-08-16, needed once
+     this became async to fetch ownExtraRootIds first -- see buildCellContactsAllViewerState's own
+     comment on why that fetch is needed). Deliberately omits "noopener" -- with that flag,
+     window.open() returns null and there'd be no handle left to navigate once the state is ready. */
+  const win=window.open("","_blank");
+  const ownExtras=await fetchExtraRootIdsFor(NID[i],rootIdStr).catch(function(){return[];});
+  const state=buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows,ownExtras);
   const viewerEl=document.getElementById("viewer");
   const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
-  window.open(base+"#!"+encodeURIComponent(JSON.stringify(state)),"_blank","noopener");
+  const url=base+"#!"+encodeURIComponent(JSON.stringify(state));
+  if(win)win.location=url;else window.open(url,"_blank"); // popup blocked the first open -- last resort, may still be blocked
 }
 /* Per-cell "Open in Neuroglancer" (2026-08-13, Soren: "make a neuroglancer link for each of the
    nearby cells to show that cell together with the target cell and all of their contact points") --
@@ -10049,13 +10067,16 @@ function openCellContactsAllViewer(i,rootIdStr,cellType,typeLabel,rows){
    touch points (all in one colour, since there's only one nearby cell in view -- no need for the
    "all" viewer's old per-cell palette). This is the view meant to actually inspect a contact
    closely; buildCellContactsAllViewerState above is deliberately lightweight instead. */
-function buildCellContactsSingleViewerState(i,rootIdStr,cellType,row){
+function buildCellContactsSingleViewerState(i,rootIdStr,cellType,row,ownExtraRootIds){
   const B=cellContactsViewerBase();
   const layers=[];
   layers.push({type:"image",source:B.SRC_EM,tab:"rendering",name:"EM",shaderControls:B.EM_SHADER_CONTROLS_LOCAL});
   const centerLayerName=cellType||"This cell";
+  // ownExtraRootIds -- see buildCellContactsAllViewerState's own comment (same 2026-08-16 fix).
+  const centerRootIds=[String(rootIdStr)].concat((ownExtraRootIds||[]).filter(Boolean).map(String)).filter(function(v,idx,arr){return v&&arr.indexOf(v)===idx;});
+  const centerColors={};centerRootIds.forEach(function(r){centerColors[r]="#ff3b3b";});
   layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:centerLayerName,
-    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+    segments:centerRootIds,segmentColors:centerColors,objectAlpha:0.85});
   const otherLayerName=(row.cellType||"Nearby cell")+" (nuc "+row.nucleusId+")";
   if(row.rootId){
     layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:otherLayerName,
@@ -10083,11 +10104,15 @@ function buildCellContactsSingleViewerState(i,rootIdStr,cellType,row){
     layout:{type:"4panel",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
-function openCellContactsSingleViewer(i,rootIdStr,cellType,row){
-  const state=buildCellContactsSingleViewerState(i,rootIdStr,cellType,row);
+async function openCellContactsSingleViewer(i,rootIdStr,cellType,row){
+  // Same open-blank-tab-first pattern as openCellContactsAllViewer above, and for the same reason.
+  const win=window.open("","_blank");
+  const ownExtras=await fetchExtraRootIdsFor(NID[i],rootIdStr).catch(function(){return[];});
+  const state=buildCellContactsSingleViewerState(i,rootIdStr,cellType,row,ownExtras);
   const viewerEl=document.getElementById("viewer");
   const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
-  window.open(base+"#!"+encodeURIComponent(JSON.stringify(state)),"_blank","noopener");
+  const url=base+"#!"+encodeURIComponent(JSON.stringify(state));
+  if(win)win.location=url;else window.open(url,"_blank");
 }
 /* "Download the coordinates of all the places the cell touches the other cells of the specified
    cell type in an excel file" -- 2026-08-13: one row per TOUCH POINT now (was one row per pair,
@@ -10259,7 +10284,11 @@ async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,on
         entry="skipped_toolarge";
       }else{
         totalVertsFetched+=vertCount;
-        entry={mesh,grid:buildContactGrid(mesh.positions,thresholdUm)};
+        // extraRootIds carried on entry (2026-08-16, Soren: "the same goes for the astrocyte-synapse
+        // proximity" -- same fix as Cell contacts' ownExtraRootIds) so buildTripartiteViewerState can
+        // list every root ID this astrocyte's mesh actually combined, not just the one it was found
+        // under, in its Neuroglancer segmentation layer.
+        entry={mesh,grid:buildContactGrid(mesh.positions,thresholdUm),extraRootIds:extras};
       }
     }catch(e){console.warn("[uJump tripartite] astrocyte mesh fetch failed",candRootStr,e&&e.message);entry=null;}
     meshCache.set(candRootStr,entry);
@@ -10286,7 +10315,8 @@ async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,on
       if(!best||r.dist<best.distUm){
         const vp=[entry.mesh.positions[r.vertexIdx*3],entry.mesh.positions[r.vertexIdx*3+1],entry.mesh.positions[r.vertexIdx*3+2]];
         best={distUm:r.dist,distNm:r.dist*1000,nucleusId:NID[c.i],rootId:candRoot,
-          touchVoxel:meshUmToVoxel(vp[0],vp[1],vp[2]),cellVoxel:[NX[c.i],NY[c.i],NZ[c.i]]};
+          touchVoxel:meshUmToVoxel(vp[0],vp[1],vp[2]),cellVoxel:[NX[c.i],NY[c.i],NZ[c.i]],
+          extraRootIds:entry.extraRootIds||[]};
       }
     }
     results.push({pos:syn.pos,partner:syn.partner,direction:syn.direction,size:syn.size,
@@ -10328,13 +10358,17 @@ function tripartiteRowHtml(r,idx,thresholdNm){
    Cell contacts' two separate builders, one shape covers both cases cleanly here since there's
    only ever one query cell + its partners + whichever astrocytes were found, not a combinatorial
    per-candidate explosion. */
-function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
+function buildTripartiteViewerState(i,rootIdStr,cellType,rows,ownExtraRootIds){
   const B=cellContactsViewerBase();
   const layers=[];
   layers.push({type:"image",source:B.SRC_EM,tab:"rendering",name:"EM",shaderControls:B.EM_SHADER_CONTROLS_LOCAL});
   const centerLayerName=cellType||"This cell";
+  // ownExtraRootIds -- see buildCellContactsAllViewerState's own comment (same 2026-08-16 fix,
+  // Soren: "the same goes for the astrocyte-synapse proximity").
+  const centerRootIds=[String(rootIdStr)].concat((ownExtraRootIds||[]).filter(Boolean).map(String)).filter(function(v,idx,arr){return v&&arr.indexOf(v)===idx;});
+  const centerColors={};centerRootIds.forEach(function(r){centerColors[r]="#ff3b3b";});
   layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:centerLayerName,
-    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+    segments:centerRootIds,segmentColors:centerColors,objectAlpha:0.85});
   const inPartners=Array.from(new Set(rows.filter(r=>r.direction==="input").map(r=>String(r.partner))));
   const outPartners=Array.from(new Set(rows.filter(r=>r.direction==="output").map(r=>String(r.partner))));
   if(inPartners.length){
@@ -10345,11 +10379,14 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
     const colors={};outPartners.forEach(p=>colors[p]="#ff4fa3");
     layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:"Output partners",segments:outPartners,segmentColors:colors,objectAlpha:0.75});
   }
-  const foundAstroByRoot=new Map(); // rootId -> {nucleusId,rows:[row,...]}
+  const foundAstroByRoot=new Map(); // rootId -> {nucleusId,extraRootIds,rows:[row,...]}
   rows.forEach(r=>{
     if(!r.astro||!r.tripartite)return;
     const key=String(r.astro.rootId);
-    if(!foundAstroByRoot.has(key))foundAstroByRoot.set(key,{nucleusId:r.astro.nucleusId,rows:[]});
+    // extraRootIds carried from computeTripartiteSynapses' r.astro.extraRootIds (2026-08-16, same
+    // fix as the center cell above) -- every astrocyte here already used its own community-proposed
+    // extras during the actual proximity compute, so the viewer's segments list should match.
+    if(!foundAstroByRoot.has(key))foundAstroByRoot.set(key,{nucleusId:r.astro.nucleusId,extraRootIds:r.astro.extraRootIds||[],rows:[]});
     foundAstroByRoot.get(key).rows.push(r);
   });
   let colorIdx=0;
@@ -10376,8 +10413,10 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
   const selectedLayerName=synAnnsIn.length?inLayerName:(synAnnsOut.length?outLayerName:centerLayerName);
   for(const[rootStr,info]of foundAstroByRoot){
     const color=cellContactPaletteColor(colorIdx++);
+    const astroRootIds=[rootStr].concat((info.extraRootIds||[]).filter(Boolean).map(String)).filter(function(v,idx,arr){return v&&arr.indexOf(v)===idx;});
+    const astroColors={};astroRootIds.forEach(function(r){astroColors[r]=color;});
     layers.push({type:"segmentation",source:B.SRC_SEG,tab:"source",name:"Astrocyte (nuc "+info.nucleusId+")",
-      segments:[rootStr],segmentColors:{[rootStr]:color},objectAlpha:0.85});
+      segments:astroRootIds,segmentColors:astroColors,objectAlpha:0.85});
     const anns=info.rows.map((r,pidx)=>{allTouchPts.push(r.astro.touchVoxel);return{type:"point",id:"astro_"+rootStr+"_"+pidx,point:r.astro.touchVoxel};});
     const layerName="Astrocyte nuc "+info.nucleusId+" process points ("+anns.length+")";
     layers.push({type:"annotation",source:"local://annotations",tab:"annotations",annotations:anns,annotationColor:color,name:layerName});
@@ -10417,11 +10456,16 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
     layout:{type:"4panel",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
-function openTripartiteViewer(i,rootIdStr,cellType,rows){
-  const state=buildTripartiteViewerState(i,rootIdStr,cellType,rows);
+async function openTripartiteViewer(i,rootIdStr,cellType,rows){
+  // Same open-blank-tab-first pattern as openCellContactsAllViewer above, and for the same reason
+  // (fetching ownExtraRootIds needs an await, which would otherwise risk the popup blocker).
+  const win=window.open("","_blank");
+  const ownExtras=await fetchExtraRootIdsFor(NID[i],rootIdStr).catch(function(){return[];});
+  const state=buildTripartiteViewerState(i,rootIdStr,cellType,rows,ownExtras);
   const viewerEl=document.getElementById("viewer");
   const base=viewerEl?viewerEl.value:"https://ngl.microns-explorer.org/";
-  window.open(base+"#!"+encodeURIComponent(JSON.stringify(state)),"_blank","noopener");
+  const url=base+"#!"+encodeURIComponent(JSON.stringify(state));
+  if(win)win.location=url;else window.open(url,"_blank");
 }
 /* Panel entry point -- same call-site signature/shape as loadCellContactsPanel (containerId,i,
    rootIdStr,cellType,nucleusId), called alongside it from showNucleus(). Collapsed by default,
