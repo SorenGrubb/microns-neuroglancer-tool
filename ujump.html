@@ -1591,7 +1591,16 @@ function renderMeshContactStats(pairs){
   const area=document.getElementById("meshContactStatsArea");
   const list=(pairs||[]).filter(function(p){return p&&p.n>0&&p.typeA&&p.typeB;});
   if(!list.length){
-    area.innerHTML="<div class='placeholder'>No comparable data yet — every time someone runs the Cell contacts “Check” button with the tool's default settings (500 nm touch threshold, 1000 nm point spacing), that pair's touch-point count is added here. Searches with custom settings still work and save in that cell's own panel, they just aren't averaged into this shared chart.</div>";
+    // 2026-08-16, Soren caught this text stuck at a stale "500 nm" from before
+    // CELL_CONTACT_THRESHOLD_UM was changed to 40nm on 2026-08-15 -- updated to match. NOTE: can't
+    // reference CELL_CONTACT_THRESHOLD_UM/CELL_CONTACT_POINT_CLUSTER_UM directly here even though
+    // they're the source of truth -- this function lives in a different <script> tag than those
+    // const declarations, and const does not cross <script>-tag boundaries in this file (see the
+    // ujump-script-tag-scope-boundary convention), so a live reference would throw a
+    // ReferenceError at runtime. If either default changes again, this string needs a manual update
+    // too -- there's no automatic way to keep them in sync across the tag boundary short of moving
+    // this function or duplicating the constants.
+    area.innerHTML="<div class='placeholder'>No comparable data yet — every time someone runs the Cell contacts “Check” button with the tool's default settings (40 nm touch threshold, 1000 nm point spacing), that pair's touch-point count is added here. Searches with custom settings still work and save in that cell's own panel, they just aren't averaged into this shared chart.</div>";
     return;
   }
   area.innerHTML='<div class="plot" id="plotMeshContactStats"></div>';
@@ -9919,7 +9928,10 @@ function findWithinRadiusOfType(i,typeLabel,radiusUm){
   out.sort((a,b)=>a.dist-b.dist);
   return out;
 }
-const CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM=100; // Soren's own default; the radius field lets this be changed per search
+const CELL_CONTACT_TYPE_RADIUS_DEFAULT_UM=50; // Lowered from 100 (2026-08-16, Soren: "50 µm
+    // generates 6-7 astrocyte-astrocyte pairs and not 60 like it does with 100 µm") -- 100µm was
+    // pulling in far more same-type candidates than were actually useful to check per click; the
+    // radius field still lets this be changed per search.
 const CELL_CONTACT_TYPE_MAX_FETCH=60; // hard cap on how many meshes one "Check contacts with this
     // type" click can trigger, regardless of how many matches the radius contains -- protects the
     // browser/session from an accidental "check 3000 meshes" click; nearest-first (see
