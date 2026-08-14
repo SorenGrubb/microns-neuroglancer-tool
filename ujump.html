@@ -6241,7 +6241,7 @@ const MeshDL=(()=>{
      coordinates in micrometres so multiple downloaded meshes stay spatially aligned with each
      other and with Neuroglancer/Blender imports of MICrONS data -- same default as
      mesh_download_prototype.html's LOD table. */
-  async function fetchMesh(rootIdStr,onProgress,forceRecheck){
+  async function fetchMesh(rootIdStr,onProgress,forceRecheck,forceCoarsestLod){
     const rootId=BigInt(rootIdStr);
     onProgress&&onProgress(0,"reading manifest…");
     await loadInfo();
@@ -6250,7 +6250,21 @@ const MeshDL=(()=>{
     const parsed=parseManifest(manifest);
     const layout=fragmentLayout(parsed,info.manifestStart);
     let lod=parsed.numLods-1;
-    for(let l=parsed.numLods-1;l>=0;l--){if(layout[l].bytes<8*1048576)lod=l;}
+    /* forceCoarsestLod (2026-08-16, Soren: "it does not load any astrocytes. All astrocyte meshes
+       are too large to load") -- root cause of that was NOT a bug in the vertex-count safety cap
+       itself, it was that astrocytes are so large and sprawling that even their finest LOD under
+       the normal 8MB-byte search below routinely decodes to WAY more than 400k vertices (draco
+       compression ratios mean an 8MB compressed fragment set can unpack into millions of vertices).
+       Tripartite synapse proximity only needs a coarse approximation of "is there astrocyte
+       membrane near this synapse" at a threshold on the order of hundreds of nm, not fine surface
+       detail -- so for that one caller, skip the byte-size search entirely and always take the
+       COARSEST available LOD (numLods-1), which is both far smaller and correctly decoded (multi-
+       resolution meshes are built exactly for this kind of "good enough, cheap" use). Every other
+       caller (Cell contacts, mesh downloads, PowerPoint export, volume computation) omits this
+       param and keeps the original finest-under-8MB behaviour unchanged. */
+    if(!forceCoarsestLod){
+      for(let l=parsed.numLods-1;l>=0;l--){if(layout[l].bytes<8*1048576)lod=l;}
+    }
     const L=layout[lod];
     onProgress&&onProgress(0.05,"fetching "+mb(L.bytes)+"…");
     const blob=await rangeGet(info.url,L.start,L.end,f=>onProgress&&onProgress(0.05+f*0.55,"fetching…"));
@@ -6332,7 +6346,7 @@ const MeshDL=(()=>{
      failure on one ID doesn't get silently mislabelled as a cache hit. mainUnavailable on the
      returned object flags the "main root ID's own mesh didn't resolve, this used one or more
      proposed/community root IDs instead" case so callers can tell the user what happened. */
-  async function fetchCombinedMesh(mainRootIdStr,onProgress,forceRecheck,extraRootIdsOverride){
+  async function fetchCombinedMesh(mainRootIdStr,onProgress,forceRecheck,extraRootIdsOverride,forceCoarsestLod){
     /* extraRootIdsOverride (2026-08-14, Soren: "In cases where root IDs have been suggested by the
        user, the contact points should be calculated for all root IDs combined") -- every existing
        caller omits this and keeps the old behaviour (extraImg65RootIds(mainRootIdStr), which reads
@@ -6340,14 +6354,16 @@ const MeshDL=(()=>{
        open on screen). The Cell contacts feature needs this for CANDIDATE cells too, not just the
        one currently displayed, so it passes an explicitly-fetched list here instead (see
        fetchExtraRootIdsFor() in the Cell contacts script block) rather than relying on that global,
-       which would silently stay empty for every cell except the one on screen. */
+       which would silently stay empty for every cell except the one on screen.
+       forceCoarsestLod (2026-08-16) -- passed straight through to every fetchMesh() call below; see
+       fetchMesh's own comment. Only the Tripartite synapse feature's astrocyte lookups set this. */
     const rootIds=[String(mainRootIdStr)].concat(extraRootIdsOverride!==undefined?extraRootIdsOverride:extraImg65RootIds(mainRootIdStr)).filter(function(id){return id&&id!=="";});
     if(!rootIds.length)throw new Error("No root IDs available for this cell yet \u2014 propose one below, then try again.");
     const n=rootIds.length,meshes=[],usedIds=[],failures=[];
     for(let i=0;i<n;i++){
       const idx=i;
       try{
-        const m=await fetchMesh(rootIds[i],(frac,msg)=>onProgress&&onProgress((idx+frac)/n,(msg||"")+(n>1?" (fragment "+(idx+1)+"/"+n+")":"")),forceRecheck);
+        const m=await fetchMesh(rootIds[i],(frac,msg)=>onProgress&&onProgress((idx+frac)/n,(msg||"")+(n>1?" (fragment "+(idx+1)+"/"+n+")":"")),forceRecheck,forceCoarsestLod);
         meshes.push(m);usedIds.push(rootIds[i]);
       }catch(err){
         console.warn("[uJump mesh] root ID "+rootIds[i]+" unavailable, skipping:",err&&err.message);
@@ -10141,33 +10157,37 @@ const TRIPARTITE_MAX_SYNAPSES=10; // Hard cap on synapses checked per "Check" cl
     // synapses within one run (see computeTripartiteSynapses's own comment), so this mainly bounds
     // how many DISTINCT synapse locations get tested, not how many mesh fetches happen per se.
     // Lowered from 20 (2026-08-15, Soren: "the page crashes when I try to load the tripartite
-    // synapses") -- see TRIPARTITE_MAX_UNIQUE_ASTROCYTES' own comment for the fuller explanation.
+    // synapses") -- see TRIPARTITE_MAX_TOTAL_MESH_VERTICES' own comment for the fuller explanation.
 const TRIPARTITE_MAX_CANDIDATES_PER_SYNAPSE=5; // Same "protect the browser from an accidental
     // huge click" reasoning as CELL_CONTACT_TYPE_MAX_FETCH, scoped per-synapse instead of per-click.
     // Lowered from 8, same 2026-08-15 change as TRIPARTITE_MAX_SYNAPSES above.
-const TRIPARTITE_MAX_UNIQUE_ASTROCYTES=6; // 2026-08-15 (Soren: "the page crashes when I try to
-    // load the tripartite synapses with 200 or 100 nm max astrocyte synapse gap") -- a genuine
-    // circuit breaker on how many DISTINCT astrocyte meshes one "Check" click will fetch, not just
-    // how many synapses/candidates it considers. This matters specifically for astrocytes: they
-    // have unusually large, sprawling meshes (a single astrocyte's territory can be far bigger than
-    // a typical cell contacts candidate), and unlike Cell contacts (which reuses ONE already-
+const TRIPARTITE_MAX_TOTAL_MESH_VERTICES=8000000; // 2026-08-15/16 (Soren: "the page crashes when I
+    // try to load the tripartite synapses with 200 or 100 nm max astrocyte synapse gap") -- a
+    // circuit breaker on the CUMULATIVE size of astrocyte mesh geometry one "Check" click will hold
+    // in memory, not a raw count of distinct astrocytes. This matters specifically for astrocytes:
+    // they have unusually large, sprawling meshes (a single astrocyte's territory can be far bigger
+    // than a typical cell contacts candidate), and unlike Cell contacts (which reuses ONE already-
     // fetched "own" mesh against many candidates), this feature can end up fetching MANY different
-    // full astrocyte meshes in one click if a cell's synapses are spread across different
+    // astrocyte meshes in one click if a cell's synapses are spread across different
     // processes/regions -- each one is cached (see computeTripartiteSynapses), but caching doesn't
-    // help the FIRST time each distinct one is fetched. Investigated but could not confirm the
-    // smaller-threshold correlation Soren reported is a deterministic effect of the gap value
-    // itself (candidate/mesh-fetch counts in this code don't depend on the gap threshold) -- most
-    // likely explanation is cumulative memory across several large, distinct astrocyte fetches in
-    // one session, which this cap bounds regardless of the precise trigger. Once this many DISTINCT
-    // astrocytes have been fetched in one run, remaining unfetched candidates are skipped (reported
-    // as "not checked" rather than silently ignored) instead of triggering further large fetches.
-const TRIPARTITE_MAX_MESH_VERTICES=400000; // 2026-08-15, same crash-safety motivation -- an
-    // astrocyte candidate whose combined mesh (main root ID + any community-proposed extras) comes
-    // back larger than this is skipped rather than risking a slow/heavy grid build over it. 400k
-    // vertices is a generous ceiling for what this feature actually needs (a single nearest-point
-    // lookup, not full visual detail) -- a provisional number, not derived from a measured crash
-    // threshold, since the crash couldn't be reproduced directly here; tune down further if large
-    // astrocyte meshes are still causing trouble.
+    // help the FIRST time each distinct one is fetched. Once the running total of vertices across
+    // successfully-fetched astrocyte meshes reaches this ceiling, remaining unfetched candidates are
+    // skipped (reported as "not checked" rather than silently ignored) -- already-cached astrocytes
+    // keep resolving. NOTE (2026-08-16, second revision): the real fix for the "too large" problem
+    // was getAstroMeshGrid() now requesting the COARSEST mesh LOD for astrocytes (see fetchMesh's
+    // forceCoarsestLod comment) instead of the finest-under-8MB LOD every other caller uses --
+    // astrocytes are so sprawling that even their finest sub-8MB LOD routinely decoded to millions
+    // of vertices, which is what made EVERY astrocyte look "too large" under the old 400k cap. With
+    // coarse-LOD fetches, a single astrocyte should now only be tens of thousands of vertices, so
+    // this cumulative budget is raised accordingly and should rarely bind in practice -- it's a
+    // backstop for genuinely pathological sessions, not the primary fix anymore.
+const TRIPARTITE_MAX_MESH_VERTICES=1500000; // 2026-08-15/16, same crash-safety motivation -- an
+    // astrocyte candidate whose combined COARSE-LOD mesh (main root ID + any community-proposed
+    // extras) comes back larger than this is skipped rather than risking a slow/heavy grid build
+    // over it. Raised well above the coarse-LOD case's expected size (tens of thousands of vertices)
+    // now that forceCoarsestLod is in effect -- this should essentially never trip for a normal
+    // astrocyte anymore; it exists only to catch a genuinely extreme outlier (e.g. an astrocyte with
+    // an unusual number of community-proposed extra root IDs all merged together).
 /* Same shape/reasoning as findWithinRadiusOfType() above, but centred on an arbitrary voxel POINT
    (a synapse location) instead of a master-array cell index -- no self-exclusion needed since a
    synapse coordinate is never itself a nucleus index. */
@@ -10200,15 +10220,15 @@ function voxelToMeshUm(vx,vy,vz){
    different synapses of one cell -- refetching/regridding it each time would be wasteful. */
 async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,onProgress){
   const meshCache=new Map(); // rootIdStr -> {mesh,grid}|null|"skipped_limit"|"skipped_toolarge"
-  const fetchedRoots=new Set(); // distinct astrocyte root IDs actually mesh-fetched this run (circuit breaker)
+  let totalVertsFetched=0; // cumulative vertex count across successfully-cached astrocyte meshes this run
   let limitHit=false; // once true, no NEW distinct astrocyte is fetched for the rest of this run
   async function getAstroMeshGrid(candRootStr,candNucleusId){
     if(meshCache.has(candRootStr))return meshCache.get(candRootStr);
-    // Circuit breaker (2026-08-15, Soren reported repeated crashes at 100/200nm gap; exact mechanism
-    // unconfirmed from code alone -- candidate/mesh-fetch counts don't depend on the gap value itself,
-    // so the most defensible mitigation is a hard ceiling on how many DISTINCT, potentially-large
-    // astrocyte meshes get fetched+gridded in one run, regardless of what triggers the crash):
-    if(!fetchedRoots.has(candRootStr)&&fetchedRoots.size>=TRIPARTITE_MAX_UNIQUE_ASTROCYTES){
+    // Circuit breaker (2026-08-15/16, Soren reported repeated crashes at 100/200nm gap; exact
+    // mechanism unconfirmed from code alone -- so this budgets CUMULATIVE mesh geometry size
+    // (see TRIPARTITE_MAX_TOTAL_MESH_VERTICES's comment for why this replaced a flat distinct-
+    // astrocyte-count cap, which turned out to gut normal results):
+    if(totalVertsFetched>=TRIPARTITE_MAX_TOTAL_MESH_VERTICES){
       limitHit=true;
       meshCache.set(candRootStr,"skipped_limit");
       return "skipped_limit";
@@ -10216,13 +10236,17 @@ async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,on
     let entry=null;
     try{
       const extras=await fetchExtraRootIdsFor(candNucleusId,candRootStr);
-      const mesh=await MeshDL.fetchCombinedMesh(candRootStr,undefined,undefined,extras);
-      fetchedRoots.add(candRootStr);
+      // forceCoarsestLod=true (2026-08-16) -- see fetchMesh's comment. This is the actual fix for
+      // "all astrocyte meshes are too large": at the normal finest-under-8MB LOD, astrocytes
+      // routinely decode to millions of vertices; the coarsest LOD is far smaller and is plenty
+      // precise for a proximity check at the hundreds-of-nm scale this feature operates at.
+      const mesh=await MeshDL.fetchCombinedMesh(candRootStr,undefined,undefined,extras,true);
       const vertCount=mesh.positions.length/3;
       if(vertCount>TRIPARTITE_MAX_MESH_VERTICES){
         console.warn("[uJump tripartite] astrocyte mesh too large, skipping",candRootStr,vertCount,"vertices");
         entry="skipped_toolarge";
       }else{
+        totalVertsFetched+=vertCount;
         entry={mesh,grid:buildContactGrid(mesh.positions,thresholdUm)};
       }
     }catch(e){console.warn("[uJump tripartite] astrocyte mesh fetch failed",candRootStr,e&&e.message);entry=null;}
@@ -10272,7 +10296,7 @@ function tripartiteRowHtml(r,idx,thresholdNm){
       :label;
     if(!r.tripartite)astroHtml+=' <span class="nsub">(closest checked, outside '+thresholdNm+' nm threshold)</span>';
   }else if(r.skippedLimit){
-    astroHtml='<span class="nsub">not checked &mdash; distinct-astrocyte fetch limit ('+TRIPARTITE_MAX_UNIQUE_ASTROCYTES+') reached this run</span>';
+    astroHtml='<span class="nsub">not checked &mdash; total astrocyte mesh data limit reached this run</span>';
   }else if(r.skippedTooLarge){
     astroHtml='<span class="nsub">not checked &mdash; nearby astrocyte mesh too large to load safely</span>';
   }else{
