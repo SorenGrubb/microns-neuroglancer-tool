@@ -10007,7 +10007,9 @@ function buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows){
     const anns=pts.map((v,pidx)=>({type:"point",id:"touch_"+r.nucleusId+"_"+pidx,point:v}));
     const layerName=(r.cellType||"Nearby cell")+" touch points (nuc "+r.nucleusId+", "+anns.length+")";
     if(firstAnnLayerName===null)firstAnnLayerName=layerName;
-    layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:color,
+    // tab:"annotations" on the layer itself (2026-08-16, same fix as Tripartite synapses -- see its
+    // comment) rather than relying solely on the top-level selectedLayer.tab hint.
+    layers.push({type:"annotation",source:"local://annotations",tab:"annotations",annotations:anns,annotationColor:color,
       name:layerName});
   });
   /* Position/zoom sized off the matched cells' own soma positions PLUS every touch point now shown
@@ -10057,7 +10059,7 @@ function buildCellContactsSingleViewerState(i,rootIdStr,cellType,row){
   const annLayerName="Touch points ("+touchPoints.length+")";
   if(touchPoints.length){
     const anns=touchPoints.map((v,pidx)=>({type:"point",id:"touch_"+pidx,point:v}));
-    layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:cellContactPaletteColor(0),
+    layers.push({type:"annotation",source:"local://annotations",tab:"annotations",annotations:anns,annotationColor:cellContactPaletteColor(0),
       name:annLayerName});
   }
   const pts=[[NX[i],NY[i],NZ[i]]];
@@ -10158,9 +10160,14 @@ const TRIPARTITE_MAX_SYNAPSES=10; // Hard cap on synapses checked per "Check" cl
     // how many DISTINCT synapse locations get tested, not how many mesh fetches happen per se.
     // Lowered from 20 (2026-08-15, Soren: "the page crashes when I try to load the tripartite
     // synapses") -- see TRIPARTITE_MAX_TOTAL_MESH_VERTICES' own comment for the fuller explanation.
-const TRIPARTITE_MAX_CANDIDATES_PER_SYNAPSE=5; // Same "protect the browser from an accidental
-    // huge click" reasoning as CELL_CONTACT_TYPE_MAX_FETCH, scoped per-synapse instead of per-click.
-    // Lowered from 8, same 2026-08-15 change as TRIPARTITE_MAX_SYNAPSES above.
+const TRIPARTITE_MAX_CANDIDATES_PER_SYNAPSE=15; // How many of the nearest astrocyte NUCLEI (by
+    // centroid distance to the synapse, within the search radius field) actually get their mesh
+    // fetched and checked per synapse -- "no astrocyte mesh resolvable among N checked" in the UI
+    // reports this number. Raised 2026-08-16 (Soren: "I would want more meshes to be checked if it
+    // does not cause a crash") now that getAstroMeshGrid() fetches astrocytes at the coarsest mesh
+    // LOD (see fetchMesh's forceCoarsestLod comment) -- each candidate fetch is now far cheaper than
+    // when this was lowered from 8 to 5 on 2026-08-15 to fight the (since-fixed) "meshes too large"
+    // problem, so there's much more room before this needs to protect the browser again.
 const TRIPARTITE_MAX_TOTAL_MESH_VERTICES=8000000; // 2026-08-15/16 (Soren: "the page crashes when I
     // try to load the tripartite synapses with 200 or 100 nm max astrocyte synapse gap") -- a
     // circuit breaker on the CUMULATIVE size of astrocyte mesh geometry one "Check" click will hold
@@ -10349,8 +10356,13 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
     (r.direction==="input"?synAnnsIn:synAnnsOut).push(ann);
   });
   const inLayerName="Input synapses ("+synAnnsIn.length+")",outLayerName="Output synapses ("+synAnnsOut.length+")";
-  if(synAnnsIn.length)layers.push({type:"annotation",source:"local://annotations",annotations:synAnnsIn,annotationColor:"#00b7ff",name:inLayerName});
-  if(synAnnsOut.length)layers.push({type:"annotation",source:"local://annotations",annotations:synAnnsOut,annotationColor:"#ff4fa3",name:outLayerName});
+  // tab:"annotations" set directly on the layer itself (2026-08-16, Soren: "the tab is on source
+  // and not annotations, like it should be") -- previously only the top-level selectedLayer.tab
+  // hinted at this; setting it on the layer object too (matching how every segmentation layer here
+  // already carries its own tab:"source") is the more robust fix, so the coordinate list panel is
+  // the one showing on open rather than the default "Source" tab.
+  if(synAnnsIn.length)layers.push({type:"annotation",source:"local://annotations",tab:"annotations",annotations:synAnnsIn,annotationColor:"#00b7ff",name:inLayerName});
+  if(synAnnsOut.length)layers.push({type:"annotation",source:"local://annotations",tab:"annotations",annotations:synAnnsOut,annotationColor:"#ff4fa3",name:outLayerName});
   /* 2026-08-15, Soren: "the neuroglancer view should always open with the input synapses open" --
      explicit priority (input, then output, then the center cell) rather than "whichever came
      first" so this is unambiguous regardless of layer-push order above. Falls through to output
@@ -10363,26 +10375,37 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows){
       segments:[rootStr],segmentColors:{[rootStr]:color},objectAlpha:0.85});
     const anns=info.rows.map((r,pidx)=>{allTouchPts.push(r.astro.touchVoxel);return{type:"point",id:"astro_"+rootStr+"_"+pidx,point:r.astro.touchVoxel};});
     const layerName="Astrocyte nuc "+info.nucleusId+" process points ("+anns.length+")";
-    layers.push({type:"annotation",source:"local://annotations",annotations:anns,annotationColor:color,name:layerName});
+    layers.push({type:"annotation",source:"local://annotations",tab:"annotations",annotations:anns,annotationColor:color,name:layerName});
   }
   /* 2026-08-15, Soren: "...and centered on the first tripartite synapse" -- was the centroid of
      every point shown (self cell + every synapse + every astrocyte touch point), which put the
      initial view somewhere in the middle of everything rather than actually AT a real synapse.
-     Now centers on the first row that qualified as tripartite (r.tripartite===true), falling back
-     to the old "centroid of everything" only when nothing qualified (e.g. every checked synapse
-     came back "checked, not close enough" -- there's no single tripartite synapse to center on in
-     that case, so the wide overview is still the more useful default). Span/zoom below is
-     unchanged -- still sized to encompass every point shown, only WHERE the camera starts differs. */
+     Now centers on the first row that qualified as tripartite (r.tripartite===true).
+     2026-08-16 REVISION (Soren: "for the 'closest checked, outside 500nm threshold' case, the
+     neuroglancer is not centered on the synapse, but somewhere far from it") -- the fallback used
+     for non-tripartite rows was a centroid of [self cell's SOMA position, every synapse, every
+     touch point], and the cell's soma can be very far from a given synapse for a large arbor (a
+     centroid mixing the two lands somewhere on the line between them, at neither). Fixed: when
+     nothing qualified as tripartite, center on the FIRST SYNAPSE ITSELF instead -- that's what the
+     user actually asked to look at ("closest checked, not close enough" is still about that one
+     synapse), never on the cell body. Only falls back further (to the cell body alone) if there are
+     literally no rows at all, which shouldn't normally happen. Span/zoom below is unchanged -- still
+     sized to encompass every point shown, only WHERE the camera starts differs. */
   const firstTripartite=rows.find(r=>r.tripartite);
   const pts=[[NX[i],NY[i],NZ[i]]].concat(allSynPts).concat(allTouchPts);
   let posVox;
   if(firstTripartite){
     posVox=firstTripartite.pos.map(Number);
+  }else if(rows.length){
+    posVox=rows[0].pos.map(Number);
   }else{
-    let sx=0,sy=0,sz=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];sz+=p[2];});
-    posVox=[sx/pts.length,sy/pts.length,sz/pts.length];
+    posVox=[NX[i],NY[i],NZ[i]];
   }
-  const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
+  // Span computed relative to the actual camera position (posVox), not always the soma -- 2026-08-16
+  // fix alongside the posVox change above: previously always measured from the cell body, which
+  // (once we're centering on a synapse far from the soma) would zoom out far more than needed to
+  // keep an irrelevant, off-screen soma in frame.
+  const cx=posVox[0]*4,cy=posVox[1]*4,cz=posVox[2]*40;
   const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
   return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
     layers,selectedLayer:{layer:selectedLayerName,visible:true,tab:selectedLayerName===centerLayerName?undefined:"annotations"},
