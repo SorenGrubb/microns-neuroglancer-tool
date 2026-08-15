@@ -95,6 +95,27 @@ h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Seg
 #themeToggleBtn:hover{border-color:var(--accent)}
 .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* 2026-08-17 (Søren: "Nothing happens when I click the dark/light button or the google login
+   button or any of the buttons in portrait mode [iPhone, Edge/WebKit]... If I shift to landscape
+   mode, I can click [most tab buttons] but still not the statistical dashboard button") -- moving
+   #themeToggleBtn/#gameChip out of position:fixed (see the comment above) fixed the VISUAL overlap
+   but not this: #gameChipSlot starts EMPTY and stays empty until gamifyInit() -> renderChip() fills
+   it in, which can take seconds on mobile (google.accounts.id.renderButton only becomes available
+   once Google's external gsi/client script finishes loading, retried up to 12x350ms=4.2s -- see
+   gamifyInit()). When it finally fills in (from 0px tall to ~30px signed-in, or ~80px signed-out
+   with the real Google button rendered below the "Sign in" text), every element below it on the
+   page shifts down -- a real, measurable layout shift, well AFTER the page's first paint. iOS
+   Safari/WebKit has a long-documented bug where touch targets can go stale relative to a late
+   shift like this (the page repaints in its new position, but touch hit-testing doesn't always
+   recompute until something forces a full reflow -- an orientation change is exactly such a
+   trigger, matching why rotating "fixed" everything above the fold but not elements whose own
+   position is STILL being resolved, like the wrapped-to-a-second-row Statistics dashboard tab).
+   Fix: reserve the chip's worst-case (signed-out) height from the very start via min-height, so
+   there's no late shift for iOS to desync touch targets against in the first place, regardless of
+   how long Google's script takes to load. Minor cosmetic cost: a little empty space below the pill
+   once signed in, traded for this being unconditionally correct rather than a guessed pixel value
+   tuned to one auth state. */
+#gameChipSlot{min-height:80px}
 .tabpanel{display:none}
 .tabpanel.active{display:block}
 /* 2026-08 (Søren: opening the dashboard used to mean leaving ujump.html entirely -- a target=_blank
