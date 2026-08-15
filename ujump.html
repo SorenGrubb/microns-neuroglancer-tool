@@ -512,6 +512,23 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <label style="margin-top:12px">Use my own Neuroglancer link as the base (optional)</label>
 <textarea id="base" placeholder="Paste a working Neuroglancer URL or JSON state; position and the selected cell/nucleus segments are overwritten."></textarea></details>
 </div>
+<!-- 2026-08-16 (Soren: "the cell identity window does not need to be below the statistical
+     dashboard, or beneath the references") -- this card was previously placed OUTSIDE all four
+     .tabpanel divs entirely (right after the dashboard tabpanel's closing tag), always rendered
+     regardless of which tab was active -- including References and Statistics dashboard, where it
+     has no relevance. Now genuinely nested INSIDE the "jump" tabpanel, right after the coordinate/
+     root-ID search controls that populate it, so it only shows on the Jump tab (matching how it's
+     actually used) instead of unconditionally on every tab. showNucleus() and friends already
+     populate #nucpanel/#idfpanel/#out purely by getElementById, so this move doesn't touch any JS
+     wiring, only where the markup physically lives (and therefore when it's visible). -->
+<div class="card" id="cellPanelCard">
+<p class="err" id="err"></p>
+<div id="backNavRow" style="display:none;margin-bottom:8px"><button type="button" class="idbtn" id="backToPrevBtn" style="width:auto;padding:6px 12px;font-size:13px">&larr; Back to previous cell</button></div>
+<div class="nuc" id="nucpanel"></div>
+<div class="idf" id="idfpanel"></div>
+<div class="out" id="out" style="display:none"><label>Neuroglancer state URL</label><div class="urlbox" id="url"></div>
+<div class="actions"><button class="copy" id="copy">Copy link</button></div></div>
+</div>
 </div>
 <div class="tabpanel" data-tabpanel="filter">
 <div class="card" id="filterCard">
@@ -1751,14 +1768,6 @@ document.getElementById("refreshBtn").addEventListener("click",function(){loadLi
 
 }
 </script>
-</div>
-<div class="card" id="cellPanelCard">
-<p class="err" id="err"></p>
-<div id="backNavRow" style="display:none;margin-bottom:8px"><button type="button" class="idbtn" id="backToPrevBtn" style="width:auto;padding:6px 12px;font-size:13px">&larr; Back to previous cell</button></div>
-<div class="nuc" id="nucpanel"></div>
-<div class="idf" id="idfpanel"></div>
-<div class="out" id="out" style="display:none"><label>Neuroglancer state URL</label><div class="urlbox" id="url"></div>
-<div class="actions"><button class="copy" id="copy">Copy link</button></div></div>
 </div>
 <div class="card">
 <p class="hint" style="margin:0">This tool was made by <b>S&oslash;ren Grubb</b> (Neuroscience Academy Denmark) to make identifying brain cortical cells in electron microscopy easy. It was built using Claude AI. Predictions from the <a class="ref" href="https://doi.org/10.1038/s41586-025-08790-w" target="_blank" rel="noopener">MICrONS consortium</a> are included, but you can help identify cells that lack a prediction, or revise ones already made &mdash; identification discrepancies and newly identified cells are shared back with the MICrONS consortium.</p>
