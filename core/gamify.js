@@ -80,7 +80,32 @@ function renderChip(){
 function gamifyGet(param,cb){
   if(!REPORT_ENDPOINT)return;
   var q=(param==="leaderboard")?"?leaderboard=1":("?"+param+"="+encodeURIComponent(GOOGLE_CREDENTIAL||""));
+  /* Every READ carries ds too, not just writes. Without this, hJump's leaderboard and stats come
+     back from µJump's spreadsheet -- the backend's dsCache() namespacing keeps the two apart
+     server-side, but only if the request actually says which dataset it is about. A missing or
+     unknown ds falls back to ujump in setDsFromRequest(), so this is safe to ship either side of
+     the backend deploy. */
+  try{ if(UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds) q+="&ds="+encodeURIComponent(UJ.cfg.backend.ds); }catch(_e){}
   fetch(REPORT_ENDPOINT+q).then(function(r){return r.json();}).then(cb).catch(function(){});
+}
+/* Cross-page totals (?profileTotals=) -- points follow the user between µJump and ηJump, rebuilt
+   nightly by Datasets.gs's trigger rather than recomputed on every profile open. Deliberately a
+   SEPARATE call rather than folded into ?myStats=: this page's own numbers must keep updating
+   instantly on submit, and only the combined figure lags a day. That difference is stated to the
+   user with an explicit "as of" timestamp instead of being left to guess. */
+function loadProfileTotals(cb){ gamifyGet("profileTotals",function(d){ cb(d&&!d.error?d:null); }); }
+function profileTotalsHtml(t){
+  if(!t) return "";
+  var per=(t.perDataset||[]).map(function(p){
+    return '<span style="display:inline-block;min-width:150px">'+escHtml(p.label||p.ds)+' <b>'+(p.points||0)+'</b></span>';
+  }).join("");
+  var when=t.updated?new Date(t.updated):null;
+  return '<h3>Across all datasets</h3>'
+    +'<div style="font-size:13px"><b>'+(t.combinedPoints||0)+'</b> points in total</div>'
+    +'<div style="font-size:12px;color:var(--mut,#8b949e);margin-top:4px">'+per+'</div>'
+    +'<div style="font-size:11px;color:var(--mut,#8b949e);margin-top:4px">Combined total as of '
+    +escHtml(when&&!isNaN(when.getTime())?when.toLocaleString("en-GB"):"the last nightly rebuild")
+    +' &mdash; this page&rsquo;s own numbers above update immediately.</div>';
 }
 function loadMyStats(cb){gamifyGet("myStats",function(d){if(d&&!d.error){MYSTATS=d;}renderChip();if(cb)cb(d);});}
 function loadFavourites(cb){gamifyGet("favourites",function(d){window.FAV_SET=new Set();((d&&d.favourites)||[]).forEach(function(f){if(f.nucleusId)window.FAV_SET.add(String(f.nucleusId));if(f.coord)window.FAV_SET.add(String(f.coord));});refreshFavStars();if(cb)cb(d);});}
@@ -149,6 +174,10 @@ function openDashboard(){
       +stat(s.upvotesReceived,"upvotes received")+stat(s.favourites,"favourites")+'</div>';
     if(s.cellTypes&&s.cellTypes.length){h+='<h3>Cell types you identify most</h3><div style="font-size:13px">'
       +s.cellTypes.map(function(c){return escHtml(c[0])+' <b>'+c[1]+'</b>';}).join(' &nbsp; ')+'</div>';}
+    /* Placeholder filled asynchronously by loadProfileTotals() below -- the combined figure comes
+       from a second endpoint, and blocking the whole profile on it would make the panel feel
+       broken whenever that call is slow or the backend predates the change. */
+    h+='<div id="profileTotals"></div>';
     // handle setter
     h+='<h3>Display name on leaderboard</h3><div style="display:flex;gap:6px;flex-wrap:wrap">'
       +'<input type="text" id="handleInput" value="'+escHtml(s.handle||"")+'" style="flex:1;min-width:160px" maxlength="40">'
@@ -158,6 +187,10 @@ function openDashboard(){
     h+='<div style="margin-top:10px"><button class="dbtn" id="downloadMyWorkBtn">Download your work</button><div style="font-size:11px;color:var(--mut);margin-top:4px">Every identification, confirmation, organelle report, and other annotation you\'ve submitted, as an Excel file (one tab per report type).</div></div>';
     h+='<div style="margin-top:16px;font-size:11px;color:var(--mut,#8b949e)">We store your Google name, email and contribution activity to power these stats and the public leaderboard, which shows your chosen display name. Contact soren@grubb.dk to remove your data.</div>';
     body.innerHTML=h;
+    loadProfileTotals(function(t){
+      var slot=document.getElementById("profileTotals");
+      if(slot&&t) slot.innerHTML=profileTotalsHtml(t);   // silently absent if the backend has no such endpoint yet
+    });
     document.getElementById("handleSave").addEventListener("click",function(){
       var v=(document.getElementById("handleInput").value||"").trim();if(!v)return;
       if(postReport({type:"set_handle",timestamp:new Date().toISOString(),handle:v},"Display name saved.")){setTimeout(function(){loadMyStats();openDashboard();},1400);}
@@ -229,5 +262,6 @@ UJ.gamify = {
   init: gamifyInit, onSignIn: gamifyOnSignIn, get: gamifyGet,
   loadMyStats: loadMyStats, loadFavourites: loadFavourites, refreshFavStars: refreshFavStars,
   renderChip: renderChip, openDashboard: openDashboard, closeDashboard: closeDashboard,
-  downloadMyWork: downloadMyWork, favStarHtml: favStarHtml
+  downloadMyWork: downloadMyWork, favStarHtml: favStarHtml,
+  loadProfileTotals: loadProfileTotals, profileTotalsHtml: profileTotalsHtml
 };
