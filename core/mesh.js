@@ -48,7 +48,15 @@ UJ.mesh=(()=>{
     const sm=hashed&mask;
     const minishard=Number(sm&((1n<<BigInt(CFG.minishardBits))-1n));
     const shard=Number((sm>>BigInt(CFG.minishardBits))&((1n<<BigInt(CFG.shardBits))-1n));
-    return {shard:shard.toString(16).padStart(4,"0"),minishard};
+    /* Shard file names are the shard number in lowercase hex, zero-padded to ceil(shard_bits/4)
+       characters -- the neuroglancer precomputed sharded-format rule, not a fixed width. This was
+       hardcoded padStart(4,"0"), which is right for MICrONS (shard_bits 13 -> 4 chars,
+       "0000.shard") and silently WRONG for H01 (shard_bits 10 -> 3 chars, shards 000..3ff): every
+       ηJump request asked for 0123.shard when the object is 123.shard, so all of them 404'd and
+       both download buttons failed. CFG.shardBits is authoritative here -- loadInfo() has already
+       overwritten it from the dataset's own mesh info file, awaited before this runs. */
+    const width=Math.max(1,Math.ceil(CFG.shardBits/4));
+    return {shard:shard.toString(16).padStart(width,"0"),minishard};
   }
   let useAlt=false;
   function shardUrl(shard){return useAlt?(CFG.meshBaseAlt+shard+CFG.meshBaseAltSuffix):(CFG.meshBase+shard+".shard");}
@@ -100,7 +108,18 @@ UJ.mesh=(()=>{
   let infoLoaded=false;
   async function loadInfo(){
     if(infoLoaded)return;
-    const res=await fetch(CFG.meshBase+"info");
+    /* Two ways to reach the info file, same pair the shard reads already use. The direct
+       storage.googleapis.com path is fine when the bucket sends CORS headers; when it does not,
+       fetch REJECTS (it does not return !res.ok), which used to abort the whole download before
+       the shard fetch ever got to try its own fallback. The JSON API path below is CORS-enabled
+       by Google for public objects, so try it before giving up -- and remember the choice in
+       useAlt so the range requests that follow go straight there too. */
+    let res=null;
+    try{ res=await fetch(CFG.meshBase+"info"); }
+    catch(_direct){
+      try{ res=await fetch(CFG.meshBaseAlt+"info?alt=media"); useAlt=true; }
+      catch(_alt){ infoLoaded=true; return; }   // both blocked -- use the built-in defaults
+    }
     if(!res.ok){infoLoaded=true;return;} // fall back to the built-in defaults above
     const j=await res.json();
     if(j["@type"]!=="neuroglancer_multilod_draco")throw new Error('unexpected mesh format "'+j["@type"]+'"');
