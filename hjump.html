@@ -464,6 +464,7 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <div class="card" id="cellPanelCard">
 <p class="err" id="err"></p>
 <div class="nuc" id="nucpanel"></div>
+<div class="idf" id="idfpanel"></div>
 </div>
 
 <div class="card">
@@ -742,7 +743,17 @@ function showCell(i, distNm){
   });
   h+='<span style="display:inline-block;min-width:150px">spininess <b>'+HSP[i].toFixed(3)+'</b></span></div></div>';
 
+  /* Same .idcta call-to-action µJump ends its cell panel with. The warn variant is used when H01
+     itself has no call, since that is the case where a user's identification is worth most. */
+  const noCall=H01_NO_CALL[t];
+  h+='<div class="idcta'+(noCall?' warn':'')+'"><div class="idcta-top"><span>'
+    +(noCall?'H01 has no published type for this cell &mdash; yours would be the first on record.'
+            :'Not sure, or think H01 got it wrong? Take the guided identification.')
+    +'</span><button class="idbtn" id="idfgo">'+(noCall?'Start guided identification':'Guided identification')+' &rarr;</button></div></div>';
+
   panel.innerHTML=h;
+  const idfBtn=panel.querySelector("#idfgo");
+  if(idfBtn) idfBtn.addEventListener("click",function(){ openIdentify(i); });
 
   /* Same wiring vocabulary as µJump: .jump/.njump fill the coordinate boxes and re-run the
      search, .idval copies on click. */
@@ -860,6 +871,318 @@ function postReport(payload,okMsg){
     .then(function(d){ if(typeof showSubmitToast==="function") showSubmitToast(!!(d&&d.ok),okMsg||""); return d; });
 }
 if(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID.indexOf("REPLACE")!==0){ gamifyInit(12); }
+
+/* ═══ Guided identification ═══════════════════════════════════════════════════════════════
+   The decision tree itself comes from core/ontology.js, shared verbatim with µJump -- one
+   ontology, maintained in one place. Everything H01-specific lives here:
+
+     * q1 ("Cortical location?") is SKIPPED. µJump has to ask, because it only has an estimate.
+       ηJump samples the layer from H01's own volume, so asking the user to guess something the
+       dataset already states would be worse than useless -- it would let a wrong guess set a
+       prior against the known answer. The layer is shown as context instead.
+
+     * H01_EQUIV maps each of the tree's 33 leaves onto the H01 published types, so "does this
+       agree with the dataset?" can be answered at all. The mapping is deliberately one-to-MANY:
+       H01's 10 classes are coarser than the tree's leaves, and exc_l4 in particular spans two
+       H01 classes ("Layer 4 pyramidal / spiny-stellate"), so forcing a single answer would
+       manufacture disagreements that aren't real.
+
+     * A leaf with NO H01 equivalent (leptomeningeal fibroblasts, blood leukocytes, perivascular
+       macrophage...) is recorded but never scored -- H01 has no class to agree or disagree with,
+       and calling that a "discrepancy" would be a lie about the dataset. */
+const H01_EQUIV = {
+  /* H01's "blood-vessel-cell" is a nucleus annotation for vessel-resident cells -- it covers the
+     wall and the lumen without separating them, so every mural/endothelial/blood leaf maps here. */
+  erythrocyte:["blood-vessel-cell"], platelet:["blood-vessel-cell"],
+  neutrophil:["blood-vessel-cell"], lymphocyte:["blood-vessel-cell"], monocyte:["blood-vessel-cell"],
+  endothelial_cell:["blood-vessel-cell"], pericyte:["blood-vessel-cell"],
+  smooth_muscle_cell:["blood-vessel-cell"], venular_smooth_muscle_pericyte:["blood-vessel-cell"],
+  /* Excitatory. H01 splits these three ways and the tree's layer-based subtypes do not line up
+     one-to-one, so any excitatory leaf is accepted against any H01 excitatory class. */
+  excitatory_neuron:["pyramidal","spiny-stellate","excitatory/spiny-with-atypical-tree"],
+  exc_l23_it:["pyramidal","excitatory/spiny-with-atypical-tree"],
+  exc_l4:["spiny-stellate","pyramidal","excitatory/spiny-with-atypical-tree"],
+  exc_l5_it:["pyramidal","excitatory/spiny-with-atypical-tree"],
+  exc_l5_et:["pyramidal","excitatory/spiny-with-atypical-tree"],
+  exc_l5_np:["pyramidal","excitatory/spiny-with-atypical-tree"],
+  exc_l6_it:["pyramidal","excitatory/spiny-with-atypical-tree"],
+  exc_l6_ct:["pyramidal","excitatory/spiny-with-atypical-tree"],
+  /* Inhibitory. H01 has one class; the tree's four subtypes all fold into it. */
+  inhibitory_neuron:["interneuron"], inh_basket:["interneuron"], inh_martinotti:["interneuron"],
+  inh_bipolar:["interneuron"], inh_neurogliaform:["interneuron"],
+  /* Glia. H01 fuses microglia and OPC into one class, so both leaves map to it -- and a user who
+     correctly separates them is NOT marked wrong for being finer than the dataset. */
+  astrocyte:["astrocyte"], microglia:["microglia/opc"], opc:["microglia/opc"],
+  oligodendrocyte:["oligodendrocyte"]
+  /* Deliberately absent -- H01 publishes no equivalent class, so these are logged, not scored:
+     perivascular_macrophage, perivascular_fibroblast, dendritic_cell, pia_mater_fibroblast,
+     pial_sheath_fibroblast, arachnoid_barrier_cell, fibroblast_reticular_cell,
+     inner_arachnoid_fibroblast, dural_border_cell. */
+};
+/* "unclassified-neuron" / "unknown-type" are H01 admitting it does not know. Treated as "no
+   published call" rather than as a type to agree or disagree with. */
+const H01_NO_CALL = {"unclassified-neuron":1,"unknown-type":1};
+
+let ID_PATH=[], ID_NODE=null, ID_CTX={};
+function startNodeFor(){ return "q2"; }   // q1 is the layer question -- see the block comment above
+
+function openIdentify(i){
+  const lay = volLayer(i)!=="no-layer" ? volLayer(i) : tagLayer(i);
+  ID_CTX = {i:i, seg:c3Id(i), body:String(HSB[i]), pos:[HX[i],HY[i],HZ[i]],
+            layer:lay, depth:depthUm(i),
+            published: H01_NO_CALL[typeName(i)] ? null : typeName(i)};
+  ID_PATH=[]; ID_NODE=startNodeFor();
+  document.getElementById("idfpanel").classList.add("show");
+  renderIdentify();
+  /* Guarded: scrollIntoView is missing in jsdom, and an unguarded call there throws AFTER the
+     panel has rendered -- which looks like a rendering failure in the test log when nothing is
+     actually wrong with the page. Real browsers all have it. */
+  const el=document.getElementById("idfpanel");
+  if(el.scrollIntoView) el.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+function closeIdentify(){ document.getElementById("idfpanel").classList.remove("show"); }
+
+function idfHeadHtml(){
+  return '<div class="idf-head"><div><div class="idf-title">Guided identification</div>'
+    +'<div class="idf-crumbs">'+(ID_CTX.published
+        ? 'H01 published type: <b>'+escHtml(longName(ID_CTX.published))+'</b>'
+        : 'H01 has no published type for this cell')+'</div>'
+    +'<div class="idf-crumbs">cortical layer: <b>'+escHtml(ID_CTX.layer)+'</b> &middot; '
+      +(ID_CTX.depth>=0?ID_CTX.depth.toFixed(0)+' µm below':Math.abs(ID_CTX.depth).toFixed(0)+' µm above')
+      +' the L1/L2 boundary &mdash; from H01’s own layer volume, not your guess</div>'
+    +'</div><button class="idf-close" id="idfclose" title="close">&times;</button></div>';
+}
+function renderIdentify(){
+  ensureGallery();                    // kick the lazy load first -- galleryHtml() runs below
+  const panel=document.getElementById("idfpanel"), node=TREE[ID_NODE];
+  let h=idfHeadHtml();
+  if(ID_PATH.length) h+='<span class="idf-back" id="idfback">&larr; back one step</span>';
+  h+='<div class="idf-q">'+node.q+'</div><div class="idf-opts">';
+  node.opts.forEach(function(o,idx){
+    /* LEAF_NAMES[o.leaf] can legitimately be undefined -- core/ontology.js's w2p node names three
+       pericyte subtypes that were never added to LEAF_NAMES. w2p is currently unreachable from
+       q1 so it never renders, but falling back to the slug means a future rewire shows something
+       readable instead of the string "undefined" in a button. */
+    const nm = o.leaf ? (LEAF_NAMES[o.leaf]||o.leaf) : null;
+    h+='<button class="idf-opt" data-idx="'+idx+'">'+(o.leaf?o.label+' <b>('+escHtml(nm)+')</b>':o.label)+'</button>';
+  });
+  h+='</div>';
+  h+=galleryHtml([...new Set(leavesUnder(ID_NODE))]);
+  panel.innerHTML=h;
+  document.getElementById("idfclose").addEventListener("click",closeIdentify);
+  const b=document.getElementById("idfback"); if(b) b.addEventListener("click",goBack);
+  panel.querySelectorAll(".idf-opt").forEach(function(btn){
+    btn.addEventListener("click",function(){ chooseOption(node.opts[+btn.dataset.idx]); });
+  });
+  ensureGallery();
+}
+function leavesUnder(nodeId,seen){
+  seen=seen||new Set();               // a Set, not {} -- `has`/`add`, and no prototype keys
+  const node=TREE[nodeId], out=[];
+  if(!node) return out;
+  for(const o of node.opts){
+    if(o.leaf) out.push(o.leaf);
+    else if(o.next && !seen.has(o.next)){ seen.add(o.next); out.push(...leavesUnder(o.next,seen)); }
+  }
+  return out;
+}
+function chooseOption(o){
+  ID_PATH.push(ID_NODE);
+  if(o.leaf){ renderResult(o.leaf); return; }
+  ID_NODE=o.next; renderIdentify();
+}
+function goBack(){ ID_NODE=ID_PATH.pop(); renderIdentify(); }
+
+/* ── reference images ───────────────────────────────────────────────────────────────────
+   microns_images_data.js is 13 MB of base64 thumbnails. Loading it up front would nearly
+   quadruple this page's weight for something most visits never open, so it is fetched lazily the
+   first time the guided-ID panel renders, and the gallery re-renders itself once it lands.
+   imgSrc() lives in that file; until it arrives, galleryHtml() renders a placeholder rather than
+   <img> tags pointing at paths that do not exist in the repo. */
+let GAL_STATE="idle";   // idle -> loading -> ready | failed
+function ensureGallery(){
+  if(GAL_STATE!=="idle") return;
+  if(typeof imgSrc==="function"){ GAL_STATE="ready"; return; }
+  GAL_STATE="loading";
+  const s=document.createElement("script");
+  s.src="microns_images_data.js";
+  s.onload=function(){ GAL_STATE=(typeof imgSrc==="function")?"ready":"failed"; repaintGallery(); };
+  s.onerror=function(){ GAL_STATE="failed"; repaintGallery(); };
+  document.head.appendChild(s);
+}
+function repaintGallery(){
+  const g=document.querySelector("#idfpanel .idf-gal");
+  if(!g||!g.dataset.slugs) return;
+  g.outerHTML=galleryHtml(g.dataset.slugs.split(","));
+}
+function galleryHtml(slugs){
+  /* Gate on the SYMBOL, not on GAL_STATE. Keying off the state flag alone was wrong: the first
+     render calls galleryHtml() before ensureGallery() has had a chance to flip "idle" -> "loading",
+     so the ready branch ran and threw ReferenceError on imgSrc, taking the whole panel with it.
+     `typeof imgSrc==="function"` is true exactly when the thumbnails can actually be built. */
+  const ready = (typeof imgSrc==="function");
+  const list=slugs.filter(function(s){ return IMAGE_LIBRARY[s]; });
+  let g='<div class="idf-gal" data-slugs="'+escHtml(slugs.join(","))+'">'
+    +'<h4>Reference images for the options above</h4>'
+    /* Said plainly rather than buried in a tooltip: these are MICrONS mouse visual cortex, not
+       H01 human temporal cortex. Organelle ultrastructure is broadly comparable, which is why
+       they are useful for training the eye, but soma size, layer thickness and vessel calibre
+       are not -- and a user should know which they are looking at before calibrating on it. */
+    +'<p class="hint" style="margin-top:-4px">From the MICrONS <i>mouse</i> visual cortex library. '
+    +'Organelle ultrastructure is broadly comparable to human, but cell and vessel dimensions are not.</p>';
+  if(GAL_STATE==="failed") g+='<span class="idf-empty">reference images unavailable (microns_images_data.js did not load)</span></div>';
+  else if(!ready) g+='<span class="idf-empty">loading reference images…</span></div>';
+  else if(!list.length) g+='<span class="idf-empty">no reference images for these options yet</span></div>';
+  else {
+    g+='<div class="idf-cells">';
+    for(const slug of list){
+      const lib=IMAGE_LIBRARY[slug];
+      g+='<div class="idf-cell"><div class="idf-cell-name">'+escHtml(LEAF_NAMES[slug]||slug)+'</div><div class="idf-thumbs">';
+      if(!lib.files.length) g+='<span class="idf-empty">no images yet</span>';
+      for(const f of lib.files){
+        /* Opens the image itself, not a Neuroglancer state. µJump builds a viewer link here, but
+           those coordinates are MICrONS minnie65/minnie35 voxels -- pointing H01's viewer at them
+           would render an empty scene at a meaningless location. Better an honest image than a
+           broken link. */
+        g+='<a class="idf-thumb" href="'+escHtml(imgSrc(lib.dir,f.file))+'" target="_blank" rel="noopener" '
+          +'title="'+escHtml((LEAF_NAMES[slug]||slug)+" ("+f.mod+") — MICrONS mouse reference, opens full size")+'">'
+          +'<img src="'+escHtml(imgSrc(lib.dir,f.file))+'" loading="lazy" alt=""><span class="mod">'+escHtml(f.mod)+'</span></a>';
+      }
+      g+='</div></div>';
+    }
+    g+='</div></div>';
+  }
+  return g;
+}
+
+/* ── result screen ──────────────────────────────────────────────────────────────────── */
+function h01Verdict(slug){
+  const eq=H01_EQUIV[slug];
+  if(!ID_CTX.published) return {kind:"no-call"};      // H01 has no type for this cell
+  if(!eq) return {kind:"no-equiv"};                   // no H01 class corresponds to this leaf
+  return eq.indexOf(ID_CTX.published)>=0 ? {kind:"agrees"} : {kind:"disagrees"};
+}
+function renderResult(slug){
+  ensureGallery();                    // see renderIdentify()
+  const panel=document.getElementById("idfpanel");
+  const name=LEAF_NAMES[slug]||slug, v=h01Verdict(slug);
+  let h=idfHeadHtml();
+  h+='<span class="idf-back" id="idfback">&larr; back one step</span>';
+  h+='<div class="idf-result"><div class="celltype">'
+    +celltypeLink(ID_CTX.pos, ID_CTX.seg, escHtml(name))+'</div>';
+
+  if(v.kind==="agrees")
+    h+='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent)">&#10003; Matches H01&rsquo;s published type (&ldquo;'
+      +escHtml(longName(ID_CTX.published))+'&rdquo;). Confirming still helps &mdash; independent agreement is what builds confidence.</div>';
+  else if(v.kind==="disagrees")
+    h+='<div class="idf-flag">&#9888; Differs from H01&rsquo;s published type (&ldquo;'
+      +escHtml(longName(ID_CTX.published))+'&rdquo;) &mdash; worth a second look, and worth logging either way.</div>';
+  else if(v.kind==="no-call")
+    h+='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent)">H01 has no published type for this cell &mdash; your identification would be the first on record.</div>';
+  else
+    h+='<div class="idf-flag" style="border-color:var(--mut);color:var(--mut)">H01 publishes no class corresponding to &ldquo;'
+      +escHtml(name)+'&rdquo;, so there is nothing to agree or disagree with. Your call is still recorded.</div>';
+  h+='</div>';
+
+  const cw = (typeof CONFUSED_WITH==="object") ? CONFUSED_WITH[slug] : null;
+  if(cw) h+='<div class="meta">Commonly confused with <b>'+escHtml(cw.withName)+'</b> &mdash; '+escHtml(cw.note)
+    +(cw.ref?' <a class="ref" href="'+escHtml(cw.ref)+'" target="_blank" rel="noopener">'+escHtml(cw.refLabel||"source")+'</a>':'')+'</div>';
+
+  h+='<div class="idf-certainty"><label>How certain are you?</label><div class="idf-opts" id="idfCert" style="flex-direction:row;flex-wrap:wrap">'
+    +["certain","fairly sure","unsure"].map(function(c){
+        return '<button class="idf-opt" data-c="'+c+'" style="flex:1;min-width:110px;text-align:center">'+c+'</button>';}).join("")
+    +'</div></div>';
+  h+='<label style="margin-top:10px;display:block">Comment (optional)</label>'
+    +'<textarea id="idfComment" placeholder="What decided it for you? Anything unusual?"></textarea>';
+
+  if(GOOGLE_VERIFIED)
+    h+='<div class="meta" style="color:var(--accent)">Submitting as '+escHtml(REPORTER_NAME)+' &mdash; signed in with Google.</div>';
+  else
+    h+='<div class="idf-submitnote">Google sign-in is required to submit &mdash; use the sign-in button at the top of the page.</div>';
+
+  h+='<div class="idf-submitnote">This is the final step &mdash; nothing is recorded until you press the button. Pick a certainty first; the button stays disabled until you do.</div>';
+  h+='<div class="idf-actions">'
+    +'<button class="idbtn" id="idfcopy">Copy summary</button>'
+    +'<button class="idbtn idbtn-submit" id="idfsubmit" disabled title="Select a certainty rating first">'
+      +(v.kind==="agrees"?"Confirm this identification":v.kind==="disagrees"?"Submit disagreement":"Contribute this identification")
+    +'</button>'
+    +'<button class="idbtn" id="idfrestart">Start over</button></div>'
+    +'<div id="idfThanks"></div>';
+  h+=galleryHtml([slug]);
+  panel.innerHTML=h;
+
+  document.getElementById("idfclose").addEventListener("click",closeIdentify);
+  document.getElementById("idfback").addEventListener("click",goBack);
+  document.getElementById("idfrestart").addEventListener("click",function(){
+    ID_PATH=[]; ID_NODE=startNodeFor(); renderIdentify();
+  });
+  let certainty="";
+  const submitBtn=document.getElementById("idfsubmit");
+  panel.querySelectorAll("#idfCert .idf-opt").forEach(function(b){
+    b.addEventListener("click",function(){
+      certainty=b.dataset.c;
+      panel.querySelectorAll("#idfCert .idf-opt").forEach(function(o){
+        o.style.borderColor = (o===b) ? "var(--accent)" : "var(--line)";
+        o.style.color       = (o===b) ? "var(--accent)" : "var(--ink)";
+      });
+      submitBtn.disabled=false; submitBtn.title="";
+    });
+  });
+  document.getElementById("idfcopy").addEventListener("click",function(){
+    const txt=[name,
+      "H01 published: "+(ID_CTX.published||"none"),
+      "layer: "+ID_CTX.layer,
+      "c3 segment: "+ID_CTX.seg,
+      "cell body: "+ID_CTX.body,
+      "voxel: "+ID_CTX.pos.join(", "),
+      "path: "+idfPathText()].join("\n");
+    if(navigator.clipboard) navigator.clipboard.writeText(txt);
+    this.textContent="Copied"; setTimeout(()=>{this.textContent="Copy summary";},1200);
+  });
+  submitBtn.addEventListener("click",function(){
+    if(!certainty){ return; }                       // belt and braces; button is disabled until set
+    const submitted=canonSubmitName(name);
+    /* Same guard µJump uses when a call crosses a major class boundary (neuron -> glia and the
+       like). Only meaningful when there IS a published type to move away from. */
+    if(v.kind==="disagrees" && typeof confirmMajorClassChange==="function"
+       && !confirmMajorClassChange(longName(ID_CTX.published), submitted)) return;
+    const payload={
+      type: v.kind==="agrees" ? "confirmation" : v.kind==="disagrees" ? "discrepancy" : "new_identification",
+      timestamp:new Date().toISOString(),
+      /* Mapped onto µJump's own column names so both datasets' sheets keep one schema:
+         nucleusId <- H01 cell-body id, rootId <- H01 c3 segment id. */
+      nucleusId:ID_CTX.body, rootId:ID_CTX.seg,
+      coord:ID_CTX.pos.join(","),
+      registered: ID_CTX.published ? longName(ID_CTX.published) : "",
+      identified: submitted,
+      certainty:certainty,
+      comment:(document.getElementById("idfComment").value||"").trim(),
+      layer:ID_CTX.layer,
+      depthUm:Math.round(ID_CTX.depth),
+      path:idfPathText()
+    };
+    submitBtn.disabled=true; submitBtn.textContent="Submitting…";
+    postReport(payload,"Thank you — recorded.").then(function(d){
+      if(d&&d.ok){
+        submitBtn.textContent="Submitted — thank you!";
+        document.getElementById("idfThanks").innerHTML=
+          '<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">'
+          +(payload.type==="discrepancy"
+             ? "Thanks — your disagreement is logged against H01’s published call. These are exactly how the dataset gets more trustworthy."
+             : payload.type==="confirmation"
+             ? "Thanks for confirming — independent agreement is what builds confidence in a cell’s type."
+             : "Thanks — you’ve put a first identification on record for this cell.")+'</div>';
+        if(typeof loadMyStats==="function") loadMyStats();   // refresh the points chip
+      } else {
+        submitBtn.disabled=false; submitBtn.textContent="Try again";
+      }
+    }).catch(function(){ submitBtn.disabled=false; submitBtn.textContent="Try again"; });
+  });
+  ensureGallery();
+}
+function idfPathText(){
+  return ID_PATH.map(function(n){ return TREE[n]?TREE[n].q:n; }).join(" > ");
+}
 
 </script>
 </body></html>
