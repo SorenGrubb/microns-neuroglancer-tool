@@ -1,90 +1,477 @@
 <!doctype html>
-<html lang="en"><head>
+<html lang="en"><head><script>/* Theme FOUC guard -- 2026-08-09, light-mode feature. Must run BEFORE the <style> block below is
+   parsed/painted, which is why it's the very first thing in <head>, ahead of even the analytics
+   tag: without this, a returning visitor who picked light mode would see one dark-mode frame
+   flash (the default :root palette) before the second script further down applies
+   [data-theme="light"]. Kept deliberately tiny and dependency-free (no access to anything else in
+   the page yet) -- see setTheme()/toggleTheme() later in the body for the full theme module this
+   pairs with, which both read/write the SAME "ujump_theme" localStorage key. */
+try{if(localStorage.getItem("ujump_theme")==="light")document.documentElement.setAttribute("data-theme","light");}catch(_fe){}
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>hJump — H01 human cortex cell lookup</title>
+<title>&eta;Jump &mdash; H01 human cortex</title>
 <style>
-:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--ink:#e8ecf3;--dim:#98a2b3;--line:#2a2f3a;
-      --accent:#7cc4ff;--good:#6ee7a8;--warn:#ffcf70;--bad:#ff8a8a}
+/* ---------------------------------------------------------------------------------------------
+   THEME ARCHITECTURE (2026-08-09, light-mode feature).
+
+   Every color used anywhere in this file's OWN chrome (not Neuroglancer's/MICrONS's data colors
+   -- see the note below) should be one of the custom properties declared here, referenced via
+   var(--x) -- never a hardcoded hex/rgba literal. That's what lets a single attribute flip
+   ([data-theme="light"] on <html>, set by setTheme()/toggleTheme() below) re-skin the entire
+   page with zero duplicated CSS rules: the DARK block below is :root's unconditional default
+   (unchanged from before this feature -- every existing var name/value is preserved so nothing
+   that already depended on them breaks), and the LIGHT block is an override that only applies
+   when [data-theme="light"] is present, using the exact same variable NAMES with different
+   VALUES. No selector anywhere else in this file needs to know or care which theme is active.
+
+   New variables added alongside the original 11 (--ok/--danger/--gold/--inset/--shadow/--scrim):
+   these give a real CSS-variable home to colors that were previously hardcoded ad hoc in random
+   places (a literal #3fb950 success green, an unbacked #f85149 admin-restore red, an unbacked
+   #e8b923 "community/unverified" gold, a third hardcoded dark surface #0b0f14 used for inputs
+   distinct from --panel, and raw rgba(0,0,0,...) shadow/scrim values) -- see the hardcoded-color
+   fixes elsewhere in this stylesheet/script that now reference these instead.
+
+   OUT OF SCOPE, DELIBERATELY: the large cell-type/vasculature/organelle color palettes used
+   for chart series (PALETTE/LAYER_COLORS/CONN_PALETTE), Neuroglancer segmentColors, and the
+   excitatory/inhibitory/non-neuronal badge colors (--exc/--inh/--non themselves, though their
+   VALUES do change per theme below) are DATA-encoding colors with fixed scientific meaning, not
+   page chrome -- retinting them per-theme would make a cell type look like a different cell type
+   between light and dark mode, which is far worse than a chart merely looking slightly different.
+   Only the page's own text/background/border/status chrome is themed.
+
+   PLOTLY NOTE: Plotly cannot read CSS custom properties, so its chart layouts read --ink/--line
+   once via getComputedStyle() through liveThemeColors() (defined further down, a plain function
+   declaration so it's visible from every <script> tag in this file including initDashboardTab()'s
+   own separate scope -- see that function's own comment on why only function declarations, not
+   const bindings, cross that boundary). retintPlotlyCharts() (also below) re-applies live colors
+   to every already-rendered chart via Plotly.relayout() whenever the theme is toggled, so open
+   charts update in place without a full page reload. */
+:root{--bg:#0d1117;--panel:#161b22;--line:#2a313c;--ink:#e6edf3;--mut:#8b949e;--accent:#27e0b3;--accent-dim:#176b57;--on-accent:#06231c;--warn:#e3b341;--exc:#f0883e;--inh:#58a6ff;--non:#8957e5;--ok:#3fb950;--danger:#f85149;--gold:#e8b923;--inset:#0b0f14;--disabled:#21262d;--shadow:rgba(0,0,0,.3);--scrim:rgba(0,0,0,.45);--mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,monospace}
+/* LIGHT THEME -- chosen for readability on screen AND on paper: near-black text on white
+   (~16:1 contrast, well past WCAG AAA), every accent/status color independently checked to stay
+   readable at normal text size on white (all >=4.5:1), no pure-saturated neon hues (the dark
+   theme's --accent teal and --warn yellow in particular would be low-contrast if simply reused
+   on a white background, so light-mode equivalents are deliberately darker/desaturated
+   versions of the same hue family, not the same color faded). --shadow/--scrim are lighter too,
+   since a heavy black shadow that looks fine floating on a dark page reads as a printing error
+   or a grubby smudge on white. */
+:root[data-theme="light"]{--bg:#ffffff;--panel:#f6f8fa;--line:#d0d7de;--ink:#1f2328;--mut:#57606a;--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff;--warn:#9a6700;--exc:#bc4c00;--inh:#0969da;--non:#8250df;--ok:#1a7f37;--danger:#cf222e;--gold:#9a6700;--inset:#ffffff;--disabled:#eaeef2;--shadow:rgba(140,149,159,.25);--scrim:rgba(140,149,159,.5)}
+/* Printing: force the light palette regardless of the on-screen theme (Søren may print while
+   working in dark mode) and strip decorations that waste toner / look wrong on paper without
+   adding a viewport media query -- this is the one deliberate exception to "no @media queries,
+   everything else uses flex-wrap" elsewhere in this file, since @media print concerns OUTPUT
+   MEDIUM, not responsive breakpoints, and there's no other way to react to "about to print". */
+@media print{
+  :root{--bg:#ffffff;--panel:#ffffff;--line:#c8ccd1;--ink:#000000;--mut:#3a3f45;--accent:#0f766e;--accent-dim:#eaf6f4;--on-accent:#ffffff;--warn:#7a5200;--exc:#8a3900;--inh:#07508f;--non:#6a3fb0;--ok:#136329;--danger:#a4001f;--gold:#7a5200;--inset:#ffffff;--disabled:#e5e5e5;--shadow:transparent;--scrim:transparent}
+  #themeToggleBtn,.tabbar,#undoToast,#submitToast{display:none!important}
+  body{padding:0}
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
-header h1{margin:0;font-size:19px;letter-spacing:.2px}
-header .sub{color:var(--dim);font-size:13px}
-header a{color:var(--accent);text-decoration:none}
-header a:hover{text-decoration:underline}
-main{max-width:1080px;margin:0 auto;padding:18px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:16px}
-label{display:block;color:var(--dim);font-size:12px;margin-bottom:4px}
-input,select,button{font:inherit;color:var(--ink);background:var(--panel2);border:1px solid var(--line);
-  border-radius:7px;padding:7px 10px}
-button{cursor:pointer}
-button.primary{background:var(--accent);color:#08121c;border-color:transparent;font-weight:600}
-button:hover{border-color:var(--accent)}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-.row .f{flex:0 0 120px}
-.units button{padding:4px 9px;font-size:12px}
-.units button.on{background:var(--accent);color:#08121c;border-color:transparent}
-.meta{color:var(--dim);font-size:12.5px}
-.big{font-size:22px;font-weight:650;letter-spacing:.2px}
-.tag{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:20px;
-  padding:2px 10px;font-size:12px;margin:2px 4px 2px 0}
-table{border-collapse:collapse;width:100%;margin-top:8px}
-td,th{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;font-size:13px}
-th{color:var(--dim);font-weight:500;font-size:12px}
-code{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;cursor:pointer}
-.err{color:var(--bad)}
-.note{border-left:3px solid var(--warn);padding-left:10px;color:var(--dim);font-size:12.5px;margin-top:10px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 14px;margin-top:8px}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5;padding:24px}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Segoe UI",system-ui,-apple-system,sans-serif;letter-spacing:-.03em;margin:0 0 6px;display:inline-flex;align-items:baseline}.logo .mu{color:var(--accent);font-style:italic;transform:translateY(1px)}.logo .jm{color:var(--ink)}.logo::after{content:"\2197";font-size:18px;font-weight:700;color:var(--accent);margin-left:4px;transform:translateY(-8px)}
+.sub{color:var(--mut);font-size:13px;margin:0 0 20px}
+.tabbar{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 16px}
+.tabbtn{display:inline-block;font:inherit;font-size:12px;color:var(--mut);text-decoration:none;background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 11px;vertical-align:middle;cursor:pointer}
+.tabbtn:hover{color:var(--ink);border-color:var(--accent)}
+.tabbtn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+/* 2026-08-17 REWRITE (Søren: "I can't change the from dark to light color or log in to google...
+   I can't click the Filter and show or references or statistical dashboard unless i turn my phone
+   to landscape mode") -- #themeToggleBtn and #gameChip (the gamification account chip, see
+   gamifyStyle() far below) used to BOTH be position:fixed, pinned to the same top-right corner at
+   hardcoded top offsets (10px and 52px) chosen to "clear" each other's height. That only accounted
+   for #gameChip's SIGNED-IN height (~29px, a single pill) -- the SIGNED-OUT state (what a new user
+   on their phone actually sees, i.e. exactly when they're trying to click "sign in") is much taller
+   (chip text + the real Google Identity button rendered below it, ~80-90px total), which the 52px
+   offset never cleared. On a narrow phone in portrait, that overlap also fell across roughly the
+   same vertical band where the wrapped .tabbar buttons land (flex-wrap puts "Filter and
+   show"/"References"/"Statistics dashboard" on a second row that near-narrow screens push into
+   that same y-range), so all three reported symptoms were the SAME root cause. Landscape "fixed" it
+   only because the wider viewport let the tabbar fit on one row further from the collision.
+   Fix: stopped using position:fixed for both entirely -- #themeToggleBtn and #gameChip now live in
+   normal document flow inside .topbar/.topbar-right (see the HTML + gamifyInjectUI() below), which
+   wraps via flex like everything else in this file, so they can never overlap each other or the
+   tabbar again regardless of viewport width or which auth state is showing. */
+#themeToggleBtn{display:flex;align-items:center;gap:6px;font:inherit;font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;cursor:pointer;box-shadow:0 2px 8px var(--shadow)}
+#themeToggleBtn:hover{border-color:var(--accent)}
+.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* 2026-08-17 (Søren: "Nothing happens when I click the dark/light button or the google login
+   button or any of the buttons in portrait mode [iPhone, Edge/WebKit]... If I shift to landscape
+   mode, I can click [most tab buttons] but still not the statistical dashboard button") -- moving
+   #themeToggleBtn/#gameChip out of position:fixed (see the comment above) fixed the VISUAL overlap
+   but not this: #gameChipSlot starts EMPTY and stays empty until gamifyInit() -> renderChip() fills
+   it in, which can take seconds on mobile (google.accounts.id.renderButton only becomes available
+   once Google's external gsi/client script finishes loading, retried up to 12x350ms=4.2s -- see
+   gamifyInit()). When it finally fills in (from 0px tall to ~30px signed-in, or ~80px signed-out
+   with the real Google button rendered below the "Sign in" text), every element below it on the
+   page shifts down -- a real, measurable layout shift, well AFTER the page's first paint. iOS
+   Safari/WebKit has a long-documented bug where touch targets can go stale relative to a late
+   shift like this (the page repaints in its new position, but touch hit-testing doesn't always
+   recompute until something forces a full reflow -- an orientation change is exactly such a
+   trigger, matching why rotating "fixed" everything above the fold but not elements whose own
+   position is STILL being resolved, like the wrapped-to-a-second-row Statistics dashboard tab).
+   Fix: reserve the chip's worst-case (signed-out) height from the very start via min-height, so
+   there's no late shift for iOS to desync touch targets against in the first place, regardless of
+   how long Google's script takes to load. Minor cosmetic cost: a little empty space below the pill
+   once signed in, traded for this being unconditionally correct rather than a guessed pixel value
+   tuned to one auth state. */
+#gameChipSlot{min-height:80px;display:flex;align-items:center}
+.tabpanel{display:none}
+.tabpanel.active{display:block}
+/* 2026-08 (Søren: opening the dashboard used to mean leaving ujump.html entirely -- a target=_blank
+   link to ujump_dashboard.html -- "not nice that you have to exit the url and lose the Google
+   login"). Now a 4th tab like the others, showing the SAME unmodified ujump_dashboard.html inline
+   via an iframe -- the page is never actually left, so there's nothing to lose. Kept as a separate
+   file (not inlined) specifically so this doesn't grow ujump.html itself; only a few lines of
+   wiring live here. Breaks out of .wrap's 760px column (full-bleed, standard vw/negative-margin
+   trick) since the dashboard's own multi-column Plotly grid wants real width -- squeezing it into
+   the narrow Jump/Filter column would work but cram every chart into one skinny stack. */
+/* 2026-08 follow-up: dropped the earlier full-bleed 100vw override for the dashboard tabpanel
+   (Søren: "I want the same width of the panels in the Dashboard as in the other tabs, also when
+   opening on a wide screen"). #dashPanel is now just a normal child of .wrap like every other
+   tabpanel, capped at the same 760px regardless of screen width. The dashboard's own .grid still
+   has max-width:1400px/auto-fit columns (harmless no-op inside a 760px parent -- auto-fit simply
+   settles on a single column, same as the rest of this narrow-column app) rather than being
+   rewritten, so nothing breaks if a wider container is ever wanted again later. */
+/* 2026-08 (Søren, after finding out ujump_dashboard.html is only ~55KB against ujump.html's own
+   multi-MB embedded-data footprint: "I think we should incorporate it fully into the µJump file")
+   -- superseded the iframe embed ([[ujump-dashboard-embed]]) with the dashboard's REAL markup/CSS/
+   JS pasted directly in. Scoped under #dashPanel (the tabpanel div itself) rather than trusting
+   cascade order, since several of the dashboard's own selector names collide EXACTLY with rules
+   ujump.html already has for its own unrelated UI (.card padding/margin differ; .logo/.tabbar/
+   .tabbtn are dropped outright below since that markup no longer exists at all here -- no more
+   duplicate-chrome problem to hide, there's simply only one). REPORT_ENDPOINT/LAYER_COLORS (the
+   dashboard script's own internal names) do NOT need renaming despite ALSO colliding by name with
+   ujump.html's own top-level `const`s of the same name -- the dashboard's entire script stays
+   wrapped in its own function scope (`initDashboardTab()`, see its own comment below), so its
+   internal REPORT_ENDPOINT/LAYER_COLORS shadow rather than collide with ujump.html's outer ones. */
+#dashPanel header{padding:0 0 10px;border-bottom:1px solid var(--line)}
+#dashPanel .subhead{color:var(--mut);font-size:13px;margin:0 0 16px;max-width:900px}
+#dashPanel .toolbar{display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap}
+#dashPanel button.refresh{background:var(--accent);color:var(--on-accent);border:none;border-radius:7px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
+#dashPanel button.refresh:hover{opacity:.9}
+#dashPanel button.refresh:disabled{background:var(--disabled);color:var(--mut);cursor:not-allowed}
+#dashPanel .status{font-size:12px;color:var(--mut)}
+#dashPanel .grid{max-width:1400px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:18px;padding:20px 24px 60px}
+#dashPanel .card{padding:14px 16px 6px;margin-bottom:0;min-width:0}
+#dashPanel .card.wide{grid-column:1/-1}
+#dashPanel .card h2{font-size:14px;margin:0 0 2px;font-weight:700;color:var(--ink)}
+#dashPanel .card .sub{font-size:11.5px;color:var(--mut);margin:0 0 8px;line-height:1.4}
+#dashPanel .plot{width:100%;height:360px}
+#dashPanel .plot.tall{height:430px}
+#dashPanel select.picker{font-size:12px;padding:3px 6px;border-radius:5px;border:1px solid var(--line);background:var(--inset);color:var(--ink);margin-left:6px}
+#dashPanel .placeholder{display:flex;align-items:center;justify-content:center;height:360px;color:var(--mut);font-size:13px;text-align:center;padding:0 30px;line-height:1.5}
+#dashPanel .footnote{font-size:10.5px;color:var(--mut);margin:4px 0 10px;line-height:1.4}
+#dashPanel a{color:var(--accent)}
+#dashPanel .topwrap{max-width:1400px;margin:0 auto;padding:8px 24px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:6px}
+.row{display:flex;gap:10px;flex-wrap:wrap}.coord{flex:1;min-width:90px}
+input[type=text],input[type=password],input[type=number],select,textarea{width:100%;background:var(--inset);border:1px solid var(--line);border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:15px;padding:9px 10px}
+textarea{min-height:64px;font-size:12px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.units{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.units button{background:var(--inset);border:1px solid var(--line);color:var(--mut);padding:6px 12px;border-radius:6px;font-family:var(--mono);font-size:13px;cursor:pointer}
+.units button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.toggles{display:flex;gap:16px;flex-wrap:wrap;margin-top:4px}
+.toggles label{display:flex;align-items:center;gap:7px;text-transform:none;letter-spacing:0;color:var(--ink);font-size:13px;cursor:pointer;margin:0}
+.hint{font-size:12px;color:var(--mut);margin:10px 0 0}
+.go{width:100%;margin-top:4px;background:var(--accent);color:var(--on-accent);border:none;padding:13px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;letter-spacing:.02em}
+.go:hover{filter:brightness(1.08)}
+.go.inline{width:44px;flex:0 0 44px;margin-top:0;padding:0;font-size:19px;line-height:1}
+.out{margin-top:14px;display:none}.out.show{display:block}
+.urlbox{font-family:var(--mono);font-size:11px;word-break:break-all;background:var(--inset);border:1px solid var(--line);border-radius:7px;padding:10px;max-height:120px;overflow:auto}
+.actions{display:flex;gap:10px;margin-top:10px}
+.actions a,.actions button{flex:1;text-align:center;text-decoration:none;border-radius:7px;padding:10px;font-size:14px;cursor:pointer;border:1px solid var(--line)}
+.copy{background:var(--inset);color:var(--ink)}
+details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-size:13px}details[open] summary{color:var(--ink);margin-bottom:10px}
+summary.card-toggle{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:0}
+details.card{padding-bottom:14px}details.card:not([open]){padding-bottom:18px}
+.err{color:var(--warn);font-size:12px;margin-top:8px;display:none}
+code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-size:12px}
+.nuc{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--inset);display:none}.nuc.show{display:block}.nuc.oob{border-color:var(--warn)}
+/* #cellPanelCard wraps err/nucpanel/idfpanel/out and lives OUTSIDE the tab panels (so it shows
+   under whichever tab is active -- Jump, Filter and show, or References -- instead of only being
+   reachable from the Jump tab). All four children default to display:none until a cell is
+   actually loaded, so without this the wrapping card would show as an empty padded box on first
+   load; :has() hides the card itself until either .nuc or .idf actually turns on. */
+#cellPanelCard{display:none}
+#cellPanelCard:has(.nuc.show),#cellPanelCard:has(.idf.show){display:block}
+.tag{display:inline-block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:3px 9px;border-radius:20px;font-weight:600}
+.tag.exc{background:rgba(240,136,62,.15);color:var(--exc);border:1px solid var(--exc)}
+.tag.inh{background:rgba(88,166,255,.15);color:var(--inh);border:1px solid var(--inh)}
+.tag.non{background:rgba(137,87,229,.15);color:var(--non);border:1px solid var(--non)}
+.tag.none{background:rgba(139,148,158,.12);color:var(--mut);border:1px solid var(--line)}
+.celltype{font-size:22px;font-weight:600;margin:8px 0 2px}.celltype small{font-size:14px;font-weight:400;color:var(--mut)}
+.celltype a{color:inherit;text-decoration:none;border-bottom:1px dashed var(--accent)}.celltype a:hover{border-bottom-style:solid}.celltype a .ext{font-size:14px;color:var(--accent);border-bottom:none}
+.meta{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:8px}
+.ids{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.idrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.idrow span.k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);min-width:74px}
+.idval{font-family:var(--mono);font-size:12px;background:var(--panel);border:1px solid var(--line);padding:3px 8px;border-radius:5px;word-break:break-all;cursor:pointer}
+.idval:hover{border-color:var(--accent)}
+.jump{background:var(--inset);border:1px solid var(--accent);color:var(--accent);border-radius:7px;padding:7px 11px;font-size:13px;cursor:pointer;margin-top:12px}
+.oobmsg{color:var(--warn);font-size:14px}
+.neigh{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+.neigh h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 6px}
+.nrow{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line)}.nrow:last-child{border-bottom:none}
+.nleft{display:flex;align-items:center;gap:9px;min-width:0}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}.dot.exc{background:var(--exc)}.dot.inh{background:var(--inh)}.dot.non{background:var(--non)}.dot.none{background:var(--mut)}
+.ntype{font-weight:600;font-size:14px}.nsub{font-family:var(--mono);font-size:11px;color:var(--mut)}
+.njump{background:var(--inset);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;flex:none}.njump:hover{border-color:var(--accent);color:var(--accent)}
+.idcta{margin-top:14px;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--inset);display:flex;flex-direction:column;gap:10px}
+.idcta.warn{border-color:var(--warn)}
+.idcta-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.idcta-top span{font-size:13px;color:var(--ink)}
+.idcta.warn .idcta-top span{color:var(--warn);font-weight:600}
+.idcta-search{border-top:1px dashed var(--line);padding-top:10px}
+.idcta-search .leaf-search label{margin-bottom:4px}
+/* Classification history panel (one card per historical identity change, chronological). Reuses
+   .tag's pill shape for the source-type badge (own/community/verification tag colours already
+   established elsewhere in this file) rather than inventing new colours per source. */
+.chist-panel{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.chist-panel h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}
+.chist-row{border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin-bottom:8px}
+.chist-row:last-child{margin-bottom:0}
+.chist-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.chist-change{font-size:13px;font-weight:600}
+.chist-change .old{color:var(--mut);font-weight:400;text-decoration:line-through}
+.chist-src{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:20px;font-weight:600;white-space:nowrap}
+/* color-mix() (2026-08-09, light-mode fix) rather than a hardcoded rgba() alpha wrapper -- CSS
+   can't apply an alpha channel to a custom property's hex value any other way, and a fixed rgba
+   literal like the ones this replaced (rgba(240,136,62,.15) etc.) would silently stay the DARK
+   theme's tint forever even after switching to light mode, since it's not derived from var(--exc)
+   at all. color-mix(in srgb, var(--x) N%, transparent) always re-derives from the CURRENT theme's
+   color. Well-supported in every evergreen browser by 2026. */
+.chist-src.microns_original{background:color-mix(in srgb,var(--mut) 12%,transparent);color:var(--mut);border:1px solid var(--line)}
+.chist-src.community{background:color-mix(in srgb,var(--exc) 15%,transparent);color:var(--exc);border:1px solid var(--exc)}
+.chist-src.verification{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)}
+.chist-src.manual_revision{background:color-mix(in srgb,var(--inh) 15%,transparent);color:var(--inh);border:1px solid var(--inh)}
+.chist-src.undo{background:color-mix(in srgb,var(--exc) 8%,transparent);color:var(--mut);border:1px dashed var(--mut)}
+.chist-src.admin_restore{background:color-mix(in srgb,var(--danger) 12%,transparent);color:var(--danger);border:1px solid var(--danger)}
+.chist-meta{font-family:var(--mono);font-size:11px;color:var(--mut)}
+.chist-cert{font-family:var(--mono);font-size:11px;color:var(--ink);margin-top:3px}
+.chist-comment{font-size:12px;color:var(--ink);margin-top:5px;padding:6px 9px;background:var(--inset);border-radius:6px;font-style:italic}
+.chist-empty{font-size:12px;color:var(--mut);font-style:italic}
+.chist-type{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:20px;font-weight:600;white-space:nowrap;background:rgba(139,148,158,.12);color:var(--mut);border:1px solid var(--line)}
+.chist-status{font-family:var(--mono);font-size:11px;margin-top:3px}
+.chist-status.st-resolved{color:var(--ok,#3fb950)}
+.chist-status.st-unresolved{color:var(--exc)}
+.chist-status.st-recorded{color:var(--mut)}
+.chist-group{font-family:var(--mono);font-size:10px;color:var(--mut);margin-left:6px}
+/* Step-through review vote panel (Filter-and-show tab) -- deliberately compact (one line per
+   votable classification, at most 2 lines total) per "minimal clutter"; buttons are real
+   <button> elements sized generously enough for a touch tap target (unlike the smaller inline
+   ▲/▼ pills elsewhere in this file, e.g. .idvote/.ridvote at padding:0/1px 5-7px) since this is
+   the one vote surface meant to be used repeatedly, quickly, while reviewing many cells in a row
+   on any device. flex-wrap keeps it usable on narrow phone widths without a media query, same
+   convention as every other row in this file. */
+.stepvote-panel{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.stepvote-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px}
+.stepvote-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.stepvote-row:last-child{margin-bottom:0}
+.stepvote-label{font-size:11px;color:var(--mut);white-space:nowrap}
+.stepvote-name{font-size:13px;font-weight:600;flex:1 1 auto;min-width:60px}
+.stepvote-net{min-width:22px;text-align:center;font-size:12px;color:var(--ink);font-family:var(--mono)}
+.stepvote{padding:5px 12px!important;font-size:14px!important;line-height:1}
+.idbtn{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent);border-radius:7px;padding:8px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
+.idbtn:disabled{background:var(--disabled);color:var(--mut);border-color:var(--line);cursor:not-allowed}
+.idcta:not(.warn) .idbtn{background:var(--inset);color:var(--ink);border-color:var(--line)}
+.idf{margin-top:16px;border:1px solid var(--accent);border-radius:10px;padding:18px;background:var(--inset);display:none}.idf.show{display:block}
+.idf-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
+.idf-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
+.idf-crumbs{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:3px}
+.idf-close{background:none;border:none;color:var(--mut);font-size:20px;cursor:pointer;line-height:1}
+.idf-back{color:var(--accent);cursor:pointer;text-decoration:underline;font-size:12px;margin-bottom:8px;display:inline-block}
+.idf-q{font-size:15px;font-weight:600;margin-bottom:12px;line-height:1.4}
+.idf-opts{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.idf-opt{text-align:left;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:13px;cursor:pointer}
+.idf-opt:hover{border-color:var(--accent)}
+.idf-gal{border-top:1px solid var(--line);padding-top:12px}
+.idf-gal h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}
+.idf-cells{display:flex;flex-wrap:wrap;gap:14px}
+.idf-cell{width:120px}
+.idf-cell-name{font-size:12px;font-weight:600;margin-bottom:4px}
+.idf-thumbs{display:flex;gap:4px;flex-wrap:wrap}
+.idf-thumb{position:relative;width:56px;height:56px;border-radius:5px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--panel)}
+.idf-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.idf-thumb .mod{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#fff;font-size:8px;text-align:center;letter-spacing:.03em}
+.idf-thumb.nocoord{opacity:.5;cursor:default}
+.idf-empty{font-size:11px;color:var(--mut);font-style:italic}
+.idf-result{text-align:center;padding:6px 0 16px}
+.idf-result .celltype{margin:6px 0;font-size:22px;font-weight:600}
+.idf-flag{color:var(--warn);font-size:12px;margin-top:6px}
+.idf-actions{display:flex;gap:10px;margin-top:14px;justify-content:center}
+.idf-certainty{margin-top:14px}
+.cert-scale{display:flex;gap:8px;justify-content:center;margin-top:6px}
+.cert-opt{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:14px;font-weight:600;cursor:pointer}
+.cert-opt:hover{border-color:var(--accent)}
+.cert-opt.sel{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.cert-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--mut);margin-top:4px;max-width:200px;margin-left:auto;margin-right:auto}
+.idf-submitnote{font-size:11px;color:var(--mut);margin-top:10px}
+.idbtn-submit{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+.idbtn-submit:hover{filter:brightness(1.08)}
+.idbtn-submit:disabled{background:var(--disabled);color:var(--mut);border-color:var(--line);font-weight:400;cursor:not-allowed;filter:none}
+.idbtn-submit:disabled:hover{filter:none}
+.cert-required{color:var(--warn);text-transform:none;letter-spacing:normal;font-weight:600}
+.hist-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
+.hist-chip{font-family:var(--mono);font-size:11px;background:var(--inset);border:1px solid var(--line);color:var(--mut);border-radius:6px;padding:4px 9px;cursor:pointer}
+.hist-chip:hover{border-color:var(--accent);color:var(--accent)}
+/* Navigation history (Back/Forward + Recently Viewed Cells) -- follows the same flex-wrap-based
+   responsiveness as every other row in this file (see .hist-row above) rather than a media query,
+   since nothing else in the app uses one either. */
+.navctrl{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.navctrl button{flex:none;padding:6px 12px;font-size:12px}
+.rv-panel{margin-top:10px}
+/* 2026-08-10 (Søren: "all the menus that are collapsable should have a little arrow to the left
+   of it, like 'Advanced: viewer + custom base state'") -- that one is a PLAIN <details>, so it
+   keeps the browser's own default disclosure triangle; every <summary> styled here previously lost
+   that native marker the moment display:flex was set on it (flex/grid display suppresses the
+   native ::marker in every engine that supports it). list-style:none + the -webkit-details-marker
+   rule below remove whatever's left of the native marker consistently across browsers, and this
+   ::before triangle replaces it -- same rotate-on-[open] behaviour as the native one, just under
+   our own styling control (colour, size) instead of each browser's own default. justify-content
+   changed from space-between to flex-start: with only a label as the summary's one real child,
+   space-between had no visible effect before, but it WOULD have shoved this new ::before arrow and
+   the label to opposite ends of the row instead of side by side -- flex-start plus the existing
+   gap:8px keeps them together, arrow-then-label, exactly like a native details marker. */
+.rv-panel summary{display:flex;align-items:center;justify-content:flex-start;gap:8px;cursor:pointer;list-style:none}
+.rv-panel summary::-webkit-details-marker{display:none}
+.rv-panel summary::before{content:"\25B6";display:inline-block;flex:none;font-size:10px;color:var(--mut);transition:transform .15s ease}
+.rv-panel[open]>summary::before{transform:rotate(90deg)}
+.rv-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:280px;overflow-y:auto}
+.rv-row{border:1px solid var(--line);border-radius:7px;padding:7px 10px;cursor:pointer}
+.rv-row:hover{border-color:var(--accent)}
+.rv-row.cur{border-color:var(--accent);background:var(--accent-dim)}
+.rv-main{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.rv-type{font-size:13px;font-weight:600}
+.rv-src{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);white-space:nowrap}
+.rv-sub{font-family:var(--mono);font-size:11px;color:var(--mut);margin-top:2px}
+.leaf-search{position:relative;margin-bottom:14px}
+.leaf-search-results{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;z-index:5;display:none;box-shadow:0 6px 16px var(--shadow)}
+.leaf-search-results.show{display:block}
+.leaf-search-item{padding:8px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line)}
+.leaf-search-item:last-child{border-bottom:none}
+.leaf-search-item:hover,.leaf-search-item.hi{background:var(--accent-dim);color:var(--accent)}
+.leaf-search-empty{padding:8px 12px;font-size:12px;color:var(--mut);font-style:italic}
 </style>
 </head><body>
+<div class="wrap">
 
-<header>
-  <h1>hJump</h1>
-  <span class="sub">H01 human cerebral cortex — jump to a coordinate, identify the nearest cell</span>
-  <span style="flex:1"></span>
-  <a href="index.html">← all tools</a>
-  <a href="ujump.html">µJump (MICrONS)</a>
-</header>
+<div class="topbar">
+<a href="#" id="logoHome" style="text-decoration:none;color:inherit;display:inline-block" title="Reload &eta;Jump"><h1 class="logo"><span class="mu">&eta;</span><span class="jm">Jump</span></h1></a>
+<div class="topbar-right">
+<button type="button" id="themeToggleBtn" title="Switch between dark and light mode" aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span> <span id="themeToggleLabel">Light</span></button>
+<div id="gameChipSlot"></div>
+</div>
+</div>
+<script>document.getElementById("logoHome").href=location.pathname;</script>
+<script>
+/* ---------------------------------------------------------------------------------------------
+   Theme module -- 2026-08-09, light-mode feature. Plain FUNCTION DECLARATIONS throughout
+   (deliberately, not const arrow functions) so every one of these is visible from every other
+   <script> tag in the page, including initDashboardTab()'s own separate top-level scope further
+   down (see the "THEME ARCHITECTURE" comment above :root for why that boundary matters here) --
+   the dashboard/connectivity chart code below calls liveThemeColors() and retintPlotlyCharts()
+   directly by name, relying on that cross-tag visibility.
 
-<main>
+   setTheme(mode)      -- applies "dark" or "light": sets/removes [data-theme] on <html>,
+                          persists to the SAME "ujump_theme" localStorage key the <head> FOUC
+                          guard reads, updates the toggle button's own label/icon, and retints
+                          any already-rendered Plotly charts in place.
+   toggleTheme()        -- flips between the two, called by the button's click handler.
+   currentTheme()        -- "light" or "dark", read from the live [data-theme] attribute (the
+                          single source of truth once the page has loaded -- NOT re-read from
+                          localStorage, so this stays correct even if a future caller changes
+                          the theme by some other path).
+   liveThemeColors()    -- {ink,line} read fresh from the live :root custom properties via
+                          getComputedStyle(); used to seed AXIS_FONT/BASE_LAYOUT (and their CONN_
+                          counterparts) with the CURRENT theme's colors at chart-creation time.
+   retintPlotlyCharts() -- walks every already-rendered Plotly div (Plotly.js tags each one
+                          "js-plotly-plot") and calls Plotly.relayout() to update its font/
+                          gridline colors in place -- this is what keeps OPEN charts in sync with
+                          a theme toggle without needing to touch or re-render any of the many
+                          individual chart-drawing functions elsewhere in the file (there are 20+
+                          Plotly.newPlot call sites; relayout-ing the live divs after the fact is
+                          far less invasive than changing every one of them). No-op, safely, if
+                          Plotly hasn't been loaded yet (nobody has opened the dashboard or
+                          connectivity panel this session) or no charts are on screen. */
+function liveThemeColors(){
+  var cs=getComputedStyle(document.documentElement);
+  return{ink:(cs.getPropertyValue("--ink")||"#e6edf3").trim(),line:(cs.getPropertyValue("--line")||"#2a313c").trim(),
+    panel:(cs.getPropertyValue("--panel")||"#161b22").trim()};
+}
+function retintPlotlyCharts(){
+  if(typeof Plotly==="undefined")return;
+  var c=liveThemeColors();
+  // hoverlabel.* covers Plotly's own tooltip box -- otherwise it stays whatever color it was
+  // created with (Plotly has no CSS-var awareness of its own), which is exactly the "tooltips"
+  // theming requirement for the dashboard/connectivity charts.
+  document.querySelectorAll(".js-plotly-plot").forEach(function(div){
+    try{Plotly.relayout(div,{"font.color":c.ink,"xaxis.gridcolor":c.line,"yaxis.gridcolor":c.line,
+      "hoverlabel.bgcolor":c.panel,"hoverlabel.font.color":c.ink,"hoverlabel.bordercolor":c.line});}catch(_rp){}
+  });
+}
+function currentTheme(){return document.documentElement.getAttribute("data-theme")==="light"?"light":"dark";}
+/* 2026-08-09 (Søren: "I meant that only the white theme will have a white background in
+   Neuroglancer and the dark theme keeps the dark background... so that it is consistent with the
+   light or dark theme") -- corrects the 2026-08-09 white-background feature, which originally set
+   BOTH Neuroglancer background keys to a hardcoded "#ffffff" unconditionally, regardless of
+   µJump's own theme (reasoning at the time: Neuroglancer opens in its own separate tab via
+   window.open, so it can't inherit this page's CSS -- true, but the fix should still key off
+   currentTheme() rather than hardcoding one color for every opened instance). "#000000" is
+   Neuroglancer's own default background (what every instance used before this feature existed),
+   not an invented dark value. Plain function declaration so it's callable from every script tag
+   that builds a Neuroglancer state, same cross-script-tag convention as currentTheme() itself. */
+function ngBgColor(){return currentTheme()==="light"?"#ffffff":"#000000";}
+function setTheme(mode){
+  var light=mode==="light";
+  if(light)document.documentElement.setAttribute("data-theme","light");
+  else document.documentElement.removeAttribute("data-theme");
+  try{localStorage.setItem("ujump_theme",light?"light":"dark");}catch(_st){}
+  var icon=document.getElementById("themeToggleIcon"),label=document.getElementById("themeToggleLabel"),
+      btn=document.getElementById("themeToggleBtn");
+  if(icon)icon.textContent=light?"☀️":"🌙";
+  if(label)label.textContent=light?"Light":"Dark";
+  if(btn)btn.setAttribute("aria-pressed",light?"true":"false");
+  retintPlotlyCharts();
+}
+function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
+(function(){
+  var btn=document.getElementById("themeToggleBtn");
+  if(btn)btn.addEventListener("click",toggleTheme);
+  // Sync the button's own label/icon to whatever the <head> FOUC guard already applied (it only
+  // sets the attribute, it doesn't know about the button since the button didn't exist yet).
+  setTheme(currentTheme());
+})();
+</script>
 
 <div class="card">
-  <div class="row">
-    <div class="f"><label for="x">x</label><input id="x" inputmode="numeric" placeholder="208797"></div>
-    <div class="f"><label for="y">y</label><input id="y" inputmode="numeric" placeholder="112676"></div>
-    <div class="f"><label for="z">z</label><input id="z" inputmode="numeric" placeholder="4230"></div>
-    <div>
-      <label>units</label>
-      <span class="units" id="units">
-        <button data-u="voxel" class="on">voxels (<span id="unitres"></span>)</button><button data-u="nm">nm</button><button data-u="um">µm</button>
-      </span>
-    </div>
-    <button class="primary" id="go">Find nearest cell</button>
-    <button id="rand">Random cell</button>
-  </div>
-  <div class="meta" style="margin-top:8px">
-    Paste a whole <code id="pastehint">x, y, z</code> into the x box and it splits itself.
-  </div>
-  <div id="err" class="err" style="display:none;margin-top:8px"></div>
+<div class="units" id="units"><button data-u="voxel" class="on">voxels (<span id="unitres"></span>)</button><button data-u="nm">nanometres</button><button data-u="um">micrometres</button></div>
+<label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; jump to it in H01, identify the nearest cell body and its neighbours</span></label>
+<div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Find the nearest classified cell body">&#8594;</button></div>
+<p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.
+  <button id="rand" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font:inherit">Show me a random cell</button></p>
+<p class="err" id="err"></p>
 </div>
 
 <div id="panel"></div>
 
 <div class="card">
-  <div class="meta"><b style="color:var(--ink)">About this dataset.</b>
-  H01 is a ~1&nbsp;mm³ sample of human temporal cortex (Shapson-Coe et al.,
-  <a href="https://www.science.org/doi/10.1126/science.adk4858" target="_blank" rel="noopener">Science 2024</a>,
-  CC&nbsp;BY). The cell types and cortical layers shown here are the dataset's own published
-  classification; the soma positions were derived by joining that classification to the
-  <code>cell_bodies</code> segmentation. <span id="dscount"></span></div>
-  <div class="note">Two caveats carried over from the join, worth knowing before you trust a label:
-  <b>spiny-stellate</b> (190 cells) is mostly labelled L5 rather than L4 and has the largest median
-  soma of any type — treat it as uncertain. And 1,468 <code>c3</code> segments contain more than one
-  soma, so a segment ID is not always one cell.</div>
+<label>About this dataset</label>
+<p class="hint" style="margin-top:0">H01 is a ~1&nbsp;mm&sup3; sample of human temporal cortex
+(Shapson-Coe et al., <a href="https://www.science.org/doi/10.1126/science.adk4858" target="_blank" rel="noopener">Science 2024</a>,
+CC&nbsp;BY). Cell types and cortical layers are the dataset's own published classification;
+soma positions come from joining that classification to the <code>cell_bodies</code> segmentation.
+<span id="dscount"></span></p>
+<p class="hint">Two caveats from that join. <b>spiny-stellate</b> (190 cells) is mostly labelled L5
+rather than L4 and has the largest median soma of any type &mdash; treat it as uncertain. And 1,468
+<code>c3</code> segments contain more than one soma, so a segment ID is not always one cell.</p>
 </div>
 
-</main>
+</div><!-- /wrap -->
 
 <script>
 /* ── hJump configuration ────────────────────────────────────────────────────────────────
@@ -100,8 +487,8 @@ UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
 UJ.toVox = function(p){ return [p[0]/UJ_RX, p[1]/UJ_RY, p[2]/UJ_RZ]; };
 
 /* H01's c3 meshes: same neuroglancer_multilod_draco + murmurhash3 sharding as MICrONS, so
-   core/mesh.js works unchanged. Values read from the bucket's own info file; loadInfo()
-   re-reads and overwrites the sharding fields at runtime anyway. */
+   core/mesh.js works unchanged. Read from the bucket's own info file; loadInfo() re-reads and
+   overwrites the sharding fields at runtime anyway. */
 UJ.cfg.mesh = {
   meshBase: "https://storage.googleapis.com/h01-release/data/20210601/c3/mesh/",
   meshBaseAlt: "https://storage.googleapis.com/storage/v1/b/h01-release/o/data%2F20210601%2Fc3%2Fmesh%2F",
@@ -113,8 +500,7 @@ UJ.cfg.mesh = {
 };
 
 /* Same Apps Script deployment as µJump -> one OAuth consent, one sign-in, one level.
-   ds:"hjump" routes writes to the H01 spreadsheet once Datasets.gs is deployed; until then
-   the backend ignores it and this page simply has nothing to report to. */
+   ds:"hjump" routes writes to the H01 spreadsheet once Datasets.gs is deployed. */
 UJ.cfg.backend = {
   endpoint: "https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec",
   clientId: "240227117082-gmiv0s37qdqngo3t3ph0lmthg4t4t47p.apps.googleusercontent.com",
@@ -135,6 +521,7 @@ document.addEventListener("DOMContentLoaded", function(){
   var e = document.getElementById("unitres");
   if (e) e.innerHTML = UJ_RX + "·" + UJ_RY + "·" + UJ_RZ + " nm";
 });
+
 </script>
 
 <script src="core/mesh.js"></script>
@@ -163,18 +550,23 @@ const MORPH = {};
 ["NVx","NSO","NSI","NSIe","NSIi","NDe","NAx","NSp","NCi","NAis","NMy"].forEach(function(k){
   MORPH[k] = new Uint32Array(b64(D[k+"B"]).buffer);
 });
-const MORPH_LABEL = {NVx:"voxels",NSO:"soma",NSI:"synapses",NSIe:"excitatory in",NSIi:"inhibitory in",
-  NDe:"dendrite",NAx:"axon",NSp:"spines",NCi:"cilium",NAis:"AIS",NMy:"myelin"};
+const MORPH_LABEL = {NSI:"synapses",NSIe:"excitatory in",NSIi:"inhibitory in",NSp:"spines",
+  NDe:"dendrite",NAx:"axon",NAis:"AIS",NMy:"myelin",NCi:"cilium",NSO:"soma",NVx:"voxels"};
 
 function c3Id(i){ return (BigInt(D.HI[HHB[i]]) * 4294967296n + BigInt(HLB[i] >>> 0)).toString(); }
 function typeName(i){ return D.CT_NAMES[HTB[i]] || "unclassified"; }
 function layerName(i){ return D.LY_NAMES[HYL[i]] || "unknown"; }
 function modifiers(i){ const m=HMB[i],out=[]; for(let b=0;b<D.MOD_NAMES.length;b++) if(m>>b&1) out.push(D.MOD_NAMES[b]); return out; }
 
-/* Colour by broad class, so the eye groups neurons vs glia vs vessel before reading. */
-const TYPE_COLOR = {pyramidal:"#7cc4ff","spiny-stellate":"#7cc4ff","excitatory/spiny-with-atypical-tree":"#7cc4ff",
-  interneuron:"#ffcf70","unclassified-neuron":"#c9b6ff",astrocyte:"#6ee7a8",oligodendrocyte:"#8fd3c4",
-  "microglia/opc":"#ff9ecb","blood-vessel-cell":"#ff8a8a","unknown-type":"#98a2b3"};
+/* Broad class, reusing µJump's own .tag exc/inh/non styling so a cell reads the same way on
+   both pages. H01 has no inhibitory/excitatory call per se -- pyramidal & spiny types are
+   excitatory, interneurons inhibitory, everything else non-neuronal. */
+const EXC = {pyramidal:1,"spiny-stellate":1,"excitatory/spiny-with-atypical-tree":1};
+function classOf(i){ const t=typeName(i);
+  if(EXC[t]) return "exc"; if(t==="interneuron") return "inh";
+  if(t==="unclassified-neuron"||t==="unknown-type") return "none"; return "non"; }
+function classLabel(i){ const c=classOf(i);
+  return c==="exc"?"excitatory":c==="inh"?"inhibitory":c==="non"?"non-neuronal":"unclassified"; }
 
 /* ── lookup ─────────────────────────────────────────────────────────────────────────── */
 function nearest(vx,vy,vz){
@@ -225,53 +617,81 @@ function escHtml(s){
   return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 function fmt(n){ return Number(n).toLocaleString("en-GB"); }
-function copyCode(txt){ return '<code onclick="navigator.clipboard&&navigator.clipboard.writeText(this.textContent)" title="click to copy">'+escHtml(txt)+'</code>'; }
+function copyCode(txt){
+  return '<code style="cursor:pointer" title="click to copy" onclick="navigator.clipboard&&navigator.clipboard.writeText(this.textContent)">'+escHtml(txt)+'</code>';
+}
 
-function showCell(i, queryPos, distNm){
-  const pos=[HX[i],HY[i],HZ[i]], t=typeName(i), col=TYPE_COLOR[t]||"#98a2b3";
-  const mods=modifiers(i), nb=kNearest(pos[0],pos[1],pos[2],3,i);
+let CUR_IDX=null;
+function showCell(i, distNm){
+  CUR_IDX=i;
+  const pos=[HX[i],HY[i],HZ[i]], t=typeName(i), mods=modifiers(i), nb=kNearest(pos[0],pos[1],pos[2],3,i);
+  const url=viewerUrl(pos,c3Id(i));
+
+  /* Søren, 2026-08-16: the cell NAME is the Neuroglancer link -- no separate button. */
   let h='<div class="card">';
-  h+='<div class="big" style="color:'+col+'">'+escHtml(t)+'</div>';
-  h+='<div class="meta">'+escHtml(layerName(i))+' &middot; soma '+HVB[i].toFixed(0)+' µm³'
-    +(distNm!=null?' &middot; '+(distNm/1000).toFixed(2)+' µm from your query':'')+'</div>';
-  if(mods.length) h+='<div style="margin-top:6px">'+mods.map(m=>'<span class="tag">'+escHtml(m)+'</span>').join("")+'</div>';
+  h+='<a href="'+escHtml(url)+'" target="_blank" rel="noopener" '
+    +'title="Open this cell in Neuroglancer with the segment selected" '
+    +'style="display:inline-block;font-size:26px;font-weight:700;color:var(--accent);text-decoration:none;line-height:1.2">'
+    +escHtml(t)+' <span style="font-size:16px;opacity:.75">&#8599;</span></a>';
+  h+='<div style="margin-top:6px"><span class="tag '+classOf(i)+'">'+escHtml(classLabel(i))+'</span> '
+    +'<span class="tag none">'+escHtml(layerName(i))+'</span>'
+    +mods.map(m=>' <span class="tag none">'+escHtml(m)+'</span>').join("")+'</div>';
+  h+='<p class="hint" style="margin-top:10px">Soma '+HVB[i].toFixed(0)+' &micro;m&sup3;'
+    +(distNm!=null?' &middot; '+(distNm/1000).toFixed(2)+' &micro;m from your query':'')
+    +' &middot; click the name above to open it in Neuroglancer</p>';
 
-  h+='<table><tr><th>c3 segment</th><td>'+copyCode(c3Id(i))+'</td>'
-    +'<th>cell body</th><td>'+copyCode(HSB[i])+'</td></tr>'
-    +'<tr><th>voxel</th><td>'+copyCode(pos.join(", "))+'</td>'
-    +'<th>spininess</th><td>'+HSP[i].toFixed(3)+'</td></tr></table>';
+  h+='<div class="meta">c3 segment '+copyCode(c3Id(i))+' &middot; cell body '+copyCode(HSB[i])
+    +' &middot; voxel '+copyCode(pos.join(", "))+'</div>';
 
-  h+='<div class="grid">';
+  h+='<div class="meta" style="margin-top:12px;color:var(--ink)">';
   Object.keys(MORPH_LABEL).forEach(function(k){
-    h+='<div class="meta">'+escHtml(MORPH_LABEL[k])+': <b style="color:var(--ink)">'+fmt(MORPH[k][i])+'</b></div>';
+    h+='<span style="display:inline-block;min-width:150px">'+escHtml(MORPH_LABEL[k])
+      +' <b>'+fmt(MORPH[k][i])+'</b></span>';
   });
-  h+='</div>';
+  h+='<span style="display:inline-block;min-width:150px">spininess <b>'+HSP[i].toFixed(3)+'</b></span></div>';
 
-  h+='<div class="row" style="margin-top:12px">'
-    +'<button class="primary" onclick="window.open(\''+viewerUrl(pos,c3Id(i))+'\',\'_blank\')">Open in Neuroglancer</button>'
-    +'<button id="meshbtn">Download 3D mesh (.glb)</button></div>';
-  h+='<div class="meta" id="meshmsg" style="margin-top:6px"></div>';
+  h+='<div class="row" style="margin-top:14px">'
+    +'<button id="meshbtn" style="flex:1;min-width:170px">Download 3D mesh (.glb)</button>'
+    +'<button id="pptxbtn" style="flex:1;min-width:170px">Download PowerPoint</button></div>';
+  h+='<p class="hint" id="meshmsg"></p>';
 
-  h+='<div style="margin-top:14px"><div class="meta">3 nearest cells</div><table>';
+  h+='<label style="margin-top:16px;display:block">Nearest cells</label><div class="meta">';
   nb.forEach(function(c){
-    h+='<tr><td style="color:'+(TYPE_COLOR[typeName(c.i)]||"#98a2b3")+'">'+escHtml(typeName(c.i))+'</td>'
-      +'<td>'+escHtml(layerName(c.i))+'</td><td>'+(c.dist/1000).toFixed(2)+' µm</td>'
-      +'<td><button onclick="jumpToIndex('+c.i+')">go</button></td></tr>';
+    h+='<div style="margin-bottom:4px"><span class="tag '+classOf(c.i)+'" style="font-size:10px">'
+      +escHtml(typeName(c.i))+'</span> '+escHtml(layerName(c.i))+' &middot; '
+      +(c.dist/1000).toFixed(2)+' &micro;m '
+      +'<button onclick="jumpToIndex('+c.i+')" style="padding:2px 8px;font-size:11px">go</button></div>';
   });
-  h+='</table></div></div>';
+  h+='</div></div>';
 
   document.getElementById("panel").innerHTML=h;
+  wireMeshButtons(i);
+}
+function jumpToIndex(i){ showCell(i,null); window.scrollTo({top:0,behavior:"smooth"}); }
 
+/* core/mesh.js calls onProgress(fraction, message) -- two arguments, not one. */
+function wireMeshButtons(i){
+  const msg=document.getElementById("meshmsg");
+  function prog(frac,text){
+    msg.textContent=(text||"working…")+(typeof frac==="number"?" ("+Math.round(frac*100)+"%)":"");
+  }
+  function run(btn,fn){
+    btn.disabled=true; prog(0,"starting…");
+    Promise.resolve().then(fn)
+      .then(function(){ msg.textContent="done."; })
+      .catch(function(err){ msg.textContent="failed: "+(err&&err.message||err); })
+      .then(function(){ btn.disabled=false; });
+  }
   const mb=document.getElementById("meshbtn");
   if(mb) mb.addEventListener("click",function(){
-    const msg=document.getElementById("meshmsg");
-    mb.disabled=true; msg.textContent="fetching mesh…";
-    UJ.mesh.downloadRoot(c3Id(i),function(s){msg.textContent=s;})
-      .then(function(){mb.disabled=false;})
-      .catch(function(err){msg.textContent="mesh failed: "+err.message;mb.disabled=false;});
+    run(mb,function(){ return UJ.mesh.downloadRoot(c3Id(i),prog); });
+  });
+  const pb=document.getElementById("pptxbtn");
+  if(pb) pb.addEventListener("click",function(){
+    const coord=[HX[i],HY[i],HZ[i]].join(", ");
+    run(pb,function(){ return UJ.mesh.downloadRootPptx(c3Id(i),typeName(i)+" · "+layerName(i),coord,prog); });
   });
 }
-function jumpToIndex(i){ showCell(i,null,null); window.scrollTo({top:0,behavior:"smooth"}); }
 
 /* ── input ──────────────────────────────────────────────────────────────────────────── */
 let unit="voxel";
@@ -287,7 +707,6 @@ function toVoxels(x,y,z){
   if(unit==="nm")return[x/UJ_RX,y/UJ_RY,z/UJ_RZ];
   return[x*(1000/UJ_RX),y*(1000/UJ_RY),z*(1000/UJ_RZ)];
 }
-/* Paste "x, y, z" (or tabs, or spaces) into the x box and it fills all three. */
 document.getElementById("x").addEventListener("paste",function(ev){
   const t=(ev.clipboardData||window.clipboardData).getData("text")||"";
   const p=t.trim().split(/[\s,;]+/).filter(Boolean);
@@ -299,7 +718,7 @@ document.getElementById("x").addEventListener("paste",function(ev){
   }
 });
 function fail(m){const e=document.getElementById("err");e.textContent=m;e.style.display=m?"block":"none";}
-document.getElementById("go").addEventListener("click",function(){
+function doJump(){
   fail("");
   const raw=["x","y","z"].map(id=>parseFloat(document.getElementById(id).value));
   if(raw.some(v=>!isFinite(v)))return fail("Enter all three coordinates.");
@@ -307,12 +726,15 @@ document.getElementById("go").addEventListener("click",function(){
   const r=nearest(v[0],v[1],v[2]);
   if(r.i<0)return fail("No cell found.");
   if(r.dist>50000) fail("Nearest cell is "+(r.dist/1000).toFixed(1)+" µm away — that coordinate may be outside the classified volume.");
-  showCell(r.i,v,r.dist);
+  showCell(r.i,r.dist);
+}
+document.getElementById("go").addEventListener("click",doJump);
+["x","y","z"].forEach(function(id){
+  document.getElementById(id).addEventListener("keydown",function(e){ if(e.key==="Enter") doJump(); });
 });
 document.getElementById("rand").addEventListener("click",function(){
   fail(""); jumpToIndex(Math.floor(Math.random()*N));
 });
-
 document.getElementById("dscount").textContent = fmt(N)+" cells are loaded in this page.";
 
 /* ── sign-in plumbing that core/gamify.js expects ───────────────────────────────────── */
@@ -335,5 +757,6 @@ function postReport(payload,okMsg){
     .then(function(d){ if(typeof showSubmitToast==="function") showSubmitToast(!!(d&&d.ok),okMsg||""); return d; });
 }
 if(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID.indexOf("REPLACE")!==0){ gamifyInit(12); }
+
 </script>
 </body></html>
