@@ -63,11 +63,33 @@ function gamifyInjectUI(){
   if(!document.getElementById("gameDash")){var d=document.createElement("div");d.id="gameDash";
     d.addEventListener("click",function(e){if(e.target===d)closeDashboard();});document.body.appendChild(d);}
 }
+/* Combined points, live. Søren, 2026-08-16: opening ηJump showed "1 pts" when µJump showed
+   hundreds, which reads as data loss even though it is the per-dataset figure behaving exactly as
+   designed. The chip is the always-visible number, so it must show the thing that is CONTINUOUS
+   across pages, not the per-sheet one.
+
+   Not simply t.combinedPoints: that snapshot is rebuilt nightly, so a report submitted five
+   minutes ago would not appear and the chip would look stuck. Instead take the OTHER datasets
+   from the nightly snapshot and this dataset LIVE from myStats -- correct immediately after a
+   submission, and still correct across pages. */
+function combinedPoints(){
+  var live=(MYSTATS&&MYSTATS.points)||0, t=window.__PROFILE_TOTALS;
+  if(!t||t.combinedPoints==null) return {points:live,combined:false,per:null};
+  var ds=(UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds)||"", mine=0;
+  (t.perDataset||[]).forEach(function(p){ if(p.ds===ds) mine=p.points||0; });
+  return {points:Math.max(live,(t.combinedPoints-mine)+live),combined:true,per:t.perDataset||[]};
+}
 function renderChip(){
   var c=document.getElementById("gameChip");if(!c)return;
   if(GOOGLE_VERIFIED&&MYSTATS){
-    c.innerHTML='<div class="chipbtn" id="chipOpen"><span>'+escHtml(MYSTATS.handle||"you")+'</span>'
-      +'<span class="lvl">'+escHtml(MYSTATS.level||"")+'</span><span class="pts">'+(MYSTATS.points||0)+' pts</span>'+((MYSTATS.downvoted>0)?'<span style="color:#e3b341" title="You have '+MYSTATS.downvoted+' down-voted report(s) to review">⚠ '+MYSTATS.downvoted+'</span>':'')+'</div>';
+    var cp=combinedPoints();
+    var tip=cp.combined
+      ? ("Points across every dataset: "
+         +cp.per.map(function(p){return (p.label||p.ds)+" "+(p.points||0);}).join(" · ")
+         +". This page's own "+((MYSTATS.points)||0)+" update immediately; the others come from the nightly rebuild.")
+      : "Points on this dataset. The combined cross-dataset total appears once the nightly rebuild has run.";
+    c.innerHTML='<div class="chipbtn" id="chipOpen" title="'+escHtml(tip)+'"><span>'+escHtml(MYSTATS.handle||"you")+'</span>'
+      +'<span class="lvl">'+escHtml(MYSTATS.level||"")+'</span><span class="pts">'+cp.points+' pts</span>'+((MYSTATS.downvoted>0)?'<span style="color:#e3b341" title="You have '+MYSTATS.downvoted+' down-voted report(s) to review">⚠ '+MYSTATS.downvoted+'</span>':'')+'</div>';
     var o=document.getElementById("chipOpen");if(o)o.addEventListener("click",openDashboard);
   } else if(GOOGLE_VERIFIED){
     c.innerHTML='<div class="chipbtn" id="chipOpen"><span>signed in</span><span class="pts">loading…</span></div>';
@@ -93,7 +115,13 @@ function gamifyGet(param,cb){
    SEPARATE call rather than folded into ?myStats=: this page's own numbers must keep updating
    instantly on submit, and only the combined figure lags a day. That difference is stated to the
    user with an explicit "as of" timestamp instead of being left to guess. */
-function loadProfileTotals(cb){ gamifyGet("profileTotals",function(d){ cb(d&&!d.error?d:null); }); }
+function loadProfileTotals(cb){
+  gamifyGet("profileTotals",function(d){
+    window.__PROFILE_TOTALS=(d&&!d.error)?d:null;
+    renderChip();                       // the chip shows the combined figure -- repaint once it lands
+    if(cb)cb(window.__PROFILE_TOTALS);
+  });
+}
 function profileTotalsHtml(t){
   if(!t) return "";
   var per=(t.perDataset||[]).map(function(p){
@@ -113,7 +141,7 @@ function refreshFavStars(){
   document.querySelectorAll(".favstar").forEach(function(b){
     var on=window.FAV_SET.has(String(b.dataset.nid||""))||(b.dataset.coord&&window.FAV_SET.has(String(b.dataset.coord)));b.textContent=on?"★":"☆";b.style.color=on?"var(--accent)":"var(--mut)";b.title=on?"In favourites":"Save to favourites";});
 }
-function gamifyOnSignIn(){renderChip();loadMyStats();loadFavourites();}
+function gamifyOnSignIn(){renderChip();loadMyStats();loadFavourites();loadProfileTotals(function(){});}
 /* "Download your work" (2026-08-02) -- Søren: "I want the user to be able to download all the
    annotation that they have made themselves, when looking at their profile below the 'Reports
    needing review' as a button that says 'Download your work'." Pulls every report/annotation the
