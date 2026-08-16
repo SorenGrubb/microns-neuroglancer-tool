@@ -355,6 +355,66 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .leaf-search-item:hover,.leaf-search-item.hi{background:var(--accent-dim);color:var(--accent)}
 .leaf-search-empty{padding:8px 12px;font-size:12px;color:var(--mut);font-style:italic}
 </style>
+<script>
+/* ── Stage 0 of the shared-core refactor (2026-08-16) ────────────────────────────────
+   Single source of truth for what is per-DATASET rather than per-tool. The H01 build
+   ("hJump") sets res:[8,8,33] here and changes nothing else.
+
+   Declared with `var` on purpose. `var` at the top level of a classic script becomes a
+   window property, so it is readable from every later <script> block AND from inside any
+   function, and re-declaring it is harmless while this file is mid-split. A top-level
+   `const` would throw SyntaxError if any block ever redeclared the name, and that error
+   silently kills the whole block.
+
+   UJ_RX/UJ_RY/UJ_RZ are nm per voxel; they replaced 64 hardcoded 4/4/40 literals. */
+window.UJ = window.UJ || {};
+UJ.cfg = {
+  id: "microns",
+  label: "MICrONS minnie65",
+  res: [4, 4, 40]           // nm per voxel, x/y/z
+};
+var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
+
+/* Backend + identity, consumed by core/gamify.js (loaded below). Lifted out of the tool script
+   in stage 2 so hJump can share one Apps Script deployment -- one URL means one OAuth consent
+   screen and one sign-in, and the user's level follows them between pages.
+   `ds` names this page's dataset. The backend does not read it yet; it is declared here so the
+   client side is ready when Code.gs gains its per-dataset spreadsheet map and the daily-cached
+   profile totals. */
+UJ.cfg.backend = {
+  endpoint: "https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec",
+  clientId: "240227117082-gmiv0s37qdqngo3t3ph0lmthg4t4t47p.apps.googleusercontent.com",
+  ownerEmail: "",
+  ds: "ujump"
+};
+
+/* Per-dataset mesh source, consumed by core/mesh.js (loaded immediately below). Lifted verbatim
+   out of that file's own CFG in stage 1 so hJump can point the same pipeline at H01's c3 meshes
+   by changing only this object. loadInfo() overwrites the sharding fields at runtime from the
+   bucket's info file, which stays authoritative. */
+UJ.cfg.mesh = {
+  meshBase:"https://storage.googleapis.com/iarpa_microns/minnie/minnie65/seg_m1300/mesh/",
+  meshBaseAlt:"https://storage.googleapis.com/storage/v1/b/iarpa_microns/o/minnie%2Fminnie65%2Fseg_m1300%2Fmesh%2F",
+  meshBaseAltSuffix:".shard?alt=media",
+  // Defaults, OVERWRITTEN at runtime from the mesh info file (see loadInfo). Never hardcode
+  // these for real: the info file is authoritative and free to read.
+  preshiftBits:6,minishardBits:8,shardBits:13,vertexQuantizationBits:16,
+  // 4x3 row-major affine, "stored model" space -> nm. seg_m1300 meshes are built from the
+  // 16x16x40 nm mip, NOT the 8x8x40 base -- see mesh-download-browser memory.
+  transform:[16,0,0,0, 0,16,0,0, 0,0,40,0],
+  dracoWrapper:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
+  dracoWasm:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
+};
+UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
+UJ.toVox = function(p){ return [p[0]/UJ_RX, p[1]/UJ_RY, p[2]/UJ_RZ]; };
+document.addEventListener("DOMContentLoaded", function(){
+  var e = document.getElementById("unitres");
+  if (e) e.innerHTML = UJ_RX + "\u00b7" + UJ_RY + "\u00b7" + UJ_RZ + " nm";
+});
+</script>
+<script src="core/mesh.js"></script>
+<script src="core/gamify.js"></script>
+<script src="core/ontology.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 </head><body>
@@ -507,7 +567,7 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <div class="tabpanel active" data-tabpanel="jump">
 <div class="card">
 <label style="display:none">Input units</label>
-<div class="units" id="units" style="display:none"><button data-u="voxel" class="on">voxels (4&middot;4&middot;40 nm)</button><button data-u="nm">nanometres</button><button data-u="um">micrometres</button></div>
+<div class="units" id="units" style="display:none"><button data-u="voxel" class="on">voxels (<span id="unitres"></span>)</button><button data-u="nm">nanometres</button><button data-u="um">micrometres</button></div>
 <label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; jump to it in minnie65, identify the nearest cell &amp; its neighbours, and load the cell + nucleus in 3D</span></label>
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Jump to this coordinate, build the Neuroglancer link and enable identification">&#8594;</button></div>
 <p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.</p>
@@ -874,7 +934,7 @@ function initDashboardTab(){
    geometry currently counts toward (which IS always current). There is no more static data
    embed in this file at all -- this HTML no longer needs to be re-generated/re-spliced when
    the dataset changes; it's just a normal static file that always asks the backend fresh. */
-const REPORT_ENDPOINT="https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec";
+const REPORT_ENDPOINT=UJ.cfg.backend.endpoint;
 /* Optional: if a connectivity_aggregate.json (from the synaptic-connectivity Colab script)
    is placed next to this HTML file, it's picked up automatically -- otherwise that one panel
    shows a "not generated yet" note instead of failing. This one stays a separate, occasional
@@ -1657,12 +1717,11 @@ function renderMeshContactStats(pairs){
     // 2026-08-16, Soren caught this text stuck at a stale "500 nm" from before
     // CELL_CONTACT_THRESHOLD_UM was changed to 40nm on 2026-08-15 -- updated to match. NOTE: can't
     // reference CELL_CONTACT_THRESHOLD_UM/CELL_CONTACT_POINT_CLUSTER_UM directly here even though
-    // they're the source of truth -- this function lives in a different <script> tag than those
-    // const declarations, and const does not cross <script>-tag boundaries in this file (see the
-    // ujump-script-tag-scope-boundary convention), so a live reference would throw a
-    // ReferenceError at runtime. If either default changes again, this string needs a manual update
-    // too -- there's no automatic way to keep them in sync across the tag boundary short of moving
-    // this function or duplicating the constants.
+    // they're the source of truth.
+    // CORRECTED 2026-08-16: the stated reason was wrong. Top-level `const` DOES cross <script>-tag
+    // boundaries -- see the note above ORGANELLE_GROUPS. A live reference would NOT throw. This
+    // string is still hand-synced only because nobody has changed it yet; that is a TODO, not a
+    // constraint. It is exactly why this text sat stale at "500 nm" until Soren spotted it.
     area.innerHTML="<div class='placeholder'>No comparable data yet — every time someone runs the Cell contacts “Check” button with the tool's default settings (40 nm touch threshold, 1000 nm point spacing), that pair's touch-point count is added here. Searches with custom settings still work and save in that cell's own panel, they just aren't averaged into this shared chart.</div>";
     return;
   }
@@ -1832,7 +1891,7 @@ const SRC={em:"precomputed://https://storage.googleapis.com/iarpa_microns/minnie
    every EM image layer this file builds (Img65 and Img35 alike). Per Søren. */
 const EM_SHADER_CONTROLS={normalized:{range:[86,172]}};
 const NUC_INFO="https://bossdb-open-data.s3.amazonaws.com/iarpa_microns/minnie/minnie65/nuclei/info";
-const DIM={x:[4e-9,"m"],y:[4e-9,"m"],z:[4e-8,"m"]};
+const DIM={x:[UJ_RX*1e-9,"m"],y:[UJ_RY*1e-9,"m"],z:[UJ_RZ*1e-9,"m"]};
 /* Distance (nm) past which the nearest MICrONS-detected nucleus is no longer treated as a
    credible stand-in for what's actually at a query coordinate. Tighter than the 5000nm/5um
    "probably the same cell" threshold used elsewhere in this tool (own-coordinate join, cilium
@@ -2031,9 +2090,9 @@ function ownOverride(i){
 }
 function nearestStandalone(vx,vy,vz,maxDistNm){
   let best=-1,bestD=Infinity;
-  const px=vx*4,py=vy*4,pz=vz*40;
+  const px=vx*UJ_RX,py=vy*UJ_RY,pz=vz*UJ_RZ;
   for(let i=0;i<ST_N;i++){
-    const dx=px-ST_X[i]*4,dy=py-ST_Y[i]*4,dz=pz-ST_Z[i]*40,d=dx*dx+dy*dy+dz*dz;
+    const dx=px-ST_X[i]*UJ_RX,dy=py-ST_Y[i]*UJ_RY,dz=pz-ST_Z[i]*UJ_RZ,d=dx*dx+dy*dy+dz*dz;
     if(d<bestD){bestD=d;best=i;}
   }
   if(best<0)return null;
@@ -2177,7 +2236,7 @@ function idwSurfaceY(qx,qz,PX,PY,PZ,PN,k){
   return ysum/wsum;
 }
 function estimateLayer(vx,vy,vz){
-  const qx=vx*4,qy=vy*4,qz=vz*40;
+  const qx=vx*UJ_RX,qy=vy*UJ_RY,qz=vz*UJ_RZ;
   const piaY=idwSurfaceY(qx,qz,PIA_X,PIA_Y,PIA_Z,PIA_N,8);
   const wmY=idwSurfaceY(qx,qz,WM_X,WM_Y,WM_Z,WM_N,8);
   const depth=qy-piaY,thickness=wmY-piaY;
@@ -2254,7 +2313,7 @@ function connIdwSurfaceYGrid(qx,qz,PX,PY,PZ,grid,k){
 function estimateDepthGridded(vx,vy,vz){
   if(!CONN_PIA_GRID)CONN_PIA_GRID=connBuildDepthGrid(PIA_X,PIA_Z,PIA_N);
   if(!CONN_WM_GRID)CONN_WM_GRID=connBuildDepthGrid(WM_X,WM_Z,WM_N);
-  const qx=vx*4,qy=vy*4,qz=vz*40;
+  const qx=vx*UJ_RX,qy=vy*UJ_RY,qz=vz*UJ_RZ;
   const piaY=connIdwSurfaceYGrid(qx,qz,PIA_X,PIA_Y,PIA_Z,CONN_PIA_GRID,8);
   const wmY=connIdwSurfaceYGrid(qx,qz,WM_X,WM_Y,WM_Z,CONN_WM_GRID,8);
   if(piaY==null||wmY==null)return null;
@@ -2396,8 +2455,8 @@ function stickTextAnnotations(text,xNm,yNm,zNm,glyphHNm,idPrefix){
     const segs=STICK_FONT[ch];
     if(segs)for(const seg of segs){
       anns.push({type:"line",id:idPrefix+"-"+(k++),
-        pointA:[(cx+seg[0][0]*glyphHNm)/4,(yNm+(1-seg[0][1])*glyphHNm)/4,zNm/40],
-        pointB:[(cx+seg[1][0]*glyphHNm)/4,(yNm+(1-seg[1][1])*glyphHNm)/4,zNm/40]});
+        pointA:[(cx+seg[0][0]*glyphHNm)/UJ_RX,(yNm+(1-seg[0][1])*glyphHNm)/UJ_RY,zNm/UJ_RZ],
+        pointB:[(cx+seg[1][0]*glyphHNm)/UJ_RX,(yNm+(1-seg[1][1])*glyphHNm)/UJ_RY,zNm/UJ_RZ]});
     }
     cx+=gw+gap;
   }
@@ -2446,7 +2505,7 @@ function buildLayerAnnotationLayers(pos,opts){
   const[vx,vy,vz]=pos;
   const info=estimateLayer(vx,vy,vz);
   if(!(info.thickUm>0))return[];
-  const qx=vx*4,qz=vz*40;
+  const qx=vx*UJ_RX,qz=vz*UJ_RZ;
   const piaY=idwSurfaceY(qx,qz,PIA_X,PIA_Y,PIA_Z,PIA_N,8);
   const wmY=idwSurfaceY(qx,qz,WM_X,WM_Y,WM_Z,WM_N,8);
   /* Which dataset(s) the bands must span. By default just the one the query position sits in --
@@ -2536,7 +2595,7 @@ function buildLayerAnnotationLayers(pos,opts){
       const cx=(bx[i]+bx[i+1])/2;
       const supported=cx>=tXlo&&cx<=tXhi;
       anns.push({type:"axis_aligned_bounding_box",id:name+"-band-"+i+(supported?"":"-x"),
-        pointA:[bx[i]/4,Math.min(a,b)/4,zmin/40],pointB:[bx[i+1]/4,Math.max(a,b)/4,zmax/40],
+        pointA:[bx[i]/UJ_RX,Math.min(a,b)/UJ_RY,zmin/UJ_RZ],pointB:[bx[i+1]/UJ_RX,Math.max(a,b)/UJ_RY,zmax/UJ_RZ],
         props:[supported?color:dimColor(color)]});
     }
     const li=segOfX(labelX),mid=(ySeg(li,f0)+ySeg(li,f1))/2;
@@ -2548,7 +2607,7 @@ function buildLayerAnnotationLayers(pos,opts){
       const cx=(bx[i]+bx[i+1])/2;
       const supported=cx>=tXlo&&cx<=tXhi;
       anns.push({type:"axis_aligned_bounding_box",id:name+"-marker-"+i+(supported?"":"-x"),
-        pointA:[bx[i]/4,(y-slabHalf)/4,zmin/40],pointB:[bx[i+1]/4,(y+slabHalf)/4,zmax/40],
+        pointA:[bx[i]/UJ_RX,(y-slabHalf)/UJ_RY,zmin/UJ_RZ],pointB:[bx[i+1]/UJ_RX,(y+slabHalf)/UJ_RY,zmax/UJ_RZ],
         props:[supported?color:dimColor(color)]});
     }
     const li=segOfX(labelX),yHere=ySeg(li,frac);
@@ -2572,7 +2631,7 @@ function buildLayerAnnotationLayers(pos,opts){
 function renderTopViewDiagram(vx,vy,vz){
   const BB65=window.MINNIE65_EM_BB,BB35=window.MINNIE35_EM_BB;
   if(!BB65||!BB35)return "";
-  const nx=vx*4,nz=vz*40;
+  const nx=vx*UJ_RX,nz=vz*UJ_RZ;
   const extents=[
     {name:"Img65 (minnie65)",color:"#58a6ff",a0:BB65.xmin,a1:BB65.xmax,b0:BB65.zmin,b1:BB65.zmax},
     {name:"Img35 (minnie35)",color:"#f0883e",a0:BB35.xmin,a1:BB35.xmax,b0:BB35.zmin,b1:BB35.zmax}
@@ -2869,13 +2928,13 @@ if(randomOfTypeBtn)randomOfTypeBtn.addEventListener("click",()=>{
   else{const pos=pickRandom(OWN_POS_BY_TYPE[chosen.key]);if(pos===-1){alert("No examples of that type found.");return;}jumpToVoxel(pos[0],pos[1],pos[2]);}
 });
 document.getElementById("x").addEventListener("input",e=>{const p=e.target.value.split(/[\s,]+/).filter(s=>s!=="");if(p.length>=3){e.target.value=p[0];document.getElementById("y").value=p[1];document.getElementById("z").value=p[2];}});
-function toVoxels(x,y,z){if(unit==="voxel")return[x,y,z];if(unit==="nm")return[x/4,y/4,z/40];return[x*250,y*250,z*25];}
+function toVoxels(x,y,z){if(unit==="voxel")return[x,y,z];if(unit==="nm")return[x/UJ_RX,y/UJ_RY,z/UJ_RZ];return[x*(1000/UJ_RX),y*(1000/UJ_RY),z*(1000/UJ_RZ)];}
 function round(n){return Math.abs(n-Math.round(n))<1e-6?Math.round(n):+n.toFixed(1);}
 
-function nearest(vx,vy,vz){let b=-1,bd=Infinity;for(let i=0;i<N;i++){const dx=(vx-NX[i])*4,dy=(vy-NY[i])*4,dz=(vz-NZ[i])*40,d=dx*dx+dy*dy+dz*dz;if(d<bd){bd=d;b=i;}}return{i:b,dist:Math.sqrt(bd)};}
-function kNearest(cx,cy,cz,k,excl){const best=[];for(let i=0;i<N;i++){if(i===excl)continue;const dx=(cx-NX[i])*4,dy=(cy-NY[i])*4,dz=(cz-NZ[i])*40,d=dx*dx+dy*dy+dz*dz;if(best.length<k){best.push({i,d});best.sort((a,b)=>a.d-b.d);}else if(d<best[k-1].d){best[k-1]={i,d};best.sort((a,b)=>a.d-b.d);}}return best.map(o=>({i:o.i,dist:Math.sqrt(o.d)}));}
-function inRegion(vx,vy,vz){const m=20000,nx=vx*4,ny=vy*4,nz=vz*40;return nx>=BB.xmin-m&&nx<=BB.xmax+m&&ny>=BB.ymin-m&&ny<=BB.ymax+m&&nz>=BB.zmin-m&&nz<=BB.zmax+m;}
-function distToBB(pos){var nx=pos[0]*4,ny=pos[1]*4,nz=pos[2]*40;return Math.min(nx-BB.xmin,BB.xmax-nx,ny-BB.ymin,BB.ymax-ny,nz-BB.zmin,BB.zmax-nz);}
+function nearest(vx,vy,vz){let b=-1,bd=Infinity;for(let i=0;i<N;i++){const dx=(vx-NX[i])*UJ_RX,dy=(vy-NY[i])*UJ_RY,dz=(vz-NZ[i])*UJ_RZ,d=dx*dx+dy*dy+dz*dz;if(d<bd){bd=d;b=i;}}return{i:b,dist:Math.sqrt(bd)};}
+function kNearest(cx,cy,cz,k,excl){const best=[];for(let i=0;i<N;i++){if(i===excl)continue;const dx=(cx-NX[i])*UJ_RX,dy=(cy-NY[i])*UJ_RY,dz=(cz-NZ[i])*UJ_RZ,d=dx*dx+dy*dy+dz*dz;if(best.length<k){best.push({i,d});best.sort((a,b)=>a.d-b.d);}else if(d<best[k-1].d){best[k-1]={i,d};best.sort((a,b)=>a.d-b.d);}}return best.map(o=>({i:o.i,dist:Math.sqrt(o.d)}));}
+function inRegion(vx,vy,vz){const m=20000,nx=vx*UJ_RX,ny=vy*UJ_RY,nz=vz*UJ_RZ;return nx>=BB.xmin-m&&nx<=BB.xmax+m&&ny>=BB.ymin-m&&ny<=BB.ymax+m&&nz>=BB.zmin-m&&nz<=BB.zmax+m;}
+function distToBB(pos){var nx=pos[0]*UJ_RX,ny=pos[1]*UJ_RY,nz=pos[2]*UJ_RZ;return Math.min(nx-BB.xmin,BB.xmax-nx,ny-BB.ymin,BB.ymax-ny,nz-BB.zmin,BB.zmax-nz);}
 
 let CUR_ROOT=null,CUR_NUCID=null,SEARCH_HISTORY=[],CUR_EXTRA_ROOTS=[];
 /* Full navigation history (Back/Forward + "Recently viewed cells" panel), persisted to
@@ -3596,230 +3655,11 @@ document.getElementById("go").addEventListener("click",()=>{
 });
 renderNavControls();renderRecentlyViewedPanel();
 document.getElementById("copy").addEventListener("click",async()=>{const url=document.getElementById("url").textContent;try{await navigator.clipboard.writeText(url);document.getElementById("copy").textContent="Copied";setTimeout(()=>document.getElementById("copy").textContent="Copy link",1200);}catch(_){}});
-/* ---------- Guided identification ---------- */
-const TREE={
- q1:{q:"Cortical location? (context only — sets priors, doesn't force a branch)",opts:[
-   {label:"Layer 1",next:"q2"},{label:"Layers 2/3",next:"q2"},{label:"Layer 4",next:"q2"},
-   {label:"Layer 5",next:"q2"},{label:"Layer 6",next:"q2"},{label:"White matter",next:"q2"},
-   {label:"Leptomeninges",next:"lepto"},{label:"Not sure — skip",next:"q2"}]},
- lepto:{q:"Leptomeningeal compartment?",opts:[
-   {label:"Part of the pia mater",next:"pia1"},
-   {label:"Part of the arachnoid mater",next:"arach1"},
-   {label:"Part of the dura mater",next:"dura1"},
-   {label:"Part of the vasculature",next:"w1"},
-   {label:"In the perivascular space",next:"p1"}]},
- pia1:{q:"Pia mater cell type — the pial fibroblast subtypes share one fibroblast ultrastructure and are separated mainly by location, not by a single-section EM feature (Pietilä et al. 2023).",opts:[
-   {label:"Pia mater fibroblast — flat fibroblast forming the pia at the brain surface / glia limitans; elongated, RER-rich, collagen-associated, gap junctions, no tight junctions, no own basement membrane",leaf:"pia_mater_fibroblast"},
-   {label:"Pial sheath fibroblast — same fibroblast ultrastructure, but ensheathing a penetrating vessel as it dives into cortex (the pial-glial / perivascular boundary)",leaf:"pial_sheath_fibroblast"}]},
- arach1:{q:"Arachnoid mater cell type — only the barrier cell has a real single-section EM signature (tight junctions); the arachnoid fibroblasts share the same fibroblast ultrastructure as the pial ones and are separated mainly by location (Pietilä et al. 2023).",opts:[
-   {label:"Arachnoid barrier cell — epithelial-like cells joined by continuous tight + adherens junctions, forming the CSF–blood barrier; minimal collagen between them, no own basement membrane",leaf:"arachnoid_barrier_cell"},
-   {label:"Inner arachnoid fibroblast — the same common leptomeningeal fibroblast type as the pia/pial-sheath fibroblasts, sitting deep to the barrier layer in the subarachnoid trabeculae",leaf:"inner_arachnoid_fibroblast"},
-   {label:"Fibroblast reticular cell — reticular fibroblast in the subarachnoid trabeculae; closely related to / sometimes named \"inner arachnoid fibroblast\" (naming overlap)",leaf:"fibroblast_reticular_cell"}]},
- dura1:{q:"Dura mater cell type — the dural border cell is the outermost leptomeningeal fibroblast layer, sitting at the dura–arachnoid interface; it shares the same fibroblast ultrastructure as the pia/arachnoid fibroblasts and is distinguished mainly by location, not by a single-section EM feature (Pietilä et al. 2023).",opts:[
-   {label:"Dural border cell — outermost leptomeningeal fibroblast, at the dura–arachnoid interface; elongated, RER-rich, collagen-associated, gap junctions, no tight junctions, no own basement membrane",leaf:"dural_border_cell"}]},
- q2:{q:"Where is the cell / how does it relate to the vasculature?",opts:[
-   {label:"Free in vascular lumen",next:"l1"},{label:"Part of vessel wall",next:"w1"},
-   {label:"Perivascular space",next:"p1"},{label:"Parenchyma (brain tissue proper)",next:"n1"},
-   {label:"Leptomeninges — at the brain surface (pia / arachnoid / subarachnoid space)",next:"lepto"}]},
- l1:{q:"Nucleus present?",opts:[
-   {label:"No nucleus — homogeneous dense, hemoglobin, biconcave/dumbbell, ~5.8µm (mouse RBC; smaller than the ~7.3µm human cell)",leaf:"erythrocyte"},
-   {label:"No nucleus — 2–4µm fragment, alpha + dense granules, marginal MT band",leaf:"platelet"},
-   {label:"Has nucleus (leukocyte)",next:"l2"}]},
- l2:{q:"Nuclear shape / granules?",opts:[
-   {label:"Ring/band-shaped or 3–5-lobed nucleus (mouse neutrophils are frequently ring-shaped) + multiple granule populations",leaf:"neutrophil"},
-   {label:"Very high N:C ratio, thin cytoplasm rim, round dense nucleus, few organelles",leaf:"lymphocyte"},
-   {label:"Largest; kidney-bean nucleus, pale lacy chromatin, Golgi in nuclear fold",leaf:"monocyte"}]},
- w1:{q:"Lines the lumen? (tight + adherens junctions, caveolae, flat nucleus bending around lumen)",opts:[
-   {label:"Yes — closest cell to lumen",leaf:"endothelial_cell"},
-   {label:"No — abluminal, enclosed in basement membrane",next:"w2"}]},
- w2:{q:"Vessel type / orientation?",opts:[
-   {label:"Capillary; bump-on-a-log, thin processes, shares endothelial BM",leaf:"pericyte"},
-   {label:"Arteriole; circumferential, contractile elements (myofilaments + dense bodies); elastic lamina thin/variable on small cortical arterioles",leaf:"smooth_muscle_cell"},
-   {label:"Venule; pericyte-like — bump-on-a-log, thin processes — on a venule",leaf:"venular_smooth_muscle_pericyte"}]},
- /* Pericyte subtyping (ensheathing / mesh / thin-strand), added at Søren's request. Deliberately
-    OPTIONAL: the last option keeps the plain "Pericyte" leaf, so nobody is forced to subtype a cell
-    whose 3D morphology or branch position isn't clear enough to call. That escape hatch matters
-    more here than elsewhere in this tree, because these three are ends of a continuum rather than
-    discrete classes -- Søren's own review argues the transitional mural cells are better described
-    as simply "contractile" vs "noncontractile", since morphology grades smoothly from arteriolar
-    smooth muscle through to thin-strand pericytes (Grubb 2023, Vascular Biology). The criteria
-    below are drawn from 3D/ultrastructural sources rather than invented: Grant et al. 2019 (JCBFM)
-    established the three-way naming and the branch-order zones from in vivo optical imaging;
-    Abdelazim et al. 2022 (Front. Physiol.) is the one that matters most for this tool, because it
-    tested those same categories against serial block-face SEM and reported which features actually
-    separate them in volume EM -- circumferential coverage, cross-sectional area shared with the
-    endothelium, peg-and-socket density, and an ECM feature unique to ensheathing pericytes. */
- w2p:{q:"Pericyte subtype from 3D shape and position along the vessel? (optional — pick the last option to leave it as a plain pericyte)",opts:[
-   {label:"Ensheathing — near the arteriole→capillary transition (roughly 1st–4th order branch off a penetrating arteriole, often at/just past a precapillary sphincter); processes wrap circumferentially and cover most of the vessel circumference; largest shared area with the endothelium; frequently a separate contractile mural cell sandwiched between it and the endothelium; radial \"blade-like\" basement-membrane extensions into the parenchyma are unique to this subtype",leaf:"pericyte_ensheathing"},
-   {label:"Mesh — true capillary zone, downstream of the transition; short, branching, interconnecting processes forming a mesh-like net around the vessel; intermediate circumferential coverage — more of the vessel surface covered than thin-strand, clearly less than ensheathing",leaf:"pericyte_mesh"},
-   {label:"Thin-strand — mid/high-order capillary; classic \"bump-on-a-log\" ovoid soma with one or two long, thin, unbranched strands running ALONG the vessel axis, narrowing as they go; lowest circumferential coverage and lowest shared area with the endothelium; peg-and-socket contacts prominent",leaf:"pericyte_thin_strand"},
-   {label:"Not sure / don't subtype — record it as a plain pericyte",leaf:"pericyte"}]},
- p1:{q:"What best describes this cell in the perivascular space?",opts:[
-   {label:"Large dense heterolysosomes/phagosomes, lipid + lipofuscin, blunt pseudopods",leaf:"perivascular_macrophage"},
-   {label:"Elongated, RER-rich, flanked by collagen fibrils, no own BM",leaf:"perivascular_fibroblast"},
-   {label:"Dendritic cell — criteria TBD (no peer-reviewed EM source pinned down yet; placeholder)",leaf:"dendritic_cell"},
-   {label:"Leukocyte morphology (has nucleus, blood-cell-like — incl. around leptomeninges)",next:"l2"}]},
- n1:{q:"Neuron or glia?",opts:[
-   {label:"Neuron — large pale euchromatic nucleus, owl-eye nucleolus, Nissl substance, prominent Golgi, receives synapses, primary cilium",next:"ne2"},
-   {label:"Glia — smaller nucleus relative to cell size, more heterochromatin (darker nucleus on EM), less prominent or absent \"owl-eye\" nucleolus, less abundant rough ER (no obvious Nissl substance), simpler Golgi apparatus",next:"g1"}]},
- ne2:{q:"Synapses its axon makes (or somatic proxies)?",opts:[
-   {label:"Asymmetric (Gray I), round vesicles, thick PSD; spiny dendrites + apical dendrite, pyramidal soma → excitatory",next:"ne_exc"},
-   {label:"Symmetric (Gray II), flat/pleomorphic vesicles, thin PSD; aspiny, indented nucleus, dense somatic synapses → inhibitory",next:"ne_inh"}]},
- ne_exc:{q:"Which excitatory subtype? MICrONS excitatory subtypes are set by cortical layer + 3-D dendritic shape (apical trunk, tuft, soma size), reconstructed from the full segmentation — a single TEM section usually can't resolve them, and the morphology is largely a continuum with only a few sharp exceptions in layers 5–6 (Weis et al. 2025). Use the predicted layer shown above as your main cue and pick the closest fit.",opts:[
-   {label:"Upper cortex (L2/3): one spiny apical dendrite rising to L1 with a modest tuft; arbor width & tuft shrink with depth (IT-projecting)",leaf:"exc_l23_it"},
-   {label:"Layer 4: small soma, weak or absent apical dendrite (spiny-stellate / star-pyramid), locally-branching spiny dendrites; thalamo-recipient",leaf:"exc_l4"},
-   {label:"Layer 5, large soma: THICK apical trunk with a prominent L1 tuft + extensive basal/oblique dendrites; thick myelinated axon to white matter (thick-tufted, ET)",leaf:"exc_l5_et"},
-   {label:"Layer 5, moderate soma: slender apical dendrite with a thinner/weaker tuft (intratelencephalic, IT)",leaf:"exc_l5_it"},
-   {label:"Layer 5: sparse dendritic arbor with little or no apical tuft (near-projecting, NP)",leaf:"exc_l5_np"},
-   {label:"Layer 6: tall, narrow, upright apical dendrite reaching up toward L4/upper layers (corticothalamic, CT)",leaf:"exc_l6_ct"},
-   {label:"Layer 6: shorter apical dendrite, diverse forms incl. horizontal/inverted (intratelencephalic, IT — can be hard to separate from 6P-CT)",leaf:"exc_l6_it"}]},
- ne_inh:{q:"Which inhibitory subtype? MICrONS inhibitory subtypes are defined mainly by where the axon places its synapses (Schneider-Mizell et al. 2025), so a full axon reconstruction / connectivity is usually needed — nucleus & soma ultrastructure alone separates the broad subclasses to ~90% (Elabbady et al. 2025). Match the axonal/dendritic pattern below.",opts:[
-   {label:"Dense LOCAL axon studding somata & proximal dendrites with perisomatic boutons; multipolar dendrites (perisomatic-targeting ≈ PV basket)",leaf:"inh_basket"},
-   {label:"Axon ASCENDS to layer 1 and arborizes there, targeting distal apical dendrites; soma in L2/3–L5 (distal-targeting ≈ SST Martinotti)",leaf:"inh_martinotti"},
-   {label:"Vertical bipolar / bitufted dendrites; axon preferentially targets OTHER interneurons (inhibitory-targeting, disinhibitory ≈ VIP bipolar)",leaf:"inh_bipolar"},
-   {label:"Small round soma with a dense, fine, short-range axonal cloud; enriched in layer 1; sparse / volume-transmission targeting (≈ neurogliaform)",leaf:"inh_neurogliaform"}]},
- g1:{q:"Cytoplasmic density + contents + cilium?",opts:[
-   {label:"Electron-lucent (pale) cytoplasm — paler than the darker oligodendrocyte; glycogen granules, 10-nm GFAP intermediate-filament bundles, irregular/angular nucleus with sparse chromatin, perivascular endfeet, gap junctions, primary cilium; spongy space-filling 3D territory",leaf:"astrocyte"},
-   {label:"Scant dark cytoplasm, elongated dense nucleus w/ peripheral heterochromatin band, large dense lysosomes, NO cilium",leaf:"microglia"},
-   {label:"Dark round, clumped heterochromatin, MT-rich (no IF/glycogen), continuous w/ myelin, NO cilium, in rows",leaf:"oligodendrocyte"},
-   {label:"Intermediate density, indented nucleus, centrioles + primary cilium, sparse organelles, receives synapses",leaf:"opc"}]}
-};
-/* Commonly-confused-with warnings for the guided identification result screen. Deliberately
-   conservative: only pairs with a real, checkable basis are included (a trusted source per
-   Søren\'s "never cite something not backed by a paper" rule), everything else is left out
-   rather than guessed. "note" is the specific ultrastructural overlap that causes the confusion;
-   "ref"/"refLabel" point to a source the user can actually check. */
-const CONFUSED_WITH={
-  pericyte:{withName:"Smooth muscle cell / Venular smooth muscle cell",note:"All three are mural cells distinguished mainly by vessel branch order and morphology (bump-on-a-log vs circumferential rings), not a single fixed ultrastructural marker \u2014 see the pericyte/endothelial organization study this tool\'s mural-cell split is based on.",ref:"https://doi.org/10.1101/2025.11.19.689283",refLabel:"Grubb et al., bioRxiv 2025"},
-  smooth_muscle_cell:{withName:"Pericyte / Venular smooth muscle cell",note:"Distinguished from pericytes mainly by vessel branch order (arteriole vs capillary) rather than a single fixed marker.",ref:"https://doi.org/10.1101/2025.11.19.689283",refLabel:"Grubb et al., bioRxiv 2025"},
-  venular_smooth_muscle_pericyte:{withName:"Pericyte",note:"Sits on the venous side at a branch order where pericyte- and smooth-muscle-like morphology overlap.",ref:"https://doi.org/10.1101/2025.11.19.689283",refLabel:"Grubb et al., bioRxiv 2025"},
-  endothelial_cell:{withName:"Pericyte",note:"A thin pericyte process running along the vessel wall can resemble endothelium in cross-section; check which side of the shared basement membrane the cell sits on.",ref:"https://doi.org/10.1101/2025.11.19.689283",refLabel:"Grubb et al., bioRxiv 2025"},
-  perivascular_macrophage:{withName:"Microglia / Perivascular fibroblast",note:"Both perivascular macrophages and microglia carry heterogeneous lysosomes/lipofuscin; location (perivascular space vs parenchyma) and phagolysosome pattern are the more reliable cues.",ref:"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/",refLabel:"PMC7930431"},
-  microglia:{withName:"Perivascular macrophage",note:"Shares dense lysosomes and a similarly dark, scant cytoplasm; parenchymal location (isolated by astrocyte endfeet) vs the perivascular space is the more reliable cue.",ref:"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/",refLabel:"PMC7930431"},
-  opc:{withName:"Oligodendrocyte",note:"Both have intermediate cytoplasmic density; OPCs keep a primary cilium/centrioles and receive bona fide synapses, which mature oligodendrocytes generally lack.",ref:"http://www.drjastrow.de/WAI/EM/EMAtlas.html",refLabel:"Dr. Jastrow\'s EM Atlas"},
-  oligodendrocyte:{withName:"OPC",note:"Both have intermediate cytoplasmic density; look for continuity with myelin internodes (oligodendrocyte) vs a primary cilium and thin radial processes (OPC).",ref:"http://www.drjastrow.de/WAI/EM/EMAtlas.html",refLabel:"Dr. Jastrow\'s EM Atlas"},
-  inh_basket:{withName:"Excitatory (layer 5) neuron",note:"The broad MICrONS classifier (soma/nucleus ultrastructure only) sometimes misclassifies layer 5 inhibitory neurons as excitatory; the fine m-type call is more reliable here.",ref:"https://doi.org/10.1038/s41586-024-07765-7",refLabel:"Elabbady et al., Nature 2025"},
-  inh_martinotti:{withName:"Excitatory (layer 5) neuron",note:"The broad MICrONS classifier can misclassify layer 5 inhibitory neurons as excitatory based on soma/nucleus shape alone; the fine m-type call is more reliable here.",ref:"https://doi.org/10.1038/s41586-024-07765-7",refLabel:"Elabbady et al., Nature 2025"},
-  dendritic_cell:{withName:"Perivascular macrophage",note:"Both are perivascular immune cells with overlapping ultrastructure; dendritic cells are far rarer, so a confident call benefits from a second opinion.",ref:"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/",refLabel:"PMC7930431"}
-};
-const LEAF_NAMES={erythrocyte:"Erythrocyte",platelet:"Platelet",neutrophil:"Neutrophil",lymphocyte:"Lymphocyte",monocyte:"Monocyte",endothelial_cell:"Endothelial cell",pericyte:"Pericyte",smooth_muscle_cell:"Smooth muscle cell",venular_smooth_muscle_pericyte:"Venular smooth muscle cell",perivascular_macrophage:"Perivascular macrophage",perivascular_fibroblast:"Perivascular fibroblast",dendritic_cell:"Dendritic cell",excitatory_neuron:"Excitatory neuron",inhibitory_neuron:"Inhibitory neuron",exc_l23_it:"L2/3 pyramidal neuron (23P)",exc_l4:"Layer 4 pyramidal / spiny-stellate neuron (4P)",exc_l5_it:"Layer 5 IT pyramidal neuron (5P-IT)",exc_l5_et:"Layer 5 ET thick-tufted pyramidal neuron (5P-ET)",exc_l5_np:"Layer 5 near-projecting neuron (5P-NP)",exc_l6_it:"Layer 6 IT pyramidal neuron (6P-IT)",exc_l6_ct:"Layer 6 CT pyramidal neuron (6P-CT)",inh_basket:"Basket cell — PV / perisomatic-targeting (BC)",inh_martinotti:"Martinotti cell — SST / distal-targeting (MC)",inh_bipolar:"Bipolar cell — VIP / inhibitory-targeting (BPC)",inh_neurogliaform:"Neurogliaform cell — sparsely-targeting (NGC)",astrocyte:"Astrocyte",microglia:"Microglia",oligodendrocyte:"Oligodendrocyte",opc:"OPC",pia_mater_fibroblast:"Pia mater fibroblast",pial_sheath_fibroblast:"Pial sheath fibroblast",arachnoid_barrier_cell:"Arachnoid barrier cell",fibroblast_reticular_cell:"Fibroblast reticular cell",inner_arachnoid_fibroblast:"Inner arachnoid fibroblast",dural_border_cell:"Dural border cell"};
-/* Canonicalizes a guided-ID leaf's DISPLAY name (LEAF_NAMES[slug], sentence case, sometimes with
-   an added qualifying word like "Perivascular") into the exact string used as the TYPE-BUCKET key
-   everywhere else in this app -- Søren's own-verified dataset (OWN_TYPE_NAMES, embedded above),
-   the Master List's current_identity column, and the Dashboard's live per-type aggregation. 4 leaf
-   display names don't literally match their canonical own-verified string: 3 differ only in the
-   capitalization of "fibroblast" ("Perivascular Fibroblast"/"Pia mater Fibroblast"/"Pial sheath
-   Fibroblast" are the real OWN_TYPE_NAMES strings; the leaf labels use sentence-case "fibroblast"
-   instead -- fine as on-screen text, but a DIFFERENT string to an exact-match spreadsheet lookup),
-   and "Perivascular macrophage" collapses to the broader canonical "Macrophage" bucket (there is
-   no separate "Perivascular macrophage" type in the verified dataset -- COMM_TO_ROWTYPE already
-   encodes this exact correction for client-side filtering, just never applied at submission time).
-   Root cause of Søren's 2026-08-08 report: "Perivascular fibroblast[s]"/"Pia mater fibroblast[s]"
-   each showing up TWICE on the dashboard's "Cells per cell type"/cilia-percent-by-type charts --
-   every guided-ID submission through one of these leaves was posting the mismatched display
-   string verbatim as `identified`, so it landed in the Master List/live-aggregation as its own
-   separate, differently-cased bucket holding only that handful of community reports. Apply this
-   ONLY when constructing the `identified`/`type` field of a report payload (postReport) -- never
-   for on-screen text, where the leaf's own wording (with its extra context, e.g. "Perivascular")
-   is clearer to a reader than the bare canonical type name. */
-const LEAF_SUBMIT_CANON={"Perivascular fibroblast":"Perivascular Fibroblast","Pia mater fibroblast":"Pia mater Fibroblast","Pial sheath fibroblast":"Pial sheath Fibroblast","Perivascular macrophage":"Macrophage"};
-function canonSubmitName(nm){return nm?(LEAF_SUBMIT_CANON[nm]||nm):nm;}
-/* Coarse cell-type "family" buckets -- 2026-08-09, undo/restore feature (Søren's example: "a
-   neuron was accidentally reclassified as an endothelial cell instead of a nearby pericyte" --
-   neuron -> endothelial crosses a family boundary that pericyte -> endothelial doesn't quite as
-   badly, but ANY cross-family jump is exactly the class of accidental misclick this is meant to
-   catch). Deliberately KEYWORD-based rather than a lookup keyed on the 16 leaf slugs: the actual
-   string compared here is whatever's currently on screen as the "previous" identity (a MICrONS
-   suggestion, a community vote, or a free-text override), which doesn't always match a leaf slug
-   verbatim (different casing, spacing, or a name that predates a later leaf rename) -- a
-   substring match against normalized (lowercased, underscores->spaces) text is far more robust to
-   that than an exact map would be. Order matters where a name could match more than one keyword
-   set (there isn't one today, but if a future leaf name did, the first matching family wins). */
-const CLASS_FAMILY_KEYWORDS=[
-  {family:"neuron",kws:["neuron","interneuron","pyramidal"]},
-  {family:"vascular",kws:["endothelial","pericyte","smooth muscle","mural"]},
-  {family:"perivascular",kws:["perivascular","fibroblast"]},
-  {family:"blood",kws:["erythrocyte","platelet"]},
-  {family:"circulating immune",kws:["neutrophil","lymphocyte","monocyte"]},
-  {family:"glial",kws:["astrocyte","oligodendrocyte","opc","precursor cell"]},
-  {family:"resident immune",kws:["microglia"]}
-];
-function familyOf(nameStr){
-  if(!nameStr)return null;
-  const s=String(nameStr).toLowerCase().replace(/_/g," ");
-  for(const grp of CLASS_FAMILY_KEYWORDS){
-    if(grp.kws.some(k=>s.indexOf(k)>=0))return grp.family;
-  }
-  return null;
-}
-/* Shown as a native confirm() dialog right before a reclassification that crosses a family
-   boundary (see familyOf() above) actually posts -- cheap, unmissable, blocking, and needs no new
-   UI: exactly what "confirmation dialog for major class changes" calls for. Returns true if the
-   submission should proceed (no family change, families unknown/unclassified so nothing to
-   compare, or the user confirmed), false if the user backed out. */
-function confirmMajorClassChange(oldName,newName){
-  const oldFam=familyOf(oldName),newFam=familyOf(newName);
-  if(!oldFam||!newFam||oldFam===newFam)return true;
-  return confirm("This changes the cell's category from "+oldFam+" (“"+oldName+"”) to "+newFam+" (“"+newName+"”) — a major reclassification, not just a nearby subtype.\n\nDouble-check this against the ultrastructure before submitting. Continue?");
-}
-// Real files currently sitting in the image library folders (matches what's on disk today).
-// coord is [x,y,z] in VOXELS, filled in from the catalog's Notes/coordinate column.
-// Left null until supplied -- thumbnails without a coord show greyed-out with no jump link.
-const IMAGE_LIBRARY={
- erythrocyte:{dir:"A_free_in_lumen/erythrocyte",files:[
-   {file:"erythrocyte_01_TEM.png",mod:"TEM",coord:[317351,100655,17661]},{file:"erythrocyte_02_TEM.png",mod:"TEM",coord:[317326,100653,17649]},{file:"erythrocyte_03_TEM.png",mod:"TEM",coord:[317449,100779,17690]}]},
- platelet:{dir:"A_free_in_lumen/platelet",files:[
-   {file:"platelet_01_TEM.png",mod:"TEM",coord:[325027,83268,18723]},{file:"platelet_02_TEM.png",mod:"TEM",coord:[324948,83291,18713]},{file:"platelet_03_TEM.png",mod:"TEM",coord:[324852,83287,18707]}]},
- neutrophil:{dir:"A_free_in_lumen/neutrophil",files:[]},
- lymphocyte:{dir:"A_free_in_lumen/lymphocyte",files:[
-   {file:"lymphocyte_01_TEM.png",mod:"TEM",coord:[328719,80697,9480]},{file:"lymphocyte_02_TEM.png",mod:"TEM",coord:[172822,79160,24793]},{file:"lymphocyte_03_TEM.png",mod:"TEM",coord:[328641,80580,9491]},{file:"lymphocyte_04_TEM.png",mod:"TEM",coord:[186566,88000,17033]}]},
- monocyte:{dir:"A_free_in_lumen/monocyte",files:[
-   {file:"monocyte_01_TEM.png",mod:"TEM",coord:[209931,199836,11207]},{file:"monocyte_02_TEM.png",mod:"TEM",coord:[209682,199989,11149]},{file:"monocyte_03_TEM.png",mod:"TEM",coord:[209545,199772,11185]}]},
- endothelial_cell:{dir:"B_vessel_wall/endothelial_cell",files:[
-   {file:"endothelial_cell_01_TEM.png",mod:"TEM",coord:[230448,149883,22331]},{file:"endothelial_cell_02_TEM.png",mod:"TEM",coord:[231345,149488,22333]},{file:"endothelial_cell_03_TEM.png",mod:"TEM",coord:[220965,85534,19366]},{file:"endothelial_cell_04_TEM.png",mod:"TEM",coord:[220205,84935,19357]}]},
- smooth_muscle_cell:{dir:"B_vessel_wall/smooth_muscle_cell",files:[
-   {file:"smooth_muscle_cell_01_TEM.png",mod:"TEM",coord:[175543,122612,19403]},{file:"smooth_muscle_cell_02_TEM.png",mod:"TEM",coord:[173885,123049,19492]},{file:"smooth_muscle_cell_03_TEM.png",mod:"TEM",coord:[173720,122947,19488]},{file:"smooth_muscle_cell_04_TEM.png",mod:"TEM",coord:[174968,121555,19461]},{file:"smooth_muscle_cell_05_3D.png",mod:"3D",coord:[175478,122712,19420]}]},
- pericyte:{dir:"B_vessel_wall/pericyte",files:[
-   {file:"pericyte_01_TEM.png",mod:"TEM",coord:[351380,207262,22964]},{file:"pericyte_02_TEM.png",mod:"TEM",coord:[351303,207251,22949]},{file:"pericyte_03_TEM.png",mod:"TEM",coord:[351737,206421,23030]},{file:"pericyte_04_3D.png",mod:"TEM",coord:[352695,205803,23033]},{file:"pericyte_05_3D.png",mod:"3D",coord:[351275,206523,22974]}]},
- pericyte_ensheathing:{dir:"B_vessel_wall/pericyte_ensheathing",files:[]},
- pericyte_mesh:{dir:"B_vessel_wall/pericyte_mesh",files:[]},
- pericyte_thin_strand:{dir:"B_vessel_wall/pericyte_thin_strand",files:[]},
- venular_smooth_muscle_pericyte:{dir:"B_vessel_wall/venular_smooth_muscle_pericyte",files:[]},
- perivascular_macrophage:{dir:"C_perivascular_space/perivascular_macrophage",files:[
-   {file:"perivascular_macrophage_01_TEM.png",mod:"TEM",coord:[174365,169750,19509]},{file:"perivascular_macrophage_02_TEM.png",mod:"TEM",coord:[174339,170797,19507]},{file:"perivascular_macrophage_03_TEM.png",mod:"TEM",coord:[172784,172062,19597]},{file:"perivascular_macrophage_04_TEM.png",mod:"TEM",coord:[171898,170943,19559]},{file:"perivascular_macrophage_05_3D.png",mod:"3D",coord:[173741,170125,19591]}]},
- perivascular_fibroblast:{dir:"C_perivascular_space/perivascular_fibroblast",files:[
-   {file:"perivascular_fibroblast_01_TEM.png",mod:"TEM",coord:[148912,194263,17139]},{file:"perivascular_fibroblast_02_TEM.png",mod:"TEM",coord:[147728,193980,17100]},{file:"perivascular_fibroblast_03_TEM.png",mod:"TEM",coord:[149783,195334,17130]},{file:"perivascular_fibroblast_04_TEM.png",mod:"TEM",coord:[148660,194806,17104]},{file:"perivascular_fibroblast_05_3D.png",mod:"3D",coord:[147394,193443,17111]}]},
- dendritic_cell:{dir:"C_perivascular_space/dendritic_cell",files:[]},
- excitatory_neuron:{dir:"D_parenchyma_neurons/excitatory_neuron",files:[
-   {file:"excitatory_neuron_03_TEM.png",mod:"TEM",coord:[265015,189269,18101]},{file:"excitatory_neuron_04_3D.png",mod:"3D",coord:[265015,189269,18101]},{file:"excitatory_neuron_05_3D.png",mod:"3D",coord:[265015,189269,18101]}]},
- inhibitory_neuron:{dir:"D_parenchyma_neurons/inhibitory_neuron",files:[
-   {file:"inhibitory_neuron_03_TEM.png",mod:"TEM",coord:[262339,189412,17839]},{file:"inhibitory_neuron_04_3D.png",mod:"3D",coord:[262339,189412,17839],root:"864691135163623469"},{file:"inhibitory_neuron_05_3D.png",mod:"3D",coord:[262339,189412,17839],root:"864691135163623469"}]},
- exc_l23_it:{dir:"D_parenchyma_neurons/excitatory_neuron/exc_l23_it",files:[]},
- exc_l4:{dir:"D_parenchyma_neurons/excitatory_neuron/exc_l4",files:[]},
- exc_l5_it:{dir:"D_parenchyma_neurons/excitatory_neuron/exc_l5_it",files:[]},
- exc_l5_et:{dir:"D_parenchyma_neurons/excitatory_neuron/exc_l5_et",files:[]},
- exc_l5_np:{dir:"D_parenchyma_neurons/excitatory_neuron/exc_l5_np",files:[]},
- exc_l6_it:{dir:"D_parenchyma_neurons/excitatory_neuron/exc_l6_it",files:[]},
- exc_l6_ct:{dir:"D_parenchyma_neurons/excitatory_neuron/exc_l6_ct",files:[]},
- inh_basket:{dir:"D_parenchyma_neurons/inhibitory_neuron/inh_basket",files:[]},
- inh_martinotti:{dir:"D_parenchyma_neurons/inhibitory_neuron/inh_martinotti",files:[]},
- inh_bipolar:{dir:"D_parenchyma_neurons/inhibitory_neuron/inh_bipolar",files:[]},
- inh_neurogliaform:{dir:"D_parenchyma_neurons/inhibitory_neuron/inh_neurogliaform",files:[]},
- astrocyte:{dir:"E_parenchyma_glia/astrocyte",files:[
-   {file:"astrocyte_01_TEM.png",mod:"TEM",coord:[202245,91114,24443]},{file:"astrocyte_02_TEM.png",mod:"TEM",coord:[201959,90406,24435]},{file:"astrocyte_03_TEM.png",mod:"TEM",coord:[201458,90996,24407]},{file:"astrocyte_04_3D.png",mod:"3D",coord:[202245,91114,24443]},{file:"astrocyte_05_3D.png",mod:"3D",coord:[202245,91114,24443]}]},
- microglia:{dir:"E_parenchyma_glia/microglia",files:[
-   {file:"microglia_01_TEM.png",mod:"TEM",coord:[223862,144625,23876],root:"864691135992500360"},{file:"microglia_02_TEM.png",mod:"TEM",coord:[223965,144608,23854],root:"864691135992500360"},{file:"microglia_03_TEM.png",mod:"TEM",coord:[224380,144267,23873],root:"864691135992500360"},{file:"microglia_04_3D.png",mod:"3D",coord:[224042,144609,23852],root:"864691135992500360"}]},
- oligodendrocyte:{dir:"E_parenchyma_glia/oligodendrocyte",files:[
-   {file:"oligodendrocyte_01_TEM.png",mod:"TEM",coord:[214734,238819,18378]},{file:"oligodendrocyte_02_TEM.png",mod:"TEM",coord:[214440,239193,18347]},{file:"oligodendrocyte_04_TEM.png",mod:"TEM",coord:[214616,239130,18384]},{file:"oligodendrocyte_05_3D.png",mod:"3D",coord:[214295,239332,18362]}]},
- opc:{dir:"E_parenchyma_glia/opc",files:[
-   {file:"opc_01_TEM.png",mod:"TEM",coord:[144893,202304,18101]},{file:"opc_02_TEM.png",mod:"TEM",coord:[144468,202446,18071]},{file:"opc_04_TEM.png",mod:"TEM",coord:[145054,201800,18077]},{file:"opc_05_3D.png",mod:"3D",coord:[145722,201943,18136]}]},
- pia_mater_fibroblast:{dir:"F_leptomeninges/pia_mater_fibroblast",files:[]},
- pial_sheath_fibroblast:{dir:"F_leptomeninges/pial_sheath_fibroblast",files:[]},
- arachnoid_barrier_cell:{dir:"F_leptomeninges/arachnoid_barrier_cell",files:[]},
- fibroblast_reticular_cell:{dir:"F_leptomeninges/fibroblast_reticular_cell",files:[]},
- inner_arachnoid_fibroblast:{dir:"F_leptomeninges/inner_arachnoid_fibroblast",files:[]},
- dural_border_cell:{dir:"F_leptomeninges/dural_border_cell",files:[]}
-};
+/* Guided-identification ontology (TREE, LEAF_NAMES, CONFUSED_WITH, LEAF_SUBMIT_CANON,
+   canonSubmitName, CLASS_FAMILY_KEYWORDS, familyOf, confirmMajorClassChange, IMAGE_LIBRARY)
+   -- moved to core/ontology.js, stage 3 of the shared-core refactor, 2026-08-16. It is pure,
+   dataset-agnostic data and hJump shares it unchanged. Loaded as a <script src> further up;
+   the declarations are top-level there, so every reference below resolves as before. */
 /* Column E ("Feature to capture (discriminator)") from brain_cell_image_library_catalog.xlsx's
    "Image catalog" sheet, keyed by filename (column G) -- shown in reference-image tooltips
    alongside the cell type and modality so hovering an image also says what it's meant to show. */
@@ -4448,8 +4288,8 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
    Credentials > OAuth client ID > Application type "Web application" > add the exact
    https:// URL you host this file at under "Authorized JavaScript origins" > copy the
    Client ID into GOOGLE_CLIENT_ID below. Leave it blank to just use the typed name/email. */
-const REPORT_ENDPOINT="https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec";
-const GOOGLE_CLIENT_ID="240227117082-gmiv0s37qdqngo3t3ph0lmthg4t4t47p.apps.googleusercontent.com";
+const REPORT_ENDPOINT=UJ.cfg.backend.endpoint;
+const GOOGLE_CLIENT_ID=UJ.cfg.backend.clientId;
 const OWNER_EMAIL="";  // set to YOUR Google sign-in email to show owner-only "remove" buttons on proposed root IDs // <-- paste an OAuth client ID here to enable "Sign in with Google" (see note above)
 let REPORTER_NAME=localStorage.getItem("reporterName")||"";
 let REPORTER_EMAIL=localStorage.getItem("reporterEmail")||"";
@@ -4900,9 +4740,14 @@ function postReport(payload,okMsg){
    sections so a 49-item list stays navigable), every read-back display
    (organelleStructRowsHtml/organelleCountParts below), AND (new) the Filter-and-show "Organelles
    and extracellular structures" checkbox list (built from window.ORGANELLE_GROUPS -- exposed on
-   window since that UI lives in a LATER <script> tag, and top-level const/let bindings don't
-   cross <script> tag boundaries in a browser, only `var`/function declarations or an explicit
-   `window.x=` do). `vector:true` is still what distinguishes cilium (the one kind needing
+   window for that LATER <script> tag's UI).
+   VERIFIED 2026-08-16: top-level `const`/`let` in one classic <script> tag ARE visible to
+   every later <script> tag on the page -- they share one global lexical environment. Proof in
+   this very file: `const N` (main block) is used bare at lines ~9951/10661/10733/10795 in four
+   later blocks, and the vessel filters that depend on it work in production. What is NOT true:
+   they are not properties of `window` (so `window.X` and `typeof window.X` fail), and a second
+   `const X` anywhere on the page throws SyntaxError that silently kills that whole block.
+   So the `window.` exposure here is belt-and-braces rather than required; harmless, left alone. `vector:true` is still what distinguishes cilium (the one kind needing
    base+tip, i.e. two points) from every other kind, which is "a single annotation" (one x/y/z
    point) -- adding a 50th kind later only means appending one entry to the right group here,
    never touching any function that loops over ORGANELLE_KINDS/ORGANELLE_GROUPS generically.
@@ -5420,10 +5265,10 @@ function buildConnectivityState(centerPos,queryRootIds,shown,points){
 function computeConnSpanNm(centerPos,shown,points){
   if(!points||!points.length)return 60000;
   let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity,zmin=Infinity,zmax=-Infinity;
-  const cx=centerPos[0]*4,cy=centerPos[1]*4,cz=centerPos[2]*40;
+  const cx=centerPos[0]*UJ_RX,cy=centerPos[1]*UJ_RY,cz=centerPos[2]*UJ_RZ;
   xmin=xmax=cx;ymin=ymax=cy;zmin=zmax=cz;
   for(const p of points){
-    const x=Number(p.pos[0])*4,y=Number(p.pos[1])*4,z=Number(p.pos[2])*40;
+    const x=Number(p.pos[0])*UJ_RX,y=Number(p.pos[1])*UJ_RY,z=Number(p.pos[2])*UJ_RZ;
     if(x<xmin)xmin=x;if(x>xmax)xmax=x;if(y<ymin)ymin=y;if(y>ymax)ymax=y;if(z<zmin)zmin=z;if(z>zmax)zmax=z;
   }
   return Math.max(xmax-xmin,ymax-ymin,zmax-zmin,20000);
@@ -6003,770 +5848,10 @@ function renderConnectivityToggle(el,containerId,rootId,centerPos,cellType,nucle
   });
 }
 
-/* ============================================================================
-   Mesh download: root ID -> .glb, entirely client-side (no backend, no CAVE
-   token -- the seg_m1300 mesh bucket is public). Ported from Søren's
-   mesh_download_prototype.html / MICrONS_downloader.ipynb reverse-engineering.
-   Per Søren: attach only to this cell's own root ID row(s) (not every partner
-   in the connectivity table), and download immediately at a sensible default
-   resolution rather than opening a picker -- one click, no extra UI unless it
-   fails. See mesh-download-browser memory for the LOD/transform validation.
-
-   Pipeline: root_id --murmurhash3_x86_128--> shard+minishard --Range GET-->
-   shard index --Range GET+gunzip--> minishard index --lookup--> manifest
-   byte range --Range GET+gunzip--> neuroglancer_multilod_draco manifest
-   --Range GET (one call per LOD)--> Draco fragments --draco wasm--> verts+
-   indices --assemble--> GLB. Format spec:
-   https://github.com/google/neuroglancer/blob/master/src/datasource/precomputed/meshes.md
-   ============================================================================ */
-const MeshDL=(()=>{
-  const CFG={
-    meshBase:"https://storage.googleapis.com/iarpa_microns/minnie/minnie65/seg_m1300/mesh/",
-    meshBaseAlt:"https://storage.googleapis.com/storage/v1/b/iarpa_microns/o/minnie%2Fminnie65%2Fseg_m1300%2Fmesh%2F",
-    meshBaseAltSuffix:".shard?alt=media",
-    // Defaults, OVERWRITTEN at runtime from the mesh info file (see loadInfo). Never hardcode
-    // these for real: the info file is authoritative and free to read.
-    preshiftBits:6,minishardBits:8,shardBits:13,vertexQuantizationBits:16,
-    // 4x3 row-major affine, "stored model" space -> nm. seg_m1300 meshes are built from the
-    // 16x16x40 nm mip, NOT the 8x8x40 base -- see mesh-download-browser memory.
-    transform:[16,0,0,0, 0,16,0,0, 0,0,40,0],
-    dracoWrapper:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
-    dracoWasm:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
-  };
-  function mb(n){return (n/1048576).toFixed(n>10485760?0:1)+" MB";}
-  function rotl32(x,r){return ((x<<r)|(x>>>(32-r)))>>>0;}
-  function fmix32(h){h=(h^(h>>>16))>>>0;h=Math.imul(h,0x85ebca6b)>>>0;h=(h^(h>>>13))>>>0;h=Math.imul(h,0xc2b2ae35)>>>0;return (h^(h>>>16))>>>0;}
-  function murmur64(valBig){
-    const c1=0x239b961b,c2=0xab0e9789,c3=0x38b34ae5;
-    const high32=Number((valBig>>32n)&0xffffffffn),low32=Number(valBig&0xffffffffn);
-    let h1=0,h2=0,h3=0,h4=0;
-    let k2=Math.imul(high32,c2)>>>0;k2=rotl32(k2,16);k2=Math.imul(k2,c3)>>>0;h2=(h2^k2)>>>0;
-    let k1=Math.imul(low32,c1)>>>0;k1=rotl32(k1,15);k1=Math.imul(k1,c2)>>>0;h1=(h1^k1)>>>0;
-    const len=8;h1=(h1^len)>>>0;h2=(h2^len)>>>0;h3=(h3^len)>>>0;h4=(h4^len)>>>0;
-    h1=(h1+h2+h3+h4)>>>0;h2=(h2+h1)>>>0;h3=(h3+h1)>>>0;h4=(h4+h1)>>>0;
-    h1=fmix32(h1);h2=fmix32(h2);h3=fmix32(h3);h4=fmix32(h4);
-    h1=(h1+h2+h3+h4)>>>0;h2=(h2+h1)>>>0;
-    return (BigInt(h1)|(BigInt(h2)<<32n));
-  }
-  function shardAndMinishard(rootIdBig){
-    const hashed=murmur64(rootIdBig>>BigInt(CFG.preshiftBits));
-    const mask=(1n<<BigInt(CFG.minishardBits+CFG.shardBits))-1n;
-    const sm=hashed&mask;
-    const minishard=Number(sm&((1n<<BigInt(CFG.minishardBits))-1n));
-    const shard=Number((sm>>BigInt(CFG.minishardBits))&((1n<<BigInt(CFG.shardBits))-1n));
-    return {shard:shard.toString(16).padStart(4,"0"),minishard};
-  }
-  let useAlt=false;
-  function shardUrl(shard){return useAlt?(CFG.meshBaseAlt+shard+CFG.meshBaseAltSuffix):(CFG.meshBase+shard+".shard");}
-  /* seg_m1300 is a FROZEN precomputed snapshot (see the CAVE_SEG_SOURCE comment near
-     loadConnectivityPanel) -- a root ID that isn't in its shard index today will never suddenly
-     appear there, so there's no point re-running the same network round-trip on every click. Most
-     common cause: the ID came from a CAVE query at a version other than 1300, or the cell has
-     since been further proofread (see findManifest()'s own error text). Cache is keyed by root ID
-     string, persisted to localStorage so it survives reloads; Shift-click on the download/compute
-     button bypasses it for one attempt (genuine recheck, not a fake "click again"). */
-  const MESH_NOT_FOUND_KEY="microns_mesh_notfound_roots_v1";
-  let notFoundCache=null;
-  function loadNotFoundCache(){
-    if(notFoundCache)return notFoundCache;
-    try{notFoundCache=new Map(JSON.parse(localStorage.getItem(MESH_NOT_FOUND_KEY)||"[]"));}
-    catch(_e){notFoundCache=new Map();}
-    return notFoundCache;
-  }
-  function saveNotFoundCache(){
-    try{localStorage.setItem(MESH_NOT_FOUND_KEY,JSON.stringify([...loadNotFoundCache().entries()]));}catch(_e){}
-  }
-  function markRootNotFound(rootIdStr){loadNotFoundCache().set(String(rootIdStr),Date.now());saveNotFoundCache();}
-  function isRootKnownNotFound(rootIdStr){return loadNotFoundCache().has(String(rootIdStr));}
-  /* Exposed for manual use from the browser console if the cache ever needs a full reset (e.g. if
-     this tool later adds a fallback source for non-v1300 IDs and old "not found" entries should
-     be re-checked) -- not wired to any UI button since that's not something Søren asked for. */
-  function clearMeshNotFoundCache(){notFoundCache=new Map();try{localStorage.removeItem(MESH_NOT_FOUND_KEY);}catch(_e){}}
-  async function rangeGet(url,start,end,onProgress){
-    const res=await fetch(url,{headers:{Range:"bytes="+start+"-"+end}});
-    if(res.status!==206)throw new Error("expected HTTP 206 for byte range, got "+res.status);
-    const total=end-start+1;
-    if(!onProgress||!res.body)return new Uint8Array(await res.arrayBuffer());
-    const reader=res.body.getReader();
-    const out=new Uint8Array(total);
-    let got=0;
-    for(;;){
-      const {done,value}=await reader.read();
-      if(done)break;
-      out.set(value,got);got+=value.length;
-      onProgress(got/total);
-    }
-    return got===total?out:out.subarray(0,got);
-  }
-  async function gunzip(u8){
-    const ds=new DecompressionStream("gzip");
-    const stream=new Blob([u8]).stream().pipeThrough(ds);
-    return new Uint8Array(await new Response(stream).arrayBuffer());
-  }
-  let infoLoaded=false;
-  async function loadInfo(){
-    if(infoLoaded)return;
-    const res=await fetch(CFG.meshBase+"info");
-    if(!res.ok){infoLoaded=true;return;} // fall back to the built-in defaults above
-    const j=await res.json();
-    if(j["@type"]!=="neuroglancer_multilod_draco")throw new Error('unexpected mesh format "'+j["@type"]+'"');
-    if(Array.isArray(j.transform)&&j.transform.length===12)CFG.transform=j.transform;
-    if(j.vertex_quantization_bits)CFG.vertexQuantizationBits=j.vertex_quantization_bits;
-    const sh=j.sharding||{};
-    if(sh.preshift_bits!=null)CFG.preshiftBits=sh.preshift_bits;
-    if(sh.minishard_bits!=null)CFG.minishardBits=sh.minishard_bits;
-    if(sh.shard_bits!=null)CFG.shardBits=sh.shard_bits;
-    if(sh.hash&&sh.hash!=="murmurhash3_x86_128")throw new Error('unsupported sharding hash "'+sh.hash+'"');
-    infoLoaded=true;
-  }
-  async function findManifest(rootIdBig,forceRecheck){
-    const rootIdStr=String(rootIdBig);
-    if(!forceRecheck&&isRootKnownNotFound(rootIdStr)){
-      const err=new Error("root ID "+rootIdStr+" is cached as unavailable in the seg_m1300 mesh snapshot (an earlier lookup found it wasn't indexed there) \u2014 skipped the network check. Shift-click to force a fresh check.");
-      err.meshCached=true;throw err;
-    }
-    const {shard,minishard}=shardAndMinishard(rootIdBig);
-    let url=shardUrl(shard);
-    const shardIndexSize=(1<<CFG.minishardBits)*16;
-    const off=minishard*16;
-    let entry;
-    try{entry=await rangeGet(url,off,off+15);}
-    catch(e){
-      if(!useAlt){useAlt=true;url=shardUrl(shard);entry=await rangeGet(url,off,off+15);}
-      else throw e;
-    }
-    const ev=new DataView(entry.buffer,entry.byteOffset,entry.byteLength);
-    const startOffset=ev.getBigUint64(0,true),endOffset=ev.getBigUint64(8,true);
-    if(startOffset===endOffset){
-      markRootNotFound(rootIdStr);
-      throw new Error("minishard "+minishard+" is empty — root ID not in this dataset (or was later merged/split away)? Cached — future attempts will skip the network check; Shift-click to force a recheck.");
-    }
-    const msStart=BigInt(shardIndexSize)+startOffset,msEnd=BigInt(shardIndexSize)+endOffset;
-    const idxRaw=await gunzip(await rangeGet(url,Number(msStart),Number(msEnd-1n)));
-    const aligned=new Uint8Array(idxRaw.length);aligned.set(idxRaw);
-    const arr=new BigUint64Array(aligned.buffer);
-    const n=arr.length/3;
-    const ids=arr.slice(0,n),starts=arr.slice(n,2*n),sizes=arr.slice(2*n);
-    for(let i=1;i<n;i++)ids[i]+=ids[i-1];
-    let prev=BigInt(shardIndexSize);
-    for(let i=0;i<n;i++){starts[i]+=prev;prev=starts[i]+sizes[i];}
-    let idx=-1;
-    for(let i=0;i<n;i++)if(ids[i]===rootIdBig){idx=i;break;}
-    if(idx<0){
-      markRootNotFound(rootIdStr);
-      throw new Error("root ID "+rootIdStr+" not found in minishard "+minishard+" ("+n+" entries) — wrong dataset, or this ID predates/postdates the seg_m1300 snapshot? Cached — future attempts will skip the network check; Shift-click to force a recheck.");
-    }
-    return {shard,minishard,manifestStart:Number(starts[idx]),manifestSize:Number(sizes[idx]),url};
-  }
-  function parseManifest(u8){
-    const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
-    let p=0;
-    const chunkShape=[dv.getFloat32(p,true),dv.getFloat32(p+4,true),dv.getFloat32(p+8,true)];p+=12;
-    const gridOrigin=[dv.getFloat32(p,true),dv.getFloat32(p+4,true),dv.getFloat32(p+8,true)];p+=12;
-    const numLods=dv.getUint32(p,true);p+=4;
-    const lodScales=[];for(let i=0;i<numLods;i++){lodScales.push(dv.getFloat32(p,true));p+=4;}
-    const vertexOffsets=[];
-    for(let i=0;i<numLods;i++){vertexOffsets.push([dv.getFloat32(p,true),dv.getFloat32(p+4,true),dv.getFloat32(p+8,true)]);p+=12;}
-    const numFragsPerLod=[];for(let i=0;i<numLods;i++){numFragsPerLod.push(dv.getUint32(p,true));p+=4;}
-    const lods=[];
-    for(let l=0;l<numLods;l++){
-      const n=numFragsPerLod[l];
-      const pos=new Uint32Array(3*n);
-      for(let i=0;i<3*n;i++){pos[i]=dv.getUint32(p,true);p+=4;}
-      const sizes=new Uint32Array(n);
-      for(let i=0;i<n;i++){sizes[i]=dv.getUint32(p,true);p+=4;}
-      lods.push({n,pos,sizes});
-    }
-    return {chunkShape,gridOrigin,numLods,lodScales,vertexOffsets,numFragsPerLod,lods};
-  }
-  function fragmentLayout(parsed,manifestStart){
-    let totalBytes=0;
-    for(const lod of parsed.lods)for(const s of lod.sizes)totalBytes+=s;
-    let offset=manifestStart-totalBytes;
-    const perLod=[];
-    for(const lod of parsed.lods){
-      const start=offset,frags=[];
-      for(const s of lod.sizes){frags.push([offset,s]);offset+=s;}
-      perLod.push({start,end:offset-1,bytes:offset-start,frags});
-    }
-    return perLod;
-  }
-  let dracoPromise=null;
-  function loadDraco(){
-    if(dracoPromise)return dracoPromise;
-    dracoPromise=(async()=>{
-      const [wrapperSrc,wasmBinary]=await Promise.all([
-        fetch(CFG.dracoWrapper).then(r=>{if(!r.ok)throw new Error("draco wrapper "+r.status);return r.text();}),
-        fetch(CFG.dracoWasm).then(r=>{if(!r.ok)throw new Error("draco wasm "+r.status);return r.arrayBuffer();})
-      ]);
-      const factory=new Function(wrapperSrc+"\nreturn DracoDecoderModule;")();
-      return await factory({wasmBinary});
-    })();
-    return dracoPromise;
-  }
-  function decodeDracoFragment(draco,decoder,bytes){
-    const buf=new draco.DecoderBuffer();
-    buf.Init(new Int8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength),bytes.byteLength);
-    const mesh=new draco.Mesh();
-    const status=decoder.DecodeBufferToMesh(buf,mesh);
-    if(!status.ok()){draco.destroy(mesh);draco.destroy(buf);throw new Error("draco decode failed: "+status.error_msg());}
-    const numPoints=mesh.num_points(),numFaces=mesh.num_faces();
-    const attId=decoder.GetAttributeId(mesh,draco.POSITION);
-    const att=decoder.GetAttribute(mesh,attId);
-    const nVals=numPoints*3;
-    const pPtr=draco._malloc(nVals*4);
-    decoder.GetAttributeDataArrayForAllPoints(mesh,att,draco.DT_FLOAT32,nVals*4,pPtr);
-    const verts=new Float32Array(draco.HEAPF32.buffer,pPtr,nVals).slice();
-    draco._free(pPtr);
-    const nIdx=numFaces*3;
-    const iPtr=draco._malloc(nIdx*4);
-    decoder.GetTrianglesUInt32Array(mesh,nIdx*4,iPtr);
-    const idx=new Uint32Array(draco.HEAPF32.buffer,iPtr,nIdx).slice();
-    draco._free(iPtr);
-    draco.destroy(mesh);draco.destroy(buf);
-    return {verts,idx};
-  }
-  /* MICrONS/Neuroglancer's Y axis increases DOWNWARD (image-row convention: y=0 is the pia
-     surface, larger y is deeper/more ventral) but glTF/GLB assumes Y-UP, so feeding raw Y
-     straight through renders the mesh upside down in any standard glTF viewer (Blender, the
-     am3d PowerPoint camera, etc.). The PowerPoint export already negates Y (see the long
-     comment inline in downloadRootPptx() below, confirmed live 2026-07-28); the plain .glb
-     download was deliberately left un-mirrored at the time on the assumption that whatever
-     opened it already accounted for the convention -- Søren reported otherwise (2026-08), so
-     the SAME fix now applies here too. Mirroring one axis also flips triangle winding, so each
-     triangle's last two indices are swapped to restore correct front-face orientation/lighting. */
-  function flipYForGLTF(rawPositions,rawIndices){
-    const positions=new Float32Array(rawPositions.length);
-    for(let k=0;k<rawPositions.length;k+=3){
-      positions[k]=rawPositions[k];positions[k+1]=-rawPositions[k+1];positions[k+2]=rawPositions[k+2];
-    }
-    const indices=new Uint32Array(rawIndices.length);
-    for(let t=0;t<rawIndices.length;t+=3){
-      indices[t]=rawIndices[t];indices[t+1]=rawIndices[t+2];indices[t+2]=rawIndices[t+1];
-    }
-    return {positions,indices};
-  }
-  function buildGLB(positions,indices,name){
-    let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
-    for(let i=0;i<positions.length;i+=3){
-      const x=positions[i],y=positions[i+1],z=positions[i+2];
-      if(x<minX)minX=x;if(y<minY)minY=y;if(z<minZ)minZ=z;
-      if(x>maxX)maxX=x;if(y>maxY)maxY=y;if(z>maxZ)maxZ=z;
-    }
-    const idxBytes=indices.byteLength;
-    const idxPad=(4-(idxBytes%4))%4;
-    const posOffset=idxBytes+idxPad;
-    const binLength=posOffset+positions.byteLength;
-    const json={
-      asset:{version:"2.0",generator:"uJump MICrONS mesh downloader"},
-      scene:0,scenes:[{nodes:[0]}],nodes:[{mesh:0,name}],
-      meshes:[{name,primitives:[{attributes:{POSITION:1},indices:0,mode:4}]}],
-      accessors:[
-        {bufferView:0,componentType:5125,count:indices.length,type:"SCALAR"},
-        {bufferView:1,componentType:5126,count:positions.length/3,type:"VEC3",min:[minX,minY,minZ],max:[maxX,maxY,maxZ]}
-      ],
-      bufferViews:[
-        {buffer:0,byteOffset:0,byteLength:idxBytes,target:34963},
-        {buffer:0,byteOffset:posOffset,byteLength:positions.byteLength,target:34962}
-      ],
-      buffers:[{byteLength:binLength}]
-    };
-    let jsonBytes=new TextEncoder().encode(JSON.stringify(json));
-    const jsonPad=(4-(jsonBytes.length%4))%4;
-    if(jsonPad){const padded=new Uint8Array(jsonBytes.length+jsonPad);padded.set(jsonBytes);padded.fill(0x20,jsonBytes.length);jsonBytes=padded;}
-    const binPadded=binLength+((4-(binLength%4))%4);
-    const total=12+8+jsonBytes.length+8+binPadded;
-    const out=new Uint8Array(total);
-    const dv=new DataView(out.buffer);
-    let o=0;
-    dv.setUint32(o,0x46546C67,true);o+=4;
-    dv.setUint32(o,2,true);o+=4;
-    dv.setUint32(o,total,true);o+=4;
-    dv.setUint32(o,jsonBytes.length,true);o+=4;
-    dv.setUint32(o,0x4E4F534A,true);o+=4;
-    out.set(jsonBytes,o);o+=jsonBytes.length;
-    dv.setUint32(o,binPadded,true);o+=4;
-    dv.setUint32(o,0x004E4942,true);o+=4;
-    out.set(new Uint8Array(indices.buffer,indices.byteOffset,idxBytes),o);
-    out.set(new Uint8Array(positions.buffer,positions.byteOffset,positions.byteLength),o+posOffset);
-    return out;
-  }
-  /* Core fetch+decode pipeline, shared by the .glb download and the .pptx builder below so
-     neither duplicates the shard/manifest/Draco logic. One click, no picker: pick the coarsest
-     LOD still under ~8MB (falling back to the coarsest LOD available), absolute dataset
-     coordinates in micrometres so multiple downloaded meshes stay spatially aligned with each
-     other and with Neuroglancer/Blender imports of MICrONS data -- same default as
-     mesh_download_prototype.html's LOD table. */
-  async function fetchMesh(rootIdStr,onProgress,forceRecheck,forceCoarsestLod){
-    const rootId=BigInt(rootIdStr);
-    onProgress&&onProgress(0,"reading manifest…");
-    await loadInfo();
-    const info=await findManifest(rootId,forceRecheck);
-    const manifest=await gunzip(await rangeGet(info.url,info.manifestStart,info.manifestStart+info.manifestSize-1));
-    const parsed=parseManifest(manifest);
-    const layout=fragmentLayout(parsed,info.manifestStart);
-    let lod=parsed.numLods-1;
-    /* forceCoarsestLod (2026-08-16, Soren: "it does not load any astrocytes. All astrocyte meshes
-       are too large to load") -- root cause of that was NOT a bug in the vertex-count safety cap
-       itself, it was that astrocytes are so large and sprawling that even their finest LOD under
-       the normal 8MB-byte search below routinely decodes to WAY more than 400k vertices (draco
-       compression ratios mean an 8MB compressed fragment set can unpack into millions of vertices).
-       Tripartite synapse proximity only needs a coarse approximation of "is there astrocyte
-       membrane near this synapse" at a threshold on the order of hundreds of nm, not fine surface
-       detail -- so for that one caller, skip the byte-size search entirely and always take the
-       COARSEST available LOD (numLods-1), which is both far smaller and correctly decoded (multi-
-       resolution meshes are built exactly for this kind of "good enough, cheap" use). Every other
-       caller (Cell contacts, mesh downloads, PowerPoint export, volume computation) omits this
-       param and keeps the original finest-under-8MB behaviour unchanged. */
-    if(!forceCoarsestLod){
-      for(let l=parsed.numLods-1;l>=0;l--){if(layout[l].bytes<8*1048576)lod=l;}
-    }
-    const L=layout[lod];
-    onProgress&&onProgress(0.05,"fetching "+mb(L.bytes)+"…");
-    const blob=await rangeGet(info.url,L.start,L.end,f=>onProgress&&onProgress(0.05+f*0.55,"fetching…"));
-    const draco=await loadDraco();
-    const decoder=new draco.Decoder();
-    const quant=Math.pow(2,CFG.vertexQuantizationBits)-1;
-    const cs=parsed.chunkShape,go=parsed.gridOrigin,vo=parsed.vertexOffsets[lod];
-    const lodScale=Math.pow(2,lod);
-    const T=CFG.transform;
-    const P=parsed.lods[lod].pos,nF=parsed.lods[lod].n;
-    const vertChunks=[],idxChunks=[];
-    let totalVerts=0,totalIdx=0,decoded=0;
-    for(let i=0;i<nF;i++){
-      const [off,size]=L.frags[i];
-      if(size===0)continue;
-      const slice=blob.subarray(off-L.start,off-L.start+size);
-      let r;
-      try{r=decodeDracoFragment(draco,decoder,slice);}catch(_e){continue;}
-      const fx=P[i],fy=P[nF+i],fz=P[2*nF+i];
-      const v=r.verts;
-      const scale=1000; // micrometres
-      for(let k=0;k<v.length;k+=3){
-        const sx=go[0]+vo[0]+cs[0]*lodScale*(fx+v[k]/quant);
-        const sy=go[1]+vo[1]+cs[1]*lodScale*(fy+v[k+1]/quant);
-        const sz=go[2]+vo[2]+cs[2]*lodScale*(fz+v[k+2]/quant);
-        v[k]=(T[0]*sx+T[1]*sy+T[2]*sz+T[3])/scale;
-        v[k+1]=(T[4]*sx+T[5]*sy+T[6]*sz+T[7])/scale;
-        v[k+2]=(T[8]*sx+T[9]*sy+T[10]*sz+T[11])/scale;
-      }
-      const base=totalVerts/3;
-      if(base)for(let k=0;k<r.idx.length;k++)r.idx[k]+=base;
-      vertChunks.push(v);idxChunks.push(r.idx);
-      totalVerts+=v.length;totalIdx+=r.idx.length;decoded++;
-      if(i%8===0){onProgress&&onProgress(0.6+0.35*(i/nF),"decoding…");await new Promise(requestAnimationFrame);}
-    }
-    draco.destroy(decoder);
-    if(!decoded)throw new Error("no fragments decoded (LOD "+lod+", "+nF+" fragments in manifest)");
-    const positions=new Float32Array(totalVerts),indices=new Uint32Array(totalIdx);
-    let vo2=0,io2=0;
-    for(let i=0;i<vertChunks.length;i++){
-      positions.set(vertChunks[i],vo2);vo2+=vertChunks[i].length;
-      indices.set(idxChunks[i],io2);io2+=idxChunks[i].length;
-    }
-    return {positions,indices,lod,numLods:parsed.numLods,bytes:L.bytes};
-  }
-  /* Additional root IDs proposed for the CURRENT nucleus (CUR_EXTRA_ROOTS, populated by
-     loadRootIdPanel()) are usually fragments of the SAME cell that a patchy automatic
-     segmentation split apart, not separate cells -- so the main root ID's downloads (both the
-     .glb and the PowerPoint) fold them in automatically, added 2026-07-28 at Søren's request.
-     Only img65-segType extras qualify: Seg35 lives in a different bucket/format fetchMesh() can't
-     read, and a bare nucleus ID has no mesh at all (see mesh-download-browser memory) -- same
-     restriction the old per-row mesh button used to enforce, now centralised here since those
-     per-row buttons were removed (extra root IDs are no longer individually downloadable). */
-  function extraImg65RootIds(mainRootIdStr){
-    const seen={};seen[String(mainRootIdStr)]=1;
-    const out=[];
-    (typeof CUR_EXTRA_ROOTS!=="undefined"?CUR_EXTRA_ROOTS:[]).forEach(function(r){
-      const id=r&&r.id;
-      if(!id||seen[String(id)])return;
-      if(r.segType&&r.segType!=="img65")return;
-      seen[String(id)]=1;out.push(String(id));
-    });
-    return out;
-  }
-  /* Merges the main root ID's mesh with any qualifying extra root IDs into one vertex/index
-     buffer. Safe to do naively -- fetchMesh() already returns absolute dataset coordinates
-     specifically so multiple downloaded meshes stay spatially aligned (see the comment on
-     fetchMesh above) -- so these fragments land in their true positions relative to each other,
-     not stacked on top of one another.
-     2026-08 (S\u00f8ren: "I had tried to compute a neuron's root ID volume but it was not
-     available, then I identified its root ID and wanted to compute it, but now it says cached
-     unavailable... if it is unavailable, then the user reported root ID should replace it and the
-     volume can be computed based on the user reported root ID") -- each candidate root ID
-     (main + extras) is now fetched independently and a failure on ONE (e.g. the main MICrONS root
-     ID has since been re-segmented away and is no longer in the seg_m1300 shard index) no longer
-     aborts the whole combine. Only throws when EVERY candidate fails; still throws immediately
-     (before trying anything) when there are no candidates at all. meshCached on the thrown error
-     is only set true when ALL failures were "known not found" cache hits, so a genuine network
-     failure on one ID doesn't get silently mislabelled as a cache hit. mainUnavailable on the
-     returned object flags the "main root ID's own mesh didn't resolve, this used one or more
-     proposed/community root IDs instead" case so callers can tell the user what happened. */
-  async function fetchCombinedMesh(mainRootIdStr,onProgress,forceRecheck,extraRootIdsOverride,forceCoarsestLod){
-    /* extraRootIdsOverride (2026-08-14, Soren: "In cases where root IDs have been suggested by the
-       user, the contact points should be calculated for all root IDs combined") -- every existing
-       caller omits this and keeps the old behaviour (extraImg65RootIds(mainRootIdStr), which reads
-       the CUR_EXTRA_ROOTS global -- only ever populated for whichever cell's own panel is currently
-       open on screen). The Cell contacts feature needs this for CANDIDATE cells too, not just the
-       one currently displayed, so it passes an explicitly-fetched list here instead (see
-       fetchExtraRootIdsFor() in the Cell contacts script block) rather than relying on that global,
-       which would silently stay empty for every cell except the one on screen.
-       forceCoarsestLod (2026-08-16) -- passed straight through to every fetchMesh() call below; see
-       fetchMesh's own comment. Only the Tripartite synapse feature's astrocyte lookups set this. */
-    const rootIds=[String(mainRootIdStr)].concat(extraRootIdsOverride!==undefined?extraRootIdsOverride:extraImg65RootIds(mainRootIdStr)).filter(function(id){return id&&id!=="";});
-    if(!rootIds.length)throw new Error("No root IDs available for this cell yet \u2014 propose one below, then try again.");
-    const n=rootIds.length,meshes=[],usedIds=[],failures=[];
-    for(let i=0;i<n;i++){
-      const idx=i;
-      try{
-        const m=await fetchMesh(rootIds[i],(frac,msg)=>onProgress&&onProgress((idx+frac)/n,(msg||"")+(n>1?" (fragment "+(idx+1)+"/"+n+")":"")),forceRecheck,forceCoarsestLod);
-        meshes.push(m);usedIds.push(rootIds[i]);
-      }catch(err){
-        console.warn("[uJump mesh] root ID "+rootIds[i]+" unavailable, skipping:",err&&err.message);
-        failures.push(err);
-      }
-    }
-    if(!meshes.length){
-      const allCached=failures.length>0&&failures.every(function(e){return e&&e.meshCached;});
-      const err=new Error(n>1
-        ?"None of the "+n+" root IDs for this cell (main + proposed) were found in the seg_m1300 mesh snapshot."
-        :((failures[0]&&failures[0].message)||"Mesh not found."));
-      err.meshCached=allCached;throw err;
-    }
-    const mainUnavailable=usedIds.indexOf(String(mainRootIdStr))<0;
-    if(meshes.length===1){
-      const m=meshes[0];
-      return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds:usedIds,mainUnavailable};
-    }
-    let totalV=0,totalI=0,bytes=0;
-    meshes.forEach(m=>{totalV+=m.positions.length;totalI+=m.indices.length;bytes+=m.bytes||0;});
-    const positions=new Float32Array(totalV),indices=new Uint32Array(totalI);
-    let vOff=0,vCount=0,iOff=0;
-    meshes.forEach(m=>{
-      positions.set(m.positions,vOff);
-      for(let k=0;k<m.indices.length;k++)indices[iOff+k]=m.indices[k]+vCount;
-      vOff+=m.positions.length;iOff+=m.indices.length;vCount+=m.positions.length/3;
-    });
-    return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:meshes.length,rootIds:usedIds,mainUnavailable};
-  }
-  async function downloadRoot(rootIdStr,onProgress,forceRecheck){
-    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount,rootIds,mainUnavailable}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
-    const {positions,indices}=flipYForGLTF(rawPositions,rawIndices);
-    /* When there's no main root ID (community-only combine), fall back to the first combined ID
-       so the filename is still a real, traceable segmentation ID rather than a blank/underscore. */
-    const idForName=rootIdStr||rootIds[0];
-    const tag=fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod;
-    const glb=buildGLB(positions,indices,"microns_"+idForName+tag);
-    onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+idForName+tag+"_um.glb";
-    const url=URL.createObjectURL(new Blob([glb],{type:"model/gltf-binary"}));
-    const a=document.createElement("a");
-    a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {lod,numLods,bytes,vertices:positions.length/3,filename,fragmentCount,rootIds,mainUnavailable};
-  }
-  /* ---------- Mesh volume (on-demand, per Søren's request 2026-07-30) ----------
-     Nucleus volume (see NV/nucVolumeStr near the top of the file) is precomputed and free to
-     show everywhere -- but the volume of the whole CELL BODY isn't a column in any CAVE table,
-     so the only way to get it is to fetch and decode the full mesh (same fetchCombinedMesh() the
-     download buttons already use) and compute it directly from the triangle geometry. Søren
-     explicitly chose this be an on-demand click (not automatic on every nucleus lookup), since it
-     costs a real mesh fetch+decode -- the same cost as clicking "3D model" -- rather than being
-     free like the other data on this panel.
-     Signed-tetrahedron-sum (divergence theorem): summing the signed volume of the tetrahedron
-     formed by each triangle and the origin gives the mesh's enclosed volume exactly, for a
-     CLOSED, consistently-wound mesh, regardless of where the mesh sits relative to the origin.
-     MICrONS meshes are decoded straight from Draco-compressed segmentation fragments and can have
-     small gaps or non-manifold spots at fragment boundaries (worse when several root-ID fragments
-     are combined) -- small gaps mostly cancel out in this sum but aren't corrected for, so this is
-     reported to the user as an ESTIMATE, not an exact figure. Positions are already in this tool's
-     usual µm mesh-download units, so no extra scaling is needed. */
-  async function computeVolume(rootIdStr,onProgress,forceRecheck){
-    const {positions,indices,fragmentCount,rootIds,mainUnavailable}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
-    onProgress&&onProgress(0.98,"computing volume…");
-    let vol6=0;
-    for(let t=0;t<indices.length;t+=3){
-      const ia=indices[t]*3,ib=indices[t+1]*3,ic=indices[t+2]*3;
-      const ax=positions[ia],ay=positions[ia+1],az=positions[ia+2];
-      const bx=positions[ib],by=positions[ib+1],bz=positions[ib+2];
-      const cx=positions[ic],cy=positions[ic+1],cz=positions[ic+2];
-      vol6+=ax*(by*cz-bz*cy)-ay*(bx*cz-bz*cx)+az*(bx*cy-by*cx);
-    }
-    return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3,fragmentCount,rootIds,mainUnavailable};
-  }
-  /* ---------- PowerPoint (.pptx) with a live, auto-spinning 3D model ----------
-     PPTXSK is a ~32KB skeleton .pptx -- ONE slide holding a 3D-model placeholder with the
-     Turntable animation already applied -- captured by literally doing Insert > 3D Model >
-     Animations > Turntable in real PowerPoint and saving, NOT hand-written, because the am3d:*
-     3D-model XML extension is undocumented (not part of ECMA-376/ISO 29500) and reverse-
-     engineering it blind would risk silently-corrupt files. On top of that captured skeleton,
-     three ONE-TIME structural edits were made directly to the skeleton's XML (not per-download):
-       1. The original title slide (no 3D content) was deleted -- sldIdLst/rels/Content_Types
-          all trimmed to the single model slide, renumbered so PowerPoint doesn't see a gap.
-       2. The graphicFrame (both the live am3d:model3d branch AND its mc:Fallback picture) was
-          resized to the slide's full height (off y=0, cy=slide cy), centred horizontally,
-          aspect ratio preserved -- "as big as it can be" per Søren's request on 2026-07-28. This
-          box size is now KEPT FIXED even when shrinking the model (see FILL_BOOST note below) --
-          testing showed the graphicFrame's own EMU size does not rescale the live 3D render the
-          way it rescales the mc:Fallback picture; the render's on-screen size is governed entirely
-          by the am3d camera/FOV math against the mesh's transformed size, so shrinking the frame
-          box alone would crop the same-sized render rather than shrink it, and was reverted.
-       3. The Turntable effect's timing was changed from click-triggered to autoplay: the
-          wrapping cTn's stCondLst delay flipped from "indefinite" (wait for a click) to "0",
-          and the effect cTn's nodeType flipped from "clickEffect" to "afterEffect" -- both are
-          standard ECMA-376 animation-timing vocabulary (NOT part of the undocumented am3d
-          extension), so this edit carries none of the am3d reverse-engineering risk. Confirmed
-          live in PowerPoint: the spin now starts the moment the slide is reached in the
-          slideshow, no click needed.
-       Two plain (non-3D) text-box shapes were also added to the skeleton, stacked in the shape
-       tree AFTER the model so they draw on top of it: a large bold yellow headline (cell type)
-       and a smaller grey subtitle (root ID + nucleus centre coordinates, as raw VOXEL integers
-       -- not µm -- specifically so they can be pasted straight back into Neuroglancer's own
-       position box), both top-centred, with a subtle drop shadow for legibility over the render.
-       Their run text is the literal string CELL_TYPE_PLACEHOLDER / SUBTITLE_PLACEHOLDER, swapped
-       for the real values below.
-     Per download, four things get replaced in slide2.xml: the embedded model3d1.glb itself,
-     three numbers (meterPerModelUnit, preTrans, rot) that re-centre/re-scale the SAME fixed
-     camera+lighting rig around whatever mesh is embedded, and the two text placeholders above.
-     Camera, lighting, FOV etc. are copied verbatim from the reference file and are independent
-     of which mesh is embedded, since preTrans/scale is exactly what normalises an arbitrary mesh
-     into that fixed camera's frame.
-     The mesh's Y axis is negated before any of this (see the comment inline in
-     downloadRootPptx() below) -- MICrONS/Neuroglancer's Y increases downward (image-row
-     convention) but glTF and this camera rig assume Y-up, so feeding raw coordinates through
-     renders every cell upside down. Confirmed live and fixed 2026-07-28. Triangle winding is
-     flipped in lockstep so the mirror doesn't back-face-cull or invert lighting. Only this pptx
-     path is mirrored -- the plain .glb download is untouched.
-     Formula reverse-engineered from the reference file's own am3d:trans block by comparing it
-     against that file's actual mesh bounding box (see mesh-download-browser memory for the
-     project's mesh-format validation approach) and confirmed with a synthetic off-centre test
-     mesh, live, in PowerPoint, on 2026-07-28:
-       longest = max(spanX, spanY, spanZ)                    // mesh bounding-box span, µm
-       n = round(FILL_BOOST * 1e6 / longest); d = 1e6         // meterPerModelUnit = n/d
-       preTrans.{x,y,z} = round(-center.{x,y,z} * n * 36)      // EMU (36e6 EMU/m, d fixed at 1e6)
-     Base formula scales the model so its longest dimension is exactly 1 metre and centres it at
-     the origin -- matching the fixed camera, which sits ~1.6m back with a 45° FOV regardless of
-     which mesh is loaded. FILL_BOOST (=3, added 2026-07-28) exists because that 1-metre-object
-     render turned out to occupy only ~25-35% of the NEW full-height frame -- PowerPoint's 3D
-     viewport does not auto-zoom a small object to fill a bigger frame, it only scales an
-     over-sized one DOWN to fit. Verified live against a cube-shaped test mesh: boosting the
-     target size to 3m makes the render cross that "fit to frame" threshold so it fills the frame
-     nicely, and 2.5x/5x boosts looked visually identical (both already past the threshold),
-     suggesting real headroom either side of 3x. Empirically tuned, not a documented am3d
-     property -- and it has a known limit: a VERY elongated, thin object (e.g. a lone dendrite
-     fragment, ~40:1 length:cross-section in testing) can still look small, because it's the
-     narrower on-screen cross-section, not the longest dimension, that has to cross the fill
-     threshold. No universal fix for that without per-mesh-shape camera adjustment, which would
-     mean touching the undocumented am3d camera math itself -- left as a known caveat rather than
-     guessed at, same principle as the pericyte-subtype TBD flag elsewhere in this project.
-     When Søren later asked to shrink the render ("a little too large... 2/3 of the size",
-     2026-07-28, same day), the graphicFrame box was tried first but reverted: it turned out the
-     frame's own EMU size does NOT rescale the live am3d render (confirmed by testing synthetic
-     cube/tetrahedron meshes at both the original full-height frame and a shrunk one -- both
-     rendered identically, meaning the frame only crops/positions the viewport, it doesn't zoom
-     it). The correct, and only confirmed, lever for the render's own apparent size is FILL_BOOST
-     itself, so it was lowered from 3 to 2 (=3*2/3) instead -- a literal 2/3 linear-size reduction
-     of the same "longest dimension in metres" formula, frame box left untouched at full height.
-     CAVEAT -- not re-verified against a real MICrONS mesh: this session's sandbox could not reach
-     storage.googleapis.com (network egress restricted) or open ujump.html's own file:// URL in
-     Chrome (extension blocks local files) to re-run the live end-to-end check rounds 1-3 used.
-     The synthetic test meshes available here are compact (cube/tetrahedron: all three bounding-box
-     axes comparable in length), and at FILL_BOOST=3 they overflow the camera's view badly regardless
-     of frame size -- a real dendritic/axonal cell mesh is normally elongated along one axis instead,
-     which is presumably why rounds 1-3's real-data testing never surfaced this. FILL_BOOST=2 could
-     not be confirmed to look right on a real cell in this session -- Søren should do one live check
-     after this change and report back if the model now looks too small (raise toward 2.5) or still
-     too large (lower toward 1.5).
-     rot is reset to 0,0,0 (a neutral start pose; Turntable spins it either way). Needs JSZip
-     (loaded from cdnjs, same trust tier as the SheetJS/PptxGenJS-equivalent libraries already
-     used elsewhere in this file for Excel export).
-     Scale bar (added 2026-07-29, per Søren's request): a thin rod, sized to a "nice" 1-2-5x10^n
-     micrometre value close to 28% of the cell's own longest bounding-box span, is concatenated
-     onto the cell's raw vertex/index buffers BEFORE the Y-flip step above, positioned centred
-     under the cell (offset only along the vertical axis) so it goes through the exact same
-     flip/winding correction as the cell and needs no separate geometry-orientation logic. Because
-     it's real geometry sharing the model's own transform, it spins correctly with the Turntable at
-     every angle (unlike a flat 2D overlay, which would misrepresent scale the moment the object
-     rotates) -- the tradeoff, accepted deliberately over a text-label alternative, is that being a
-     horizontal rod centred on the vertical rotation axis, it appears edge-on/full-length at 0°/180°
-     and foreshortens to a point at 90°/270°, same as any real elongated feature of the cell would.
-     Its length is deliberately excluded from the meterPerModelUnit/preTrans normalisation (that
-     math uses the cell-only bounding box, computed before the bar is added) so adding the bar can
-     never change how big the cell itself renders. The chosen length in µm is surfaced to Søren only
-     via the on-page button's success text ("scale bar 50 µm"), not as on-slide text -- he explicitly
-     chose the embedded-rod-only option over a text label or both, when asked. */
-  const PPTXSK_B64="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";
-  const PPTXSK_URL="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-  let jszipPromise=null;
-  function loadJSZip(){
-    if(window.JSZip)return Promise.resolve(window.JSZip);
-    if(jszipPromise)return jszipPromise;
-    jszipPromise=new Promise((resolve,reject)=>{
-      const s=document.createElement("script");
-      s.src=PPTXSK_URL;s.onload=()=>resolve(window.JSZip);s.onerror=()=>reject(new Error("could not load JSZip from cdnjs"));
-      document.head.appendChild(s);
-    });
-    return jszipPromise;
-  }
-  /* Cheap orthographic point-cloud snapshot (front view, X across/Y up) rendered to a small PNG
-     via <canvas> -- used only as the fallback/cached-thumbnail image (am3d:raster + the
-     mc:Fallback picture for non-3D viewers); PowerPoint's own live 3D engine renders the actual
-     interactive/spinning view from the .glb, so this only needs to be recognisable, not exact. */
-  function renderThumbnailPNG(positions,minX,maxX,minY,maxY){
-    const W=512,H=512,pad=40;
-    const cnv=document.createElement("canvas");cnv.width=W;cnv.height=H;
-    const ctx=cnv.getContext("2d");
-    ctx.fillStyle="#000";ctx.fillRect(0,0,W,H);
-    const spanX=Math.max(maxX-minX,1e-6),spanY=Math.max(maxY-minY,1e-6);
-    const s=Math.min((W-2*pad)/spanX,(H-2*pad)/spanY);
-    ctx.fillStyle="#fff";
-    const step=positions.length>60000?9:3; // subsample dense meshes so this stays fast
-    for(let k=0;k<positions.length;k+=step*3){
-      const px=pad+(positions[k]-minX)*s;
-      const py=H-(pad+(positions[k+1]-minY)*s);
-      ctx.fillRect(px,py,1.4,1.4);
-    }
-    const dataUrl=cnv.toDataURL("image/png");
-    return dataUrl.slice(dataUrl.indexOf(",")+1); // base64 payload only
-  }
-  const PPTX_FILL_BOOST=2; // see the big comment above -- 2/3 of the original 3 (Søren's "a little too large, 2/3 size" request, 2026-07-28)
-  function escXmlText(s){return String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
-  /* Scale bar length, µm: nearest "nice" 1-2-5x10^n value to ~28% of the mesh's longest span --
-     the standard visual-scale-bar convention (round number, clearly smaller than the subject).
-     Falls back to 1µm for a degenerate/zero-size span. */
-  function niceScaleBarLength(span){
-    const target=Math.max(span*0.28,1e-6);
-    const exp=Math.floor(Math.log10(target));
-    let best=1,bestDiff=Infinity;
-    for(let e=exp-1;e<=exp+1;e++){
-      for(const b of [1,2,5]){
-        const v=b*Math.pow(10,e);
-        const diff=Math.abs(Math.log(v)-Math.log(target)); // compare on log scale so e.g. 1 vs 2 and 50 vs 100 are weighed the same way
-        if(diff<bestDiff){bestDiff=diff;best=v;}
-      }
-    }
-    return best;
-  }
-  /* Builds a thin rectangular rod (box, same 8-vertex/12-triangle topology as the test cubes used
-     to validate this pipeline) representing barLenUm micrometres, in the SAME raw (pre-Y-flip)
-     coordinate convention as fetchCombinedMesh() output -- so it can be concatenated onto the
-     cell's own raw positions/indices BEFORE the existing Y-flip+winding-swap loop runs, and come
-     out through that loop with correct orientation/lighting for free, no separate winding logic
-     needed. Positioned centred under the cell in X/Z, offset further down the RAW Y axis (dataset
-     convention: bigger Y = deeper/more ventral) so after the pipeline's Y-negation it lands BELOW
-     the cell in the final Y-up render -- and, being offset only along the vertical axis from the
-     cell's own centre, it spins in place with the turntable exactly like any real part of the
-     scene would (edge-on/full-length at 0°/180°, foreshortened to a point at 90°/270°). */
-  function buildScaleBarGeometry(rawCenterX,rawMaxY,rawCenterZ,barLenUm,gapUm){
-    const half=barLenUm/2,thick=barLenUm/12;
-    const y0=rawMaxY+gapUm,y1=y0+thick;
-    const verts=[];
-    for(const sx of [-1,1])for(const sy of [0,1])for(const sz of [-1,1]){
-      verts.push(rawCenterX+sx*half, sy?y1:y0, rawCenterZ+sz*(thick/2));
-    }
-    const positions=new Float32Array(verts);
-    const idx=[0,1,3,0,3,2,4,6,7,4,7,5,0,4,5,0,5,1,2,3,7,2,7,6,0,2,6,0,6,4,1,5,7,1,7,3];
-    return {positions,indices:new Uint32Array(idx),barLenUm};
-  }
-  async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress,forceRecheck){
-    const [{positions:cellRawPositions,indices:cellRawIndices,fragmentCount,rootIds,mainUnavailable},JSZip]=await Promise.all([fetchCombinedMesh(rootIdStr,onProgress,forceRecheck),loadJSZip()]);
-    /* Same "no main root ID -- community-only combine" fallback as downloadRoot() above. */
-    const idForName=rootIdStr||rootIds[0];
-    onProgress&&onProgress(0.96,"building PowerPoint…");
-    /* Cell-only raw bbox -- used to size the scale bar ITSELF (its length stays 28% of the CELL's
-       own longest span, not the whole assembly's, so it stays a sensible, comparable size). The
-       final am3d framing further down now uses the FULL (cell+bar) bbox instead -- see the comment
-       near `longest` below for why that changed from the original cell-only design. */
-    let rMinX=Infinity,rMinY=Infinity,rMinZ=Infinity,rMaxX=-Infinity,rMaxY=-Infinity,rMaxZ=-Infinity;
-    for(let k=0;k<cellRawPositions.length;k+=3){
-      const x=cellRawPositions[k],y=cellRawPositions[k+1],z=cellRawPositions[k+2];
-      if(x<rMinX)rMinX=x;if(x>rMaxX)rMaxX=x;
-      if(y<rMinY)rMinY=y;if(y>rMaxY)rMaxY=y;
-      if(z<rMinZ)rMinZ=z;if(z>rMaxZ)rMaxZ=z;
-    }
-    const cellLongest=Math.max(rMaxX-rMinX,rMaxY-rMinY,rMaxZ-rMinZ,1e-6);
-    const barLen=niceScaleBarLength(cellLongest);
-    const bar=buildScaleBarGeometry((rMinX+rMaxX)/2,rMaxY,(rMinZ+rMaxZ)/2,barLen,Math.max((rMaxY-rMinY)*0.12,barLen*0.35));
-    const rawPositions=new Float32Array(cellRawPositions.length+bar.positions.length);
-    rawPositions.set(cellRawPositions,0);rawPositions.set(bar.positions,cellRawPositions.length);
-    const cellVertCount=cellRawPositions.length/3;
-    const rawIndices=new Uint32Array(cellRawIndices.length+bar.indices.length);
-    rawIndices.set(cellRawIndices,0);
-    for(let t=0;t<bar.indices.length;t++)rawIndices[cellRawIndices.length+t]=bar.indices[t]+cellVertCount;
-    /* Same Y-flip + winding-swap as the plain .glb download (downloadRoot() above) -- see
-       flipYForGLTF()'s comment for the full axis-convention explanation. Both paths used to
-       apply this independently (this one only, historically -- the plain .glb was left
-       un-mirrored on the assumption viewers already accounted for the convention, which turned
-       out not to hold, so it now gets the same treatment too, 2026-08); now shared through one
-       function so the two can't drift apart. Applied to rawPositions/rawIndices AFTER the scale
-       bar is concatenated in, above, so the bar gets the exact same treatment as the cell and
-       needs no separate winding logic. */
-    const flipped=flipYForGLTF(rawPositions,rawIndices);
-    const positions=flipped.positions,indices=flipped.indices;
-    let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
-    for(let k=0;k<positions.length;k+=3){
-      const x=positions[k],y=positions[k+1],z=positions[k+2];
-      if(x<minX)minX=x;if(x>maxX)maxX=x;
-      if(y<minY)minY=y;if(y>maxY)maxY=y;
-      if(z<minZ)minZ=z;if(z>maxZ)maxZ=z;
-    }
-    /* Normalisation now frames the FULL (cell+bar) post-flip bbox -- minX..maxZ, already computed
-       just above for the thumbnail. This used to frame the CELL-ONLY bbox so the bar's geometry
-       could never shrink the cell's own render -- but Søren found the bar then landed OUTSIDE the
-       visible frame whenever the cell filled it (reported 2026-07-30): the am3d camera has a FIXED
-       frustum, so anything placed beyond the framed region simply never shows, no matter how
-       correct its geometry is. Framing on the combined bbox guarantees the bar is always inside
-       view, at the cost of the cell rendering very slightly smaller whenever the bar's Y-extent
-       (cell height + gap + bar thickness) exceeds the cell's own longest dimension -- a small,
-       acceptable trade-off since making the bar visible is the entire point of this feature. */
-    const fullSpanX=maxX-minX,fullSpanY=maxY-minY,fullSpanZ=maxZ-minZ;
-    const longest=Math.max(fullSpanX,fullSpanY,fullSpanZ,1e-6);
-    const cx=(minX+maxX)/2,cy=(minY+maxY)/2,cz=(minZ+maxZ)/2;
-    const n=Math.round(PPTX_FILL_BOOST*1000000/longest),d=1000000;
-    const pre=[Math.round(-cx*n*36),Math.round(-cy*n*36),Math.round(-cz*n*36)];
-    const glb=buildGLB(positions,indices,"microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:""));
-    const zip=await JSZip.loadAsync(PPTXSK_B64,{base64:true});
-    zip.file("ppt/media/model3d1.glb",glb);
-    const pngB64=renderThumbnailPNG(positions,minX,maxX,minY,maxY);
-    zip.file("ppt/media/image1.png",pngB64,{base64:true});
-    let slideXml=await zip.file("ppt/slides/slide2.xml").async("string");
-    slideXml=slideXml.replace(/<am3d:meterPerModelUnit n="\d+" d="\d+"\/>/,'<am3d:meterPerModelUnit n="'+n+'" d="'+d+'"/>');
-    slideXml=slideXml.replace(/<am3d:preTrans dx="-?\d+" dy="-?\d+" dz="-?\d+"\/>/,'<am3d:preTrans dx="'+pre[0]+'" dy="'+pre[1]+'" dz="'+pre[2]+'"/>');
-    slideXml=slideXml.replace(/<am3d:rot ax="-?\d+" ay="-?\d+" az="-?\d+"\/>/,'<am3d:rot ax="0" ay="0" az="0"/>');
-    /* Bar length written into the subtitle text itself -- Søren asked for the size to be visible on
-       the slide, not just in the download button's success message (the button text remains too,
-       for a quick check before opening the file). Reuses the SUBTITLE_PLACEHOLDER text box rather
-       than adding a new one to the skeleton, since that box already sits right under the model. */
-    const barDisplay=barLen>=1000?(barLen/1000)+" mm":barLen+" µm";
-    const subtitle="Root ID "+rootIdStr+(fragmentCount>1?" (+"+(fragmentCount-1)+" more, combined)":"")+(coordStr?"   ·   voxel "+coordStr:"")+"   ·   scale bar "+barDisplay;
-    slideXml=slideXml.replace("CELL_TYPE_PLACEHOLDER",escXmlText(cellTypeName||"Unclassified cell"));
-    slideXml=slideXml.replace("SUBTITLE_PLACEHOLDER",escXmlText(subtitle));
-    zip.file("ppt/slides/slide2.xml",slideXml);
-    const blob=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation"});
-    onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:"")+"_turntable.pptx";
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");
-    a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {filename,vertices:positions.length/3,fragmentCount,barLenUm:barLen,rootIds,mainUnavailable};
-  }
-  /* 2026-08-05 (Sören: recalculate should only be offered once MORE root IDs exist than the
-     saved computation used) -- exposes the exact "main + qualifying extras" count
-     fetchCombinedMesh() would use, so decorateMeshVolButtons() can compare against it without
-     duplicating extraImg65RootIds()'s own filter logic. */
-  function currentFragmentCount(mainRootIdStr){
-    const n=extraImg65RootIds(mainRootIdStr).length;
-    return mainRootIdStr?1+n:n;
-  }
-  /* fetchCombinedMesh exposed (2026-08-10) for the new "Find cell contacts" feature -- returns
-     {positions,indices,...} with positions already in real-world micrometres, same absolute
-     coordinate frame as the rest of this file's nm-based NX/NY/NZ (µm*1000=nm, see fetchMesh's
-     own "scale=1000 // micrometres" line above), just not yet Y-flipped for glTF -- exactly what
-     a mesh-to-mesh distance computation needs, and NOT what downloadRoot()'s glTF-oriented output
-     is for, so this is the right function to expose rather than reusing downloadRoot(). */
-  return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache,currentFragmentCount,fetchCombinedMesh};
-})();
+/* Mesh download pipeline -- moved to core/mesh.js (stage 1 of the shared-core refactor,
+   2026-08-16) so hJump/H01 can reuse it. Loaded as a <script src> further up the page;
+   the old name is kept so nothing else in this file had to change. */
+const MeshDL=UJ.mesh;
 /* Delegated (not re-bound per render) since root ID rows get rebuilt on every jump/reclassify --
    a single document-level listener means every ".meshdl"/".pptxdl" button works regardless of
    which render function drew it. Button label doubles as the status line; no separate progress
@@ -7315,12 +6400,12 @@ fetchNewCellOrganelles();
    see the race-guard in renderUserReportedCell(). */
 function organellesNearPos(vx,vy,vz,maxDistNm){
   if(!NEW_CELL_ORGANELLES_CACHE)return null;
-  const px=vx*4,py=vy*4,pz=vz*40;
+  const px=vx*UJ_RX,py=vy*UJ_RY,pz=vz*UJ_RZ;
   const out=[];
   for(const row of NEW_CELL_ORGANELLES_CACHE){
     const c=(row.coord||"").split(",").map(Number);
     if(c.length!==3||c.some(isNaN))continue;
-    const dx=px-c[0]*4,dy=py-c[1]*4,dz=pz-c[2]*40;
+    const dx=px-c[0]*UJ_RX,dy=py-c[1]*UJ_RY,dz=pz-c[2]*UJ_RZ;
     if(Math.sqrt(dx*dx+dy*dy+dz*dz)<=maxDistNm)out.push(row);
   }
   return out;
@@ -7333,7 +6418,7 @@ function organellesNearPos(vx,vy,vz,maxDistNm){
 function nearestUserReportedCell(vx,vy,vz,maxDistNm){
   if(!NEW_CELL_REPORTS_CACHE)return null;
   let best=null,bestPos=null,bestD=Infinity,bestIdx=-1;
-  const px=vx*4,py=vy*4,pz=vz*40;
+  const px=vx*UJ_RX,py=vy*UJ_RY,pz=vz*UJ_RZ;
   /* doPost now merges a rootId/nucRootId onto an existing row within 5000nm instead of creating
      a duplicate (see the new_cell_no_nucleus branch above), so this shouldn't happen for reports
      submitted going forward -- but any ROW ALREADY IN THE SHEET from before that fix existed can
@@ -7348,7 +6433,7 @@ function nearestUserReportedCell(vx,vy,vz,maxDistNm){
   NEW_CELL_REPORTS_CACHE.forEach((rep,idx)=>{
     const c=(rep.coord||"").split(",").map(Number);
     if(c.length!==3||c.some(isNaN))return;
-    const dx=px-c[0]*4,dy=py-c[1]*4,dz=pz-c[2]*40,d=dx*dx+dy*dy+dz*dz;
+    const dx=px-c[0]*UJ_RX,dy=py-c[1]*UJ_RY,dz=pz-c[2]*UJ_RZ,d=dx*dx+dy*dy+dz*dz;
     const better=best===null||d<bestD-tieD||(Math.abs(d-bestD)<=tieD&&completeness(rep)>completeness(best));
     if(better){bestD=d;best=rep;bestPos=c;bestIdx=idx;}
   });
@@ -7411,13 +6496,13 @@ function invalidateNewCellAndMergedSubCaches(){
 function nearestMergedSub(vx,vy,vz,maxDistNm){
   if(!MERGED_SUB_REPORTS_CACHE)return null;
   let best=null,bestPos=null,bestD=Infinity,bestIdx=-1;
-  const px=vx*4,py=vy*4,pz=vz*40;
+  const px=vx*UJ_RX,py=vy*UJ_RY,pz=vz*UJ_RZ;
   const TIE_NM=50,tieD=TIE_NM*TIE_NM;
   const completeness=r=>r.subRootId?1:0;
   MERGED_SUB_REPORTS_CACHE.forEach((sub,idx)=>{
     const c=(sub.coord||"").split(",").map(Number);
     if(c.length!==3||c.some(isNaN))return;
-    const dx=px-c[0]*4,dy=py-c[1]*4,dz=pz-c[2]*40,d=dx*dx+dy*dy+dz*dz;
+    const dx=px-c[0]*UJ_RX,dy=py-c[1]*UJ_RY,dz=pz-c[2]*UJ_RZ,d=dx*dx+dy*dy+dz*dz;
     const better=best===null||d<bestD-tieD||(Math.abs(d-bestD)<=tieD&&completeness(sub)>completeness(best));
     if(better){bestD=d;best=sub;bestPos=c;bestIdx=idx;}
   });
@@ -7436,9 +6521,9 @@ function nearestMergedSub(vx,vy,vz,maxDistNm){
    (into NEW_CELL_REPORTS_CACHE) keeps the cell already shown as the main result from also
    appearing as its own "nearest neighbour". */
 function kNearestOutOfRegion(vx,vy,vz,k,excludeIdx){
-  const px=vx*4,py=vy*4,pz=vz*40,cands=[];
+  const px=vx*UJ_RX,py=vy*UJ_RY,pz=vz*UJ_RZ,cands=[];
   for(let i=0;i<ST_N;i++){
-    const dx=px-ST_X[i]*4,dy=py-ST_Y[i]*4,dz=pz-ST_Z[i]*40;
+    const dx=px-ST_X[i]*UJ_RX,dy=py-ST_Y[i]*UJ_RY,dz=pz-ST_Z[i]*UJ_RZ;
     cands.push({kind:"standalone",i,d:dx*dx+dy*dy+dz*dz});
   }
   if(NEW_CELL_REPORTS_CACHE){
@@ -7446,7 +6531,7 @@ function kNearestOutOfRegion(vx,vy,vz,k,excludeIdx){
       if(idx===excludeIdx)return;
       const c=(rep.coord||"").split(",").map(Number);
       if(c.length!==3||c.some(isNaN))return;
-      const dx=px-c[0]*4,dy=py-c[1]*4,dz=pz-c[2]*40;
+      const dx=px-c[0]*UJ_RX,dy=py-c[1]*UJ_RY,dz=pz-c[2]*UJ_RZ;
       cands.push({kind:"community",rep,pos:c,d:dx*dx+dy*dy+dz*dz});
     });
   }
@@ -8898,211 +7983,16 @@ function renderNotNucleusReport(returnFn){
   });
 }
 document.getElementById("x").value="240640";document.getElementById("y").value="207872";document.getElementById("z").value="21360";
-/* ── Gamification: One Tap login, account chip, dashboard, favourites, leaderboard ── */
-window.FAV_SET=window.FAV_SET||new Set();
-var MYSTATS=null;
-function gamifyStyle(){
-  if(document.getElementById("gameStyle"))return;
-  var st=document.createElement("style");st.id="gameStyle";
-  st.textContent=
-    /* 2026-08-17 -- was position:fixed;top:10px;right:12px;z-index:9000, independently pinned to
-       the same corner as #themeToggleBtn's own old fixed position; see that button's CSS comment
-       for the mobile overlap bug this caused. Now placed in normal flow via #gameChipSlot inside
-       .topbar-right (see gamifyInjectUI() below and the HTML near the logo). */
-    "#gameChip{font:13px/1.3 -apple-system,Segoe UI,sans-serif}"
-   +"#gameChip .chipbtn{display:inline-flex;align-items:center;gap:8px;background:var(--panel,#161b22);color:var(--ink,#e6edf3);border:1px solid var(--accent,#27e0b3);border-radius:20px;padding:6px 13px;cursor:pointer;box-shadow:0 2px 12px color-mix(in srgb,var(--accent,#27e0b3) 25%,transparent)}"
-   +"#gameChip .lvl{font-weight:600;color:var(--accent,#3d6f92)}"
-   +"#gameChip .pts{color:var(--mut,#8b949e)}"
-   +"#gameDash{position:fixed;inset:0;z-index:9500;background:var(--scrim,rgba(0,0,0,.45));display:none;align-items:flex-start;justify-content:center;overflow:auto;padding:32px 12px}"
-   +"#gameDash .card{background:var(--panel,#161b22);color:var(--ink,#e6edf3);max-width:640px;width:100%;border-radius:14px;padding:22px 22px 26px;box-shadow:0 12px 40px var(--shadow,rgba(0,0,0,.3))}"
-   +"#gameDash h2{margin:0 0 2px;font-size:20px}#gameDash h3{margin:18px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut,#8b949e)}"
-   +"#gameDash .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}"
-   +"#gameDash .stat{background:var(--panel,#161b22);border:1px solid var(--line,#2a313c);border-radius:10px;padding:10px 12px}"
-   +"#gameDash .stat b{display:block;font-size:22px;line-height:1.1;color:var(--ink,#e6edf3)}#gameDash .stat span{font-size:11px;color:var(--mut,#8b949e)}"
-   +"#gameDash .bar{height:8px;background:var(--line,#2a313c);border-radius:6px;overflow:hidden;margin:6px 0}"
-   +"#gameDash .bar>i{display:block;height:100%;background:var(--accent,#3d6f92)}"
-   +"#gameDash .lbrow{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line,#2a313c);font-size:14px}"
-   +"#gameDash .favrow{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line,#2a313c);font-size:13px;flex-wrap:wrap}"
-   +"#gameDash .x{position:absolute;top:14px;right:16px;cursor:pointer;font-size:22px;color:var(--mut,#8b949e)}"
-   +"#gameDash .dbtn{background:var(--accent,#3d6f92);color:var(--on-accent,#06231c);border:none;border-radius:7px;padding:5px 12px;cursor:pointer}";
-  document.head.appendChild(st);
-}
-function gamifyInjectUI(){
-  gamifyStyle();
-  // 2026-08-17 -- appended into #gameChipSlot (inside .topbar-right, next to the theme toggle) so
-  // it lays out in normal flow instead of floating as its own fixed overlay; falls back to
-  // document.body only in the unexpected case that slot isn't present (keeps this function safe to
-  // call even if the surrounding HTML ever changes).
-  if(!document.getElementById("gameChip")){
-    var c=document.createElement("div");c.id="gameChip";
-    var slot=document.getElementById("gameChipSlot");
-    (slot||document.body).appendChild(c);
-  }
-  if(!document.getElementById("gameDash")){var d=document.createElement("div");d.id="gameDash";
-    d.addEventListener("click",function(e){if(e.target===d)closeDashboard();});document.body.appendChild(d);}
-}
-function renderChip(){
-  var c=document.getElementById("gameChip");if(!c)return;
-  if(GOOGLE_VERIFIED&&MYSTATS){
-    c.innerHTML='<div class="chipbtn" id="chipOpen"><span>'+escHtml(MYSTATS.handle||"you")+'</span>'
-      +'<span class="lvl">'+escHtml(MYSTATS.level||"")+'</span><span class="pts">'+(MYSTATS.points||0)+' pts</span>'+((MYSTATS.downvoted>0)?'<span style="color:#e3b341" title="You have '+MYSTATS.downvoted+' down-voted report(s) to review">⚠ '+MYSTATS.downvoted+'</span>':'')+'</div>';
-    var o=document.getElementById("chipOpen");if(o)o.addEventListener("click",openDashboard);
-  } else if(GOOGLE_VERIFIED){
-    c.innerHTML='<div class="chipbtn" id="chipOpen"><span>signed in</span><span class="pts">loading…</span></div>';
-    var o2=document.getElementById("chipOpen");if(o2)o2.addEventListener("click",openDashboard);
-  } else {
-    c.innerHTML='<div class="chipbtn"><span>Sign in to track progress</span></div><div id="chipGsi" style="margin-top:6px"></div>';
-    if(window.google&&google.accounts&&google.accounts.id){try{google.accounts.id.renderButton(document.getElementById("chipGsi"),{theme:"outline",size:"small",type:"standard"});}catch(_){}}
-  }
-}
+/* Gamification (sign-in chip, profile, favourites, leaderboard, dashboard, "Download your
+   work") -- moved to core/gamify.js, stage 2 of the shared-core refactor, 2026-08-16.
+   Loaded as a <script src> further up the page; every function is still a global, so no
+   call site changed. Two things stayed behind on purpose -- see the header of that file. */
 function escHtml(x){return String(x==null?"":x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
-function gamifyGet(param,cb){
-  if(!REPORT_ENDPOINT)return;
-  var q=(param==="leaderboard")?"?leaderboard=1":("?"+param+"="+encodeURIComponent(GOOGLE_CREDENTIAL||""));
-  fetch(REPORT_ENDPOINT+q).then(function(r){return r.json();}).then(cb).catch(function(){});
-}
-function loadMyStats(cb){gamifyGet("myStats",function(d){if(d&&!d.error){MYSTATS=d;}renderChip();if(cb)cb(d);});}
-function loadFavourites(cb){gamifyGet("favourites",function(d){window.FAV_SET=new Set();((d&&d.favourites)||[]).forEach(function(f){if(f.nucleusId)window.FAV_SET.add(String(f.nucleusId));if(f.coord)window.FAV_SET.add(String(f.coord));});refreshFavStars();if(cb)cb(d);});}
-function refreshFavStars(){
-  document.querySelectorAll(".favstar").forEach(function(b){
-    var on=window.FAV_SET.has(String(b.dataset.nid||""))||(b.dataset.coord&&window.FAV_SET.has(String(b.dataset.coord)));b.textContent=on?"★":"☆";b.style.color=on?"var(--accent)":"var(--mut)";b.title=on?"In favourites":"Save to favourites";});
-}
-function gamifyOnSignIn(){renderChip();loadMyStats();loadFavourites();}
-/* "Download your work" (2026-08-02) -- Søren: "I want the user to be able to download all the
-   annotation that they have made themselves, when looking at their profile below the 'Reports
-   needing review' as a button that says 'Download your work'." Pulls every report/annotation the
-   signed-in user has ever submitted via the new ?myReports= backend endpoint (see myReportsList()
-   in Code.gs.txt) and writes it out as one multi-sheet Excel workbook, one tab per report type --
-   same SheetJS pattern (XLSX.utils.aoa_to_sheet/book_new/book_append_sheet/writeFile) the
-   "Download as Excel" filter export already uses (dlBtn's click handler above). Deliberately does
-   NOT reuse gamifyGet() for this call: gamifyGet() silently swallows fetch errors (.catch(function(){}))
-   which is fine for a background stats refresh but wrong for an explicit download action -- the
-   user needs to actually be told if it failed, not see nothing happen. */
-function downloadMyWork(){
-  var btn=document.getElementById("downloadMyWorkBtn");
-  if(!REPORT_ENDPOINT){alert("No report backend is configured — nothing to download.");return;}
-  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){alert("Please sign in with Google first.");return;}
-  var origText=btn?btn.textContent:"";
-  if(btn){btn.disabled=true;btn.textContent="Preparing…";}
-  fetch(REPORT_ENDPOINT+"?myReports="+encodeURIComponent(GOOGLE_CREDENTIAL))
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(!d||d.error){alert("Couldn't load your work"+(d&&d.error?(": "+d.error):"")+". Try signing in again.");return;}
-      var sheets=d.sheets||{};
-      var names=Object.keys(sheets);
-      if(!names.length){alert("No annotations found for your account yet — nothing to download.");return;}
-      var wb=XLSX.utils.book_new();
-      names.forEach(function(name){
-        var s=sheets[name];
-        var data=[s.headers].concat(s.rows);
-        var ws=XLSX.utils.aoa_to_sheet(data);
-        // Sheet tab names are capped at 31 characters and can't contain []:*?/\ -- Excel enforces
-        // this, so sanitize before appending rather than letting book_append_sheet throw.
-        var tabName=name.replace(/[\[\]\*\?\/\\:]/g,"").slice(0,31);
-        XLSX.utils.book_append_sheet(wb,ws,tabName);
-      });
-      XLSX.writeFile(wb,"my_microns_work_"+(d.email||"me").replace(/[^a-z0-9]+/gi,"_")+".xlsx");
-    })
-    .catch(function(err){alert("Couldn't download your work — network error. Please try again.");})
-    .finally(function(){if(btn){btn.disabled=false;btn.textContent=origText;}});
-}
-function openDashboard(){
-  var d=document.getElementById("gameDash");if(!d)return;
-  d.style.display="flex";
-  d.innerHTML='<div class="card" style="position:relative"><span class="x" id="dashX">×</span><div id="dashBody">Loading…</div></div>';
-  document.getElementById("dashX").addEventListener("click",closeDashboard);
-  var body=document.getElementById("dashBody");
-  loadMyStats(function(s){
-    if(!s||s.error){body.innerHTML="Could not load your stats. Are you signed in?";return;}
-    var pct=s.totalUsers?Math.round(100*(s.rank||s.totalUsers)/s.totalUsers):0;
-    var prog=(s.nextLevelAt&&s.points!=null)?Math.min(100,Math.round(100*s.points/s.nextLevelAt)):100;
-    var h='<h2>'+escHtml(s.handle||"You")+'</h2>'
-      +'<div style="color:var(--mut,#8b949e);font-size:13px">'+escHtml(s.level||"")+' &middot; '+(s.points||0)+' points'
-      +(s.rank?(' &middot; rank #'+s.rank+' of '+s.totalUsers+' (top '+pct+'%)'):'')+'</div>';
-    if(s.nextLevel){h+='<div class="bar"><i style="width:'+prog+'%"></i></div><div style="font-size:11px;color:var(--mut,#8b949e)">'+(s.nextLevelAt-s.points)+' pts to '+escHtml(s.nextLevel)+'</div>';}
-    h+='<h3>Your activity</h3><div class="grid">'
-      +stat(s.reports,"total reports","Reported or confirmed cell identities only (New identification / Discrepancy / Confirmation reports, plus identified new cells and merged-nucleus sub-cell splits). Computed volumes, root ID proposals, votes, and \"not a nucleus\" flags are real contributions too, but aren't cell-identity reports — see the separate stats below for those.")+stat(s.daysActive,"days active")+stat(s.streak,"day streak")
-      +stat(s.longestStreak,"longest streak")+stat(s.newCells,"new cells found")+stat(s.organelles,"organelles","Every centriole, primary cilium, microglia plug, astrocyte hole, and other logged organelle/extracellular structure counts here — cilia and centrioles just earn more points per report (see the point-system notes), they're not the only thing tallied.")
-      +stat(s.rootProposals,"root IDs proposed")+stat(s.computedVolumes,"volumes computed")+stat(s.votesGiven,"votes given","Identity or root-ID votes you've cast on other people's reports — distinct from \"upvotes received\" below, which counts votes cast BY OTHERS on your own reports.")+stat(s.notNucleusFlags,"\"not a nucleus\" flags","Detections you flagged as segmentation artifacts rather than real cells — no cell identity is given for these, so they aren't counted in \"total reports\".")
-      +stat(s.meshContactsComputed,"cell contacts computed","Cell-pairs you've checked with “Find cell contacts” — mesh proximity (touching membranes), not synapses. Not counted in “total reports”.")
-      +stat(s.upvotesReceived,"upvotes received")+stat(s.favourites,"favourites")+'</div>';
-    if(s.cellTypes&&s.cellTypes.length){h+='<h3>Cell types you identify most</h3><div style="font-size:13px">'
-      +s.cellTypes.map(function(c){return escHtml(c[0])+' <b>'+c[1]+'</b>';}).join(' &nbsp; ')+'</div>';}
-    // handle setter
-    h+='<h3>Display name on leaderboard</h3><div style="display:flex;gap:6px;flex-wrap:wrap">'
-      +'<input type="text" id="handleInput" value="'+escHtml(s.handle||"")+'" style="flex:1;min-width:160px" maxlength="40">'
-      +'<button class="dbtn" id="handleSave">Save</button></div>';
-    h+='<h3>Favourites</h3><div id="favList" style="font-size:13px">Loading…</div>';
-    h+='<h3>Leaderboard — top 10</h3><div id="lbList">Loading…</div>';h+='<h3>Reports needing review</h3><div style="font-size:12px;color:var(--mut);margin-bottom:4px">Cells where your identification has received down-votes — worth a second look. Re-identifying a cell updates your earlier report.</div><div id="dvList">Loading…</div>';
-    h+='<div style="margin-top:10px"><button class="dbtn" id="downloadMyWorkBtn">Download your work</button><div style="font-size:11px;color:var(--mut);margin-top:4px">Every identification, confirmation, organelle report, and other annotation you\'ve submitted, as an Excel file (one tab per report type).</div></div>';
-    h+='<div style="margin-top:16px;font-size:11px;color:var(--mut,#8b949e)">We store your Google name, email and contribution activity to power these stats and the public leaderboard, which shows your chosen display name. Contact soren@grubb.dk to remove your data.</div>';
-    body.innerHTML=h;
-    document.getElementById("handleSave").addEventListener("click",function(){
-      var v=(document.getElementById("handleInput").value||"").trim();if(!v)return;
-      if(postReport({type:"set_handle",timestamp:new Date().toISOString(),handle:v},"Display name saved.")){setTimeout(function(){loadMyStats();openDashboard();},1400);}
-    });
-    var dmwBtn=document.getElementById("downloadMyWorkBtn");
-    if(dmwBtn)dmwBtn.addEventListener("click",downloadMyWork);
-    loadFavourites(function(fd){
-      var favs=(fd&&fd.favourites)||[],fl=document.getElementById("favList");if(!fl)return;
-      fl.innerHTML=favs.length?favs.map(function(f){
-        return '<div class="favrow"><code>'+escHtml(f.nucleusId||f.coord)+'</code>'
-          +(f.coord?'<button class="dbtn favjump" data-coord="'+escHtml(f.coord)+'" style="padding:2px 8px">jump</button>':'')
-          +'<button class="favdel" data-nid="'+escHtml(f.nucleusId)+'" data-coord="'+escHtml(f.coord)+'" style="padding:2px 8px;color:var(--danger);background:none;border:1px solid var(--line,#ccc);border-radius:6px;cursor:pointer">remove</button></div>';
-      }).join(''):'<div style="color:var(--mut,#8b949e)">No favourites yet — use ☆ Save to favourites on a cell.</div>';
-      fl.querySelectorAll(".favdel").forEach(function(b){b.addEventListener("click",function(){
-        if(postReport({type:"remove_favourite",timestamp:new Date().toISOString(),nucleusId:b.dataset.nid,coord:b.dataset.coord},"Removed from favourites.")){
-          window.FAV_SET.delete(String(b.dataset.nid));refreshFavStars();setTimeout(function(){openDashboard();},1200);}});});
-      fl.querySelectorAll(".favjump").forEach(function(b){b.addEventListener("click",function(){
-        var p=(b.dataset.coord||"").split(",");if(p.length===3){var xEl=document.getElementById("x"),yEl=document.getElementById("y"),zEl=document.getElementById("z");
-          if(xEl&&yEl&&zEl){xEl.value=p[0];yEl.value=p[1];zEl.value=p[2];closeDashboard();var go=document.querySelector(".goarrow,#go,button.go");if(go)go.click();}}});});
-    });
-    gamifyGet("myDownvoted",function(dd){
-      var dv=(dd&&dd.downvoted)||[],el=document.getElementById("dvList");if(!el)return;
-      el.innerHTML=dv.length?dv.map(function(x){
-        return '<div class="favrow"><span>'+escHtml(x.identity)+'</span><span style="color:var(--mut);font-size:12px">▲'+x.up+' ▼'+x.down+'</span>'
-          +(x.coord?'<button class="dbtn dvjump" data-coord="'+escHtml(x.coord)+'" style="padding:2px 8px">review ↗</button>':'')+'</div>';
-      }).join(''):'<div style="color:var(--mut)">None — no one has down-voted your identifications.</div>';
-      el.querySelectorAll(".dvjump").forEach(function(b){b.addEventListener("click",function(){
-        var p=(b.dataset.coord||"").split(",");if(p.length===3){var xEl=document.getElementById("x"),yEl=document.getElementById("y"),zEl=document.getElementById("z");
-          if(xEl&&yEl&&zEl){xEl.value=p[0];yEl.value=p[1];zEl.value=p[2];closeDashboard();var go=document.querySelector(".goarrow,#go,button.go");if(go)go.click();}}});});
-    });
-    gamifyGet("leaderboard",function(ld){
-      var lb=(ld&&ld.leaderboard)||[],el=document.getElementById("lbList");if(!el)return;
-      el.innerHTML=lb.length?lb.map(function(u,i){return '<div class="lbrow"><span>'+(i+1)+'. '+escHtml(u.handle)+'</span><span>'+u.points+' pts &middot; '+u.reports+' reports</span></div>';}).join(''):'<div style="color:var(--mut,#8b949e)">No entries yet.</div>';
-    });
-  });
-}
-/* title (optional) -- 2026-08-09, renamed the organelle-count stat from "centrioles/cilia" to
-   "organelles" (Søren: label was undersellling what it actually counts -- see the tooltip below
-   and u.organelles++ in Code.gs.txt's myStats aggregation, which increments for EVERY row in
-   "Organelle locations", not just centriole/cilium; centriole and primary cilium reports just
-   happen to be weighted higher toward points, see the 2pt-for-cilium comment there). */
-function stat(v,label,title){return '<div class="stat"'+(title?' title="'+escHtml(title)+'"':'')+'><b>'+(v==null?0:v)+'</b><span>'+label+'</span></div>';}
-function closeDashboard(){var d=document.getElementById("gameDash");if(d)d.style.display="none";}
-function favStarHtml(nid,root,x,y,z){
-  var on=window.FAV_SET&&(window.FAV_SET.has(String(nid))||window.FAV_SET.has(x+','+y+','+z));
-  return '<span class="favstar" data-nid="'+nid+'" data-root="'+(root||"")+'" data-coord="'+x+','+y+','+z+'" title="'+(on?"In favourites":"Save to favourites")+'" style="cursor:pointer;margin-left:6px;font-size:15px;color:'+(on?"var(--accent)":"var(--mut)")+'">'+(on?"★":"☆")+'</span>';
-}
-// favourite star (event delegation)
-document.addEventListener("click",function(e){
-  var b=e.target&&e.target.closest?e.target.closest(".favstar"):null;if(!b)return;
-  var nid=String(b.dataset.nid||"");
-  if(!GOOGLE_VERIFIED){alert("Please sign in with Google to save favourites.");return;}
-  var coord=String(b.dataset.coord||"");var on=window.FAV_SET.has(nid)||(coord&&window.FAV_SET.has(coord));
-  if(on){window.FAV_SET.delete(nid);if(coord)window.FAV_SET.delete(coord);b.textContent="☆";b.style.color="var(--mut)";b.title="Save to favourites";
-    postReport({type:"remove_favourite",timestamp:new Date().toISOString(),nucleusId:nid,coord:b.dataset.coord},"Removed from favourites.");}
-  else{window.FAV_SET.add(nid);if(coord)window.FAV_SET.add(coord);b.textContent="★";b.style.color="var(--accent)";b.title="In favourites";
-    postReport({type:"add_favourite",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.root,coord:b.dataset.coord},"Saved to favourites.");}
-});
-function gamifyInit(retries){
-  gamifyInjectUI();
-  if(!(window.google&&google.accounts&&google.accounts.id)){if(retries>0)setTimeout(function(){gamifyInit(retries-1);},350);else renderChip();return;}
-  try{google.accounts.id.initialize({client_id:GOOGLE_CLIENT_ID,callback:handleGoogleCred,auto_select:true});}catch(_){}
-  renderChip();
-  if(GOOGLE_CLIENT_ID){try{google.accounts.id.prompt();}catch(_){}}
-  if(GOOGLE_VERIFIED)gamifyOnSignIn();
-}
+/* NOTE 2026-08-16: this is the SECOND escHtml in this script -- it shadows the fuller one
+   further up (which also escapes " and '), because within one script the later function
+   declaration wins for the whole block. Every escHtml call in this file therefore uses THIS
+   3-character version, including ones writing into HTML attributes. Left exactly as-is by
+   the refactor so behaviour is unchanged; flagged to Søren as a real bug to fix separately. */
 if(GOOGLE_CLIENT_ID){gamifyInit(12);}
 (function(){var xEl=document.getElementById("x");if(xEl)xEl.addEventListener("focus",function(){var el=this;setTimeout(function(){try{el.select();}catch(_){}} ,0);});})();
 
@@ -9217,7 +8107,7 @@ if(GOOGLE_CLIENT_ID){gamifyInit(12);}
   }
   const upper=[],lower=[];
   for(const key in members){
-    const i=Number(key),y=NY[i]*4;
+    const i=Number(key),y=NY[i]*UJ_RY;
     (breakY!=null&&y>breakY?lower:upper).push(i);
   }
   // Vertical axis position for the unslanted upper segment: mean (x,z) of the upper-segment
@@ -9227,7 +8117,7 @@ if(GOOGLE_CLIENT_ID){gamifyInit(12);}
   let ux=boundary.cx,uz=boundary.cz;
   if(upper.length>=5){
     let sx=0,sz=0;
-    for(const i of upper){sx+=NX[i]*4;sz+=NZ[i]*40;}
+    for(const i of upper){sx+=NX[i]*UJ_RX;sz+=NZ[i]*UJ_RZ;}
     ux=sx/upper.length;uz=sz/upper.length;
   }
   boundary.breakY=breakY;
@@ -9242,10 +8132,10 @@ if(GOOGLE_CLIENT_ID){gamifyInit(12);}
     // fitted lines that would leave a visible gap at the join.
     let sYY=0,sXY=0,sZY=0;
     for(const i of lower){
-      const dy=NY[i]*4-breakY;
+      const dy=NY[i]*UJ_RY-breakY;
       sYY+=dy*dy;
-      sXY+=dy*(NX[i]*4-ux);
-      sZY+=dy*(NZ[i]*40-uz);
+      sXY+=dy*(NX[i]*UJ_RX-ux);
+      sZY+=dy*(NZ[i]*UJ_RZ-uz);
     }
     boundary.axisSlopeX=sYY?sXY/sYY:0;
     boundary.axisSlopeZ=sYY?sZY/sYY:0;
@@ -9260,7 +8150,7 @@ if(GOOGLE_CLIENT_ID){gamifyInit(12);}
   };
   const dists=[];
   for(const key in members){
-    const i=Number(key),x=NX[i]*4,y=NY[i]*4,z=NZ[i]*40;
+    const i=Number(key),x=NX[i]*UJ_RX,y=NY[i]*UJ_RY,z=NZ[i]*UJ_RZ;
     const[lcx,lcz]=localCenter(y);
     dists.push(Math.hypot(x-lcx,z-lcz));
   }
@@ -9301,7 +8191,7 @@ function buildV1ColumnLayer(){
   const b=window.V1_COLUMN_BOUNDARY;
   if(!b)return null;
   const SEGS=32,VERT_STRIDE=4; // 32 points/ring, a strut every 4th point -> 8 struts
-  const toVox=p=>[p[0]/4,p[1]/4,p[2]/40];
+  const toVox=p=>[p[0]/UJ_RX,p[1]/UJ_RY,p[2]/UJ_RZ];
   /* centerAt(y): two-segment piecewise-linear axis matching Elabbady et al. 2025's own
      description of this column (see the doc comment above the V1-loading IIFE) -- vertical
      (fixed b.upperCx/b.upperCz) from the top down to the measured Layer 5a/5b boundary
@@ -9557,7 +8447,7 @@ function allContactPointsWithinThreshold(posA,gridA,posB,threshold,clusterUm){
    e.g. estimateLayer's qx=vx*4 etc.), so a contact point can be jumped to / copied exactly like
    every other coordinate this tool shows. */
 function meshUmToVoxel(px,py,pz){
-  return[Math.round(px*1000/4),Math.round(py*1000/4),Math.round(pz*1000/40)];
+  return[Math.round(px*1000/UJ_RX),Math.round(py*1000/UJ_RY),Math.round(pz*1000/UJ_RZ)];
 }
 /* Live per-nucleus lookup of community-PROPOSED extra root IDs (2026-08-14, Soren: "In cases where
    root IDs have been suggested by the user, the contact points should be calculated for all root
@@ -9977,11 +8867,11 @@ function cellTypeOptionsForContactSearch(){
 function findWithinRadiusOfType(i,typeLabel,radiusUm){
   const idx=buildMainArrayTypeIndex();
   const radiusNm=radiusUm*1000;
-  const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
+  const cx=NX[i]*UJ_RX,cy=NY[i]*UJ_RY,cz=NZ[i]*UJ_RZ;
   const out=[];
   for(let j=0;j<N;j++){
     if(j===i||idx[j]!==typeLabel)continue;
-    const dx=NX[j]*4-cx,dy=NY[j]*4-cy,dz=NZ[j]*40-cz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    const dx=NX[j]*UJ_RX-cx,dy=NY[j]*UJ_RY-cy,dz=NZ[j]*UJ_RZ-cz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
     if(d<=radiusNm)out.push({i:j,dist:d});
   }
   out.sort((a,b)=>a.dist-b.dist);
@@ -10004,10 +8894,11 @@ async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,clusterU
 }
 /* Shared static literals (SRC/DIM/EM shader controls) for both viewer builders below -- re-
    declared as small local literals rather than reused from their own top-level declarations
-   elsewhere in this file, because top-level const/let bindings do not cross <script> tag
-   boundaries in this document (see the organelle-groups comment earlier in this file for the same
-   note) -- duplicating these static, never-changing literals is simpler and safer than trying to
-   reach across that boundary. Both builders always use the Img65 EM layer (2026-08-13, Soren:
+   elsewhere in this file.
+   CORRECTED 2026-08-16: the stated reason was wrong -- top-level const/let DO cross <script> tag
+   boundaries (see the note above ORGANELLE_GROUPS), so DIM could simply be reused and DIM_LOCAL
+   dropped. Left duplicated for now because de-duplicating is a behaviour-affecting change that
+   belongs in its own reviewed step, not a comment fix. TODO. Both builders always use the Img65 EM layer (2026-08-13, Soren:
    "the find contacts neuroglancer instance should include the EM data, so that I can verify that
    they are actually touching") -- never Img35, since this whole feature is scoped to the main
    in-region nucleus array only (see cellTypeOptionsForContactSearch()'s own comment), so every
@@ -10018,15 +8909,16 @@ function cellContactsViewerBase(){
     SRC_SEG:"precomputed://gs://iarpa_microns/minnie/minnie65/seg_m1300",
     SRC_EM:"precomputed://https://storage.googleapis.com/iarpa_microns/minnie/minnie65/em",
     EM_SHADER_CONTROLS_LOCAL:{normalized:{range:[86,172]}},
-    DIM_LOCAL:{x:[4e-9,"m"],y:[4e-9,"m"],z:[4e-8,"m"]}
+    DIM_LOCAL:{x:[UJ_RX*1e-9,"m"],y:[UJ_RY*1e-9,"m"],z:[UJ_RZ*1e-9,"m"]}
   };
 }
 /* Golden-angle (137.508°) hue stepping -- gives N maximally-distinct colours without hand-picking
    a palette, same technique ORG_POINT_COLORS uses elsewhere in this file for its ~50 organelle
    kinds (see that code's own comment) -- reimplemented as a small LOCAL function here rather than
-   reused from there, because top-level const/let AND function-scoped helpers inside that other
-   script block's own IIFE don't cross <script> tag boundaries in this document (see the
-   organelle-groups comment earlier in this file for the same rule). Used by both viewers now --
+   reused from there. CORRECTED 2026-08-16: only half of that reason held. Helpers declared inside
+   another block's IIFE are genuinely invisible (ordinary function scope), but top-level const/let
+   DO cross <script> tag boundaries (see the note above ORGANELLE_GROUPS). TODO: check which of the
+   two the original actually was before de-duplicating. Used by both viewers now --
    see buildCellContactsAllViewerState's own comment for why it went back to needing more than one
    colour. */
 function cellContactPaletteColor(idx){
@@ -10099,8 +8991,8 @@ function buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows,own
   const pts=[[NX[i],NY[i],NZ[i]]].concat(rows.filter(r=>r.cellVoxel).map(r=>r.cellVoxel)).concat(allTouchPoints);
   let sx=0,sy=0,sz=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];sz+=p[2];});
   const posVox=[sx/pts.length,sy/pts.length,sz/pts.length];
-  const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
-  const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
+  const cx=NX[i]*UJ_RX,cy=NY[i]*UJ_RY,cz=NZ[i]*UJ_RZ;
+  const span=Math.max(...pts.map(p=>{const dx=p[0]*UJ_RX-cx,dy=p[1]*UJ_RY-cy,dz=p[2]*UJ_RZ-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
   /* layout "4panel" (2026-08-14, Soren: "it should have all the 3 EM views open as well as the 3D
      view") -- Neuroglancer's standard 4-pane layout (xy/xz/yz cross-sections + 3D), replacing the
      2-pane "xy-3d" both cell-contacts viewers used before. selectedLayer opens the first touch-
@@ -10159,8 +9051,8 @@ function buildCellContactsSingleViewerState(i,rootIdStr,cellType,row,ownExtraRoo
   pts.push(...touchPoints);
   let sx=0,sy=0,sz=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];sz+=p[2];});
   const posVox=touchPoints.length?touchPoints[0]:[sx/pts.length,sy/pts.length,sz/pts.length];
-  const cx=NX[i]*4,cy=NY[i]*4,cz=NZ[i]*40;
-  const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),3000)*2.4;
+  const cx=NX[i]*UJ_RX,cy=NY[i]*UJ_RY,cz=NZ[i]*UJ_RZ;
+  const span=Math.max(...pts.map(p=>{const dx=p[0]*UJ_RX-cx,dy=p[1]*UJ_RY-cy,dz=p[2]*UJ_RZ-cz;return Math.hypot(dx,dy,dz);}),3000)*2.4;
   /* 4panel layout + annotation-tab selection, same as buildCellContactsAllViewerState above and
      for the same reason (2026-08-14, Soren) -- see that function's own comment. Only one possible
      annotation layer here, so no "first of several" logic is needed. */
@@ -10296,11 +9188,11 @@ const TRIPARTITE_MAX_MESH_VERTICES=1500000; // 2026-08-15/16, same crash-safety 
 function findWithinRadiusOfTypeAtPoint(vx,vy,vz,typeLabel,radiusUm){
   const idx=buildMainArrayTypeIndex();
   const radiusNm=radiusUm*1000;
-  const cx=vx*4,cy=vy*4,cz=vz*40;
+  const cx=vx*UJ_RX,cy=vy*UJ_RY,cz=vz*UJ_RZ;
   const out=[];
   for(let j=0;j<N;j++){
     if(idx[j]!==typeLabel)continue;
-    const dx=NX[j]*4-cx,dy=NY[j]*4-cy,dz=NZ[j]*40-cz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    const dx=NX[j]*UJ_RX-cx,dy=NY[j]*UJ_RY-cy,dz=NZ[j]*UJ_RZ-cz,d=Math.sqrt(dx*dx+dy*dy+dz*dz);
     if(d<=radiusNm)out.push({i:j,dist:d});
   }
   out.sort((a,b)=>a.dist-b.dist);
@@ -10311,7 +9203,7 @@ function findWithinRadiusOfTypeAtPoint(vx,vy,vz,typeLabel,radiusUm){
    these positions directly as annotation points with no conversion) needs to be in the SAME
    real-world-µm frame as mesh vertex positions before it can be compared against one. */
 function voxelToMeshUm(vx,vy,vz){
-  return[vx*4/1000,vy*4/1000,vz*40/1000];
+  return[vx*UJ_RX/1000,vy*UJ_RY/1000,vz*UJ_RZ/1000];
 }
 /* Core compute: for each synapse point, find the nearest ASTROCYTE mesh vertex among candidate
    astrocytes within TRIPARTITE_CANDIDATE_RADIUS_UM, reporting whichever candidate came closest
@@ -10514,8 +9406,8 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows,ownExtraRootIds){
   // fix alongside the posVox change above: previously always measured from the cell body, which
   // (once we're centering on a synapse far from the soma) would zoom out far more than needed to
   // keep an irrelevant, off-screen soma in frame.
-  const cx=posVox[0]*4,cy=posVox[1]*4,cz=posVox[2]*40;
-  const span=Math.max(...pts.map(p=>{const dx=p[0]*4-cx,dy=p[1]*4-cy,dz=p[2]*40-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
+  const cx=posVox[0]*UJ_RX,cy=posVox[1]*UJ_RY,cz=posVox[2]*UJ_RZ;
+  const span=Math.max(...pts.map(p=>{const dx=p[0]*UJ_RX-cx,dy=p[1]*UJ_RY-cy,dz=p[2]*UJ_RZ-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
   return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
     layers,selectedLayer:{layer:selectedLayerName,visible:true,tab:selectedLayerName===centerLayerName?undefined:"annotations"},
     layout:{type:"4panel",orthographicProjection:true},
@@ -10972,7 +9864,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
   function estimateLayerFast(vx,vy,vz){
     if(!PIA_GRID)PIA_GRID=buildGrid(PIA_X,PIA_Z,PIA_N);
     if(!WM_GRID)WM_GRID=buildGrid(WM_X,WM_Z,WM_N);
-    const qx=vx*4,qy=vy*4,qz=vz*40;
+    const qx=vx*UJ_RX,qy=vy*UJ_RY,qz=vz*UJ_RZ;
     const piaY=idwSurfaceYGrid(qx,qz,PIA_X,PIA_Y,PIA_Z,PIA_GRID,8);
     const wmY=idwSurfaceYGrid(qx,qz,WM_X,WM_Y,WM_Z,WM_GRID,8);
     if(piaY==null||wmY==null)return{region:"unknown",label:"Unknown",wmDistUm:null};
@@ -11241,8 +10133,9 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
   /* "Organelles and extracellular structures" checkboxes in "Add to the Neuroglancer view" --
      same generation pattern as the cell-type checkboxes just above (topic sub-headline + one
      .toggles div per topic), built from window.ORGANELLE_GROUPS (defined in an earlier <script>
-     tag and exposed via window since top-level const/let bindings don't cross <script> tag
-     boundaries -- see the big comment above ORGANELLE_GROUPS). 2026-08-06, Søren: "the list
+     tag and exposed via window; note the `window.` prefix is belt-and-braces, not required --
+     top-level const/let DO cross <script> tag boundaries, see the corrected note above
+     ORGANELLE_GROUPS). 2026-08-06, Søren: "the list
      should be organized into topics." The two vector checkboxes (#filterCentVec/#filterCilVec,
      unchanged IDs from before this rewrite) are spliced in right after their own kind's point
      checkbox -- centriole/cilium are the only two kinds with a bespoke "draw a 3D arrow" option,
@@ -11462,7 +10355,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const gv=cls=>{const el=row.querySelector("."+cls);const v=el?parseFloat(el.value):NaN;return v;};
       const x1=gv("rx1"),y1=gv("ry1"),z1=gv("rz1"),x2=gv("rx2"),y2=gv("ry2"),z2=gv("rz2");
       if([x1,y1,z1,x2,y2,z2].some(v=>isNaN(v)))return;
-      const nx1=x1*4,nx2=x2*4,ny1=y1*4,ny2=y2*4,nz1=z1*40,nz2=z2*40;
+      const nx1=x1*UJ_RX,nx2=x2*UJ_RX,ny1=y1*UJ_RY,ny2=y2*UJ_RY,nz1=z1*UJ_RZ,nz2=z2*UJ_RZ;
       // n = idx+1 (DOM row position), NOT a count of valid boxes pushed so far -- matches
       // renumberRegionBoxes()'s own on-screen "Box N" labelling exactly, including when an
       // earlier row is left blank/incomplete (which would otherwise desync the two numberings).
@@ -11502,7 +10395,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       let regionBoxLabel=null;
       if(regionOn&&regionValid){
         const pos=rowPos(row);
-        const nx=pos[0]*4,ny=pos[1]*4,nz=pos[2]*40;
+        const nx=pos[0]*UJ_RX,ny=pos[1]*UJ_RY,nz=pos[2]*UJ_RZ;
         const hitBoxes=regionBoxesNM.filter(b=>nx>=b.xmin&&nx<=b.xmax&&ny>=b.ymin&&ny<=b.ymax&&nz>=b.zmin&&nz<=b.zmax);
         if(!hitBoxes.length)return null;
         /* Label uses the RAW, unsorted voxel corners as Søren typed them (e.g. "Box 1 -
@@ -11696,7 +10589,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
   function buildNucGrid(){
     const map=new Map();
     for(let i=0;i<N;i++){
-      const cx=Math.floor((NX[i]*4)/NUC_GRID_CELL),cy=Math.floor((NY[i]*4)/NUC_GRID_CELL),cz=Math.floor((NZ[i]*40)/NUC_GRID_CELL);
+      const cx=Math.floor((NX[i]*UJ_RX)/NUC_GRID_CELL),cy=Math.floor((NY[i]*UJ_RY)/NUC_GRID_CELL),cz=Math.floor((NZ[i]*UJ_RZ)/NUC_GRID_CELL);
       const key=cx+","+cy+","+cz;
       let arr=map.get(key);if(!arr){arr=[];map.set(key,arr);}
       arr.push(i);
@@ -11705,7 +10598,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
   }
   function kNearestGrid(cx,cy,cz,k,excl){
     if(!NUC_GRID)NUC_GRID=buildNucGrid();
-    const qx=cx*4,qy=cy*4,qz=cz*40;
+    const qx=cx*UJ_RX,qy=cy*UJ_RY,qz=cz*UJ_RZ;
     const gx=Math.floor(qx/NUC_GRID_CELL),gy=Math.floor(qy/NUC_GRID_CELL),gz=Math.floor(qz/NUC_GRID_CELL);
     let best=[],radius=1;
     const scan=r=>{
@@ -11715,7 +10608,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         if(!arr)continue;
         for(const i of arr){
           if(i===excl)continue;
-          const ddx=qx-NX[i]*4,ddy=qy-NY[i]*4,ddz=qz-NZ[i]*40,d=ddx*ddx+ddy*ddy+ddz*ddz;
+          const ddx=qx-NX[i]*UJ_RX,ddy=qy-NY[i]*UJ_RY,ddz=qz-NZ[i]*UJ_RZ,d=ddx*ddx+ddy*ddy+ddz*ddz;
           if(best.length<k){best.push({i,d});best.sort((a,b)=>a.d-b.d);}
           else if(d<best[k-1].d){best[k-1]={i,d};best.sort((a,b)=>a.d-b.d);}
         }
@@ -11883,9 +10776,9 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       {header:"Voxel X",get:m=>rowPos(m.row)[0]},
       {header:"Voxel Y",get:m=>rowPos(m.row)[1]},
       {header:"Voxel Z",get:m=>rowPos(m.row)[2]},
-      {header:"nm X",get:m=>rowPos(m.row)[0]*4},
-      {header:"nm Y",get:m=>rowPos(m.row)[1]*4},
-      {header:"nm Z",get:m=>rowPos(m.row)[2]*40},
+      {header:"nm X",get:m=>rowPos(m.row)[0]*UJ_RX},
+      {header:"nm Y",get:m=>rowPos(m.row)[1]*UJ_RY},
+      {header:"nm Z",get:m=>rowPos(m.row)[2]*UJ_RZ},
       {header:"Cell type",get:m=>m.row.type},
       /* MS (merged-nucleus sub-cell) rows checked FIRST here: they carry source:"community" like
          an ordinary community-identified nucleus does, but "MICrONS prediction" (the ternary's
@@ -12378,7 +11271,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      ONLY place that layer is ever shown; per-cell links (buildState/buildExampleState) never
      include it, since Søren didn't want it appearing every time a single cell is opened. */
   function vecArrowAnns(nVox,tVox,colorHex,idp){
-    var S=[nVox[0]*4,nVox[1]*4,nVox[2]*40],E=[tVox[0]*4,tVox[1]*4,tVox[2]*40];
+    var S=[nVox[0]*UJ_RX,nVox[1]*UJ_RY,nVox[2]*UJ_RZ],E=[tVox[0]*UJ_RX,tVox[1]*UJ_RY,tVox[2]*UJ_RZ];
     var ax=[E[0]-S[0],E[1]-S[1],E[2]-S[2]],dist=Math.hypot(ax[0],ax[1],ax[2]);
     if(!(dist>0))return[];
     var u0=[ax[0]/dist,ax[1]/dist,ax[2]/dist];
@@ -12388,7 +11281,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     var v=[u0[1]*u[2]-u0[2]*u[1],u0[2]*u[0]-u0[0]*u[2],u0[0]*u[1]-u0[1]*u[0]];
     var headLen=Math.min(dist*0.3,dist),headR=headLen*0.45;
     var bc=[E[0]-u0[0]*headLen,E[1]-u0[1]*headLen,E[2]-u0[2]*headLen];
-    var toV=function(p){return[Math.round(p[0]/4),Math.round(p[1]/4),Math.round(p[2]/40)];};
+    var toV=function(p){return[Math.round(p[0]/UJ_RX),Math.round(p[1]/UJ_RY),Math.round(p[2]/UJ_RZ)];};
     var P1=[bc[0]+u[0]*headR,bc[1]+u[1]*headR,bc[2]+u[2]*headR],
         P2=[bc[0]-u[0]*headR,bc[1]-u[1]*headR,bc[2]-u[2]*headR],
         P3=[bc[0]+v[0]*headR,bc[1]+v[1]*headR,bc[2]+v[2]*headR],
@@ -12460,7 +11353,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     function catBucket(cat){return byCat[cat]||(byCat[cat]={segIds:new Set(),nucIds:new Set(),seg35Ids:new Set(),points:[]});}
     for(const m of matches){
       const p=rowPos(m.row); // voxel coords
-      const nx=p[0]*4,ny=p[1]*4,nz=p[2]*40; // physical nm, for the bounding-box span only
+      const nx=p[0]*UJ_RX,ny=p[1]*UJ_RY,nz=p[2]*UJ_RZ; // physical nm, for the bounding-box span only
       if(nx<nxmin)nxmin=nx;if(nx>nxmax)nxmax=nx;
       if(ny<nymin)nymin=ny;if(ny>nymax)nymax=ny;
       if(nz<nzmin)nzmin=nz;if(nz>nzmax)nzmax=nz;
@@ -12639,8 +11532,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         annotations:[{
           type:"axis_aligned_bounding_box",
           id:"region-box-"+i,
-          pointA:[b.xmin/4,b.ymin/4,b.zmin/40],
-          pointB:[b.xmax/4,b.ymax/4,b.zmax/40]
+          pointA:[b.xmin/UJ_RX,b.ymin/UJ_RY,b.zmin/UJ_RZ],
+          pointB:[b.xmax/UJ_RX,b.ymax/UJ_RY,b.zmax/UJ_RZ]
         }],
         annotationColor:color,
         name:regionBoxesNM.length>1?"Region box "+(i+1):"Region box"
@@ -12970,7 +11863,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const gv=cls=>{const el=row.querySelector("."+cls);const v=el?parseFloat(el.value):NaN;return v;};
       const x1=gv("rx1"),y1=gv("ry1"),z1=gv("rz1"),x2=gv("rx2"),y2=gv("ry2"),z2=gv("rz2");
       if([x1,y1,z1,x2,y2,z2].some(v=>isNaN(v))){anyIncomplete=true;return;}
-      const nx1=x1*4,nx2=x2*4,ny1=y1*4,ny2=y2*4,nz1=z1*40,nz2=z2*40;
+      const nx1=x1*UJ_RX,nx2=x2*UJ_RX,ny1=y1*UJ_RY,ny2=y2*UJ_RY,nz1=z1*UJ_RZ,nz2=z2*UJ_RZ;
       boxesNm.push({
         bx0:Math.min(nx1,nx2),bx1:Math.max(nx1,nx2),
         by0:Math.min(ny1,ny2),by1:Math.max(ny1,ny2),

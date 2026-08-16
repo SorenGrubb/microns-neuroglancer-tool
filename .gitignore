@@ -1,0 +1,3 @@
+# Scratch folder used when a file has to be removed but the tooling cannot delete it.
+# Never commit this.
+_to_delete/
