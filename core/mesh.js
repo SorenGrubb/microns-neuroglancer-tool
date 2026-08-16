@@ -58,7 +58,18 @@ UJ.mesh=(()=>{
     const width=Math.max(1,Math.ceil(CFG.shardBits/4));
     return {shard:shard.toString(16).padStart(width,"0"),minishard};
   }
-  let useAlt=false;
+  /* Start on whichever host the dataset's bucket actually allows cross-origin.
+     Confirmed from grubblab.com, 2026-08-16:
+       storage.googleapis.com/h01-release/...        -> served 200/206 but NO
+                                                        Access-Control-Allow-Origin, so the
+                                                        browser rejects it ("Failed to fetch")
+       storage.googleapis.com/storage/v1/b/h01-...   -> 200 on the info file, 206 on a ranged
+                                                        shard read: fully usable
+     MICrONS's iarpa_microns bucket allows "*", so µJump keeps starting on the direct path and
+     nothing about its behaviour changes. Setting preferAlt skips a request that is guaranteed to
+     fail rather than relying on the catch below to notice -- one less round trip per download,
+     and no red CORS error in the console on every single click. */
+  let useAlt=!!CFG.preferAlt;
   function shardUrl(shard){return useAlt?(CFG.meshBaseAlt+shard+CFG.meshBaseAltSuffix):(CFG.meshBase+shard+".shard");}
   /* seg_m1300 is a FROZEN precomputed snapshot (see the CAVE_SEG_SOURCE comment near
      loadConnectivityPanel) -- a root ID that isn't in its shard index today will never suddenly
@@ -114,12 +125,14 @@ UJ.mesh=(()=>{
        the shard fetch ever got to try its own fallback. The JSON API path below is CORS-enabled
        by Google for public objects, so try it before giving up -- and remember the choice in
        useAlt so the range requests that follow go straight there too. */
+    const direct=CFG.meshBase+"info", alt=CFG.meshBaseAlt+"info?alt=media";
+    const order=useAlt?[alt,direct]:[direct,alt];
     let res=null;
-    try{ res=await fetch(CFG.meshBase+"info"); }
-    catch(_direct){
-      try{ res=await fetch(CFG.meshBaseAlt+"info?alt=media"); useAlt=true; }
-      catch(_alt){ infoLoaded=true; return; }   // both blocked -- use the built-in defaults
+    for(let k=0;k<order.length;k++){
+      try{ res=await fetch(order[k]); useAlt=(order[k]===alt); break; }
+      catch(_e){ res=null; }
     }
+    if(!res){ infoLoaded=true; return; }   // both blocked -- use the built-in defaults
     if(!res.ok){infoLoaded=true;return;} // fall back to the built-in defaults above
     const j=await res.json();
     if(j["@type"]!=="neuroglancer_multilod_draco")throw new Error('unexpected mesh format "'+j["@type"]+'"');

@@ -509,6 +509,11 @@ UJ.cfg.mesh = {
   meshBase: "https://storage.googleapis.com/h01-release/data/20210601/c3/mesh/",
   meshBaseAlt: "https://storage.googleapis.com/storage/v1/b/h01-release/o/data%2F20210601%2Fc3%2Fmesh%2F",
   meshBaseAltSuffix: ".shard?alt=media",
+  /* The h01-release bucket sends no Access-Control-Allow-Origin on its direct storage.googleapis
+     .com paths, so a browser on grubblab.com cannot read them even though the server returns the
+     bytes. Google's JSON API endpoint for the same objects DOES send CORS headers and honours
+     Range requests, so read everything through it. Verified live from grubblab.com. */
+  preferAlt: true,
   preshiftBits: 6, minishardBits: 8, shardBits: 10, vertexQuantizationBits: 16,
   transform: [16,0,0,0, 0,16,0,0, 0,0,33,0],
   dracoWrapper: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
