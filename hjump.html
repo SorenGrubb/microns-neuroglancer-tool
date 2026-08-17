@@ -448,6 +448,38 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 })();
 </script>
 
+<div class="tabbar" id="mainTabs" role="tablist">
+<button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
+<button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">&#128229; Filter and show</button>
+<button type="button" class="tabbtn" data-tab="refs" role="tab" aria-selected="false">&#128218; References</button>
+</div>
+<script>
+/* Same tab machinery as µJump, minus the dashboard's lazy-init (no dashboard here yet).
+   activate() is deferred to DOMContentLoaded for the same reason it is there: this script sits
+   directly after the tab bar, BEFORE any .tabpanel exists, so calling it synchronously would find
+   zero panels and silently toggle nothing. The remembered tab uses its own hjump_ key so the two
+   pages never fight over one another's last-open tab. */
+(function(){
+  var bar=document.getElementById("mainTabs"); if(!bar)return;
+  var btns=Array.prototype.slice.call(bar.querySelectorAll(".tabbtn[data-tab]"));
+  function activate(name){
+    btns.forEach(function(b){var on=b.dataset.tab===name;b.classList.toggle("active",on);b.setAttribute("aria-selected",on?"true":"false");});
+    document.querySelectorAll(".tabpanel").forEach(function(p){p.classList.toggle("active",p.dataset.tabpanel===name);});
+    try{localStorage.setItem("hjump_active_tab",name);}catch(e){}
+  }
+  btns.forEach(function(b){b.addEventListener("click",function(){activate(b.dataset.tab);});});
+  window.__hjumpActivateTab=activate;
+  document.addEventListener("DOMContentLoaded",function(){
+    var fromUrl=null;try{fromUrl=new URLSearchParams(location.search).get("tab");}catch(e){}
+    var saved=null;try{saved=localStorage.getItem("hjump_active_tab");}catch(e){}
+    var pick=[fromUrl,saved].find(function(t){return t&&btns.some(function(b){return b.dataset.tab===t;});});
+    activate(pick||"jump");
+  });
+})();
+</script>
+
+<div class="tabpanel active" data-tabpanel="jump">
+
 <div class="card">
 <label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; in <span id="unitres"></span> voxels; jump to it in H01, identify the nearest cell body and its neighbours, and load the cell in 3D</span></label>
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Find the nearest classified cell body">&#8594;</button></div>
@@ -496,27 +528,96 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <div class="nuc" id="nucpanel"></div>
 <div class="idf" id="idfpanel"></div>
 </div>
-
 <div class="card">
 <label>About this dataset</label>
 <p class="hint" style="margin-top:0">H01 is a ~1&nbsp;mm&sup3; sample of human temporal cortex
-(Shapson-Coe et al., <a href="https://www.science.org/doi/10.1126/science.adk4858" target="_blank" rel="noopener">Science 2024</a>,
-CC&nbsp;BY). Cell types are the dataset's own published classification; soma positions come from
-joining that classification to the <code>cell_bodies</code> segmentation.
-<span id="dscount"></span></p>
-<p class="hint">Cortical layer is sampled from H01's own <code>layers</code> volume at each soma
-centroid. It agrees with the classification's <code>#L1&hellip;#WM</code> tags on 94.8&thinsp;% of
-cells and, where the two differ, they are always <i>exactly</i> one layer apart &mdash; so a
-&ldquo;border&rdquo; badge means the soma sits on that boundary, not that either source is wrong.
-For the 520 cells the volume does not cover, and for any coordinate outside the cell table, the
-layer is estimated from fitted geometry (96.0&thinsp;% accurate against the volume, never off by
-more than one layer).</p>
-<p class="hint">Two caveats from the join. <b>spiny-stellate</b> (190 cells) is 62.6&thinsp;% in L5
-rather than L4 by the layer volume and has the largest median soma of any type &mdash; treat it as
-uncertain. And 1,468 <code>c3</code> segments contain more than one soma, so a segment ID is not
-always one cell.</p>
+(Shapson-Coe et al., <a class="ref" href="https://doi.org/10.1126/science.adk4858" target="_blank" rel="noopener">Science 2024</a>,
+CC&nbsp;BY). Cell types are the dataset's own published classification; cortical layer is sampled
+from H01's own <code>layers</code> volume. <span id="dscount"></span></p>
+<p class="hint">Sources, the layer-label mapping, and the caveats worth knowing before trusting a
+number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</p>
+</div>
+</div><!-- /tabpanel jump -->
+
+<div class="tabpanel" data-tabpanel="filter">
+<div class="card" id="filterCard">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Filter and show</div>
+<p class="hint" style="margin-top:6px">Applied to the <span id="filterTotal"></span> cells embedded in this page, entirely in your browser &mdash; nothing is fetched. Leave a section untouched to ignore it.</p>
+
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px">Cell type</div>
+<div style="max-height:230px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterTypes"></div>
+
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="From H01's own cortical-layer volume where it covers the soma, otherwise from the published #L1..#WM tag.">Cortical layer</div>
+<div class="toggles" style="margin-top:4px" id="filterLayers"></div>
+
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px">Soma volume</div>
+<div class="row" style="gap:8px;align-items:center">
+<label style="font-size:12px">from <input type="text" id="filterVolMin" placeholder="min" style="width:72px;padding:4px 6px" inputmode="decimal"></label>
+<label style="font-size:12px">to <input type="text" id="filterVolMax" placeholder="max" style="width:72px;padding:4px 6px" inputmode="decimal"></label>
+<span style="font-size:12px;color:var(--mut)">&micro;m&sup3; &mdash; blank means no limit</span>
 </div>
 
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="The per-segment counts H01 publishes in its segment_properties — useful for finding, say, cells with an unusually high synapse count for their type.">Morphology count</div>
+<div class="row" style="gap:8px;align-items:center">
+<select id="filterMorphKey" style="flex:1 1 auto"></select>
+<label style="font-size:12px">from <input type="text" id="filterMorphMin" placeholder="min" style="width:72px;padding:4px 6px" inputmode="numeric"></label>
+<label style="font-size:12px">to <input type="text" id="filterMorphMax" placeholder="max" style="width:72px;padding:4px 6px" inputmode="numeric"></label>
+</div>
+
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="Two diagonal corners, in the same 8-8-33 nm voxels as the Jump tab. Either diagonal works. You can paste x, y, z into either x field.">Region</div>
+<label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="filterRegionOn" style="width:auto"> Limit to a bounding box</label>
+<div class="row" style="gap:6px;margin-top:6px">
+<div class="coord"><input type="text" id="rx1" placeholder="x1" inputmode="numeric"></div><div class="coord"><input type="text" id="ry1" placeholder="y1" inputmode="numeric"></div><div class="coord"><input type="text" id="rz1" placeholder="z1" inputmode="numeric"></div>
+</div>
+<div class="row" style="gap:6px;margin-top:6px">
+<div class="coord"><input type="text" id="rx2" placeholder="x2" inputmode="numeric"></div><div class="coord"><input type="text" id="ry2" placeholder="y2" inputmode="numeric"></div><div class="coord"><input type="text" id="rz2" placeholder="z2" inputmode="numeric"></div>
+</div>
+
+<div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
+<button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
+<button class="idbtn" id="filterReset" style="flex:0 0 auto">Reset</button>
+</div>
+<div class="row" style="margin-top:8px;gap:10px">
+<button class="idbtn" id="filterXlsx" disabled title="Preview matches first" style="flex:1">Download as Excel</button>
+<a class="idbtn" id="filterViewer" style="flex:1;text-align:center;text-decoration:none;pointer-events:none;opacity:.45" target="_blank" rel="noopener" title="Preview matches first">Open all in Neuroglancer &#8599;</a>
+</div>
+<p class="hint" id="filterStatus"></p>
+<div id="filterResults"></div>
+</div>
+</div><!-- /tabpanel filter -->
+
+<div class="tabpanel" data-tabpanel="refs">
+<div class="card">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">References</div>
+
+<p class="hint" style="margin-top:8px"><b>The dataset.</b> Shapson-Coe, Januszewski, Berger <i>et al.</i>, &ldquo;A petavoxel fragment of human cerebral cortex reconstructed at nanoscale resolution,&rdquo; <a class="ref" href="https://doi.org/10.1126/science.adk4858" target="_blank" rel="noopener">Science 384, eadk4858 (2024)</a>. Released CC&nbsp;BY. Every cell type, cortical layer and segment ID in this tool comes from that release.</p>
+<p class="hint">Volumes and browser: <a class="ref" href="https://h01-release.storage.googleapis.com/data.html" target="_blank" rel="noopener">H01 release page</a>. This tool reads the <code>c3</code> segmentation and its <code>segment_properties</code>, the <code>cell_bodies</code> centroids, and the <code>layers</code> volume.</p>
+
+<p class="hint" style="margin-top:14px"><b>Cortical layers.</b> Each cell&rsquo;s layer is sampled from H01&rsquo;s own <code>layers</code> volume. H01 publishes no mapping from its numeric labels to layer names, so the mapping (1&nbsp;=&nbsp;L1 &hellip; 7&nbsp;=&nbsp;WM) was recovered here by cross-tabulating against the classification&rsquo;s <code>#L1&hellip;#WM</code> tags: 94.8&thinsp;% agreement, and every disagreement is exactly one layer apart, never two.</p>
+<p class="hint">For whole-cortex comparison: <a class="ref" href="https://doi.org/10.1371/journal.pbio.3000678" target="_blank" rel="noopener">Wagstyl et al., &ldquo;BigBrain 3D atlas of cortical layers: cortical and laminar thickness gradients diverge in sensory and motor cortices,&rdquo; PLOS Biology 18, e3000678 (2020)</a>. It reports thickness as regional gradients (1.67&ndash;4.5&nbsp;mm total) and shares no coordinate frame with H01, so it can sanity-check this sample&rsquo;s ~2.3&nbsp;mm but cannot place a boundary inside it.</p>
+
+<p class="hint" style="margin-top:14px"><b>Cell identification.</b> The guided decision tree is shared with &micro;Jump. Perisomatic ultrastructure as a classifier: <a class="ref" href="https://doi.org/10.1038/s41586-024-07765-7" target="_blank" rel="noopener">Elabbady et al., &ldquo;Perisomatic ultrastructure efficiently classifies cells in mouse cortex,&rdquo; Nature 640, 478&ndash;486 (2025)</a>.</p>
+<p class="hint">Brain ultrastructure overview: <a class="ref" href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/" target="_blank" rel="noopener">&ldquo;Brain Ultrastructure: Putting the Pieces Together,&rdquo; PMC7930431</a>.</p>
+<p class="hint">Neurovascular volume EM: <a class="ref" href="https://doi.org/10.3389/fcell.2022.849469" target="_blank" rel="noopener">&ldquo;Public Volume Electron Microscopy Data: An Essential Resource to Study the Brain Microvasculature,&rdquo; Frontiers in Cell and Developmental Biology 10, 849469 (2022)</a>.</p>
+<p class="hint">Synapse type I/II framework: Gray, E.G., &ldquo;Axo-somatic and axo-dendritic synapses of the cerebral cortex: an electron microscope study,&rdquo; J. Anat. 93, 420&ndash;433 (1959) &mdash; foundational, no open-access link.</p>
+<p class="hint">The reference images in the guided tree are the MICrONS <i>mouse</i> visual cortex library. Organelle ultrastructure is broadly comparable to human; cell and vessel dimensions are not.</p>
+
+<p class="hint" style="margin-top:14px"><b>Read these before trusting a number.</b> <b>spiny-stellate</b> (190 cells) sits 62.6&thinsp;% in L5 rather than L4 by the layer volume, and has the largest median soma of any type &mdash; treat it as uncertain. 1,468 <code>c3</code> segments contain more than one soma, so a segment ID is not always one cell. A further 1,917 detected somata carry no cell-type call at all and are not loaded here. Cell contacts are <b>mesh surface proximity, not synapses</b> &mdash; H01 publishes its own synapse tables, which this tool does not yet use.</p>
+</div>
+</div><!-- /tabpanel refs -->
+
+<script>
+/* The About card's pointer to the References tab -- uses the tab machinery rather than an anchor
+   jump, since the panel is display:none until its tab is active. */
+document.addEventListener("DOMContentLoaded",function(){
+  var a=document.getElementById("aboutToRefs");
+  if(a) a.addEventListener("click",function(e){
+    e.preventDefault();
+    if(window.__hjumpActivateTab) window.__hjumpActivateTab("refs");
+    try{ if(window.scrollTo) window.scrollTo({top:0,behavior:"smooth"}); }catch(_e){}   // jsdom lacks it
+  });
+});
+</script>
 </div><!-- /wrap -->
 
 <script>
@@ -1976,6 +2077,224 @@ function showContactResults(i,rows,thNm,clNm){
     });
   });
 }
+
+
+/* jsdom does not implement window.scrollTo, and an unguarded call there throws AFTER the real
+   work has already succeeded -- which reads as a failure in the test log when nothing is wrong.
+   Same reasoning as the scrollIntoView guard in openIdentify(). Every real browser has it. */
+function scrollTop(){ try{ if(window.scrollTo) window.scrollTo({top:0,behavior:"smooth"}); }catch(_e){} }
+
+/* ═══ Filter and show ═════════════════════════════════════════════════════════════════════
+   Everything runs against the embedded table, in the browser -- 47,447 rows is nothing for a
+   linear scan, so there is no index to keep in sync and no network round trip. */
+const FILTER={rows:[]};
+function filterLayerOf(i){ return volLayer(i)!=="no-layer"?volLayer(i):tagLayer(i); }
+
+function buildFilterUI(){
+  const types=document.getElementById("filterTypes"); if(!types)return;
+  document.getElementById("filterTotal").textContent=fmt(N);
+  /* Grouped exactly like the random-example dropdown, so the same families read the same way
+     wherever cell types are listed on this page. */
+  types.innerHTML=TYPE_GROUPS.map(function(g){
+    const inner=g.types.filter(function(t){ return IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length; })
+      .map(function(t){
+        return '<label style="font-size:12px;display:flex;align-items:center;gap:6px">'
+          +'<input type="checkbox" class="ftype" value="'+escHtml(t)+'" style="width:auto"> '
+          +escHtml(longName(t))+' <span class="nsub">'+fmt(IDX_BY_TYPE[t].length)+'</span></label>'; }).join("");
+    return inner?'<div style="margin-bottom:8px"><div class="nsub" style="text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'
+      +escHtml(g.label)+'</div>'+inner+'</div>':"";
+  }).join("");
+  const lay=document.getElementById("filterLayers");
+  const counts={}; for(let i=0;i<N;i++){ const l=filterLayerOf(i); counts[l]=(counts[l]||0)+1; }
+  lay.innerHTML=LAYER_ORDER.map(function(l){
+    return '<label style="font-size:12px"><input type="checkbox" class="flayer" value="'+l+'"> '
+      +l+' <span class="nsub">'+fmt(counts[l]||0)+'</span></label>'; }).join("");
+  const mk=document.getElementById("filterMorphKey");
+  mk.innerHTML='<option value="">Not filtering by a count</option>'
+    +Object.keys(MORPH_LABEL).map(function(k){
+      return '<option value="'+k+'">'+escHtml(MORPH_LABEL[k])+'</option>'; }).join("")
+    +'<option value="__Sp">spininess</option>';
+}
+
+function runFilter(){
+  const $=function(id){ return document.getElementById(id); };
+  const num=function(id){ const v=parseFloat(($(id)||{}).value); return isFinite(v)?v:null; };
+  const wantTypes=[].slice.call(document.querySelectorAll(".ftype:checked")).map(function(b){ return b.value; });
+  const wantLayers=[].slice.call(document.querySelectorAll(".flayer:checked")).map(function(b){ return b.value; });
+  const vMin=num("filterVolMin"), vMax=num("filterVolMax");
+  const mKey=($("filterMorphKey")||{}).value||"", mMin=num("filterMorphMin"), mMax=num("filterMorphMax");
+  let box=null;
+  if(($("filterRegionOn")||{}).checked){
+    const c=["rx1","ry1","rz1","rx2","ry2","rz2"].map(num);
+    if(c.some(function(v){ return v===null; })){
+      $("filterStatus").textContent="Fill in both box corners, or untick the region limit."; return;
+    }
+    /* Either diagonal works -- sort each axis rather than demanding corner order. */
+    box=[[Math.min(c[0],c[3]),Math.max(c[0],c[3])],
+         [Math.min(c[1],c[4]),Math.max(c[1],c[4])],
+         [Math.min(c[2],c[5]),Math.max(c[2],c[5])]];
+  }
+  const tSet=wantTypes.length?new Set(wantTypes):null, lSet=wantLayers.length?new Set(wantLayers):null;
+  const rows=[];
+  for(let i=0;i<N;i++){
+    if(tSet&&!tSet.has(typeName(i)))continue;
+    if(lSet&&!lSet.has(filterLayerOf(i)))continue;
+    const vol=HVB[i];
+    if(vMin!==null&&vol<vMin)continue;
+    if(vMax!==null&&vol>vMax)continue;
+    if(mKey){
+      const val=(mKey==="__Sp")?HSP[i]:MORPH[mKey][i];
+      if(mMin!==null&&val<mMin)continue;
+      if(mMax!==null&&val>mMax)continue;
+    }
+    if(box){
+      if(HX[i]<box[0][0]||HX[i]>box[0][1])continue;
+      if(HY[i]<box[1][0]||HY[i]>box[1][1])continue;
+      if(HZ[i]<box[2][0]||HZ[i]>box[2][1])continue;
+    }
+    rows.push(i);
+  }
+  FILTER.rows=rows;
+  FILTER.criteria={types:wantTypes,layers:wantLayers,vMin:vMin,vMax:vMax,
+                   morph:mKey,mMin:mMin,mMax:mMax,box:box};
+  renderFilterResults();
+}
+
+function renderFilterResults(){
+  const rows=FILTER.rows, st=document.getElementById("filterStatus"),
+        out=document.getElementById("filterResults"),
+        xb=document.getElementById("filterXlsx"), vb=document.getElementById("filterViewer");
+  st.textContent=fmt(rows.length)+" of "+fmt(N)+" cells match ("+(100*rows.length/N).toFixed(1)+"%).";
+  xb.disabled=!rows.length; xb.title=rows.length?"":"Preview matches first";
+  /* The viewer link is capped. Neuroglancer will happily accept thousands of segment IDs, but the
+     resulting URL runs to megabytes and the page then tries to load every mesh -- which is how you
+     hang a browser. Cap, and SAY that it is capped rather than silently truncating. */
+  const CAP=200;
+  if(rows.length){
+    const shown=rows.slice(0,CAP);
+    vb.href=filterViewerUrl(shown);
+    vb.style.pointerEvents=""; vb.style.opacity="";
+    vb.title=rows.length>CAP
+      ? ("Opens the first "+CAP+" of "+fmt(rows.length)+" matches — more than that and the viewer URL becomes unusable")
+      : ("Opens all "+rows.length+" matches, coloured by cell type");
+    vb.textContent=(rows.length>CAP?("Open first "+CAP+" in Neuroglancer"):"Open all in Neuroglancer")+" ↗";
+    if(rows.length>CAP) st.textContent+=" The viewer link shows the first "+CAP+"; the Excel export has all of them.";
+  } else {
+    vb.removeAttribute("href"); vb.style.pointerEvents="none"; vb.style.opacity=".45";
+    vb.textContent="Open all in Neuroglancer ↗";
+  }
+  // a short preview, not the whole list -- 30k rows of DOM would freeze the tab
+  const PREVIEW=25;
+  out.innerHTML=rows.length
+    ? '<div class="neigh" style="margin-top:10px"><h4>First '+Math.min(PREVIEW,rows.length)+' matches</h4>'
+      +rows.slice(0,PREVIEW).map(function(i){
+        return '<div class="nrow"><div class="nleft"><span class="dot '+classOf(i)+'"></span><div>'
+          +'<div class="ntype fjump" data-i="'+i+'" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" '
+          +'title="Open this cell on the Jump tab">'+escHtml(longName(typeName(i)))+'</div>'
+          +'<div class="nsub">'+escHtml(filterLayerOf(i))+' &middot; soma '+HVB[i].toFixed(0)
+          +' &micro;m&sup3; &middot; body '+HSB[i]+' &middot; voxel '+HX[i]+', '+HY[i]+', '+HZ[i]+'</div>'
+          +'</div></div></div>'; }).join("")
+      +(rows.length>PREVIEW?'<div class="nsub" style="margin-top:6px">…and '+fmt(rows.length-PREVIEW)+' more — download the Excel for the full list.</div>':"")
+      +'</div>'
+    : '<div class="nsub" style="margin-top:8px">Nothing matches. Try loosening a filter.</div>';
+  out.querySelectorAll(".fjump").forEach(function(b){
+    b.addEventListener("click",function(){
+      if(window.__hjumpActivateTab) window.__hjumpActivateTab("jump");
+      jumpToIndex(+b.dataset.i);
+      scrollTop();
+    });
+  });
+}
+
+/* One segmentation layer per cell type, each its own colour, so a mixed result set is readable
+   rather than one undifferentiated blob. */
+function filterViewerUrl(rows){
+  const V=UJ.cfg.viewer;
+  const layers=[{type:"image",source:V.em,tab:"rendering",name:"4nm EM"}];
+  const byType={};
+  rows.forEach(function(i){ (byType[typeName(i)]=byType[typeName(i)]||[]).push(i); });
+  let ci=0;
+  Object.keys(byType).forEach(function(t){
+    const col={}, segs=byType[t].map(function(i){ return c3Id(i); });
+    const c=contactPaletteColor(ci++);
+    segs.forEach(function(s){ col[s]=c; });
+    layers.push({type:"segmentation",source:V.seg,tab:"source",
+      name:longName(t)+" ("+segs.length+")",segments:segs,segmentColors:col,objectAlpha:0.85});
+  });
+  let sx=0,sy=0,sz=0;
+  rows.forEach(function(i){ sx+=HX[i];sy+=HY[i];sz+=HZ[i]; });
+  const pos=[sx/rows.length,sy/rows.length,sz/rows.length];
+  const cx=pos[0]*UJ_RX, cy=pos[1]*UJ_RY, cz=pos[2]*UJ_RZ;
+  const span=Math.max.apply(null,rows.map(function(i){
+    return Math.hypot(HX[i]*UJ_RX-cx,HY[i]*UJ_RY-cy,HZ[i]*UJ_RZ-cz); }).concat([20000]))*2.2;
+  return V.base+"#!"+encodeURIComponent(JSON.stringify({
+    dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
+    position:pos, crossSectionScale:3.0, projectionScale:span,
+    layers:layers, layout:{type:"4panel",orthographicProjection:true}}));
+}
+
+function downloadFilterExcel(){
+  if(typeof XLSX==="undefined"){ alert("The spreadsheet library has not loaded yet — try again in a moment."); return; }
+  const rows=FILTER.rows;
+  const morphKeys=Object.keys(MORPH_LABEL);
+  const head=["Cell body ID","c3 segment ID","Cell type","Broad class","Layer (volume)",
+    "Layer (published tag)","Layer estimated","Cortical depth (um)","Soma volume (um3)","Spininess",
+    "Voxel X","Voxel Y","Voxel Z","Paste coordinate","Modifiers"]
+    .concat(morphKeys.map(function(k){ return MORPH_LABEL[k]; }));
+  const data=[head];
+  rows.forEach(function(i){
+    data.push([HSB[i],c3Id(i),longName(typeName(i)),classLabel(i),
+      volLayer(i),tagLayer(i),estimateLayer(HX[i],HY[i]).layer,
+      Math.round(depthUm(i)),Math.round(HVB[i]*10)/10,Math.round(HSP[i]*1000)/1000,
+      HX[i],HY[i],HZ[i],[HX[i],HY[i],HZ[i]].join(", "),modifiers(i).join(" ")]
+      .concat(morphKeys.map(function(k){ return MORPH[k][i]; })));
+  });
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(data),"Cells");
+  /* The filter that produced the sheet, recorded alongside it -- otherwise a saved export cannot
+     be reproduced or defended later. */
+  const c=FILTER.criteria||{};
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([
+    ["Filter","Value"],
+    ["Dataset","H01 c3 (Shapson-Coe et al., Science 2024)"],
+    ["Cell types",c.types&&c.types.length?c.types.join(", "):"any"],
+    ["Cortical layers",c.layers&&c.layers.length?c.layers.join(", "):"any"],
+    ["Soma volume min (um3)",c.vMin==null?"":c.vMin],
+    ["Soma volume max (um3)",c.vMax==null?"":c.vMax],
+    ["Morphology count",c.morph?(MORPH_LABEL[c.morph]||c.morph):"not used"],
+    ["Count min",c.mMin==null?"":c.mMin],["Count max",c.mMax==null?"":c.mMax],
+    ["Region box",c.box?JSON.stringify(c.box):"whole volume"],
+    ["Matches",rows.length],["Of total",N],
+    ["Layer source","H01 layers volume where it covers the soma; published tag otherwise"],
+    ["Voxel size (nm)",UJ_RX+" x "+UJ_RY+" x "+UJ_RZ],
+    ["Generated",new Date().toISOString()]
+  ]),"Filter used");
+  XLSX.writeFile(wb,"h01_filter_"+rows.length+"_cells.xlsx");
+}
+
+(function wireFilter(){
+  const run=document.getElementById("filterRun"); if(!run)return;
+  buildFilterUI();
+  run.addEventListener("click",runFilter);
+  document.getElementById("filterXlsx").addEventListener("click",downloadFilterExcel);
+  document.getElementById("filterReset").addEventListener("click",function(){
+    document.querySelectorAll(".ftype:checked,.flayer:checked").forEach(function(b){ b.checked=false; });
+    ["filterVolMin","filterVolMax","filterMorphMin","filterMorphMax","rx1","ry1","rz1","rx2","ry2","rz2"]
+      .forEach(function(id){ const e=document.getElementById(id); if(e) e.value=""; });
+    document.getElementById("filterMorphKey").value="";
+    document.getElementById("filterRegionOn").checked=false;
+    FILTER.rows=[]; renderFilterResults();
+  });
+  /* Paste "x, y, z" into either corner's x field, same convenience as the Jump tab. */
+  [["rx1","ry1","rz1"],["rx2","ry2","rz2"]].forEach(function(ids){
+    const el=document.getElementById(ids[0]); if(!el)return;
+    el.addEventListener("paste",function(ev){
+      const t=(ev.clipboardData||window.clipboardData).getData("text")||"";
+      const p=t.trim().split(/[\s,;]+/).filter(Boolean);
+      if(p.length>=3){ ev.preventDefault(); ids.forEach(function(id,k){ document.getElementById(id).value=p[k]; }); }
+    });
+  });
+})();
 
 </script>
 </body></html>
