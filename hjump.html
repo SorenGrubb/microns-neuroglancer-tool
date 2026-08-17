@@ -454,6 +454,35 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Find the nearest classified cell body">&#8594;</button></div>
 <p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.
   <button id="rand" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font:inherit">Show me a random cell</button></p>
+
+<!-- Same collapsed-by-default <details> pattern µJump uses for its own Root/Nucleus ID search. -->
+<details class="rv-panel" id="idSearchPanel">
+<summary>Search by c3 segment or cell body ID</summary>
+<div class="row" style="margin-top:8px"><div class="coord" style="flex:1 1 auto"><input type="text" id="idSearchInput" inputmode="numeric" placeholder="c3 segment ID or cell body ID (number)"></div><button class="idbtn" id="idSearchGo">Go</button></div>
+<p class="hint" id="idSearchStatus"></p>
+</details>
+
+<div class="navctrl">
+<button class="idbtn" id="navBackBtn" type="button" title="Go back to the previous cell you viewed" disabled>&#8592; Back</button>
+<button class="idbtn" id="navFwdBtn" type="button" title="Go forward again" disabled>Forward &#8594;</button>
+</div>
+
+<details class="rv-panel" id="recentlyViewedPanel">
+<summary>Recently viewed cells</summary>
+<div class="rv-list" id="recentlyViewedList"></div>
+</details>
+
+<details class="rv-panel" id="randomCellPanel">
+<summary>Or browse a random cell</summary>
+<button class="idbtn" id="randomUnassigned" style="width:100%;margin:8px 0" title="Cells H01 could not confidently type — these are where a community identification is worth most">Random unassigned cell &mdash; help identify one</button>
+<p class="hint" id="unassignedCount" style="margin:-4px 0 8px"></p>
+<button class="idbtn" id="randomCommunity" style="width:100%;margin-bottom:8px" title="Jump to a cell someone has already identified — useful for reviewing, confirming or challenging another person's call">Random community-identified cell &mdash; review someone&rsquo;s call</button>
+<div class="row" style="gap:8px">
+<select id="randomTypeSelect" style="flex:1 1 auto"></select>
+<button class="idbtn" id="randomOfType">Random example</button>
+</div>
+<p class="hint">Good for learning what a cell type looks like &mdash; a new random example loads each click.</p>
+</details>
 </div>
 
 <!-- Same wrapper µJump uses, not just the same stylesheet: .nuc stays display:none until
@@ -700,8 +729,10 @@ function idRow(k, val, title, extra){
 }
 
 let CUR_IDX=null;
-function showCell(i, distNm){
+function showCell(i, distNm, fromHistory){
   CUR_IDX=i;
+  navGo(i,fromHistory);
+  rvPush(i);
   const panel=document.getElementById("nucpanel");
   panel.className="nuc show";
   const pos=[HX[i],HY[i],HZ[i]], t=typeName(i), mods=modifiers(i), seg=c3Id(i);
@@ -710,8 +741,12 @@ function showCell(i, distNm){
     +escHtml(classLabel(i))+'</span> '+layerHtml(i)
     +mods.map(m=>' <span class="tag none" title="Morphological modifier from the H01 classification">'+escHtml(m)+'</span>').join("");
 
-  h+='<div class="celltype">'+celltypeLink(pos,seg,escHtml(longName(t)))
+  /* favStarHtml comes from core/gamify.js -- same favourites store as µJump, keyed here by the
+     cell-body id plus the voxel coordinate, exactly as µJump keys by nucleus id + coordinate. */
+  const star=(typeof favStarHtml==="function")?favStarHtml(String(HSB[i]),seg,pos[0],pos[1],pos[2]):"";
+  h+='<div class="celltype">'+celltypeLink(pos,seg,escHtml(longName(t)))+star
     +' <small>H01 published classification</small></div>';
+  h+='<div id="idVotePanel" style="margin:6px 0"></div>';
 
   const dep=depthUm(i);
   h+='<div class="meta">Soma '+fmt(HVB[i].toFixed(0))+' &micro;m&sup3; &middot; '
@@ -730,6 +765,8 @@ function showCell(i, distNm){
   h+=idRow("voxel", pos.join(", "), "Position in "+UJ_RX+"·"+UJ_RY+"·"+UJ_RZ+" nm voxels — click to copy");
   h+='</div>';
   h+='<p class="hint" id="meshmsg" style="margin-top:8px"></p>';
+  h+='<div id="extraIdPanel" style="margin:6px 0"></div>';
+  h+=contactsPanelHtml();
   h+='</div></div>';        // close the ids column and the flex row opened above the diagram
 
   h+='<button class="jump" data-x="'+pos[0]+'" data-y="'+pos[1]+'" data-z="'+pos[2]+'">Jump to this cell &#8599;</button>';
@@ -761,9 +798,18 @@ function showCell(i, distNm){
             :'Not sure, or think H01 got it wrong? Take the guided identification.')
     +'</span><button class="idbtn" id="idfgo">'+(noCall?'Start guided identification':'Guided identification')+' &rarr;</button></div></div>';
 
+  h+='<div class="idcta-search" style="margin-top:10px">'+leafSearchHtml("mainLeaf")+'</div>';
+
   panel.innerHTML=h;
   const idfBtn=panel.querySelector("#idfgo");
   if(idfBtn) idfBtn.addEventListener("click",function(){ openIdentify(i); });
+  wireLeafSearch("mainLeaf",function(slug){ openIdentify(i); renderResult(slug); });
+  wireContacts(i);
+  /* Async, and deliberately after the panel is in the DOM: a slow backend must never delay the
+     cell itself appearing. Each writes into its own placeholder or stays empty. */
+  loadIdentityVotes(String(HSB[i]), H01_NO_CALL[t]?[]:[longName(t)]);
+  loadExtraIdPanel(String(HSB[i]));
+  if(typeof refreshFavStars==="function") refreshFavStars();
 
   /* Same wiring vocabulary as µJump: .jump/.njump fill the coordinate boxes and re-run the
      search, .idval copies on click. */
@@ -784,7 +830,7 @@ function showCell(i, distNm){
   });
   wireMeshButtons(i);
 }
-function jumpToIndex(i){ showCell(i,null); }
+function jumpToIndex(i){ showCell(i,null,false); }
 
 /* core/mesh.js calls onProgress(fraction, message) -- two arguments, not one. */
 function wireMeshButtons(i){
@@ -1279,6 +1325,455 @@ function layerDiagram(xVox, yVox, volName){
       +'</b>, so it sits on that boundary.</p>';
   return svg;
 }
+
+/* ═══ Indexes, navigation and browsing ════════════════════════════════════════════════════ */
+/* Built once. 47k entries each, ~15 ms -- far cheaper than scanning the arrays per lookup, and
+   the c3 index is many-to-one on purpose: 1,468 c3 segments contain more than one soma, so a
+   segment ID maps to a LIST of cells, not one. Pretending otherwise would silently hide cells. */
+const BY_BODY = new Map(), BY_C3 = new Map();
+(function buildIndexes(){
+  for(let i=0;i<N;i++){
+    BY_BODY.set(String(HSB[i]), i);
+    const c=c3Id(i);
+    let arr=BY_C3.get(c); if(!arr){arr=[];BY_C3.set(c,arr);}
+    arr.push(i);
+  }
+})();
+
+/* ── navigation history ────────────────────────────────────────────────────────────────── */
+const NAV={stack:[],pos:-1};
+const RV_KEY="hjump_recently_viewed", RV_MAX=12;
+function navGo(i,fromHistory){
+  if(!fromHistory){
+    NAV.stack=NAV.stack.slice(0,NAV.pos+1);
+    if(NAV.stack[NAV.pos]!==i){ NAV.stack.push(i); NAV.pos=NAV.stack.length-1; }
+    if(NAV.stack.length>200){ NAV.stack.shift(); NAV.pos--; }
+  }
+  renderNavButtons();
+}
+function renderNavButtons(){
+  const b=document.getElementById("navBackBtn"), f=document.getElementById("navFwdBtn");
+  if(b) b.disabled = NAV.pos<=0;
+  if(f) f.disabled = NAV.pos<0 || NAV.pos>=NAV.stack.length-1;
+}
+function navBack(){ if(NAV.pos>0){ NAV.pos--; showCell(NAV.stack[NAV.pos],null,true); } }
+function navForward(){ if(NAV.pos<NAV.stack.length-1){ NAV.pos++; showCell(NAV.stack[NAV.pos],null,true); } }
+
+/* Recently viewed persists across reloads. Stored as cell-body IDs, NOT array indexes: indexes
+   are an artefact of this build of the page and would silently point at different cells if the
+   table is ever rebuilt in a different order. */
+function rvLoad(){ try{ return JSON.parse(localStorage.getItem(RV_KEY)||"[]"); }catch(e){ return []; } }
+function rvPush(i){
+  let l=rvLoad().filter(id=>id!==String(HSB[i]));
+  l.unshift(String(HSB[i])); l=l.slice(0,RV_MAX);
+  try{ localStorage.setItem(RV_KEY,JSON.stringify(l)); }catch(e){}
+  renderRecentlyViewed();
+}
+function renderRecentlyViewed(){
+  const el=document.getElementById("recentlyViewedList"); if(!el)return;
+  const ids=rvLoad();
+  if(!ids.length){ el.innerHTML='<div class="nsub">Nothing yet — the cells you look at will collect here.</div>'; return; }
+  el.innerHTML=ids.map(function(id){
+    const i=BY_BODY.get(id); if(i===undefined) return "";
+    return '<div class="rv-row"><span class="dot '+classOf(i)+'"></span>'
+      +'<span class="rvjump" data-i="'+i+'" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted">'
+      +escHtml(longName(typeName(i)))+'</span> <span class="nsub">'+escHtml(volLayer(i)!=="no-layer"?volLayer(i):tagLayer(i))
+      +' &middot; body '+escHtml(id)+'</span></div>';
+  }).join("");
+  el.querySelectorAll(".rvjump").forEach(function(b){
+    b.addEventListener("click",function(){ jumpToIndex(+b.dataset.i); });
+  });
+}
+
+/* ── ID search ─────────────────────────────────────────────────────────────────────────── */
+/* One box for both ID spaces. They cannot be told apart by shape alone -- cell-body IDs run
+   1..49,220 and plenty of c3 IDs are small too -- so this checks the cell-body index first
+   (exact, one cell) and then the c3 index, and SAYS which one it matched rather than guessing
+   silently. If a c3 segment holds several somata, all of them are offered. */
+function idSearch(){
+  const raw=(document.getElementById("idSearchInput").value||"").trim().replace(/[\s,]/g,"");
+  const st=document.getElementById("idSearchStatus");
+  if(!/^\d+$/.test(raw)){ st.textContent="Enter a numeric ID — a c3 segment ID or a cell body ID."; return; }
+  const byBody=BY_BODY.get(raw), byC3=BY_C3.get(raw);
+  if(byBody!==undefined && !byC3){ st.textContent="Matched cell body "+raw+"."; jumpToIndex(byBody); return; }
+  if(byC3 && byC3.length===1 && byBody===undefined){ st.textContent="Matched c3 segment "+raw+"."; jumpToIndex(byC3[0]); return; }
+  if(!byC3 && byBody===undefined){
+    st.textContent="No cell with that c3 segment ID or cell body ID is in this table. "
+      +"H01 has 1,917 somata with no cell-type call that are not loaded here, and unsegmented IDs will not match.";
+    return;
+  }
+  // ambiguous, or one c3 segment holding several somata -- offer the choice instead of picking
+  const opts=[]; if(byBody!==undefined) opts.push({i:byBody,why:"cell body "+raw});
+  (byC3||[]).forEach(function(i){ if(i!==byBody) opts.push({i:i,why:"c3 segment "+raw}); });
+  st.innerHTML="That ID matches "+opts.length+" cells — pick one: "
+    +opts.map(function(o){ return '<button class="idbtn idpick" data-i="'+o.i+'" style="padding:1px 8px;margin:2px;font-size:11px">'
+      +escHtml(longName(typeName(o.i))+" · body "+HSB[o.i]+" ("+o.why+")")+'</button>'; }).join("");
+  st.querySelectorAll(".idpick").forEach(function(b){
+    b.addEventListener("click",function(){ jumpToIndex(+b.dataset.i); });
+  });
+}
+
+/* ── random browsing ───────────────────────────────────────────────────────────────────── */
+/* µJump groups its cell types by family in the dropdown; H01's ten published classes map onto
+   the same three families, so the grouping reads the same way across the two pages. */
+const TYPE_GROUPS=[
+  {label:"Neurons — excitatory", types:["pyramidal","spiny-stellate","excitatory/spiny-with-atypical-tree"]},
+  {label:"Neurons — inhibitory", types:["interneuron"]},
+  {label:"Glia",                 types:["astrocyte","oligodendrocyte","microglia/opc"]},
+  {label:"Vascular",             types:["blood-vessel-cell"]},
+  {label:"No confident call",    types:["unclassified-neuron","unknown-type"]}
+];
+const IDX_BY_TYPE={}, UNASSIGNED_IDX=[];
+(function buildPools(){
+  D.CT_NAMES.forEach(function(t){ IDX_BY_TYPE[t]=[]; });
+  for(let i=0;i<N;i++){
+    const t=typeName(i);
+    if(IDX_BY_TYPE[t]) IDX_BY_TYPE[t].push(i);
+    if(H01_NO_CALL[t]) UNASSIGNED_IDX.push(i);
+  }
+})();
+function pickRandom(a){ return (a&&a.length)?a[Math.floor(Math.random()*a.length)]:-1; }
+
+/* Cells the community has identified, from the backend. Cached for the session -- it is a whole-
+   sheet read, and nothing about it changes minute to minute. */
+let COMMUNITY_IDX=null;
+function loadCommunityIdentified(cb){
+  if(COMMUNITY_IDX){ cb(COMMUNITY_IDX); return; }
+  if(!REPORT_ENDPOINT){ cb([]); return; }
+  fetch(REPORT_ENDPOINT+"?allIds=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      const out=[], seen={};
+      ((d&&d.allIds)||[]).forEach(function(row){
+        const key=String(row.nucleusId||"");           // ηJump files reports under the cell-body ID
+        if(!key||seen[key])return; seen[key]=1;
+        const i=BY_BODY.get(key); if(i!==undefined) out.push(i);
+      });
+      COMMUNITY_IDX=out; cb(out);
+    })
+    .catch(function(){ COMMUNITY_IDX=[]; cb([]); });
+}
+
+/* ── leaf search ("Already know it? Jump straight there") ──────────────────────────────── */
+function searchLeaves(q){
+  q=String(q||"").trim().toLowerCase();
+  if(!q)return[];
+  return Object.keys(LEAF_NAMES).filter(function(s){ return LEAF_NAMES[s].toLowerCase().indexOf(q)>=0; }).slice(0,8);
+}
+function leafSearchHtml(idPrefix,label){
+  return '<div class="leaf-search"><label style="display:block;font-size:11px;text-transform:uppercase;'
+    +'letter-spacing:.05em;color:var(--mut);margin-bottom:4px">'+escHtml(label||"Already know it? Jump straight there")+'</label>'
+    +'<input type="text" id="'+idPrefix+'Input" placeholder="type any part of a cell type, e.g. “pyram” or “astro”" autocomplete="off">'
+    +'<div class="leaf-search-results" id="'+idPrefix+'Results"></div></div>';
+}
+function wireLeafSearch(idPrefix,onSelect){
+  const input=document.getElementById(idPrefix+"Input"), results=document.getElementById(idPrefix+"Results");
+  if(!input||!results)return;
+  let hi=-1;
+  const items=function(){ return [].slice.call(results.querySelectorAll(".leaf-search-item")); };
+  function setHi(idx){
+    const els=items(); if(!els.length){hi=-1;return;}
+    hi=(idx+els.length)%els.length;
+    els.forEach(function(el,k){ el.classList.toggle("hi",k===hi); });
+    if(els[hi].scrollIntoView) els[hi].scrollIntoView({block:"nearest"});
+  }
+  function render(){
+    const m=searchLeaves(input.value);
+    if(!input.value.trim()){ results.classList.remove("show"); results.innerHTML=""; hi=-1; return; }
+    results.innerHTML=m.length
+      ? m.map(function(s){ return '<div class="leaf-search-item" data-slug="'+escHtml(s)+'">'+escHtml(LEAF_NAMES[s])+'</div>'; }).join("")
+      : '<div class="leaf-search-empty">No cell types match</div>';
+    results.classList.add("show");
+    /* pointerdown, not mousedown -- on Søren's Kamvas pen display and any touchscreen a tap does
+       not reliably fire mousedown before the input's blur hides the list, so a mouse-only
+       listener never sees it. Same fix µJump already carries. */
+    const evt=window.PointerEvent?"pointerdown":"mousedown";
+    results.querySelectorAll(".leaf-search-item").forEach(function(el){
+      el.addEventListener(evt,function(ev){ ev.preventDefault(); onSelect(el.dataset.slug); });
+    });
+    hi=-1; if(m.length) setHi(0);
+  }
+  input.addEventListener("input",render);
+  input.addEventListener("focus",render);
+  input.addEventListener("keydown",function(ev){
+    if(ev.key==="ArrowDown"&&items().length){ ev.preventDefault(); setHi(hi+1); }
+    else if(ev.key==="ArrowUp"&&items().length){ ev.preventDefault(); setHi(hi-1); }
+    else if(ev.key==="Enter"){ const els=items(); if(hi>=0&&els[hi]){ ev.preventDefault(); onSelect(els[hi].dataset.slug); } }
+    else if(ev.key==="Escape"){ results.classList.remove("show"); }
+  });
+  input.addEventListener("blur",function(){ setTimeout(function(){ results.classList.remove("show"); },150); });
+}
+
+/* ── identity voting ───────────────────────────────────────────────────────────────────── */
+/* Same backend contract as µJump: ?identityVotes=<id> to read, report type "vote_identity" to
+   write. The id here is the CELL BODY id, matching what the guided-ID submit files under. */
+function loadIdentityVotes(bodyId,seedNames){
+  const el=document.getElementById("idVotePanel");
+  if(!el||!REPORT_ENDPOINT||!bodyId){ if(el)el.innerHTML=""; return; }
+  const votable=function(n){ return n&&String(n).trim()&&!/unclassif|unknown/i.test(String(n)); };
+  const base=(seedNames||[]).filter(votable).map(String);
+  const render=function(list){
+    const map={}; list.forEach(function(v){ map[String(v.identity).toLowerCase()]=v; });
+    const names=[], seen={};
+    base.concat(list.map(function(v){ return v.identity; })).forEach(function(n){
+      const k=String(n).toLowerCase(); if(k&&!seen[k]&&votable(n)){ seen[k]=1; names.push(n); }
+    });
+    if(!names.length){ el.innerHTML=""; return; }
+    const multi=names.length>1;
+    let h='<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--mut)">'
+      +'<span title="Vote on whether each identification is right. More independent agreement is what makes a call trustworthy.">agree?</span>';
+    names.forEach(function(n){
+      const t=map[String(n).toLowerCase()]||{up:0,down:0,net:0};
+      h+='<span style="display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:14px;padding:1px 7px">'
+        +(multi?'<span style="color:var(--ink)">'+escHtml(n)+'</span>':'')
+        +'<button class="idbtn idvote" data-nm="'+escHtml(n)+'" data-v="1" title="agree" style="padding:0 5px">&#9650;</button>'
+        +'<span style="min-width:14px;text-align:center;color:var(--ink)">'+(t.net>0?"+":"")+(t.net||0)+'</span>'
+        +'<button class="idbtn idvote" data-nm="'+escHtml(n)+'" data-v="-1" title="disagree" style="padding:0 5px">&#9660;</button>'
+        +'</span>';
+    });
+    el.innerHTML=h+'</div>';
+    el.querySelectorAll(".idvote").forEach(function(b){
+      b.addEventListener("click",function(){
+        postReport({type:"vote_identity",timestamp:new Date().toISOString(),
+                    nucleusId:String(bodyId),identity:b.dataset.nm,vote:Number(b.dataset.v)},
+                   "Vote recorded — thank you.")
+          .then(function(){ setTimeout(function(){ loadIdentityVotes(bodyId,seedNames); },1200); });
+      });
+    });
+  };
+  fetch(REPORT_ENDPOINT+"?identityVotes="+encodeURIComponent(bodyId)+"&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){ render((d&&d.identityVotes)||[]); })
+    .catch(function(){ el.innerHTML=""; });
+}
+
+/* ── suggest additional c3 / cell-body IDs ─────────────────────────────────────────────── */
+/* H01's c3 is a conservative agglomeration: one real cell is often split across several
+   segments, and cell_bodies is a separate ID space again. So "this cell is also segment X" is
+   a genuinely useful community fact. Same backend contract as µJump's root-ID panel
+   (propose_root_id / vote_root_id / remove_root_id), with segType naming H01's two ID spaces. */
+function loadExtraIdPanel(bodyId){
+  const el=document.getElementById("extraIdPanel");
+  if(!el||!REPORT_ENDPOINT||!bodyId){ if(el)el.innerHTML=""; return; }
+  const render=function(list){
+    const isOwner=OWNER_EMAIL&&REPORTER_NAME&&false;   // owner-only removal needs the email, not the name
+    let body='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">'
+      +'H01&rsquo;s c3 is a <i>conservative</i> agglomeration, so one cell is often split across '
+      +'several segments &mdash; and 1,468 segments contain more than one soma. If you can see that '
+      +'another segment belongs to this cell, propose it here and others can vote.</div>';
+    if(list.length){
+      list.forEach(function(x){
+        body+='<div style="display:flex;align-items:center;gap:6px;margin:3px 0;flex-wrap:wrap">'
+          +'<span style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;border:1px solid var(--line);border-radius:10px;padding:0 6px;color:var(--mut)">'
+            +escHtml(x.segType==="cellbody"?"cell body":"c3")+'</span>'
+          +'<code style="cursor:pointer" class="eidcopy" data-rid="'+escHtml(x.rootId)+'" title="click to copy">'+escHtml(x.rootId)+'</code>'
+          +'<span style="font-size:12px;color:var(--mut)">net '+((x.net||0)>0?"+":"")+(x.net||0)+' (&#9650;'+(x.up||0)+' &#9660;'+(x.down||0)+')</span>'
+          +'<button class="idbtn eidvote" data-rid="'+escHtml(x.rootId)+'" data-v="1" style="padding:1px 7px">&#9650;</button>'
+          +'<button class="idbtn eidvote" data-rid="'+escHtml(x.rootId)+'" data-v="-1" style="padding:1px 7px">&#9660;</button>'
+          +(x.by?'<span style="font-size:11px;color:var(--mut)">by '+escHtml(x.by)+'</span>':'')
+          +'</div>';
+      });
+    } else body+='<div style="font-size:12px;color:var(--mut)">None proposed yet.</div>';
+    body+='<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'
+      +'<select id="eidType" style="min-width:110px"><option value="c3">c3 segment ID</option>'
+      +'<option value="cellbody">Cell body ID</option></select>'
+      +'<input type="text" id="eidInput" placeholder="ID (number)" style="flex:1;min-width:120px" inputmode="numeric">'
+      +'<button class="idbtn idbtn-submit" id="eidPropose" style="padding:2px 10px">Propose</button></div>';
+    const label=function(){ return "additional c3 / cell body IDs"+(list.length?" ("+list.length+")":""); };
+    el.innerHTML='<a href="#" id="eidToggle" class="nsub" style="font-size:12px;cursor:pointer;text-decoration:underline">'
+      +(window.__eidOpen?"▼ ":"▶ ")+label()+'</a>'
+      +'<div id="eidBody" style="display:'+(window.__eidOpen?"block":"none")+';margin:6px 0 2px">'+body+'</div>';
+    const tog=el.querySelector("#eidToggle"), bod=el.querySelector("#eidBody");
+    tog.addEventListener("click",function(e){
+      e.preventDefault();
+      const open=bod.style.display==="none";
+      bod.style.display=open?"block":"none";
+      tog.textContent=(open?"▼ ":"▶ ")+label();
+      window.__eidOpen=open;
+    });
+    el.querySelectorAll(".eidcopy").forEach(function(b){
+      b.addEventListener("click",function(){
+        if(navigator.clipboard) navigator.clipboard.writeText(b.dataset.rid);
+        const o=b.textContent; b.textContent="copied"; setTimeout(function(){ b.textContent=o; },800);
+      });
+    });
+    el.querySelectorAll(".eidvote").forEach(function(b){
+      b.addEventListener("click",function(){
+        postReport({type:"vote_root_id",timestamp:new Date().toISOString(),
+                    nucleusId:String(bodyId),rootId:b.dataset.rid,vote:Number(b.dataset.v)},"Vote recorded.")
+          .then(function(){ window.__eidOpen=true; setTimeout(function(){ loadExtraIdPanel(bodyId); },1200); });
+      });
+    });
+    const pb=el.querySelector("#eidPropose");
+    if(pb) pb.addEventListener("click",function(){
+      const v=((el.querySelector("#eidInput")||{}).value||"").trim();
+      const st=(el.querySelector("#eidType")||{}).value||"c3";
+      if(!/^\d+$/.test(v)){ alert("Enter a numeric ID — the c3 segment ID or cell body ID from Neuroglancer."); return; }
+      postReport({type:"propose_root_id",timestamp:new Date().toISOString(),
+                  nucleusId:String(bodyId),rootId:v,segType:st},"Proposed — thank you.")
+        .then(function(){ window.__eidOpen=true; setTimeout(function(){ loadExtraIdPanel(bodyId); },1200); });
+    });
+  };
+  fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(bodyId)+"&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){ render((d&&(d.rootIds||d.proposals))||[]); })
+    .catch(function(){ el.innerHTML=""; });
+}
+
+/* ═══ Cell contacts ═══════════════════════════════════════════════════════════════════════
+   First pass. Fetches this cell's mesh and each nearby cell's mesh, and reports where their
+   membranes come within a threshold of each other -- mesh proximity, NOT synapses. H01 does
+   publish synapses (c3/synapses), and wiring those in is the obvious next step; a contact found
+   here means "these two surfaces touch", which is what matters for glial ensheathment and
+   perivascular contacts but is not by itself evidence of a synapse.
+
+   Geometry lives in core/mesh.js (buildContactGrid / allContactPointsWithinThreshold) so both
+   pages can share one implementation.
+
+   Defaults carried over from µJump, where they were tuned against real astrocyte contacts:
+     threshold 40 nm   -- membranes this close are touching at EM resolution
+     cluster   1000 nm -- one broad contact patch should yield one point, not hundreds
+     min hits  3       -- a bucket with fewer is almost always mesh noise
+   All three are exposed in the UI because the right value genuinely depends on the cell type. */
+const CONTACT_THRESHOLD_UM=0.04, CONTACT_CLUSTER_UM=1.0, CONTACT_MIN_HITS=3, CONTACT_RADIUS_UM=30;
+
+function contactsPanelHtml(){
+  return '<details class="rv-panel" id="contactsPanel"><summary>Find cell contacts</summary>'
+    +'<div style="font-size:12px;color:var(--mut);margin:8px 0">Downloads this cell&rsquo;s 3D mesh and '
+    +'each neighbour&rsquo;s, then finds where their membranes come within the threshold below. '
+    +'This is <b>mesh proximity, not synapses</b> &mdash; useful for glial ensheathment and '
+    +'perivascular contacts. Each neighbour is a real mesh fetch, so this is slow; start with a few.</div>'
+    +'<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">'
+      +'<label style="font-size:12px">within <input type="text" id="ctRadius" value="'+CONTACT_RADIUS_UM+'" style="width:52px;padding:4px 6px" inputmode="decimal"> &micro;m of this soma</label>'
+      +'<label style="font-size:12px">touching at <input type="text" id="ctThresh" value="'+(CONTACT_THRESHOLD_UM*1000)+'" style="width:52px;padding:4px 6px" inputmode="decimal"> nm</label>'
+      +'<label style="font-size:12px">cluster <input type="text" id="ctCluster" value="'+(CONTACT_CLUSTER_UM*1000)+'" style="width:58px;padding:4px 6px" inputmode="decimal"> nm</label>'
+    +'</div>'
+    +'<div class="row" style="gap:8px;margin-top:8px"><button class="idbtn" id="ctRun" style="flex:1">Find contacts</button></div>'
+    +'<p class="hint" id="ctMsg"></p><div id="ctResults"></div></details>';
+}
+function wireContacts(i){
+  const btn=document.getElementById("ctRun"); if(!btn)return;
+  btn.addEventListener("click",function(){
+    const msg=document.getElementById("ctMsg"), out=document.getElementById("ctResults");
+    const num=function(id,dflt){ const v=parseFloat((document.getElementById(id)||{}).value); return isFinite(v)&&v>0?v:dflt; };
+    const radiusUm=num("ctRadius",CONTACT_RADIUS_UM);
+    const threshUm=num("ctThresh",CONTACT_THRESHOLD_UM*1000)/1000;
+    const clusterUm=num("ctCluster",CONTACT_CLUSTER_UM*1000)/1000;
+    /* Candidates by soma distance. A soma 30 µm away can still have processes touching this
+       cell, and one 5 µm away might not touch at all -- this only decides which meshes are worth
+       fetching, never whether a contact exists. */
+    const cands=[];
+    for(let k=0;k<N;k++){
+      if(k===i)continue;
+      const dx=(HX[k]-HX[i])*UJ_RX, dy=(HY[k]-HY[i])*UJ_RY, dz=(HZ[k]-HZ[i])*UJ_RZ;
+      const d=Math.sqrt(dx*dx+dy*dy+dz*dz)/1000;
+      if(d<=radiusUm) cands.push({i:k,dist:d});
+    }
+    cands.sort(function(a,b){ return a.dist-b.dist; });
+    if(!cands.length){ msg.textContent="No other soma within "+radiusUm+" µm. Try a larger radius."; return; }
+    btn.disabled=true; out.innerHTML="";
+    msg.textContent="fetching this cell's mesh… (0/"+cands.length+")";
+    runContacts(i,cands,threshUm,clusterUm,function(f,t){ msg.textContent=t; })
+      .then(function(rows){
+        btn.disabled=false;
+        const touching=rows.filter(function(r){ return r.points.length; });
+        msg.textContent=touching.length+" of "+rows.length+" neighbouring cells touch this one.";
+        out.innerHTML=touching.length?renderContactRows(i,touching)
+          :'<div class="nsub">No contacts within '+(threshUm*1000).toFixed(0)+' nm. Try a larger threshold.</div>';
+        out.querySelectorAll(".ctjump").forEach(function(b){
+          b.addEventListener("click",function(){
+            unit="voxel";[].slice.call(unitsEl.children).forEach(function(c){ c.classList.toggle("on",c.dataset.u==="voxel"); });
+            document.getElementById("x").value=b.dataset.x;
+            document.getElementById("y").value=b.dataset.y;
+            document.getElementById("z").value=b.dataset.z;
+            document.getElementById("go").click();
+          });
+        });
+      })
+      .catch(function(e){ btn.disabled=false; msg.textContent="failed: "+((e&&e.message)||e); });
+  });
+}
+async function runContacts(i,cands,threshUm,clusterUm,onProgress){
+  const own=await UJ.mesh.fetchCombinedMesh(c3Id(i));
+  const ownGrid=UJ.mesh.buildContactGrid(own.positions,threshUm);
+  const rows=[];
+  for(let k=0;k<cands.length;k++){
+    const nb=cands[k];
+    onProgress(k/cands.length,"checking neighbour "+(k+1)+"/"+cands.length+" ("+longName(typeName(nb.i))+")…");
+    let m=null;
+    try{ m=await UJ.mesh.fetchCombinedMesh(c3Id(nb.i)); }
+    catch(e){ rows.push({i:nb.i,dist:nb.dist,points:[],error:(e&&e.message)||String(e)}); continue; }
+    const pts=UJ.mesh.allContactPointsWithinThreshold(own.positions,ownGrid,m.positions,threshUm,clusterUm,CONTACT_MIN_HITS);
+    rows.push({i:nb.i,dist:nb.dist,points:pts});
+  }
+  return rows;
+}
+/* Mesh vertices are µm in the real-world frame; convert to this page's voxel convention so a
+   contact point can be jumped to exactly like any other coordinate here. */
+function meshUmToVoxel(px,py,pz){
+  return [Math.round(px*1000/UJ_RX),Math.round(py*1000/UJ_RY),Math.round(pz*1000/UJ_RZ)];
+}
+function renderContactRows(i,rows){
+  return '<div class="neigh" style="margin-top:10px">'+rows.map(function(r){
+    const v=r.points.slice(0,5).map(function(p){
+      const vx=meshUmToVoxel(p.point[0],p.point[1],p.point[2]);
+      return '<button class="idbtn ctjump" data-x="'+vx[0]+'" data-y="'+vx[1]+'" data-z="'+vx[2]+'" '
+        +'style="padding:1px 7px;margin:2px;font-size:11px" title="Jump to this contact point">'
+        +(r.points.indexOf(p)+1)+': '+(p.dist*1000).toFixed(0)+' nm</button>';
+    }).join("");
+    return '<div class="nrow"><div class="nleft"><span class="dot '+classOf(r.i)+'"></span><div>'
+      +'<div class="ntype">'+escHtml(longName(typeName(r.i)))+' <span class="nsub">'
+      +escHtml(volLayer(r.i)!=="no-layer"?volLayer(r.i):tagLayer(r.i))+' &middot; soma '+r.dist.toFixed(1)+' &micro;m away</span></div>'
+      +'<div class="nsub">'+r.points.length+' contact patch'+(r.points.length===1?"":"es")
+      +' &middot; closest '+(r.points[0].dist*1000).toFixed(0)+' nm</div>'
+      +'<div>'+v+(r.points.length>5?'<span class="nsub"> +'+(r.points.length-5)+' more</span>':'')+'</div>'
+      +'</div></div></div>';
+  }).join("")+'</div>';
+}
+
+
+/* ── wire the browse / search controls ─────────────────────────────────────────────────── */
+(function wireBrowse(){
+  const $=function(id){ return document.getElementById(id); };
+  const go=$("idSearchGo"); if(go) go.addEventListener("click",idSearch);
+  const inp=$("idSearchInput");
+  if(inp) inp.addEventListener("keydown",function(e){ if(e.key==="Enter") idSearch(); });
+  const b=$("navBackBtn"); if(b) b.addEventListener("click",navBack);
+  const f=$("navFwdBtn");  if(f) f.addEventListener("click",navForward);
+  const ru=$("randomUnassigned");
+  if(ru) ru.addEventListener("click",function(){
+    const i=pickRandom(UNASSIGNED_IDX);
+    if(i<0){ fail("No unassigned cells in this table."); return; }
+    fail(""); jumpToIndex(i);
+  });
+  const rc=$("randomCommunity");
+  if(rc) rc.addEventListener("click",function(){
+    rc.disabled=true; const old=rc.textContent; rc.textContent="looking…";
+    loadCommunityIdentified(function(list){
+      rc.disabled=false; rc.textContent=old;
+      if(!list.length){ fail("No community identifications on file yet — be the first."); return; }
+      fail(""); jumpToIndex(pickRandom(list));
+    });
+  });
+  const sel=$("randomTypeSelect");
+  if(sel){
+    sel.innerHTML=TYPE_GROUPS.map(function(g){
+      const opts=g.types.filter(function(t){ return IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length; })
+        .map(function(t){ return '<option value="'+escHtml(t)+'">'+escHtml(longName(t))+' ('+fmt(IDX_BY_TYPE[t].length)+')</option>'; }).join("");
+      return opts?'<optgroup label="'+escHtml(g.label)+'">'+opts+'</optgroup>':"";
+    }).join("");
+  }
+  const rt=$("randomOfType");
+  if(rt) rt.addEventListener("click",function(){
+    const t=(sel||{}).value; const pool=IDX_BY_TYPE[t]||[];
+    if(!pool.length){ fail("No cells of that type."); return; }
+    fail(""); jumpToIndex(pickRandom(pool));
+  });
+  const uc=$("unassignedCount");
+  if(uc) uc.textContent=fmt(UNASSIGNED_IDX.length)+" cells in this table have no confident H01 call.";
+  renderRecentlyViewed();
+  renderNavButtons();
+})();
 
 </script>
 </body></html>

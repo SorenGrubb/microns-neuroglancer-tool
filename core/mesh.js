@@ -791,5 +791,80 @@ UJ.mesh=(()=>{
      own "scale=1000 // micrometres" line above), just not yet Y-flipped for glTF -- exactly what
      a mesh-to-mesh distance computation needs, and NOT what downloadRoot()'s glTF-oriented output
      is for, so this is the right function to expose rather than reusing downloadRoot(). */
-  return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache,currentFragmentCount,fetchCombinedMesh};
+  /* ── contact geometry ───────────────────────────────────────────────────────────────────
+     Pure geometry on two vertex clouds -- no dataset knowledge at all, which is why it belongs
+     here rather than in either page. Ported verbatim from µJump's own implementation (the
+     algorithm and its constants were tuned with Søren against real astrocyte contacts); µJump
+     still runs its own copy, so nothing about its behaviour changes today. Worth switching it
+     over to these in a later pass so there is one implementation rather than two. */
+  function buildContactGrid(positions,cellSize){
+    const map=new Map(), n=positions.length/3;
+    for(let v=0;v<n;v++){
+      const k=Math.floor(positions[v*3]/cellSize)+","+Math.floor(positions[v*3+1]/cellSize)
+             +","+Math.floor(positions[v*3+2]/cellSize);
+      let arr=map.get(k); if(!arr){arr=[];map.set(k,arr);}
+      arr.push(v);
+    }
+    return {map,cellSize,positions};
+  }
+  function nearestInContactGrid(grid,qx,qy,qz){
+    const cx=Math.floor(qx/grid.cellSize),cy=Math.floor(qy/grid.cellSize),cz=Math.floor(qz/grid.cellSize);
+    let bestD2=Infinity,bestV=-1;
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){
+      const arr=grid.map.get((cx+dx)+","+(cy+dy)+","+(cz+dz));
+      if(!arr)continue;
+      for(const v of arr){
+        const ddx=qx-grid.positions[v*3],ddy=qy-grid.positions[v*3+1],ddz=qz-grid.positions[v*3+2];
+        const d2=ddx*ddx+ddy*ddy+ddz*ddz;
+        if(d2<bestD2){bestD2=d2;bestV=v;}
+      }
+    }
+    return bestV<0?null:{dist:Math.sqrt(bestD2),vertexIdx:bestV};
+  }
+  /* Every contact patch between two meshes, not just the single closest point. Mutual-nearest
+     (reciprocity) filtering discards one-sided matches; midpoints are then bucketed on a
+     clusterUm grid so one broad contact patch yields ONE representative point rather than
+     hundreds of near-duplicates. The reported position is the bucket's medoid -- a real observed
+     point -- while the reported distance is the bucket's TIGHTEST gap, so sorting by "closest
+     touch" stays meaningful. */
+  function allContactPointsWithinThreshold(posA,gridA,posB,threshold,clusterUm,minHits){
+    const gridB=buildContactGrid(posB,threshold);
+    const buckets=new Map(), nA=posA.length/3, tol=threshold*0.5, revCache=new Map();
+    for(let v=0;v<nA;v++){
+      const ax=posA[v*3],ay=posA[v*3+1],az=posA[v*3+2];
+      const r=nearestInContactGrid(gridB,ax,ay,az);
+      if(!r)continue;
+      let rev=revCache.get(r.vertexIdx);
+      if(rev===undefined){
+        rev=nearestInContactGrid(gridA,posB[r.vertexIdx*3],posB[r.vertexIdx*3+1],posB[r.vertexIdx*3+2]);
+        revCache.set(r.vertexIdx,rev);
+      }
+      if(!rev)continue;
+      if(Math.hypot(posA[rev.vertexIdx*3]-ax,posA[rev.vertexIdx*3+1]-ay,posA[rev.vertexIdx*3+2]-az)>tol)
+        continue;                                   // one-sided match -- not a genuinely local pair
+      const mx=(ax+posB[r.vertexIdx*3])/2, my=(ay+posB[r.vertexIdx*3+1])/2, mz=(az+posB[r.vertexIdx*3+2])/2;
+      const key=Math.floor(mx/clusterUm)+","+Math.floor(my/clusterUm)+","+Math.floor(mz/clusterUm);
+      let arr=buckets.get(key); if(!arr){arr=[];buckets.set(key,arr);}
+      arr.push({mx,my,mz,dist:r.dist});
+    }
+    const out=[];
+    for(const arr of buckets.values()){
+      if(arr.length<(minHits||3))continue;           // too few hits to be anything but noise
+      let cx=0,cy=0,cz=0;
+      for(const p of arr){cx+=p.mx;cy+=p.my;cz+=p.mz;}
+      cx/=arr.length;cy/=arr.length;cz/=arr.length;
+      let best=arr[0],bestD2=Infinity,minDist=Infinity;
+      for(const p of arr){
+        const dx=p.mx-cx,dy=p.my-cy,dz=p.mz-cz,d2=dx*dx+dy*dy+dz*dz;
+        if(d2<bestD2){bestD2=d2;best=p;}
+        if(p.dist<minDist)minDist=p.dist;
+      }
+      out.push({dist:minDist,point:[best.mx,best.my,best.mz]});
+    }
+    out.sort((a,b)=>a.dist-b.dist);
+    return out;
+  }
+
+  return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache,currentFragmentCount,
+          fetchCombinedMesh,buildContactGrid,nearestInContactGrid,allContactPointsWithinThreshold};
 })();
