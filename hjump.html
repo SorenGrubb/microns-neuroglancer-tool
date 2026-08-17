@@ -401,9 +401,22 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
    The values are µJump's own accent triple, unchanged, so the two pages' guided identification
    looks identical -- which is the point: it is the one genuinely shared surface between them.
    Contrast is already validated at 11.17:1 dark and 5.47:1 light on their backgrounds. */
-.idf{--accent:#27e0b3;--accent-dim:#176b57;--on-accent:#06231c}
-:root[data-theme="light"] .idf{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}
-@media print{.idf{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}}
+/* Scope covers the whole guided-identification surface, not just the open panel: .idf is the
+   panel, .idcta is the "take the guided identification" call-to-action in the cell card, and
+   .idcta-search is the "already know it? jump straight there" box beneath it. Scoping only .idf
+   left the entry point orange while the panel it opens was teal -- which is worse than either,
+   because the two read as unrelated. */
+.idf,.idcta,.idcta-search{--accent:#27e0b3;--accent-dim:#176b57;--on-accent:#06231c}
+:root[data-theme="light"] .idf,
+:root[data-theme="light"] .idcta,
+:root[data-theme="light"] .idcta-search{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}
+@media print{.idf,.idcta,.idcta-search{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}}
+/* .idcta.warn marks "H01 has no published type for this cell". µJump flags that with
+   border-color:var(--warn), a gold that is fine against teal but sits right on top of ηJump's
+   orange. Keep the emphasis, drop the clashing hue: same teal border as the rest of this block,
+   distinguished by a second inset ring instead of by colour. The message itself already says
+   what is going on, so no information is carried by the hue alone. */
+.idcta.warn{border-color:var(--accent);box-shadow:inset 0 0 0 3px var(--accent-dim)}
 </style>
 </head><body>
 <div class="wrap">
@@ -500,6 +513,7 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">&#128229; Filter and show</button>
 <button type="button" class="tabbtn" data-tab="refs" role="tab" aria-selected="false">&#128218; References</button>
+<button type="button" class="tabbtn" data-tab="dash" role="tab" aria-selected="false" title="Charts built from this page's own data plus the community backend — the charting library loads only when you open this tab">&#128202; Statistics</button>
 </div>
 <script>
 /* Same tab machinery as µJump, minus the dashboard's lazy-init (no dashboard here yet).
@@ -514,6 +528,10 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
     btns.forEach(function(b){var on=b.dataset.tab===name;b.classList.toggle("active",on);b.setAttribute("aria-selected",on?"true":"false");});
     document.querySelectorAll(".tabpanel").forEach(function(p){p.classList.toggle("active",p.dataset.tabpanel===name);});
     try{localStorage.setItem("hjump_active_tab",name);}catch(e){}
+    /* Lazy: Plotly plus the chart code is ~1 MB of network and a few hundred ms of aggregation.
+       A Jump or Filter session should never pay for either -- only whoever opens this tab does.
+       DASH.init() is idempotent, so re-clicking an already-drawn tab costs nothing. */
+    if(name==="dash" && window.DASH) DASH.init();
   }
   btns.forEach(function(b){b.addEventListener("click",function(){activate(b.dataset.tab);});});
   window.__hjumpActivateTab=activate;
@@ -653,6 +671,54 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 <p class="hint" style="margin-top:14px"><b>Read these before trusting a number.</b> <b>spiny-stellate</b> (190 cells) sits 62.6&thinsp;% in L5 rather than L4 by the layer volume, and has the largest median soma of any type &mdash; treat it as uncertain. 1,468 <code>c3</code> segments contain more than one soma, so a segment ID is not always one cell. A further 1,917 detected somata carry no cell-type call at all and are not loaded here. Cell contacts are <b>mesh surface proximity, not synapses</b> &mdash; H01 publishes its own synapse tables, which this tool does not yet use.</p>
 </div>
 </div><!-- /tabpanel refs -->
+
+<div class="tabpanel" data-tabpanel="dash">
+<div class="card">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Statistics dashboard</div>
+<p class="hint" style="margin-top:6px">Fifteen charts computed from the <span id="dashTotal"></span> cells embedded in this page &mdash; no network. Three more come from the community backend. <span id="dashStatus" style="color:var(--accent)"></span></p>
+<div class="row" style="gap:10px;margin-top:8px"><button class="idbtn" id="dashXlsx" style="flex:0 0 auto">Download the numbers as Excel</button></div>
+<p class="hint" style="margin-top:6px">Cell types are never encoded by colour: no ten-hue set survives colour-vision checks, so type is carried by position and label. Colour is only used for broad class (excitatory / inhibitory / non-neuronal) and for magnitude.</p>
+</div>
+
+<div class="card"><label>Cells per cell type</label><div id="dCellsPerType" style="height:340px"></div></div>
+<div class="card"><label>Cells per type, per cortical layer</label>
+<p class="hint" style="margin-top:0">Layer is H01's own <code>layers</code> volume where it covers the soma, otherwise the published tag.</p>
+<div id="dTypeLayer" style="height:400px"></div></div>
+<div class="card"><label>Cortical depth profile, by cell type</label>
+<p class="hint" style="margin-top:0">Each panel is one type's own depth distribution, as a percentage of that type &mdash; so a rare type is still readable next to a common one. Depth is continuous, measured from the L1/L2 boundary; dotted lines are the fitted layer boundaries. This is the chart &micro;Jump cannot draw, because it only has discrete layer bins.</p>
+<div id="dDepth" style="min-height:700px"></div></div>
+<div class="card"><label>Excitatory share of synaptic input, by layer</label>
+<p class="hint" style="margin-top:0">Of every synapse arriving on cells whose soma sits in that layer, the percentage classed excitatory.</p>
+<div id="dEI" style="height:320px"></div></div>
+<div class="card"><label>Cells with no confident H01 call, per layer</label><div id="dUnclassPerLayer" style="height:300px"></div></div>
+<div class="card"><label>Soma volume, by cell type</label><div id="dSomaVol" style="height:360px"></div></div>
+<div class="card"><label>Whole-cell volume, by cell type</label>
+<p class="hint" style="margin-top:0">From each segment's own voxel count, so it is known for every cell rather than only for cells someone has computed a mesh volume for.</p>
+<div id="dSegVol" style="height:360px"></div></div>
+<div class="card"><label>Soma as a share of whole-cell volume</label><div id="dShare" style="height:340px"></div></div>
+<div class="card"><label>Spininess, by cell type</label>
+<p class="hint" style="margin-top:0">H01's published per-segment spininess &mdash; the classic spiny/aspiny discriminator the guided tree asks you to judge by eye.</p>
+<div id="dSpin" style="height:340px"></div></div>
+<div class="card"><label>Soma volume vs synapse count</label>
+<p class="hint" style="margin-top:0">One point per cell, both axes logarithmic. Coloured by broad class only.</p>
+<div id="dScatter" style="height:420px"></div></div>
+<div class="card"><label>Synaptic input, by cell type</label><div id="dSynIo" style="height:360px"></div></div>
+<div class="card"><label>Primary cilia, by cell type</label><div id="dCilia" style="height:340px"></div></div>
+<div class="card"><label>What is the nearest cell?</label>
+<p class="hint" style="margin-top:0">Each row is a cell type; the row shows what percentage of those cells have each type as their nearest neighbour. <span id="dNeighNote"></span></p>
+<div id="dNeigh" style="height:420px"></div></div>
+<div class="card"><label>Somata sharing one c3 segment</label>
+<p class="hint" style="margin-top:0"><span id="dMultiSomaNote"></span></p>
+<div id="dMultiSoma" style="height:320px"></div></div>
+<div class="card"><label>Where the two layer sources disagree</label>
+<p class="hint" style="margin-top:0">H01's layer volume against the classification's own <code>#L1&hellip;#WM</code> tags. If the disagreements really are boundary cells, they should pile up at the dotted lines and be near zero between them.</p>
+<div id="dDisagree" style="height:320px"></div></div>
+
+<div class="card"><label>Community contributions &mdash; live</label>
+<div id="dIdentified" style="height:200px"></div>
+<p class="hint" id="dSourceNote"></p><div id="dSource" style="height:230px"></div>
+<p class="hint" id="dReportsNote"></p><div id="dReports" style="height:280px"></div></div>
+</div><!-- /tabpanel dash -->
 
 <script>
 /* The About card's pointer to the References tab -- uses the tab machinery rather than an anchor
@@ -2343,6 +2409,393 @@ function downloadFilterExcel(){
     });
   });
 })();
+
+</script>
+
+<script>
+/* ═══ ηJump statistics dashboard ═══════════════════════════════════════════════════════════
+   Loaded lazily: Plotly (~1 MB) and everything below only run when the Statistics tab is first
+   opened, so a normal Jump/Filter session never pays for them. Same approach µJump uses.
+
+   Fifteen charts come straight off the embedded table -- no network, no backend, no waiting.
+   Three more need the community backend and are drawn separately once it answers, so a slow or
+   missing backend degrades to "those three say why they are empty" rather than a blank tab.
+
+   ── Colour ────────────────────────────────────────────────────────────────────────────────
+   Two roles only, and both were validated with the palette checker rather than chosen by eye:
+
+   CLASS   broad class identity (excitatory / inhibitory / non-neuronal). Three slots, which is
+           the documented all-pairs-safe limit -- the ten published cell types are never encoded
+           by hue, because no ten-hue set survives colour-vision checks. Types are carried by
+           position and label instead.
+             dark  #d9752c #4a90d9 #8957e5   worst all-pairs CVD ΔE 8.6, normal-vision 15.5
+             light #bc4c00 #0969da #6b21a8   worst all-pairs CVD ΔE 10.2, normal-vision 18.4
+           Both sets keep the page's own hue family (orange/blue/purple) so a chart reads the
+           same way as the cell tags; only the steps differ, because the page's tag colours are
+           outside the lightness band a chart surface needs.
+
+           The light theme's own purple (#8250df) had to move to #6b21a8: against the page's blue
+           it scored CVD ΔE 1.9 for protanopia -- a reader with the commonest form of colour
+           blindness genuinely could not separate "inhibitory" from "non-neuronal".
+
+   RAMP    magnitude, for the two heatmaps. One hue, lightness monotonic (checked), light→dark. */
+
+const DASH = (function(){
+  "use strict";
+  const VOX_NM3 = UJ_RX * UJ_RY * UJ_RZ;          // 8·8·33 nm = 2112 nm³ per voxel
+
+  function isLight(){ return document.documentElement.getAttribute("data-theme")==="light"; }
+  function classColors(){
+    return isLight()
+      ? {exc:"#bc4c00", inh:"#0969da", non:"#6b21a8", none:"#57606a"}
+      : {exc:"#d9752c", inh:"#4a90d9", non:"#8957e5", none:"#8b949e"};
+  }
+  function ramp(){
+    return isLight()
+      ? [[0,"#fff3e6"],[0.17,"#ffdcb8"],[0.33,"#f7b97c"],[0.5,"#e8944a"],[0.67,"#cf6f22"],[0.83,"#a8500f"],[1,"#7a3708"]]
+      : [[0,"#2a1a08"],[0.17,"#5c3410"],[0.33,"#8f4f18"],[0.5,"#c26a20"],[0.67,"#e08b3a"],[0.83,"#f5b169"],[1,"#ffd9a8"]];
+  }
+  /* One neutral for every single-series chart. A lone series needs no identity colour -- the
+     title names it -- so it wears the page accent rather than a categorical slot. */
+  function oneSeries(){ return isLight() ? "#bc4c00" : "#d9752c"; }
+
+  const CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d","autoScale2d"]};
+  function themeC(){ return liveThemeColors(); }
+  /* Object.assign is SHALLOW: passing {yaxis:{title:...}} used to replace the whole default
+     yaxis, silently dropping gridcolor -- so those charts fell back to Plotly's default white
+     grid, which then competed with the marks instead of receding behind them. Merge one level
+     into the axis objects so a caller can override a title without losing the theming. */
+  function layout(extra){
+    const c=themeC();
+    const base=({
+      margin:{l:64,r:14,t:10,b:96},
+      font:{family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:c.ink},
+      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
+      showlegend:false,
+      hoverlabel:{bgcolor:c.panel,bordercolor:c.line,font:{color:c.ink}},
+      /* Recessive grid: present enough to read a value off, never competing with the marks. */
+      xaxis:{automargin:true,gridcolor:c.line,zeroline:false,tickangle:-45},
+      yaxis:{automargin:true,gridcolor:c.line,zeroline:false}
+    });
+    const out=Object.assign({},base,extra||{});
+    ["xaxis","yaxis"].forEach(function(k){
+      if(extra&&extra[k]) out[k]=Object.assign({},base[k],extra[k]);
+    });
+    return out;
+  }
+  function draw(id,traces,extra){
+    const el=document.getElementById(id); if(!el)return;
+    Plotly.react(el,traces,layout(extra),CFG);
+  }
+  function note(id,text){ const e=document.getElementById(id); if(e) e.textContent=text; }
+
+  /* ── shared aggregates, computed once ──────────────────────────────────────────────────── */
+  const TYPES=D.CT_NAMES.slice();
+  const LAYERS=LAYER_ORDER.slice();
+  const A={};                                     // everything the charts read
+  function layerOf(i){ return volLayer(i)!=="no-layer"?volLayer(i):tagLayer(i); }
+  function segVolUm3(i){ return MORPH.NVx[i]*VOX_NM3/1e9; }
+
+  function aggregate(){
+    A.perType={}; TYPES.forEach(t=>A.perType[t]=0);
+    A.perTypeLayer={}; TYPES.forEach(t=>{A.perTypeLayer[t]={};LAYERS.forEach(l=>A.perTypeLayer[t][l]=0);});
+    A.unclassPerLayer={}; LAYERS.forEach(l=>A.unclassPerLayer[l]=0);
+    A.soma={}; A.seg={}; A.share={}; A.spin={}; A.cilia={}; A.ciliaN={};
+    TYPES.forEach(t=>{A.soma[t]=[];A.seg[t]=[];A.share[t]=[];A.spin[t]=[];A.cilia[t]=0;A.ciliaN[t]=0;});
+    A.exIn={}; A.inIn={}; TYPES.forEach(t=>{A.exIn[t]=0;A.inIn[t]=0;});
+    A.eiByLayer={}; LAYERS.forEach(l=>A.eiByLayer[l]={e:0,i:0,n:0});
+    A.depth={}; TYPES.forEach(t=>A.depth[t]=[]);
+    A.scatter={exc:[[],[]],inh:[[],[]],non:[[],[]],none:[[],[]]};
+    A.disagreeDepth=[]; A.agreeDepth=[];
+    const perSeg={};
+    for(let i=0;i<N;i++){
+      const t=typeName(i), l=layerOf(i), sv=HVB[i], gv=segVolUm3(i), d=depthUm(i);
+      A.perType[t]++;
+      if(A.perTypeLayer[t]) A.perTypeLayer[t][l]=(A.perTypeLayer[t][l]||0)+1;
+      if(H01_NO_CALL[t]) A.unclassPerLayer[l]=(A.unclassPerLayer[l]||0)+1;
+      A.soma[t].push(sv); A.seg[t].push(gv);
+      if(gv>0) A.share[t].push(Math.min(1,sv/gv));
+      if(HSP[i]>0) A.spin[t].push(HSP[i]);
+      A.ciliaN[t]++; if(MORPH.NCi[i]>0) A.cilia[t]++;
+      A.exIn[t]+=MORPH.NSIe[i]; A.inIn[t]+=MORPH.NSIi[i];
+      const tot=MORPH.NSIe[i]+MORPH.NSIi[i];
+      if(tot>0){ const b=A.eiByLayer[l]; if(b){ b.e+=MORPH.NSIe[i]; b.i+=MORPH.NSIi[i]; b.n++; } }
+      A.depth[t].push(d);
+      const cls=classOf(i);
+      if(A.scatter[cls] && MORPH.NSI[i]>0){ A.scatter[cls][0].push(sv); A.scatter[cls][1].push(MORPH.NSI[i]); }
+      const v=volLayer(i), tg=tagLayer(i);
+      if(v!=="no-layer"&&tg!=="layer-unclassified"){ (v===tg?A.agreeDepth:A.disagreeDepth).push(d); }
+      const c=c3Id(i); perSeg[c]=(perSeg[c]||0)+1;
+    }
+    A.somataPerSeg={};
+    Object.keys(perSeg).forEach(function(k){ const n=perSeg[k]; A.somataPerSeg[n]=(A.somataPerSeg[n]||0)+1; });
+    /* Nearest-neighbour composition. O(N²) over 47k cells is far too slow in a browser, so this
+       samples: 1,500 cells, each matched against the full table. Stated on the chart -- a
+       sampled number presented as exhaustive is a lie, however small the error. */
+    A.NB_SAMPLE=1500;
+    A.neigh={}; TYPES.forEach(t=>{A.neigh[t]={};TYPES.forEach(u=>A.neigh[t][u]=0);});
+    const step=Math.max(1,Math.floor(N/A.NB_SAMPLE));
+    for(let i=0;i<N;i+=step){
+      let b=-1,bd=Infinity;
+      for(let k=0;k<N;k++){
+        if(k===i)continue;
+        const dx=(HX[k]-HX[i])*UJ_RX,dy=(HY[k]-HY[i])*UJ_RY,dz=(HZ[k]-HZ[i])*UJ_RZ;
+        const dd=dx*dx+dy*dy+dz*dz; if(dd<bd){bd=dd;b=k;}
+      }
+      if(b>=0) A.neigh[typeName(i)][typeName(b)]++;
+    }
+  }
+
+  /* Median/quartiles without sorting a copy per call. */
+  function q(arr,p){ if(!arr.length)return 0; const a=arr.slice().sort((x,y)=>x-y);
+    const k=(a.length-1)*p, f=Math.floor(k); return f+1<a.length?a[f]+(a[f+1]-a[f])*(k-f):a[f]; }
+  function typesByCount(){ return TYPES.slice().sort((a,b)=>A.perType[b]-A.perType[a]); }
+  function shortName(t){ return longName(t).replace("Excitatory/spiny-with-atypical-tree","Atypical spiny"); }
+
+  /* ── the static charts ─────────────────────────────────────────────────────────────────── */
+  function drawStatic(){
+    const C=classColors(), one=oneSeries(), order=typesByCount();
+
+    // 1. cells per type -- magnitude, one series, so no legend and no categorical hue
+    draw("dCellsPerType",[{type:"bar",x:order.map(shortName),y:order.map(t=>A.perType[t]),
+      marker:{color:one},hovertemplate:"%{x}<br>%{y:,} cells<extra></extra>"}],
+      {yaxis:{title:{text:"cells"}}});
+
+    // 2. type × layer -- magnitude across two categories: a heatmap, not 10 stacked hues
+    draw("dTypeLayer",[{type:"heatmap",x:LAYERS,y:order.map(shortName),
+      z:order.map(t=>LAYERS.map(l=>A.perTypeLayer[t][l])),
+      colorscale:ramp(),hovertemplate:"%{y} in %{x}<br>%{z:,} cells<extra></extra>",
+      colorbar:{title:{text:"cells"},thickness:10,outlinewidth:0}}],
+      {margin:{l:150,r:14,t:10,b:60},xaxis:{tickangle:0,gridcolor:"rgba(0,0,0,0)"},yaxis:{gridcolor:"rgba(0,0,0,0)"}});
+
+    // 3. cells with no confident call, per layer
+    draw("dUnclassPerLayer",[{type:"bar",x:LAYERS,y:LAYERS.map(l=>A.unclassPerLayer[l]),
+      marker:{color:one},hovertemplate:"%{x}<br>%{y:,} cells<extra></extra>"}],
+      {xaxis:{tickangle:0},yaxis:{title:{text:"cells with no H01 call"}}});
+
+    // 4/5/6. distributions -> box plots, which show spread rather than hiding it in a mean
+    function boxes(id,src,title,fmt){
+      draw(id,order.filter(t=>src[t]&&src[t].length).map(t=>({type:"box",name:shortName(t),y:src[t],
+        marker:{color:one},line:{width:1.5},boxpoints:false,
+        hovertemplate:"%{x}<br>median "+(fmt||"%{median}")+"<extra></extra>"})),
+        {yaxis:{title:{text:title}}});
+    }
+    boxes("dSomaVol",A.soma,"soma volume (µm³)");
+    boxes("dSegVol",A.seg,"whole-cell volume (µm³)");
+    boxes("dShare",A.share,"soma ÷ whole-cell volume");
+    boxes("dSpin",A.spin,"spininess");
+
+    // 7. synaptic input, two series -> legend required
+    draw("dSynIo",[
+      {type:"bar",name:"excitatory input",x:order.map(shortName),y:order.map(t=>A.exIn[t]),marker:{color:C.exc}},
+      {type:"bar",name:"inhibitory input",x:order.map(shortName),y:order.map(t=>A.inIn[t]),marker:{color:C.inh}}
+    ],{barmode:"group",bargap:0.25,bargroupgap:0.08,showlegend:true,
+       legend:{orientation:"h",y:1.12,x:0},yaxis:{title:{text:"synapses (total)"}}});
+
+    // 8. nearest-neighbour composition -- row-normalised, so rare types are still readable
+    const nb=order.map(t=>{ const row=order.map(u=>A.neigh[t][u]||0), s=row.reduce((a,b)=>a+b,0);
+      return s?row.map(v=>100*v/s):row; });
+    draw("dNeigh",[{type:"heatmap",x:order.map(shortName),y:order.map(shortName),z:nb,
+      colorscale:ramp(),zmin:0,hovertemplate:"%{y} → nearest is %{x}<br>%{z:.1f}% of them<extra></extra>",
+      colorbar:{title:{text:"% of row"},thickness:10,outlinewidth:0}}],
+      {margin:{l:150,r:14,t:10,b:130},xaxis:{gridcolor:"rgba(0,0,0,0)"},yaxis:{gridcolor:"rgba(0,0,0,0)"}});
+    note("dNeighNote","Sampled: every "+Math.max(1,Math.floor(N/A.NB_SAMPLE))+"th cell ("
+      +fmt(Object.values(A.neigh).reduce((a,r)=>a+Object.values(r).reduce((x,y)=>x+y,0),0))
+      +" cells), each matched against all "+fmt(N)+". A full pairwise pass would freeze the tab.");
+
+    // 9. cilia
+    draw("dCilia",[{type:"bar",x:order.map(shortName),
+      y:order.map(t=>A.ciliaN[t]?100*A.cilia[t]/A.ciliaN[t]:0),marker:{color:one},
+      hovertemplate:"%{x}<br>%{y:.1f}% have a cilium<extra></extra>"}],
+      {yaxis:{title:{text:"% of cells with a cilium"},range:[0,100]}});
+
+    // 10. cortical depth profile -- small multiples. Ten types cannot be ten lines on one axis
+    // (no ten-hue set is colour-vision safe), and faceting is the better form for a laminar
+    // profile anyway: each type gets its own panel and the shapes are compared directly.
+    const cols=3, rows=Math.ceil(order.length/cols), traces=[], ann=[], shapes=[];
+    const lo=-200, hi=2400, bins=44, w=(hi-lo)/bins;
+    const bounds=LF.r.map(r=>(LF.r[0]-r)*UJ_RX/1000).slice(1);
+    order.forEach(function(t,k){
+      const col=k%cols+1, row=Math.floor(k/cols)+1;
+      const h=new Array(bins).fill(0);
+      A.depth[t].forEach(function(d){ const b=Math.floor((d-lo)/w); if(b>=0&&b<bins) h[b]++; });
+      const tot=A.depth[t].length||1;
+      const ax=k?String(k+1):"";
+      traces.push({type:"scatter",mode:"lines",orientation:"h",
+        x:h.map(v=>100*v/tot), y:h.map((_,b)=>lo+(b+0.5)*w),
+        line:{color:one,width:2},fill:"tozerox",fillcolor:one+"33",
+        xaxis:"x"+ax,yaxis:"y"+ax,
+        hovertemplate:shortName(t)+"<br>%{y:.0f} µm deep<br>%{x:.1f}% of them<extra></extra>"});
+      ann.push({text:shortName(t)+" ("+fmt(A.perType[t])+")",xref:"x"+ax+" domain",yref:"y"+ax+" domain",
+        x:0.5,y:1.06,showarrow:false,font:{size:10}});
+      bounds.forEach(function(b){
+        shapes.push({type:"line",xref:"x"+ax+" domain",yref:"y"+ax,x0:0,x1:1,y0:b,y1:b,
+          line:{color:themeC().line,width:1,dash:"dot"}});
+      });
+    });
+    const gl={grid:{rows:rows,columns:cols,pattern:"independent",roworder:"top to bottom",
+      xgap:0.16,ygap:0.34},annotations:ann,shapes:shapes,margin:{l:52,r:14,t:26,b:44},height:170*rows};
+    for(let k=0;k<order.length;k++){
+      const ax=k?String(k+1):"";
+      gl["xaxis"+ax]={showgrid:false,zeroline:false,title:k>=order.length-cols?{text:"% of that type",font:{size:10}}:undefined};
+      gl["yaxis"+ax]={autorange:"reversed",gridcolor:"rgba(0,0,0,0)",zeroline:false,
+        title:k%cols===0?{text:"depth (µm)",font:{size:10}}:undefined};
+    }
+    draw("dDepth",traces,gl);
+
+    // 11. E/I balance by layer -- one derived series, no legend
+    const ei=LAYERS.map(l=>{ const b=A.eiByLayer[l]; return b.e+b.i?100*b.e/(b.e+b.i):0; });
+    draw("dEI",[{type:"bar",x:LAYERS,y:ei,marker:{color:one},
+      hovertemplate:"%{x}<br>%{y:.1f}% of synaptic input is excitatory<extra></extra>"}],
+      {xaxis:{tickangle:0},
+       yaxis:{title:{text:"% of input that is excitatory"},range:[0,60]}});
+
+    // 13. soma volume vs synapse count. Coloured by BROAD CLASS (three slots, all-pairs safe),
+    // never by the ten types.
+    const S=A.scatter, lab={exc:"excitatory",inh:"inhibitory",non:"non-neuronal",none:"no confident call"};
+    draw("dScatter",["exc","inh","non","none"].filter(k=>S[k][0].length).map(k=>({
+      type:"scattergl",mode:"markers",name:lab[k],x:S[k][0],y:S[k][1],
+      marker:{color:C[k],size:4,opacity:0.45,line:{width:0}},
+      hovertemplate:lab[k]+"<br>soma %{x:.0f} µm³<br>%{y:,} synapses<extra></extra>"})),
+      {showlegend:true,legend:{orientation:"h",y:1.12,x:0},
+       xaxis:{type:"log",title:{text:"soma volume (µm³, log)"},tickangle:0},
+       yaxis:{type:"log",title:{text:"synapses (log)"}}});
+
+    // 14. how many somata share one c3 segment
+    const ks=Object.keys(A.somataPerSeg).map(Number).sort((a,b)=>a-b);
+    draw("dMultiSoma",[{type:"bar",x:ks.map(String),y:ks.map(k=>A.somataPerSeg[k]),marker:{color:one},
+      hovertemplate:"%{x} soma(ta) in one segment<br>%{y:,} segments<extra></extra>"}],
+      {xaxis:{tickangle:0,title:{text:"somata in the same c3 segment"}},
+       yaxis:{type:"log",title:{text:"segments (log)"}}});
+    note("dMultiSomaNote",fmt(ks.filter(k=>k>1).reduce((a,k)=>a+A.somataPerSeg[k],0))
+      +" segments hold more than one soma, up to "+Math.max.apply(null,ks)
+      +". For those, a segment ID is not one cell — which is why ηJump keys everything on the cell-body ID.");
+
+    // 15. where the layer sources disagree
+    const dl=-200,dh=2400,db=44,dw=(dh-dl)/db;
+    const hd=new Array(db).fill(0), ha=new Array(db).fill(0);
+    A.disagreeDepth.forEach(d=>{const b=Math.floor((d-dl)/dw); if(b>=0&&b<db)hd[b]++;});
+    A.agreeDepth.forEach(d=>{const b=Math.floor((d-dl)/dw); if(b>=0&&b<db)ha[b]++;});
+    const pct=hd.map((v,b)=>(v+ha[b])?100*v/(v+ha[b]):0);
+    draw("dDisagree",[{type:"bar",x:hd.map((_,b)=>dl+(b+0.5)*dw),y:pct,marker:{color:one},
+      hovertemplate:"%{x:.0f} µm deep<br>%{y:.1f}% disagree<extra></extra>"}],
+      {shapes:bounds.map(b=>({type:"line",x0:b,x1:b,yref:"paper",y0:0,y1:1,
+        line:{color:themeC().line,width:1,dash:"dot"}})),
+       xaxis:{title:{text:"cortical depth (µm) — dotted lines are the fitted layer boundaries"},
+              tickangle:0},
+       yaxis:{title:{text:"% where the two layer sources differ"}}});
+  }
+
+  /* ── the live charts ───────────────────────────────────────────────────────────────────── */
+  function drawLive(){
+    const one=oneSeries(), C=classColors();
+    const withCall=TYPES.filter(t=>!H01_NO_CALL[t]).reduce((a,t)=>a+A.perType[t],0);
+    const noCall=N-withCall;
+    draw("dIdentified",[{type:"bar",orientation:"h",y:["H01 published","no confident call"],
+      x:[withCall,noCall],marker:{color:one},
+      hovertemplate:"%{y}<br>%{x:,} cells<extra></extra>"}],
+      {margin:{l:150,r:14,t:10,b:44},xaxis:{title:{text:"cells"},tickangle:0},
+       yaxis:{gridcolor:"rgba(0,0,0,0)"}});
+
+    if(!REPORT_ENDPOINT){ ["dSource","dReports"].forEach(id=>note(id+"Note","No backend configured.")); return; }
+    fetch(REPORT_ENDPOINT+"?allIds=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+      .then(r=>r.json())
+      .then(function(d){
+        const rows=(d&&d.allIds)||[];
+        if(!rows.length){
+          note("dSourceNote","No community identifications on file yet — this fills in as people submit.");
+          note("dReportsNote","No community reports yet.");
+          return;
+        }
+        let agree=0,disagree=0,firstCall=0;
+        const byDay={};
+        rows.forEach(function(r){
+          const i=BY_BODY.get(String(r.nucleusId||""));
+          const t=r.type||"";
+          if(t==="confirmation")agree++; else if(t==="discrepancy")disagree++; else firstCall++;
+          const day=String(r.timestamp||"").slice(0,10);
+          if(day) byDay[day]=(byDay[day]||0)+1;
+        });
+        draw("dSource",[{type:"bar",orientation:"h",
+          y:["confirmed H01's call","disagreed with H01","first call on record"],
+          x:[agree,disagree,firstCall],marker:{color:[C.inh,C.exc,C.non]},
+          hovertemplate:"%{y}<br>%{x:,} reports<extra></extra>"}],
+          {margin:{l:170,r:14,t:10,b:44},xaxis:{title:{text:"community reports"},tickangle:0},
+           yaxis:{gridcolor:"rgba(0,0,0,0)"}});
+        const days=Object.keys(byDay).sort();
+        let run=0; const cum=days.map(d=>(run+=byDay[d]));
+        draw("dReports",[{type:"scatter",mode:"lines",x:days,y:cum,line:{color:one,width:2},
+          fill:"tozeroy",fillcolor:one+"33",hovertemplate:"%{x}<br>%{y:,} reports in total<extra></extra>"}],
+          {xaxis:{tickangle:0},yaxis:{title:{text:"cumulative reports"}}});
+      })
+      .catch(function(){
+        note("dSourceNote","Could not reach the backend.");
+        note("dReportsNote","Could not reach the backend.");
+      });
+  }
+
+  /* ── the table view, for anything colour or a chart cannot carry ───────────────────────── */
+  function downloadDashExcel(){
+    if(typeof XLSX==="undefined"){ alert("The spreadsheet library has not loaded yet — try again in a moment."); return; }
+    const order=typesByCount(), wb=XLSX.utils.book_new();
+    const perType=[["Cell type","Cells","Median soma volume (um3)","Median whole-cell volume (um3)",
+      "Median soma share","Median spininess","% with a cilium","Excitatory input","Inhibitory input"]];
+    order.forEach(t=>perType.push([longName(t),A.perType[t],
+      Math.round(q(A.soma[t],.5)*10)/10,Math.round(q(A.seg[t],.5)*10)/10,
+      Math.round(q(A.share[t],.5)*1000)/1000,Math.round(q(A.spin[t],.5)*1000)/1000,
+      A.ciliaN[t]?Math.round(1000*A.cilia[t]/A.ciliaN[t])/10:0,A.exIn[t],A.inIn[t]]));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(perType),"Per cell type");
+    const tl=[["Cell type"].concat(LAYERS)];
+    order.forEach(t=>tl.push([longName(t)].concat(LAYERS.map(l=>A.perTypeLayer[t][l]))));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(tl),"Type x layer");
+    const ei=[["Layer","% of input excitatory","Cells counted"]];
+    LAYERS.forEach(l=>{const b=A.eiByLayer[l];
+      ei.push([l,b.e+b.i?Math.round(1000*b.e/(b.e+b.i))/10:0,b.n]);});
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ei),"E-I by layer");
+    XLSX.writeFile(wb,"h01_dashboard_summary.xlsx");
+  }
+
+  let inited=false;
+  function init(){
+    if(inited) return Promise.resolve();
+    const status=document.getElementById("dashStatus");
+    if(status) status.textContent="loading the charting library…";
+    return ensureDashPlotly().then(function(){
+      if(status) status.textContent="computing…";
+      aggregate();
+      drawStatic(); drawLive();
+      inited=true;
+      if(status) status.textContent="";
+      const x=document.getElementById("dashXlsx");
+      if(x) x.addEventListener("click",downloadDashExcel);
+    }).catch(function(e){
+      if(status) status.textContent="Could not load the charting library — "+((e&&e.message)||e);
+    });
+  }
+  /* Redraw on theme change: Plotly bakes colours in at render time, so retinting the axes is not
+     enough -- the marks themselves carry the wrong palette until the traces are rebuilt. */
+  function retheme(){ if(inited){ drawStatic(); drawLive(); } }
+
+  return {init:init, retheme:retheme, agg:A, excel:downloadDashExcel};
+})();
+/* Top-level `const` does NOT become a property of window -- it lives in the global lexical
+   environment instead. The tab handler in the page body tests `window.DASH` before calling
+   init(), so without this line the Statistics tab silently did nothing: no error, no charts,
+   no status text. Same trap as the const/let-across-script-tags note in core/gamify.js. */
+window.DASH = DASH;
+
+let _dashPlotly=null;
+function ensureDashPlotly(){
+  if(window.Plotly) return Promise.resolve();
+  if(_dashPlotly) return _dashPlotly;
+  _dashPlotly=new Promise(function(res,rej){
+    const s=document.createElement("script");
+    s.src="https://cdn.plot.ly/plotly-2.35.2.min.js";
+    s.onload=function(){res();}; s.onerror=function(){rej(new Error("Failed to load Plotly from cdn.plot.ly"));};
+    document.head.appendChild(s);
+  });
+  return _dashPlotly;
+}
 
 </script>
 </body></html>
