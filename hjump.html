@@ -389,6 +389,21 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 :root{--accent:#ffb454;--accent-dim:#4a2f10;--on-accent:#241503}
 :root[data-theme="light"]{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}
 @media print{:root{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}}
+
+/* ── the guided identification stays teal ────────────────────────────────────────────────
+   Søren, 2026-08-17: "the guided identification could be the teal green in the hJump, so that
+   it is more of a contrast". Scoped by redefining the three custom properties ON the panel:
+   custom properties inherit, so the nearest ancestor that declares one wins for that whole
+   subtree -- which recolours not only the CSS rules but every inline `var(--accent)` the panel's
+   generated markup contains (the certainty pills, the agree/disagree flags, the submit button),
+   without touching a single one of them individually.
+
+   The values are µJump's own accent triple, unchanged, so the two pages' guided identification
+   looks identical -- which is the point: it is the one genuinely shared surface between them.
+   Contrast is already validated at 11.17:1 dark and 5.47:1 light on their backgrounds. */
+.idf{--accent:#27e0b3;--accent-dim:#176b57;--on-accent:#06231c}
+:root[data-theme="light"] .idf{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}
+@media print{.idf{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}}
 </style>
 </head><body>
 <div class="wrap">

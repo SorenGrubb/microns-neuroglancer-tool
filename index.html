@@ -81,6 +81,22 @@
       --accent:#7db3d6;--teal:#27e0b3;--teal-soft:#12271f;--card:#1a1e24;--hero:#181c21;
     }
   }
+  /* ── the ηJump card is orange ──────────────────────────────────────────────────────────
+     Søren, 2026-08-17. Same two oranges the ηJump page itself uses, so the card and the tool it
+     opens read as one thing. Scoped to .feature.eta, so the µJump card keeps its teal.
+
+     --teal is used for BOTH text (kicker, logo, hover border) and the CTA's background, which is
+     why .cta is given its own colours here rather than inheriting: white on a light amber is
+     1.76:1, unreadable. Measured — kicker/logo 5.18:1 on the light card and 9.49:1 on the dark
+     one; CTA text 5.18:1 light and 10.06:1 dark. */
+  .feature.eta{--teal:#c2410c;--teal-soft:#fdece2}
+  .feature.eta .cta{background:#c2410c;color:#ffffff}
+  @media (prefers-color-scheme:dark){
+    .feature.eta{--teal:#ffb454;--teal-soft:#3a2408}
+    /* dark text on the light amber fill, not white — see the contrast note above */
+    .feature.eta .cta{background:#ffb454;color:#241503}
+  }
+
 </style>
 </head>
 <body>
@@ -124,7 +140,7 @@
     <span class="cta">Open µJump &rarr;</span>
   </a>
 
-  <a class="feature" href="/hjump.html">
+  <a class="feature eta" href="/hjump.html">
     <div class="kicker">Interactive tool</div>
     <div class="logo"><span class="mu">&eta;</span><span class="jm">Jump</span></div>
     <p class="desc">
