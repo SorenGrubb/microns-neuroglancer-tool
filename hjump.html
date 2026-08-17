@@ -390,33 +390,22 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 :root[data-theme="light"]{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}
 @media print{:root{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}}
 
-/* ── the guided identification stays teal ────────────────────────────────────────────────
-   Søren, 2026-08-17: "the guided identification could be the teal green in the hJump, so that
-   it is more of a contrast". Scoped by redefining the three custom properties ON the panel:
-   custom properties inherit, so the nearest ancestor that declares one wins for that whole
-   subtree -- which recolours not only the CSS rules but every inline `var(--accent)` the panel's
-   generated markup contains (the certainty pills, the agree/disagree flags, the submit button),
-   without touching a single one of them individually.
+/* ── the guided-identification BUTTON only ───────────────────────────────────────────────
+   Søren, 2026-08-17, correcting my previous pass: "it was only this field that should be a
+   different color from the rest ... after you press start guided identification in hJump, the
+   frame should be orange again, like it is green for µJump."
 
-   The values are µJump's own accent triple, unchanged, so the two pages' guided identification
-   looks identical -- which is the point: it is the one genuinely shared surface between them.
-   Contrast is already validated at 11.17:1 dark and 5.47:1 light on their backgrounds. */
-/* Scope covers the whole guided-identification surface, not just the open panel: .idf is the
-   panel, .idcta is the "take the guided identification" call-to-action in the cell card, and
-   .idcta-search is the "already know it? jump straight there" box beneath it. Scoping only .idf
-   left the entry point orange while the panel it opens was teal -- which is worse than either,
-   because the two read as unrelated. */
-.idf,.idcta,.idcta-search{--accent:#27e0b3;--accent-dim:#176b57;--on-accent:#06231c}
-:root[data-theme="light"] .idf,
-:root[data-theme="light"] .idcta,
-:root[data-theme="light"] .idcta-search{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}
-@media print{.idf,.idcta,.idcta-search{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}}
-/* .idcta.warn marks "H01 has no published type for this cell". µJump flags that with
-   border-color:var(--warn), a gold that is fine against teal but sits right on top of ηJump's
-   orange. Keep the emphasis, drop the clashing hue: same teal border as the rest of this block,
-   distinguished by a second inset ring instead of by colour. The message itself already says
-   what is going on, so no information is carried by the hue alone. */
-.idcta.warn{border-color:var(--accent);box-shadow:inset 0 0 0 3px var(--accent-dim)}
+   So the guided-identification PANEL frame follows the page accent, exactly as it does on µJump
+   -- teal there because µJump is teal, orange here because ηJump is orange. The one element that
+   diverges is the button that opens it, which stays µJump's teal so the entry point stands out
+   against an otherwise orange page.
+
+   I had scoped the teal to .idf/.idcta/.idcta-search, which recoloured the whole surface -- the
+   opposite of what was asked. Only #idfgo now. Custom properties inherit, so setting the triple
+   on the button alone is enough for .idbtn's border/fill/label to follow. */
+#idfgo{--accent:#27e0b3;--accent-dim:#176b57;--on-accent:#06231c}
+:root[data-theme="light"] #idfgo{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}
+@media print{#idfgo{--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff}}
 </style>
 </head><body>
 <div class="wrap">
