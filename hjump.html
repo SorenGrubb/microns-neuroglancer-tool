@@ -356,6 +356,39 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .leaf-search-item:last-child{border-bottom:none}
 .leaf-search-item:hover,.leaf-search-item.hi{background:var(--accent-dim);color:var(--accent)}
 .leaf-search-empty{padding:8px 12px;font-size:12px;color:var(--mut);font-style:italic}
+
+/* ── ηJump identity ──────────────────────────────────────
+   Everything above this point is µJump's stylesheet, copied verbatim by build_hjump.py so the
+   two pages stay structurally identical. This block is the ONE deliberate divergence: Søren,
+   2026-08-17 -- "hJump looks a bit too much like µJump ... change the colour scheme from the
+   teal/green to orange for the hJump only". Overriding three custom properties, rather than
+   editing the copy, keeps re-copying from µJump lossless.
+
+   Why these exact oranges. µJump's teal sits ΔE 100 from --exc (#f0883e), the ORANGE already
+   used for the "excitatory" cell tag; ANY orange accent lands far closer, and the two genuinely
+   appear side by side -- the class pill sits directly above the accent-coloured cell name. So
+   the pair is separated by LIGHTNESS rather than hue: dark accent L* 78.8 against --exc's 66.9,
+   light accent L* 33.6 against 43.7 -- ΔE 20.0 and 18.3, in opposite directions.
+
+   Measured, not eyeballed. The lowest contrast ratio anywhere in this block is 6.36:1 (accent on
+   accent-dim, light theme); accent on background is 10.73:1 dark and 7.31:1 light. WCAG AA for
+   normal text needs 4.5:1, so every pairing clears it with room to spare.
+
+   The light rule must be `:root[data-theme="light"]`, NOT `[data-theme="light"]`. µJump writes
+   it the first way, specificity (0,2,0), which BEATS a bare attribute selector (0,1,0) however
+   late it appears. Written the short way, this file recoloured the dark theme and silently left
+   light mode teal -- caught only because themecheck.js resolves the cascade by specificity
+   instead of trusting the first rule whose selector string happens to match.
+
+   µJump's stylesheet has an @media print block with its own palette for paper; it is mirrored
+   below, or the dark accent here would override it and print unreadably pale.
+
+   Data-encoding colours (--exc/--inh/--non/--ok/--warn/--danger) are deliberately NOT touched.
+   They mean the same thing on both pages, and a cell tagged "excitatory" must not change colour
+   depending on which dataset you happen to be looking at. */
+:root{--accent:#ffb454;--accent-dim:#4a2f10;--on-accent:#241503}
+:root[data-theme="light"]{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}
+@media print{:root{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}}
 </style>
 </head><body>
 <div class="wrap">
