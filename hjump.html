@@ -449,8 +449,7 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 </script>
 
 <div class="card">
-<div class="units" id="units"><button data-u="voxel" class="on">voxels (<span id="unitres"></span>)</button><button data-u="nm">nanometres</button><button data-u="um">micrometres</button></div>
-<label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; jump to it in H01, identify the nearest cell body and its neighbours, and load the cell in 3D</span></label>
+<label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; in <span id="unitres"></span> voxels; jump to it in H01, identify the nearest cell body and its neighbours, and load the cell in 3D</span></label>
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Find the nearest classified cell body">&#8594;</button></div>
 <p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.
   <button id="rand" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font:inherit">Show me a random cell</button></p>
@@ -809,7 +808,7 @@ function showCell(i, distNm, fromHistory){
   if(idfBtn) idfBtn.addEventListener("click",function(){ openIdentify(i); });
   wireLeafSearch("mainLeaf",function(slug){ openIdentify(i); renderResult(slug); });
   wireContacts(i);
-  renderContactHistory();
+  renderPriorRunNote(i);
   /* Async, and deliberately after the panel is in the DOM: a slow backend must never delay the
      cell itself appearing. Each writes into its own placeholder or stays empty. */
   loadIdentityVotes(String(HSB[i]), H01_NO_CALL[t]?[]:[longName(t)]);
@@ -820,7 +819,6 @@ function showCell(i, distNm, fromHistory){
      search, .idval copies on click. */
   panel.querySelectorAll(".jump,.njump").forEach(function(b){
     b.addEventListener("click",function(){
-      unit="voxel";[...unitsEl.children].forEach(c=>c.classList.toggle("on",c.dataset.u==="voxel"));
       document.getElementById("x").value=b.dataset.x;
       document.getElementById("y").value=b.dataset.y;
       document.getElementById("z").value=b.dataset.z;
@@ -865,19 +863,10 @@ function wireMeshButtons(i){
 }
 
 /* ── input ──────────────────────────────────────────────────────────────────────────── */
-let unit="voxel";
-const unitsEl=document.getElementById("units");
-[...unitsEl.children].forEach(function(btn){
-  btn.addEventListener("click",function(){
-    unit=btn.dataset.u;
-    [...unitsEl.children].forEach(c=>c.classList.toggle("on",c===btn));
-  });
-});
-function toVoxels(x,y,z){
-  if(unit==="voxel")return[x,y,z];
-  if(unit==="nm")return[x/UJ_RX,y/UJ_RY,z/UJ_RZ];
-  return[x*(1000/UJ_RX),y*(1000/UJ_RY),z*(1000/UJ_RZ)];
-}
+/* Coordinates are voxels, full stop (Søren, 2026-08-17: the nm/µm options "are not helpful").
+   Every coordinate this page shows, copies and links to is already in the viewer's own 8·8·33 nm
+   voxel frame, so the switcher only created a way to paste a number into the wrong frame and get
+   a confidently wrong cell back. µJump hides its own units row for the same reason. */
 document.getElementById("x").addEventListener("paste",function(ev){
   const t=(ev.clipboardData||window.clipboardData).getData("text")||"";
   const p=t.trim().split(/[\s,;]+/).filter(Boolean);
@@ -893,7 +882,7 @@ function doJump(){
   fail("");
   const raw=["x","y","z"].map(id=>parseFloat(document.getElementById(id).value));
   if(raw.some(v=>!isFinite(v)))return fail("Enter all three coordinates.");
-  const v=toVoxels(raw[0],raw[1],raw[2]).map(Math.round);
+  const v=raw.map(Math.round);
   const r=nearest(v[0],v[1],v[2]);
   if(r.i<0)return fail("No cell found.");
   if(r.dist>50000){
@@ -1676,6 +1665,14 @@ function wireContacts(i){
     }
     cands.sort(function(a,b){ return a.dist-b.dist; });
     if(!cands.length){ msg.textContent="No other soma within "+radiusUm+" µm. Try a larger radius."; return; }
+    const thNm0=Math.round(threshUm*1000*10)/10, clNm0=Math.round(clusterUm*1000);
+    const prior=findContactRun(i,thNm0,clNm0,radiusUm);
+    if(prior){                       // same cell, same settings -- nothing to recompute
+      showContactResults(i,prior.rows,thNm0,clNm0);
+      msg.textContent="You already ran this cell at these settings — reusing that result, nothing re-fetched.";
+      renderPriorRunNote(i);
+      return;
+    }
     btn.disabled=true; out.innerHTML="";
     msg.textContent="fetching this cell's mesh… (0/"+cands.length+")";
     runContacts(i,cands,threshUm,clusterUm,function(f,t){ msg.textContent=t; })
@@ -1684,20 +1681,9 @@ function wireContacts(i){
         const touching=rows.filter(function(r){ return r.points.length; });
         msg.textContent=touching.length+" of "+rows.length+" neighbouring cells touch this one.";
         const thNm=Math.round(threshUm*1000*10)/10, clNm=Math.round(clusterUm*1000);
-        out.innerHTML=touching.length?renderContactRows(i,touching,thNm,clNm)
-          :'<div class="nsub">No contacts within '+thNm+' nm. Try a larger threshold.</div>';
-        const xb=document.getElementById("ctXlsx");
-        if(xb) xb.addEventListener("click",function(){ downloadContactsExcel(i,touching,thNm,clNm); });
-        if(touching.length) pushContactHistory(i,touching,thNm,clNm);
-        out.querySelectorAll(".ctjump").forEach(function(b){
-          b.addEventListener("click",function(){
-            unit="voxel";[].slice.call(unitsEl.children).forEach(function(c){ c.classList.toggle("on",c.dataset.u==="voxel"); });
-            document.getElementById("x").value=b.dataset.x;
-            document.getElementById("y").value=b.dataset.y;
-            document.getElementById("z").value=b.dataset.z;
-            document.getElementById("go").click();
-          });
-        });
+        if(touching.length) saveContactRun(i,touching,thNm,clNm,radiusUm);
+        showContactResults(i,touching,thNm,clNm);
+        renderPriorRunNote(i);
       })
       .catch(function(e){ btn.disabled=false; msg.textContent="failed: "+((e&&e.message)||e); });
   });
@@ -1830,21 +1816,31 @@ function renderContactRows(i,rows,thresholdNm,clusterNm){
     +'Open all in Neuroglancer &#8599;</a>'
     +'<button class="idbtn" id="ctXlsx" style="flex:1">Download as Excel</button></div>';
   return head+'<div class="neigh" style="margin-top:10px">'+rows.map(function(r){
-    const v=r.points.slice(0,5).map(function(p){
+    /* Numbered jump buttons, nothing else on the face of them. They used to read "1: 0 nm",
+       "2: 0 nm" ... which was both cryptic and, on H01, nearly always zero: c3 segments are cut
+       from one shared volume, so two touching cells' meshes have coincident vertices at the
+       shared surface and the measured gap really is ~0. That makes the per-patch gap useless as a
+       displayed number here (it is still exported, where a column of zeros is at least
+       self-explanatory). What actually varies between neighbours is the NUMBER of patches, which
+       is the line above. */
+    const v=r.points.slice(0,8).map(function(p,pi){
       const vx=meshUmToVoxel(p.point[0],p.point[1],p.point[2]);
       return '<button class="idbtn ctjump" data-x="'+vx[0]+'" data-y="'+vx[1]+'" data-z="'+vx[2]+'" '
-        +'style="padding:1px 7px;margin:2px;font-size:11px" title="Jump to this contact point">'
-        +(r.points.indexOf(p)+1)+': '+(p.dist*1000).toFixed(0)+' nm</button>';
+        +'style="padding:1px 7px;margin:2px;font-size:11px" '
+        +'title="Centre this tool on contact patch '+(pi+1)+' — voxel '+vx.join(", ")
+        +', measured gap '+(p.dist*1000).toFixed(1)+' nm">'+(pi+1)+'</button>';
     }).join("");
+    /* The NAME is the link, same rule as the cell headline and the neighbours list -- no separate
+       "open in Neuroglancer" row anywhere on this page. */
     return '<div class="nrow"><div class="nleft"><span class="dot '+classOf(r.i)+'"></span><div>'
-      +'<div class="ntype">'+escHtml(longName(typeName(r.i)))+' <span class="nsub">'
+      +'<div class="ntype"><a href="'+escHtml(contactsViewerUrl(i,[r]))+'" target="_blank" rel="noopener" '
+        +'title="Open this pair in Neuroglancer — both cells loaded, with every contact patch as an annotation layer" '
+        +'style="color:inherit;text-decoration:none;border-bottom:1px dashed var(--accent)">'
+        +escHtml(longName(typeName(r.i)))+' <span class="ext">&#8599;</span></a> <span class="nsub">'
       +escHtml(volLayer(r.i)!=="no-layer"?volLayer(r.i):tagLayer(r.i))+' &middot; soma '+r.dist.toFixed(1)+' &micro;m away</span></div>'
-      +'<div class="nsub">'+r.points.length+' contact patch'+(r.points.length===1?"":"es")
-      +' &middot; closest '+(r.points[0].dist*1000).toFixed(0)+' nm</div>'
-      +'<div>'+v+(r.points.length>5?'<span class="nsub"> +'+(r.points.length-5)+' more</span>':'')+'</div>'
-      +'<div style="margin-top:4px"><a class="ref" href="'+escHtml(contactsViewerUrl(i,[r]))+'" target="_blank" rel="noopener" '
-        +'title="Open this pair in Neuroglancer with every contact point as an annotation layer">'
-        +'Open this pair in Neuroglancer &#8599;</a></div>'
+      +'<div class="nsub">'+r.points.length+' contact patch'+(r.points.length===1?"":"es")+'</div>'
+      +'<div class="nsub" style="margin-top:3px">jump to patch: '+v
+        +(r.points.length>8?'<span class="nsub"> +'+(r.points.length-8)+' more in the Excel export</span>':'')+'</div>'
       +'</div></div></div>';
   }).join("")+'</div>';
 }
@@ -1893,18 +1889,10 @@ function renderContactRows(i,rows,thresholdNm,clusterNm){
   renderNavButtons();
 })();
 
-/* ── "Recent" ──────────────────────────────────────────────────────────────────────────────
-   Two of them, because "the last 3 results" means different things in the two places it is
-   useful, and µJump's own Recent chips are the search kind:
-
-     SEARCH_HISTORY   the last 3 cells you looked at, as chips under the coordinate box --
-                      µJump's #searchHistory, same .hist-chip styling and same behaviour
-                      (re-visiting one moves it to the front rather than duplicating it).
-     CONTACT_HISTORY  the last 3 cell-contact RUNS, kept inside the contacts panel. A run costs
-                      one mesh fetch per neighbour, so being able to reopen the previous result
-                      without recomputing it is worth more here than anywhere else on the page.
-                      Kept in memory only: the rows hold decoded mesh-derived geometry, which is
-                      far too large for localStorage and would go stale against a re-fetch. */
+/* ── "Recent" chips ────────────────────────────────────────────────────────────────────────
+   The last 3 cells you looked at, under the coordinate box -- µJump's own #searchHistory, same
+   .hist-chip styling and same behaviour (re-visiting one moves it to the front rather than
+   duplicating it). Contact runs are remembered separately and per-cell; see CONTACT_RUNS. */
 let SEARCH_HISTORY=[];
 function pushSearchHistory(i){
   const key=String(HSB[i]);
@@ -1927,46 +1915,64 @@ function renderSearchHistory(){
   });
 }
 
-let CONTACT_HISTORY=[];
-function pushContactHistory(i,rows,thresholdNm,clusterNm){
-  const key=HSB[i]+"@"+thresholdNm+"/"+clusterNm;
-  CONTACT_HISTORY=CONTACT_HISTORY.filter(function(h){ return h.key!==key; });
-  CONTACT_HISTORY.unshift({key:key,i:i,rows:rows,thresholdNm:thresholdNm,clusterNm:clusterNm,
-    n:rows.length, patches:rows.reduce(function(a,r){ return a+r.points.length; },0)});
-  if(CONTACT_HISTORY.length>3) CONTACT_HISTORY.length=3;
-  renderContactHistory();
+/* Earlier runs are remembered ONLY for the cell you are looking at (Søren, 2026-08-17: the list
+   was showing a previous run on a DIFFERENT cell, which answers no useful question -- "have I
+   done this one before?" is the only version worth asking). Nothing appears unless this exact
+   cell has been run before; then it offers the stored result instead of re-fetching one mesh per
+   neighbour, which is the expensive part.
+
+   Keyed on cell + settings, because changing the threshold, cluster size or radius changes the
+   answer -- silently reusing a result computed at different settings would be wrong. In memory
+   only: the rows hold decoded mesh geometry, far too large for localStorage. */
+const CONTACT_RUNS=new Map();
+function contactRunKey(i,thresholdNm,clusterNm,radiusUm){
+  return HSB[i]+"@"+thresholdNm+"/"+clusterNm+"/"+radiusUm;
 }
-function renderContactHistory(){
+function saveContactRun(i,rows,thresholdNm,clusterNm,radiusUm){
+  CONTACT_RUNS.set(contactRunKey(i,thresholdNm,clusterNm,radiusUm),
+                   {i:i,rows:rows,thresholdNm:thresholdNm,clusterNm:clusterNm,radiusUm:radiusUm});
+}
+function findContactRun(i,thresholdNm,clusterNm,radiusUm){
+  return CONTACT_RUNS.get(contactRunKey(i,thresholdNm,clusterNm,radiusUm))||null;
+}
+function priorRunsFor(i){
+  const out=[];
+  CONTACT_RUNS.forEach(function(v){ if(v.i===i) out.push(v); });
+  return out;
+}
+function renderPriorRunNote(i){
   const el=document.getElementById("ctRecent"); if(!el)return;
-  if(!CONTACT_HISTORY.length){ el.innerHTML=""; return; }
-  el.innerHTML='<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:10px">Recent contact runs</div>'
-    +CONTACT_HISTORY.map(function(h,k){
-      return '<div class="nrow" style="padding:5px 0"><div class="nleft"><span class="dot '+classOf(h.i)+'"></span><div>'
-        +'<div class="nsub">'+escHtml(longName(typeName(h.i)))+' &middot; body '+escHtml(String(HSB[h.i]))
-        +' &middot; '+h.n+' cells, '+h.patches+' patches @ '+h.thresholdNm+' nm</div>'
-        +'<div style="margin-top:3px">'
-        +'<a class="ref" href="'+escHtml(contactsViewerUrl(h.i,h.rows))+'" target="_blank" rel="noopener">Open in Neuroglancer &#8599;</a>'
-        +' <button class="idbtn ctreXlsx" data-k="'+k+'" style="padding:1px 7px;font-size:11px;margin-left:6px">Excel</button>'
-        +' <button class="idbtn ctreShow" data-k="'+k+'" style="padding:1px 7px;font-size:11px">Show again</button>'
-        +'</div></div></div></div>';
-    }).join("");
-  el.querySelectorAll(".ctreXlsx").forEach(function(b){
-    b.addEventListener("click",function(){
-      const h=CONTACT_HISTORY[+b.dataset.k];
-      if(h) downloadContactsExcel(h.i,h.rows,h.thresholdNm,h.clusterNm);
-    });
-  });
+  const runs=priorRunsFor(i);
+  if(!runs.length){ el.innerHTML=""; return; }
+  el.innerHTML='<div class="nsub" style="margin-top:8px">You have already run <b>this</b> cell '
+    +(runs.length===1?"once":runs.length+" times")+' this session: '
+    +runs.map(function(r,k){
+      return '<button class="idbtn ctreShow" data-k="'+k+'" style="padding:1px 7px;font-size:11px;margin:2px" '
+        +'title="Show that result again without re-fetching any meshes">'
+        +r.rows.length+' cells @ '+r.thresholdNm+' nm within '+r.radiusUm+' &micro;m</button>';
+    }).join("")+'</div>';
   el.querySelectorAll(".ctreShow").forEach(function(b){
     b.addEventListener("click",function(){
-      const h=CONTACT_HISTORY[+b.dataset.k]; if(!h)return;
-      /* Re-render the stored rows without recomputing. Only meaningful while the panel on screen
-         belongs to the same cell -- otherwise jump there first, which reopens its own panel. */
-      if(CUR_IDX!==h.i){ jumpToIndex(h.i); return; }
-      const out=document.getElementById("ctResults");
-      if(!out)return;
-      out.innerHTML=renderContactRows(h.i,h.rows,h.thresholdNm,h.clusterNm);
-      const xb=document.getElementById("ctXlsx");
-      if(xb) xb.addEventListener("click",function(){ downloadContactsExcel(h.i,h.rows,h.thresholdNm,h.clusterNm); });
+      const r=priorRunsFor(i)[+b.dataset.k]; if(!r)return;
+      showContactResults(i,r.rows,r.thresholdNm,r.clusterNm);
+      const m=document.getElementById("ctMsg");
+      if(m) m.textContent="Showing the earlier run on this cell — nothing re-fetched.";
+    });
+  });
+}
+/* One painter, used by a fresh run and by re-showing a stored one, so the two cannot diverge. */
+function showContactResults(i,rows,thNm,clNm){
+  const out=document.getElementById("ctResults"); if(!out)return;
+  out.innerHTML=rows.length?renderContactRows(i,rows,thNm,clNm)
+    :'<div class="nsub">No contacts within '+thNm+' nm. Try a larger threshold.</div>';
+  const xb=document.getElementById("ctXlsx");
+  if(xb) xb.addEventListener("click",function(){ downloadContactsExcel(i,rows,thNm,clNm); });
+  out.querySelectorAll(".ctjump").forEach(function(b){
+    b.addEventListener("click",function(){
+      document.getElementById("x").value=b.dataset.x;
+      document.getElementById("y").value=b.dataset.y;
+      document.getElementById("z").value=b.dataset.z;
+      document.getElementById("go").click();
     });
   });
 }
