@@ -620,13 +620,10 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 </div>
 
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="Two diagonal corners, in the same 8-8-33 nm voxels as the Jump tab. Either diagonal works. You can paste x, y, z into either x field.">Region</div>
-<label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="filterRegionOn" style="width:auto"> Limit to a bounding box</label>
-<div class="row" style="gap:6px;margin-top:6px">
-<div class="coord"><input type="text" id="rx1" placeholder="x1" inputmode="numeric"></div><div class="coord"><input type="text" id="ry1" placeholder="y1" inputmode="numeric"></div><div class="coord"><input type="text" id="rz1" placeholder="z1" inputmode="numeric"></div>
-</div>
-<div class="row" style="gap:6px;margin-top:6px">
-<div class="coord"><input type="text" id="rx2" placeholder="x2" inputmode="numeric"></div><div class="coord"><input type="text" id="ry2" placeholder="y2" inputmode="numeric"></div><div class="coord"><input type="text" id="rz2" placeholder="z2" inputmode="numeric"></div>
-</div>
+<label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="filterRegionOn" style="width:auto"> Limit to region(s)</label>
+<div id="regionBoxes"></div>
+<button type="button" class="idbtn" id="regionAddBox" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another box</button>
+<p class="hint" style="margin-top:6px">A cell matches if it falls inside <b>any</b> box. Each box is drawn in its own colour in the Neuroglancer link, on its own toggleable layer.</p>
 
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
@@ -2191,6 +2188,87 @@ function scrollTop(){ try{ if(window.scrollTo) window.scrollTo({top:0,behavior:"
    Everything runs against the embedded table, in the browser -- 47,447 rows is nothing for a
    linear scan, so there is no index to keep in sync and no network round trip. */
 const FILTER={rows:[]};
+
+/* ── region boxes ──────────────────────────────────────────────────────────────────────────
+   Any number of ROIs, matched as a UNION: a cell is in the region if it falls inside ANY box
+   (Søren, 2026-08-17). Same shape as µJump's -- one row per box, each with its own colour, its
+   own remove button and its own annotation layer in the viewer, so boxes can be toggled
+   independently rather than arriving as one indivisible blob.
+
+   Colours are µJump's REGION_BOX_COLORS, unchanged. They are labels for "which box is this",
+   not data, and they are drawn on EM rather than on the page surface -- so they are deliberately
+   left as the bright set that reads against grey tissue, and each box carries a number in its
+   layer name so the identity never rests on colour alone. */
+const REGION_BOX_COLORS=["#ffd43b","#e64980","#4dabf7","#82c91e","#be4bdb","#20c997","#fa5252","#5c7cfa"];
+function regionRowHtml(k){
+  const c=REGION_BOX_COLORS[k%REGION_BOX_COLORS.length];
+  return '<div class="rbox-row" data-k="'+k+'" style="border:1px solid var(--line);border-radius:7px;padding:8px;margin-top:8px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+      +'<span style="width:10px;height:10px;border-radius:2px;background:'+c+';flex:none"></span>'
+      +'<span class="nsub">Box <b class="rb-n">'+(k+1)+'</b></span>'
+      +'<button type="button" class="idbtn rb-del" style="margin-left:auto;padding:1px 8px;font-size:11px" title="Remove this box">remove</button>'
+    +'</div>'
+    +'<div class="row" style="gap:6px"><div class="coord"><input type="text" class="rb-x1" placeholder="x1" inputmode="numeric"></div>'
+      +'<div class="coord"><input type="text" class="rb-y1" placeholder="y1" inputmode="numeric"></div>'
+      +'<div class="coord"><input type="text" class="rb-z1" placeholder="z1" inputmode="numeric"></div></div>'
+    +'<div class="row" style="gap:6px;margin-top:6px"><div class="coord"><input type="text" class="rb-x2" placeholder="x2" inputmode="numeric"></div>'
+      +'<div class="coord"><input type="text" class="rb-y2" placeholder="y2" inputmode="numeric"></div>'
+      +'<div class="coord"><input type="text" class="rb-z2" placeholder="z2" inputmode="numeric"></div></div>'
+    +'</div>';
+}
+function renumberRegionRows(){
+  const rows=document.querySelectorAll("#regionBoxes .rbox-row");
+  rows.forEach(function(r,k){
+    r.dataset.k=k;
+    const n=r.querySelector(".rb-n"); if(n) n.textContent=k+1;
+    const sw=r.querySelector("span"); if(sw) sw.style.background=REGION_BOX_COLORS[k%REGION_BOX_COLORS.length];
+  });
+}
+function addRegionBox(){
+  const host=document.getElementById("regionBoxes"); if(!host)return null;
+  const k=host.querySelectorAll(".rbox-row").length;
+  host.insertAdjacentHTML("beforeend",regionRowHtml(k));
+  const row=host.lastElementChild;
+  row.querySelector(".rb-del").addEventListener("click",function(){
+    row.remove(); renumberRegionRows();
+    /* Never leave zero rows while the limit is ticked -- an empty list would silently mean
+       "no region", which is not what a ticked checkbox says. */
+    if(!host.querySelectorAll(".rbox-row").length) addRegionBox();
+  });
+  [["rb-x1","rb-y1","rb-z1"],["rb-x2","rb-y2","rb-z2"]].forEach(function(cls){
+    const el=row.querySelector("."+cls[0]);
+    el.addEventListener("paste",function(ev){
+      const t=(ev.clipboardData||window.clipboardData).getData("text")||"";
+      const p=t.trim().split(/[\s,;]+/).filter(Boolean);
+      if(p.length>=3){ ev.preventDefault(); cls.forEach(function(c,i){ row.querySelector("."+c).value=p[i]; }); }
+    });
+  });
+  return row;
+}
+/* Every row that is completely filled in, as [[xmin,xmax],[ymin,ymax],[zmin,zmax]] in voxels.
+   Returns {boxes, incomplete} so the caller can tell "no boxes" from "a half-typed box" -- the
+   second deserves a warning, the first does not. */
+function getRegionBoxes(){
+  const out=[]; let incomplete=0;
+  document.querySelectorAll("#regionBoxes .rbox-row").forEach(function(row){
+    const v=["rb-x1","rb-y1","rb-z1","rb-x2","rb-y2","rb-z2"].map(function(c){
+      const n=parseFloat((row.querySelector("."+c)||{}).value); return isFinite(n)?n:null; });
+    if(v.every(function(x){ return x===null; })) return;          // untouched row: not an error
+    if(v.some(function(x){ return x===null; })){ incomplete++; return; }
+    out.push([[Math.min(v[0],v[3]),Math.max(v[0],v[3])],
+              [Math.min(v[1],v[4]),Math.max(v[1],v[4])],
+              [Math.min(v[2],v[5]),Math.max(v[2],v[5])]]);
+  });
+  return {boxes:out, incomplete:incomplete};
+}
+function inAnyBox(i,boxes){
+  for(let k=0;k<boxes.length;k++){
+    const b=boxes[k];
+    if(HX[i]>=b[0][0]&&HX[i]<=b[0][1]&&HY[i]>=b[1][0]&&HY[i]<=b[1][1]&&HZ[i]>=b[2][0]&&HZ[i]<=b[2][1]) return true;
+  }
+  return false;
+}
+
 function filterLayerOf(i){ return volLayer(i)!=="no-layer"?volLayer(i):tagLayer(i); }
 
 function buildFilterUI(){
@@ -2226,16 +2304,17 @@ function runFilter(){
   const wantLayers=[].slice.call(document.querySelectorAll(".flayer:checked")).map(function(b){ return b.value; });
   const vMin=num("filterVolMin"), vMax=num("filterVolMax");
   const mKey=($("filterMorphKey")||{}).value||"", mMin=num("filterMorphMin"), mMax=num("filterMorphMax");
-  let box=null;
+  let boxes=[];
   if(($("filterRegionOn")||{}).checked){
-    const c=["rx1","ry1","rz1","rx2","ry2","rz2"].map(num);
-    if(c.some(function(v){ return v===null; })){
-      $("filterStatus").textContent="Fill in both box corners, or untick the region limit."; return;
+    const r=getRegionBoxes();
+    if(r.incomplete){
+      $("filterStatus").textContent="Box "+(r.boxes.length+1)+" is only half filled in — every box needs both corners, or remove it.";
+      return;
     }
-    /* Either diagonal works -- sort each axis rather than demanding corner order. */
-    box=[[Math.min(c[0],c[3]),Math.max(c[0],c[3])],
-         [Math.min(c[1],c[4]),Math.max(c[1],c[4])],
-         [Math.min(c[2],c[5]),Math.max(c[2],c[5])]];
+    if(!r.boxes.length){
+      $("filterStatus").textContent="Fill in at least one box, or untick the region limit."; return;
+    }
+    boxes=r.boxes;
   }
   const tSet=wantTypes.length?new Set(wantTypes):null, lSet=wantLayers.length?new Set(wantLayers):null;
   const rows=[];
@@ -2250,16 +2329,12 @@ function runFilter(){
       if(mMin!==null&&val<mMin)continue;
       if(mMax!==null&&val>mMax)continue;
     }
-    if(box){
-      if(HX[i]<box[0][0]||HX[i]>box[0][1])continue;
-      if(HY[i]<box[1][0]||HY[i]>box[1][1])continue;
-      if(HZ[i]<box[2][0]||HZ[i]>box[2][1])continue;
-    }
+    if(boxes.length && !inAnyBox(i,boxes)) continue;      // union, not intersection
     rows.push(i);
   }
   FILTER.rows=rows;
   FILTER.criteria={types:wantTypes,layers:wantLayers,vMin:vMin,vMax:vMax,
-                   morph:mKey,mMin:mMin,mMax:mMax,box:box};
+                   morph:mKey,mMin:mMin,mMax:mMax,boxes:boxes};
   renderFilterResults();
 }
 
@@ -2330,19 +2405,20 @@ function filterViewerUrl(rows){
      pattern µJump uses. pointA/pointB are voxels because a local annotation layer with no
      transform of its own inherits the state's top-level `dimensions`, which is declared in
      voxels; passing nanometres here would draw a box thousands of times too large. */
-  const box=(FILTER.criteria&&FILTER.criteria.box)||null;
+  const boxes=(FILTER.criteria&&FILTER.criteria.boxes)||[];
   const corners=[];
-  if(box){
+  boxes.forEach(function(box,k){
     layers.push({type:"annotation",source:"local://annotations",tool:"annotateBoundingBox",
-      annotations:[{type:"axis_aligned_bounding_box",id:"filter-region-box",
+      annotations:[{type:"axis_aligned_bounding_box",id:"filter-region-box-"+k,
         pointA:[box[0][0],box[1][0],box[2][0]],
         pointB:[box[0][1],box[1][1],box[2][1]]}],
-      annotationColor:"#ffb454", name:"Filter region box"});
+      annotationColor:REGION_BOX_COLORS[k%REGION_BOX_COLORS.length],
+      name:boxes.length>1?("Region box "+(k+1)):"Region box"});
     /* Frame the BOX as well as the cells. A box can be much larger than the handful of cells it
        contains, and framing only the cells would open the view inside it with no visible edges --
        which looks exactly like the box was never drawn. */
     corners.push([box[0][0],box[1][0],box[2][0]],[box[0][1],box[1][1],box[2][1]]);
-  }
+  });
   let sx=0,sy=0,sz=0;
   rows.forEach(function(i){ sx+=HX[i];sy+=HY[i];sz+=HZ[i]; });
   const pos=[sx/rows.length,sy/rows.length,sz/rows.length];
@@ -2378,7 +2454,9 @@ function downloadFilterExcel(){
   /* The filter that produced the sheet, recorded alongside it -- otherwise a saved export cannot
      be reproduced or defended later. */
   const c=FILTER.criteria||{};
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([
+  /* Built as a plain array and pushed to, rather than one long literal with .concat() chained
+     onto it -- the chained version put a paren in the wrong place and broke the whole file. */
+  const set=[
     ["Filter","Value"],
     ["Dataset","H01 c3 (Shapson-Coe et al., Science 2024)"],
     ["Cell types",c.types&&c.types.length?c.types.join(", "):"any"],
@@ -2387,12 +2465,18 @@ function downloadFilterExcel(){
     ["Soma volume max (um3)",c.vMax==null?"":c.vMax],
     ["Morphology count",c.morph?(MORPH_LABEL[c.morph]||c.morph):"not used"],
     ["Count min",c.mMin==null?"":c.mMin],["Count max",c.mMax==null?"":c.mMax],
-    ["Region box",c.box?JSON.stringify(c.box):"whole volume"],
-    ["Matches",rows.length],["Of total",N],
+    ["Region boxes",(c.boxes&&c.boxes.length)||"whole volume"],
+    ["Region rule",(c.boxes&&c.boxes.length>1)?"a cell matches if it is inside ANY box":""]
+  ];
+  (c.boxes||[]).forEach(function(b,k){
+    set.push(["  box "+(k+1)+" (voxels)",
+      "x "+b[0][0]+"–"+b[0][1]+"   y "+b[1][0]+"–"+b[1][1]+"   z "+b[2][0]+"–"+b[2][1]]);
+  });
+  set.push(["Matches",rows.length],["Of total",N],
     ["Layer source","H01 layers volume where it covers the soma; published tag otherwise"],
     ["Voxel size (nm)",UJ_RX+" x "+UJ_RY+" x "+UJ_RZ],
-    ["Generated",new Date().toISOString()]
-  ]),"Filter used");
+    ["Generated",new Date().toISOString()]);
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(set),"Filter used");
   XLSX.writeFile(wb,"h01_filter_"+rows.length+"_cells.xlsx");
 }
 
@@ -2403,21 +2487,26 @@ function downloadFilterExcel(){
   document.getElementById("filterXlsx").addEventListener("click",downloadFilterExcel);
   document.getElementById("filterReset").addEventListener("click",function(){
     document.querySelectorAll(".ftype:checked,.flayer:checked").forEach(function(b){ b.checked=false; });
-    ["filterVolMin","filterVolMax","filterMorphMin","filterMorphMax","rx1","ry1","rz1","rx2","ry2","rz2"]
+    ["filterVolMin","filterVolMax","filterMorphMin","filterMorphMax"]
       .forEach(function(id){ const e=document.getElementById(id); if(e) e.value=""; });
+    const host=document.getElementById("regionBoxes");
+    if(host){ host.innerHTML=""; addRegionBox(); }
     document.getElementById("filterMorphKey").value="";
     document.getElementById("filterRegionOn").checked=false;
     FILTER.rows=[]; renderFilterResults();
   });
-  /* Paste "x, y, z" into either corner's x field, same convenience as the Jump tab. */
-  [["rx1","ry1","rz1"],["rx2","ry2","rz2"]].forEach(function(ids){
-    const el=document.getElementById(ids[0]); if(!el)return;
-    el.addEventListener("paste",function(ev){
-      const t=(ev.clipboardData||window.clipboardData).getData("text")||"";
-      const p=t.trim().split(/[\s,;]+/).filter(Boolean);
-      if(p.length>=3){ ev.preventDefault(); ids.forEach(function(id,k){ document.getElementById(id).value=p[k]; }); }
-    });
-  });
+  addRegionBox();                                   // start with one empty box
+  const addB=document.getElementById("regionAddBox");
+  if(addB) addB.addEventListener("click",function(){ addRegionBox(); });
+  /* The box list is only meaningful when the limit is ticked; dim it otherwise rather than
+     hiding it, so it is obvious the boxes are still there. */
+  const regOn=document.getElementById("filterRegionOn");
+  function updateRegionUI(){
+    const on=regOn&&regOn.checked, host=document.getElementById("regionBoxes");
+    [host,addB].forEach(function(el){ if(el){ el.style.opacity=on?"":"0.4"; el.style.pointerEvents=on?"":"none"; } });
+  }
+  if(regOn) regOn.addEventListener("change",updateRegionUI);
+  updateRegionUI();
 })();
 
 </script>
