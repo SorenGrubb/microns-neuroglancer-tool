@@ -792,7 +792,8 @@ function showCell(i, distNm){
   let h='<div class="card">';
   h+='<a href="'+escHtml(url)+'" target="_blank" rel="noopener" '
     +'title="Open this nucleus in Neuroglancer" '
-    +'style="display:inline-block;font-size:26px;font-weight:700;color:var(--accent);text-decoration:none;line-height:1.2">'
+    +'style="display:inline-block;font-size:26px;font-weight:700;color:var(--accent);text-decoration:none;line-height:1.2" '
+    +'id="cellHeadline">'
     +'Nucleus '+BID[i]+' <span style="font-size:16px;opacity:.75">&#8599;</span></a>';
 
   h+='<div style="margin-top:6px"><span class="tag '+st.cls+'">'+escHtml(st.label)+'</span>';
@@ -833,6 +834,9 @@ function showCell(i, distNm){
 
   /* The whole point of the tool. There is no machine prediction here, so this panel is the only
      place a cell type ever comes from. */
+  h+='<label style="margin-top:18px;display:block">Community identifications</label>';
+  h+='<div id="community"></div>';
+
   h+='<label style="margin-top:18px;display:block">What is this cell?</label>';
   h+='<p class="hint" style="margin-top:0">Nothing in this dataset is pre-classified. Work through '
     +'the guided tree, or pick directly if you already know.</p>';
@@ -845,7 +849,7 @@ function showCell(i, distNm){
     +'placeholder="corrected x, y, z (voxels)"></div>'
     +'<button id="fixmove" style="flex:1">Move it here</button>'
     +'<button id="fixsplit" style="flex:1">Not a nucleus</button></div>';
-  h+='<p class="hint" id="fixmsg"></p>';
+  h+='<p class="hint" id="fixmsg"></p><div id="fixstatus"></div>';
 
   h+='<label style="margin-top:16px;display:block">Nearest nuclei</label><div class="meta">';
   nb.forEach(function(c){
@@ -861,6 +865,7 @@ function showCell(i, distNm){
   wireMeshButtons(i);
   wireCorrection(i);
   resetGuided(i);
+  loadCommunity(i);
 }
 function jumpToIndex(i){ showCell(i,null); window.scrollTo({top:0,behavior:"smooth"}); }
 
@@ -902,6 +907,101 @@ function netErr(e){
          + "in a browser tab — it should return JSON, not a Google error page.";
   }
   return m;
+}
+
+/* ── what the community already said ────────────────────────────────────────────────────
+   Without this the tool is write-only: you classify a cell, the row lands in the sheet, and the
+   page still shows nothing. `?nucleusId=` returns every identification for one nucleus and
+   `?bjumpFixes=` returns position corrections that have reached consensus, so both are read back
+   and shown on the panel. Fetched per cell rather than in bulk -- 220 nuclei is small, but a
+   user only ever looks at one at a time. */
+let FIXES_CACHE=null;
+
+function communityFetch(url){
+  return fetch(url).then(function(r){ return r.json(); });
+}
+function consensusOf(reports){
+  const tally={};
+  reports.forEach(function(r){
+    const k=String(r.identified||"").trim(); if(!k) return;
+    tally[k]=tally[k]||{n:0,cert:0};
+    tally[k].n++; tally[k].cert+=Number(r.certainty)||0;
+  });
+  const rows=Object.keys(tally).map(function(k){return {name:k,n:tally[k].n,cert:tally[k].cert};});
+  /* Most votes wins; ties broken by summed certainty, so two hesitant calls do not outrank two
+     confident ones by accident. */
+  rows.sort(function(a,b){ return b.n-a.n || b.cert-a.cert; });
+  return rows;
+}
+
+function loadCommunity(i){
+  const box=document.getElementById("community");
+  if(!box || !REPORT_ENDPOINT) return;
+  const ds="&ds="+encodeURIComponent(UJ.cfg.backend.ds);
+  box.innerHTML='<p class="hint">loading community identifications…</p>';
+
+  communityFetch(REPORT_ENDPOINT+"?nucleusId="+encodeURIComponent(BID[i])+ds)
+    .then(function(d){
+      if(CUR_IDX!==i) return;                       // user moved on while this was in flight
+      const reps=(d&&d.reports)||[];
+      const notNuc=(d&&d.notNucleusReports)||[];
+      let h="";
+      if(!reps.length && !notNuc.length){
+        h='<p class="hint">No one has identified this nucleus yet — you would be the first.</p>';
+      } else {
+        const rows=consensusOf(reps);
+        if(rows.length){
+          const top=rows[0];
+          h+='<div style="font-size:18px;font-weight:700;color:var(--accent);margin-bottom:2px">'
+            +escHtml(top.name)+'</div>';
+          h+='<p class="hint" style="margin-top:0">'+top.n+(top.n===1?" identification":" identifications")
+            +(rows.length>1?', and '+(rows.length-1)+" other "+(rows.length===2?"opinion":"opinions"):"")
+            +'. '+(top.n>=2&&rows.length===1?"<b>Agreed by "+top.n+" people.</b>":"Needs more votes to be a consensus.")
+            +'</p>';
+        }
+        h+='<div class="meta" style="color:var(--ink)">';
+        reps.forEach(function(r){
+          h+='<div style="margin-bottom:5px"><b>'+escHtml(r.identified||"—")+'</b> '
+            +'<span class="hint">'+escHtml(r.reporterName||"someone")
+            +(r.certainty?" · certainty "+escHtml(r.certainty)+"/5":"")+'</span>'
+            +(r.comment?'<br><span class="hint">“'+escHtml(r.comment)+'”</span>':'')+'</div>';
+        });
+        if(notNuc.length) h+='<div style="margin-bottom:5px"><b>Flagged as not a nucleus</b> '
+          +'<span class="hint">×'+notNuc.length+'</span></div>';
+        h+='</div>';
+      }
+      box.innerHTML=h;
+      /* Promote the consensus into the headline, so a classified cell reads as its cell type
+         rather than as "Nucleus 129" forever. */
+      const rows=consensusOf(reps);
+      const hd=document.getElementById("cellHeadline");
+      if(hd && rows.length) hd.innerHTML=escHtml(rows[0].name)
+        +' <span style="font-size:16px;opacity:.75">&#8599;</span>'
+        +'<div style="font-size:12px;font-weight:400;color:var(--mut)">Nucleus '+BID[i]
+        +' · community identification</div>';
+    })
+    .catch(function(e){ box.innerHTML='<p class="hint">could not load community data: '+escHtml(netErr(e))+'</p>'; });
+
+  const fixBox=document.getElementById("fixstatus");
+  const showFixes=function(d){
+    if(CUR_IDX!==i || !fixBox) return;
+    const mine=((d&&d.fixes)||[]).filter(function(f){
+      return String(f.from)===[BX[i],BY[i],BZ[i]].join(",");
+    });
+    if(mine.length){
+      fixBox.innerHTML='<p class="hint"><b>Community correction agreed:</b> this nucleus should be at '
+        +escHtml(mine[0].to)+' ('+mine[0].votes+' independent votes). The embedded table still holds '
+        +'the original position until the next rebuild.</p>';
+    } else {
+      fixBox.innerHTML='<p class="hint">A correction only moves a nucleus once <b>'+((d&&d.minVotes)||2)
+        +' different people</b> propose a similar position, so yours may be recorded and still not '
+        +'shown here yet.</p>';
+    }
+  };
+  if(FIXES_CACHE){ showFixes(FIXES_CACHE); }
+  else communityFetch(REPORT_ENDPOINT+"?bjumpFixes=1"+ds)
+        .then(function(d){ FIXES_CACHE=d; showFixes(d); })
+        .catch(function(){});
 }
 
 /* ── guided identification ──────────────────────────────────────────────────────────────
@@ -998,7 +1098,9 @@ function renderGuided(){
   if(cs) [].forEach.call(cs.children,function(b){
     b.addEventListener("click",function(){
       GUIDE.certainty=+b.dataset.val;
-      [].forEach.call(cs.children,function(o){o.classList.toggle("on",o===b);});
+      /* µJump's stylesheet styles `.cert-opt.sel`, not `.on` — using the wrong class left the
+         button visually unchanged, so there was no way to tell a click had registered. */
+      [].forEach.call(cs.children,function(o){o.classList.toggle("sel",o===b);});
     });
   });
   const sb=document.getElementById("idsubmit");
@@ -1032,6 +1134,7 @@ function submitIdentification(){
     timestamp:new Date().toISOString()
   }, nm).then(function(d){
     msg.textContent=(d&&d.ok)?("Recorded: "+nm+". Thank you."):"Could not record that.";
+    if(d&&d.ok) loadCommunity(i);          // show the user their own identification immediately
   }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
 }
 
