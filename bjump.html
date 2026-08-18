@@ -611,6 +611,63 @@ function pct(m, v){
   return Math.round(100*lo/m.sorted.length);
 }
 
+/* ── hippocampal ontology overrides ──────────────────────────────────────────────────────
+   core/ontology.js is shared verbatim with µJump and ηJump, and its decision tree opens on
+   CORTICAL LAYER, which is meaningless in hippocampus. TREE is a const binding but a mutable
+   object, so the three cortex-specific nodes are replaced here rather than forking the module —
+   every other node (vascular relationship, blood cells, mural cells, glia) transfers unchanged.
+
+   LEAF SLUGS ARE DELIBERATELY PRESERVED. The interneuron labels below are rewritten in
+   hippocampal terms but keep µJump's slugs (inh_basket, inh_martinotti, …) so a classification
+   made here is directly comparable with one made in cortex. Only the excitatory branch needed a
+   genuinely new leaf, because CA1 has no L2/3–L6 subtypes to choose between. */
+(function(){
+  const T = UJ.ontology.TREE, LN = UJ.ontology.LEAF_NAMES;
+
+  T.q1 = {q:"CA1 stratum? (context only — sets priors, doesn't force a branch). The panel above "
+           +"gives a signed distance from the fitted stratum pyramidale; note that which side is "
+           +"oriens and which is radiatum is NOT yet confirmed for this volume, so use the "
+           +"image, not the sign.",
+    opts:[
+      {label:"Stratum oriens — basal dendrites and O-LM interneurons, between alveus and the cell layer",next:"q2"},
+      {label:"Stratum pyramidale — the densely packed cell-body layer",next:"q2"},
+      {label:"Stratum radiatum — apical dendrites, Schaffer collateral input",next:"q2"},
+      {label:"Stratum lacunosum-moleculare — distal apical tufts, perforant path input",next:"q2"},
+      {label:"Not sure — skip",next:"q2"}]};
+
+  LN.ca1_pyramidal = "CA1 pyramidal neuron";
+  T.ne_exc = {q:"CA1 has one principal excitatory cell, so there is no layer-based subtype choice "
+               +"to make here. Deep vs superficial CA1 pyramidal cells are a real distinction "
+               +"(Soltesz & Losonczy, Nat Neurosci 2018) but are defined by radial position and "
+               +"molecular markers, not by anything visible in a single EM section — and this "
+               +"volume's oriens/radiatum orientation is unconfirmed, so the sublayer cannot be "
+               +"assigned. Confirm the excitatory call and move on.",
+    opts:[
+      {label:"CA1 pyramidal neuron — soma in stratum pyramidale, ONE thick apical dendrite rising "
+            +"through radiatum to a tuft in lacunosum-moleculare, basal dendrites into oriens, "
+            +"densely spiny, large pale nucleus with an owl-eye nucleolus",
+       leaf:"ca1_pyramidal"}]};
+
+  T.ne_inh = {q:"Which inhibitory subtype? Hippocampal interneurons are classified chiefly by "
+                +"WHERE their axon terminates (Klausberger & Somogyi, Science 2008) — the same "
+                +"logic as the cortical tree, so these keep µJump's slugs and the data stays "
+                +"comparable. A full axon reconstruction is normally needed; soma and nuclear "
+                +"ultrastructure alone only get you to the broad class.",
+    opts:[
+      {label:"PERISOMATIC-targeting: dense local axon studding pyramidal somata and proximal "
+            +"dendrites in stratum pyramidale (basket / axo-axonic family, largely PV+)",
+       leaf:"inh_basket"},
+      {label:"DISTAL-DENDRITE-targeting: soma in stratum oriens, axon ascends and arborises in "
+            +"stratum lacunosum-moleculare onto distal apical tufts (O-LM family, largely SST+)",
+       leaf:"inh_martinotti"},
+      {label:"INTERNEURON-targeting: bipolar/bitufted dendrites, axon preferentially contacts "
+            +"other interneurons rather than pyramidal cells (disinhibitory, largely VIP+)",
+       leaf:"inh_bipolar"},
+      {label:"NEUROGLIAFORM / ivy: small round soma with a dense, very fine, short-range axonal "
+            +"cloud; volume transmission rather than discrete targeting",
+       leaf:"inh_neurogliaform"}]};
+})();
+
 const SRC_NAME = ["none","secgan16","seg32"];
 function hasMesh(i){ return BSRC[i]===1; }               // only the SECGAN volume ships meshes
 
@@ -763,6 +820,13 @@ function showCell(i, distNm){
     +(hasMesh(i)?"":"No mesh for this nucleus — it lies outside the segmented sub-volume, "
                    +"which covers only about half the imaged block.")+'</p>';
 
+  /* The whole point of the tool. There is no machine prediction here, so this panel is the only
+     place a cell type ever comes from. */
+  h+='<label style="margin-top:18px;display:block">What is this cell?</label>';
+  h+='<p class="hint" style="margin-top:0">Nothing in this dataset is pre-classified. Work through '
+    +'the guided tree, or pick directly if you already know.</p>';
+  h+='<div id="idbox"></div>';
+
   h+='<label style="margin-top:16px;display:block">Is this position wrong?</label>';
   h+='<p class="hint" style="margin-top:0">Detection is automatic and imperfect. Paste a corrected '
     +'voxel coordinate, or flag the nucleus, and the community consensus decides.</p>';
@@ -785,6 +849,7 @@ function showCell(i, distNm){
   document.getElementById("panel").innerHTML=h;
   wireMeshButtons(i);
   wireCorrection(i);
+  resetGuided(i);
 }
 function jumpToIndex(i){ showCell(i,null); window.scrollTo({top:0,behavior:"smooth"}); }
 
@@ -813,6 +878,137 @@ function wireMeshButtons(i){
   });
 }
 
+/* ── guided identification ──────────────────────────────────────────────────────────────
+   Walks core/ontology.js's TREE (with the hippocampal overrides applied above). Keeps a path so
+   the submitted classification records HOW the user got there, not just where they landed --
+   which is what makes a disagreement diagnosable later rather than just a tally. */
+let GUIDE = null;   // {idx, node, path:[{node,label}]}
+
+function resetGuided(i){
+  GUIDE = {idx:i, node:null, path:[]};
+  renderGuided();
+}
+function guidedGo(nodeId, label){
+  if(label!=null) GUIDE.path.push({node:GUIDE.node, label:label});
+  GUIDE.node = nodeId;
+  renderGuided();
+}
+function guidedBack(){
+  const prev = GUIDE.path.pop();
+  GUIDE.node = prev ? prev.node : null;
+  GUIDE.leaf = null;
+  renderGuided();
+}
+function guidedLeaf(slug, label){
+  GUIDE.path.push({node:GUIDE.node, label:label});
+  GUIDE.leaf = slug;
+  renderGuided();
+}
+function renderGuided(){
+  const box=document.getElementById("idbox"); if(!box) return;
+  const O=UJ.ontology, T=O.TREE, LN=O.LEAF_NAMES;
+  let h="";
+
+  if(GUIDE.path.length){
+    h+='<div class="meta" style="margin-bottom:8px">'
+      + GUIDE.path.map(function(p){return escHtml(p.label.split(" — ")[0].split(":")[0]);}).join(" &rsaquo; ")
+      + ' <button onclick="guidedBack()" style="padding:2px 8px;font-size:11px;margin-left:6px">back</button>'
+      + ' <button onclick="resetGuided('+GUIDE.idx+')" style="padding:2px 8px;font-size:11px">start over</button></div>';
+  }
+
+  if(GUIDE.leaf){
+    const nm = LN[GUIDE.leaf] || GUIDE.leaf;
+    h+='<div style="font-size:20px;font-weight:700;color:var(--accent);margin-bottom:4px">'+escHtml(nm)+'</div>';
+    const cw = O.CONFUSED_WITH[GUIDE.leaf];
+    if(cw){
+      h+='<p class="hint" style="margin-top:0"><b>Often confused with '+escHtml(cw.withName)+'.</b> '
+        + escHtml(cw.note)
+        + (cw.ref?' <a href="'+escHtml(cw.ref)+'" target="_blank" rel="noopener">'
+                 +escHtml(cw.refLabel||"reference")+'</a>':'')+'</p>';
+    }
+    /* Same controls µJump uses, and the same 1-5 scale, so the two datasets' rows are directly
+       comparable in the sheet. Certainty is required — an unqualified call from an unsure user is
+       exactly the kind of row that poisons a consensus. */
+    h+='<div class="idf-certainty"><label style="display:block;font-size:11px;text-transform:uppercase;'
+      +'letter-spacing:.05em;color:var(--mut);margin-top:12px">How certain are you of this '
+      +'identification? <span class="cert-required">(required to submit)</span></label>'
+      +'<div class="cert-scale" id="certScale">'
+      +[1,2,3,4,5].map(function(n){return '<button type="button" class="cert-opt" data-val="'+n+'">'+n+'</button>';}).join("")
+      +'</div><div class="cert-labels"><span>Not sure</span><span>Certain</span></div></div>';
+    h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;'
+      +'color:var(--mut);margin-top:12px">Comments (optional)</label>'
+      +'<textarea id="idfComment" placeholder="e.g. ambiguous ultrastructure, could also be X..."></textarea>';
+    h+='<div class="row" style="margin-top:10px"><button id="idsubmit" style="flex:1">Submit this identification</button>'
+      +'<button onclick="resetGuided('+GUIDE.idx+')" style="flex:0 0 auto">Cancel</button></div>';
+  } else if(GUIDE.node===null){
+    h+='<div class="row"><button onclick="guidedGo(\'q1\',null)" style="flex:1">Start guided identification</button></div>';
+    h+='<p class="hint">Or pick directly: <select id="iddirect" style="max-width:100%">'
+      +'<option value="">— choose a cell type —</option>'
+      + Object.keys(LN).sort(function(a,b){return LN[a].localeCompare(LN[b]);})
+          .map(function(k){return '<option value="'+escHtml(k)+'">'+escHtml(LN[k])+'</option>';}).join("")
+      +'</select></p>';
+  } else {
+    const nd = T[GUIDE.node];
+    if(!nd){ h+='<p class="err">Unknown tree node "'+escHtml(GUIDE.node)+'".</p>'; }
+    else {
+      h+='<p style="margin:4px 0 8px">'+escHtml(nd.q)+'</p>';
+      nd.opts.forEach(function(o,k){
+        const call = o.leaf ? 'guidedLeaf(\''+o.leaf+'\','+JSON.stringify(o.label).replace(/"/g,"&quot;")+')'
+                            : 'guidedGo(\''+o.next+'\','+JSON.stringify(o.label).replace(/"/g,"&quot;")+')';
+        h+='<button onclick="'+call+'" style="display:block;width:100%;text-align:left;'
+          +'margin-bottom:6px;white-space:normal;line-height:1.35;padding:8px 10px">'
+          +escHtml(o.label)+'</button>';
+      });
+    }
+  }
+  h+='<p class="hint" id="idmsg"></p>';
+  box.innerHTML=h;
+
+  const sel=document.getElementById("iddirect");
+  if(sel) sel.addEventListener("change",function(){
+    if(sel.value){ GUIDE.path=[{node:null,label:"picked directly"}]; guidedLeaf(sel.value, UJ.ontology.LEAF_NAMES[sel.value]); }
+  });
+  const cs=document.getElementById("certScale");
+  if(cs) [].forEach.call(cs.children,function(b){
+    b.addEventListener("click",function(){
+      GUIDE.certainty=+b.dataset.val;
+      [].forEach.call(cs.children,function(o){o.classList.toggle("on",o===b);});
+    });
+  });
+  const sb=document.getElementById("idsubmit");
+  if(sb) sb.addEventListener("click",submitIdentification);
+}
+/* Posts Code.gs's EXISTING "new_identification" type and column layout -- timestamp, nucleusId,
+   rootId, coord, identified, path, reporterName, reporterEmail, comment, certainty -- rather than
+   inventing a βJump schema. That buys the whole existing pipeline for free: per-user dedup, the
+   Master cell list upsert, the points table, and the dashboard. It is always new_identification
+   and never "confirmation" or "discrepancy", because those two mean "agrees / disagrees with the
+   machine prediction" and this dataset has no prediction to agree with.
+
+   `coord` carries the VOXEL, which is what makes a row survive a re-detection: nucleus ids are
+   assigned 1..N in sort order, so changing any detection setting renumbers all of them. */
+function submitIdentification(){
+  const i=GUIDE.idx, msg=document.getElementById("idmsg");
+  if(!GOOGLE_VERIFIED){ msg.textContent="Sign in first — identifications are attributed."; return; }
+  if(!GUIDE.certainty){ msg.textContent="Pick a certainty from 1 to 5 first."; return; }
+  const nm=UJ.ontology.canonSubmitName(UJ.ontology.LEAF_NAMES[GUIDE.leaf]||GUIDE.leaf);
+  const cmtEl=document.getElementById("idfComment");
+  msg.textContent="sending…";
+  postReport({
+    type:"new_identification",
+    nucleusId:BID[i],
+    rootId:BSEG[i]||"",                    // segment id; "" where this nucleus has no segment
+    coord:[BX[i],BY[i],BZ[i]].join(","),
+    identified:nm,
+    path:GUIDE.path.map(function(p){return p.label.split(" — ")[0].split(":")[0];}).join(" > "),
+    comment:(cmtEl&&cmtEl.value||"").trim(),
+    certainty:GUIDE.certainty,
+    timestamp:new Date().toISOString()
+  }, nm).then(function(d){
+    msg.textContent=(d&&d.ok)?("Recorded: "+nm+". Thank you."):"Could not record that.";
+  }).catch(function(e){ msg.textContent="failed: "+(e&&e.message||e); });
+}
+
 /* ── position correction ────────────────────────────────────────────────────────────────
    Proposals are stored against a COORDINATE, never only a nucleus_id: ids are assigned 1..N in
    sort order by the notebook, so changing any detection setting renumbers the whole table and
@@ -821,9 +1017,10 @@ function wireCorrection(i){
   const msg=document.getElementById("fixmsg");
   function send(payload,label){
     if(!GOOGLE_VERIFIED){ msg.textContent="Sign in first — corrections are attributed."; return; }
-    payload.kind="nucleusPosition"; payload.nucleusId=BID[i];
-    payload.originalVoxel=[BX[i],BY[i],BZ[i]].join(",");   // the anchor that survives re-detection
-    payload.segId=BSEG[i]||""; payload.segSource=SRC_NAME[BSRC[i]];
+    payload.nucleusId=BID[i];
+    payload.rootId=BSEG[i]||"";
+    payload.coord=[BX[i],BY[i],BZ[i]].join(",");   // the anchor that survives a re-detection
+    payload.timestamp=new Date().toISOString();
     msg.textContent="sending…";
     postReport(payload,label).then(function(d){
       msg.textContent=(d&&d.ok)?"Thank you — recorded.":"Could not record that.";
@@ -833,10 +1030,15 @@ function wireCorrection(i){
   if(mv) mv.addEventListener("click",function(){
     const raw=(document.getElementById("fixcoord").value||"").trim().split(/[\s,;]+/).filter(Boolean);
     if(raw.length<3){ msg.textContent="Paste three numbers: x, y, z in voxels."; return; }
-    send({action:"move",correctedVoxel:raw.slice(0,3).join(",")},"position correction");
+    /* The one genuinely new post type βJump needs. Everything else reuses Code.gs as it stands;
+       this needs the small BJumpPosition.gs block. Until that is deployed the server ignores it
+       and answers ok:false, which the message below reports honestly rather than pretending. */
+    send({type:"nucleus_position_fix",newCoord:raw.slice(0,3).join(",")},"position correction");
   });
   const rj=document.getElementById("fixsplit");
-  if(rj) rj.addEventListener("click",function(){ send({action:"reject"},"flagged as not a nucleus"); });
+  /* "not_a_nucleus" already exists in Code.gs and is already worth 10 points -- no backend
+     change needed for this one. */
+  if(rj) rj.addEventListener("click",function(){ send({type:"not_a_nucleus"},"flagged as not a nucleus"); });
 }
 
 /* ── input ──────────────────────────────────────────────────────────────────────────── */
