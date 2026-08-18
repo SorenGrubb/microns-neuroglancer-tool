@@ -71,6 +71,18 @@ UJ.mesh=(()=>{
      and no red CORS error in the console on every single click. */
   let useAlt=!!CFG.preferAlt;
   function shardUrl(shard){return useAlt?(CFG.meshBaseAlt+shard+CFG.meshBaseAltSuffix):(CFG.meshBase+shard+".shard");}
+  /* UNSHARDED datasets address objects by name rather than by shard, so they need a URL builder
+     that does not bake in the ".shard" extension. Kept separate from shardUrl() rather than
+     generalising it, so the sharded path µJump and ηJump depend on is byte-for-byte unchanged.
+     CFG.meshBaseAlt already ends in the URL-encoded object prefix, and a bare id or "id.index"
+     needs no further escaping (only "/" would). */
+  function objUrl(name){return useAlt?(CFG.meshBaseAlt+name+(CFG.meshBaseAltQuery||"?alt=media"))
+                                     :(CFG.meshBase+name);}
+  /* An unsharded .index file is stored raw; a sharded manifest is gzipped. Sniff rather than
+     assume, so neither layout needs a separate code path here. */
+  async function maybeGunzip(u8){
+    return (u8.length>1&&u8[0]===0x1f&&u8[1]===0x8b)?await gunzip(u8):u8;
+  }
   /* seg_m1300 is a FROZEN precomputed snapshot (see the CAVE_SEG_SOURCE comment near
      loadConnectivityPanel) -- a root ID that isn't in its shard index today will never suddenly
      appear there, so there's no point re-running the same network round-trip on every click. Most
@@ -78,7 +90,10 @@ UJ.mesh=(()=>{
      since been further proofread (see findManifest()'s own error text). Cache is keyed by root ID
      string, persisted to localStorage so it survives reloads; Shift-click on the download/compute
      button bypasses it for one attempt (genuine recheck, not a fake "click again"). */
-  const MESH_NOT_FOUND_KEY="microns_mesh_notfound_roots_v1";
+  /* Namespaced per dataset: βJump meshes only ~half its segments, so its not-found set is large
+     and completely unrelated to µJump's. Sharing one key would have hJump and βJump each
+     poisoning the other's cache. Default keeps µJump's existing key, so no user loses theirs. */
+  const MESH_NOT_FOUND_KEY=CFG.notFoundKey||"microns_mesh_notfound_roots_v1";
   let notFoundCache=null;
   function loadNotFoundCache(){
     if(notFoundCache)return notFoundCache;
@@ -138,7 +153,13 @@ UJ.mesh=(()=>{
     if(j["@type"]!=="neuroglancer_multilod_draco")throw new Error('unexpected mesh format "'+j["@type"]+'"');
     if(Array.isArray(j.transform)&&j.transform.length===12)CFG.transform=j.transform;
     if(j.vertex_quantization_bits)CFG.vertexQuantizationBits=j.vertex_quantization_bits;
-    const sh=j.sharding||{};
+    /* Per the precomputed spec, a mesh info with NO "sharding" key is the unsharded multi-LOD
+       layout: one object per segment holding the fragments, plus "<id>.index" holding the
+       manifest. That is what gs://vclem-xh/alzheimers/segmentation_secgan_16nm/mesh uses.
+       The info file is authoritative -- it overrides whatever the page's config guessed. */
+    if(!j.sharding){ CFG.unsharded=true; infoLoaded=true; return; }
+    CFG.unsharded=false;
+    const sh=j.sharding;
     if(sh.preshift_bits!=null)CFG.preshiftBits=sh.preshift_bits;
     if(sh.minishard_bits!=null)CFG.minishardBits=sh.minishard_bits;
     if(sh.shard_bits!=null)CFG.shardBits=sh.shard_bits;
@@ -148,8 +169,15 @@ UJ.mesh=(()=>{
   async function findManifest(rootIdBig,forceRecheck){
     const rootIdStr=String(rootIdBig);
     if(!forceRecheck&&isRootKnownNotFound(rootIdStr)){
-      const err=new Error("root ID "+rootIdStr+" is cached as unavailable in the seg_m1300 mesh snapshot (an earlier lookup found it wasn't indexed there) \u2014 skipped the network check. Shift-click to force a fresh check.");
+      const err=new Error("root ID "+rootIdStr+" is cached as unavailable in "+(CFG.snapshotName||"the seg_m1300 mesh snapshot")+" (an earlier lookup found it wasn't indexed there) \u2014 skipped the network check. Shift-click to force a fresh check.");
       err.meshCached=true;throw err;
+    }
+    /* Unsharded: there is nothing to locate. The manifest is its own object, so skip the
+       murmur hash, the shard index and the minishard index entirely and hand readManifest()
+       the two URLs. Everything downstream -- manifest parsing, LOD choice, Draco decode, GLB,
+       PPTX -- is shared with the sharded path unchanged. */
+    if(CFG.unsharded){
+      return {unsharded:true,rootIdStr,url:objUrl(rootIdStr),indexUrl:objUrl(rootIdStr+".index")};
     }
     const {shard,minishard}=shardAndMinishard(rootIdBig);
     let url=shardUrl(shard);
@@ -183,6 +211,34 @@ UJ.mesh=(()=>{
       throw new Error("root ID "+rootIdStr+" not found in minishard "+minishard+" ("+n+" entries) — wrong dataset, or this ID predates/postdates the seg_m1300 snapshot? Cached — future attempts will skip the network check; Shift-click to force a recheck.");
     }
     return {shard,minishard,manifestStart:Number(starts[idx]),manifestSize:Number(sizes[idx]),url};
+  }
+  /* The one place the two layouts differ after location. Sharded: the manifest sits AFTER its
+     fragments inside the shard, so fragmentLayout() walks backwards from manifestStart.
+     Unsharded: the fragments are a separate object starting at byte 0, which is exactly
+     fragmentLayout(parsed, totalBytes) -- so the same function serves both and there is no
+     second offset calculation to keep in step. */
+  async function readManifest(info,onProgress){
+    if(!info.unsharded){
+      const raw=await rangeGet(info.url,info.manifestStart,info.manifestStart+info.manifestSize-1);
+      const parsed=parseManifest(await maybeGunzip(raw));
+      return {parsed,layout:fragmentLayout(parsed,info.manifestStart)};
+    }
+    let res=null;
+    try{ res=await fetch(info.indexUrl); }catch(_e){ res=null; }
+    if((!res||!res.ok)&&!useAlt){        // same CORS fallback the sharded reads use
+      useAlt=true;
+      info.indexUrl=objUrl(info.rootIdStr+".index"); info.url=objUrl(info.rootIdStr);
+      try{ res=await fetch(info.indexUrl); }catch(_e2){ res=null; }
+    }
+    if(!res||!res.ok){
+      markRootNotFound(info.rootIdStr);
+      throw new Error("no mesh for segment "+info.rootIdStr+" ("+(res?("HTTP "+res.status):"fetch blocked")+
+        ") \u2014 this segmentation does not mesh every segment. Cached; Shift-click to force a recheck.");
+    }
+    const parsed=parseManifest(await maybeGunzip(new Uint8Array(await res.arrayBuffer())));
+    let total=0;
+    for(const lod of parsed.lods)for(const sz of lod.sizes)total+=sz;
+    return {parsed,layout:fragmentLayout(parsed,total)};
   }
   function parseManifest(u8){
     const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
@@ -328,9 +384,7 @@ UJ.mesh=(()=>{
     onProgress&&onProgress(0,"reading manifest…");
     await loadInfo();
     const info=await findManifest(rootId,forceRecheck);
-    const manifest=await gunzip(await rangeGet(info.url,info.manifestStart,info.manifestStart+info.manifestSize-1));
-    const parsed=parseManifest(manifest);
-    const layout=fragmentLayout(parsed,info.manifestStart);
+    const {parsed,layout}=await readManifest(info,onProgress);
     let lod=parsed.numLods-1;
     /* forceCoarsestLod (2026-08-16, Soren: "it does not load any astrocytes. All astrocyte meshes
        are too large to load") -- root cause of that was NOT a bug in the vertex-count safety cap
@@ -403,7 +457,9 @@ UJ.mesh=(()=>{
   function extraImg65RootIds(mainRootIdStr){
     const seen={};seen[String(mainRootIdStr)]=1;
     const out=[];
-    (typeof CUR_EXTRA_ROOTS!=="undefined"?CUR_EXTRA_ROOTS:[]).forEach(function(r){
+    /* Array.isArray, not typeof!=="undefined": the latter passes for null and then .forEach
+       throws, killing every mesh download. Found by the unsharded harness, 2026-08-18. */
+    (typeof CUR_EXTRA_ROOTS!=="undefined"&&Array.isArray(CUR_EXTRA_ROOTS)?CUR_EXTRA_ROOTS:[]).forEach(function(r){
       const id=r&&r.id;
       if(!id||seen[String(id)])return;
       if(r.segType&&r.segType!=="img65")return;
