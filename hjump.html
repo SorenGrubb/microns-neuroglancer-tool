@@ -2324,12 +2324,33 @@ function filterViewerUrl(rows){
     layers.push({type:"segmentation",source:V.seg,tab:"source",
       name:longName(t)+" ("+segs.length+")",segments:segs,segmentColors:col,objectAlpha:0.85});
   });
+  /* If the search was limited to a box, draw the box (Søren, 2026-08-17: "it should also show
+     the box in the neuroglancer window, just like in µJump"). Its own annotation layer, so it can
+     be toggled off from the layer panel without touching the cells -- the same one-layer-per-box
+     pattern µJump uses. pointA/pointB are voxels because a local annotation layer with no
+     transform of its own inherits the state's top-level `dimensions`, which is declared in
+     voxels; passing nanometres here would draw a box thousands of times too large. */
+  const box=(FILTER.criteria&&FILTER.criteria.box)||null;
+  const corners=[];
+  if(box){
+    layers.push({type:"annotation",source:"local://annotations",tool:"annotateBoundingBox",
+      annotations:[{type:"axis_aligned_bounding_box",id:"filter-region-box",
+        pointA:[box[0][0],box[1][0],box[2][0]],
+        pointB:[box[0][1],box[1][1],box[2][1]]}],
+      annotationColor:"#ffb454", name:"Filter region box"});
+    /* Frame the BOX as well as the cells. A box can be much larger than the handful of cells it
+       contains, and framing only the cells would open the view inside it with no visible edges --
+       which looks exactly like the box was never drawn. */
+    corners.push([box[0][0],box[1][0],box[2][0]],[box[0][1],box[1][1],box[2][1]]);
+  }
   let sx=0,sy=0,sz=0;
   rows.forEach(function(i){ sx+=HX[i];sy+=HY[i];sz+=HZ[i]; });
   const pos=[sx/rows.length,sy/rows.length,sz/rows.length];
   const cx=pos[0]*UJ_RX, cy=pos[1]*UJ_RY, cz=pos[2]*UJ_RZ;
-  const span=Math.max.apply(null,rows.map(function(i){
-    return Math.hypot(HX[i]*UJ_RX-cx,HY[i]*UJ_RY-cy,HZ[i]*UJ_RZ-cz); }).concat([20000]))*2.2;
+  const span=Math.max.apply(null,
+    rows.map(function(i){ return [HX[i],HY[i],HZ[i]]; }).concat(corners)
+      .map(function(p){ return Math.hypot(p[0]*UJ_RX-cx,p[1]*UJ_RY-cy,p[2]*UJ_RZ-cz); })
+      .concat([20000]))*2.2;
   return V.base+"#!"+encodeURIComponent(JSON.stringify({
     dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
     position:pos, crossSectionScale:3.0, projectionScale:span,
