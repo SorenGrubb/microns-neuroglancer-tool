@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Grubb Lab — Brain ultrastructure &amp; the neurovascular unit</title>
-<meta name="description" content="Volume electron microscopy of the brain microvasculature and neurovascular unit. Home of µJump, a MICrONS cell explorer, and ηJump for the H01 human cortex dataset.">
+<meta name="description" content="Volume electron microscopy of the brain microvasculature and neurovascular unit. Home of µJump, a MICrONS cell explorer, ηJump for the H01 human cortex dataset, and βJump for an Alzheimer’s model hippocampus.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='none' stroke='%2327c9a3' stroke-width='9'/><circle cx='50' cy='50' r='13' fill='%2327c9a3'/></svg>">
 <style>
   :root{
@@ -97,6 +97,20 @@
     .feature.eta .cta{background:#ffb454;color:#241503}
   }
 
+  /* ── the βJump card is red ─────────────────────────────────────────────────────────────
+     Søren, 2026-08-18. Same two reds the βJump page itself uses, so card and tool read as one
+     thing. Crimson/rose rather than the orange-red of an error state, and far enough from the
+     ηJump amber that the three cards are tellable apart at a glance.
+     Measured the same way as the block above — kicker/logo 7.67:1 on the light card and 6.11:1
+     on the dark one; CTA text 7.67:1 light and 6.67:1 dark. All well past AA. */
+  .feature.beta{--teal:#a4133c;--teal-soft:#fde7ec}
+  .feature.beta .cta{background:#a4133c;color:#ffffff}
+  @media (prefers-color-scheme:dark){
+    .feature.beta{--teal:#ff6b81;--teal-soft:#3a1018}
+    /* dark text on the light rose fill, not white — same reason as above */
+    .feature.beta .cta{background:#ff6b81;color:#2a0a12}
+  }
+
 </style>
 </head>
 <body>
@@ -160,6 +174,29 @@
       <span class="chip">3D mesh, PowerPoint &amp; Excel</span>
     </div>
     <span class="cta">Open &eta;Jump &rarr;</span>
+  </a>
+
+  <a class="feature beta" href="/bjump.html">
+    <div class="kicker">Interactive tool</div>
+    <div class="logo"><span class="mu">&beta;</span><span class="jm">Jump</span></div>
+    <p class="desc">
+      The same idea in a <em>diseased</em> brain. A volumetric CLEM dataset of hippocampal CA1 in
+      an Alzheimer's model mouse, with amyloid-&beta;, pTau and microglial marker channels
+      registered to the electron microscopy. Nothing here is pre-classified &mdash; there is no
+      machine prediction to agree with, so the community is the classifier. Your points and level
+      are shared with &micro;Jump and &eta;Jump.
+    </p>
+    <div class="chips">
+      <span class="chip">Alzheimer's model</span>
+      <span class="chip">Hippocampal CA1</span>
+      <span class="chip">220 nuclei, none pre-classified</span>
+      <span class="chip">Amyloid-&beta;, pTau &amp; CD11b readout</span>
+      <span class="chip">Guided decision tree</span>
+      <span class="chip">Community voting</span>
+      <span class="chip">Correct the detections</span>
+      <span class="chip">3D mesh, PowerPoint &amp; Excel</span>
+    </div>
+    <span class="cta">Open &beta;Jump &rarr;</span>
   </a>
 </div>
 
