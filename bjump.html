@@ -889,6 +889,21 @@ function wireMeshButtons(i){
   });
 }
 
+/* A rejected fetch() gives only "Failed to fetch" — the browser refuses to expose why. In this
+   tool the overwhelmingly likely cause is that Apps Script returned an HTML error page (which
+   carries no CORS header) rather than JSON, i.e. the request reached the server and the SERVER
+   blew up. Say so, instead of showing a message the user cannot act on. */
+function netErr(e){
+  const m=(e&&e.message)||String(e||"");
+  if(/failed to fetch|networkerror|load failed/i.test(m)){
+    return "the backend rejected the request before returning JSON. Most likely the βJump "
+         + "spreadsheet is not set up yet (Datasets.gs → DATASETS.bjump.sheetId), or the "
+         + "deployment is out of date. Check " + REPORT_ENDPOINT + "?leaderboard=1&ds=bjump "
+         + "in a browser tab — it should return JSON, not a Google error page.";
+  }
+  return m;
+}
+
 /* ── guided identification ──────────────────────────────────────────────────────────────
    Walks core/ontology.js's TREE (with the hippocampal overrides applied above). Keeps a path so
    the submitted classification records HOW the user got there, not just where they landed --
@@ -1017,7 +1032,7 @@ function submitIdentification(){
     timestamp:new Date().toISOString()
   }, nm).then(function(d){
     msg.textContent=(d&&d.ok)?("Recorded: "+nm+". Thank you."):"Could not record that.";
-  }).catch(function(e){ msg.textContent="failed: "+(e&&e.message||e); });
+  }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
 }
 
 /* ── position correction ────────────────────────────────────────────────────────────────
@@ -1035,7 +1050,7 @@ function wireCorrection(i){
     msg.textContent="sending…";
     postReport(payload,label).then(function(d){
       msg.textContent=(d&&d.ok)?"Thank you — recorded.":"Could not record that.";
-    }).catch(function(e){ msg.textContent="failed: "+(e&&e.message||e); });
+    }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
   }
   const mv=document.getElementById("fixmove");
   if(mv) mv.addEventListener("click",function(){
