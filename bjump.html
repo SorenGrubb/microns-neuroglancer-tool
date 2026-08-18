@@ -527,11 +527,22 @@ UJ.cfg.mesh = {
 /* Same Apps Script deployment as µJump and ηJump -> one OAuth consent, one sign-in, one level.
    ds:"bjump" routes writes to the βJump spreadsheet once Datasets.gs is deployed. */
 UJ.cfg.backend = {
-  endpoint: "REPLACE_WITH_UJUMP_ENDPOINT",
-  clientId: "REPLACE_WITH_UJUMP_CLIENT_ID",
+  endpoint: "https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec",
+  clientId: "240227117082-gmiv0s37qdqngo3t3ph0lmthg4t4t47p.apps.googleusercontent.com",
   ownerEmail: "",
   ds: "bjump"
 };
+/* These are µJump's OWN endpoint and client id, deliberately, not copies to be replaced later:
+   one Apps Script deployment and one OAuth client serve all three pages, which is the whole
+   reason a user's points and level follow them between µJump, ηJump and βJump. The client id is
+   origin-restricted, and bjump.html sits on the same grubblab.com origin, so no extra OAuth
+   setup is needed.
+
+   They were placeholders in the first build, copied from hjump_config.js before Søren filled
+   ηJump's in. The last line of bjump_logic.js reads
+       if(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID.indexOf("REPLACE")!==0){ gamifyInit(12); }
+   so a leftover placeholder does not fail loudly -- it silently skips sign-in entirely and the
+   page just has no Google button. bjumpcheck.js now asserts no REPLACE_ string survives. */
 
 /* Layer sources and shaders lifted from Søren's own Neuroglancer state, so a jump from βJump
    looks exactly like the view he already works in. */
