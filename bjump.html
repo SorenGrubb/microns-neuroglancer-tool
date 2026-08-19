@@ -1194,13 +1194,48 @@ function netErr(e){
 /* ── what the community already said ────────────────────────────────────────────────────
    Without this the tool is write-only: you classify a cell, the row lands in the sheet, and the
    page still shows nothing. `?nucleusId=` returns every identification for one nucleus and
-   `?bjumpFixes=` returns position corrections that have reached consensus, so both are read back
-   and shown on the panel. Fetched per cell rather than in bulk -- 220 nuclei is small, but a
-   user only ever looks at one at a time. */
-let FIXES_CACHE=null;
-
-function communityFetch(url){
-  return fetch(url).then(function(r){ return r.json(); });
+   `?bjumpFixes=` returns EVERY position correction that has reached consensus across the whole
+   sheet in one response -- always fetched in bulk (the endpoint itself has no nucleusId filter),
+   cached once for the rest of the session, same shape as fetchBjumpIdentities() below. Originally
+   fetched lazily on first cell view; promoted to a shared eager-cacheable fetcher 2026-08-19 so
+   Filter-and-show's bulk Excel export (buildColumnsBjump()'s corrected_voxel/correction_votes
+   columns) and the cell panel's own display can read the SAME cache instead of duplicating the
+   network round trip. */
+let FIXES_RESP=null, FIXES_FETCH=null;
+function fetchBjumpFixes(){
+  if(FIXES_RESP) return Promise.resolve(FIXES_RESP);
+  if(FIXES_FETCH) return FIXES_FETCH;
+  const ds="&ds="+encodeURIComponent(UJ.cfg.backend.ds);
+  FIXES_FETCH=fetch(REPORT_ENDPOINT+"?bjumpFixes=1"+ds)
+    .then(function(r){ return r.json(); })
+    .then(function(d){ FIXES_RESP=(d&&d.ok)?d:{ok:false,fixes:[]}; return FIXES_RESP; })
+    .catch(function(){ FIXES_RESP={ok:false,fixes:[]}; return FIXES_RESP; })
+    .then(function(d){ FIXES_FETCH=null; return d; });
+  return FIXES_FETCH;
+}
+/* Keyed by nucleusId (BID[i]), not by anchor coordinate -- the bulk export looks a correction up
+   BY CELL, same as bjumpIdentityOf(). A nucleus could in principle have more than one
+   non-overlapping consensus cluster (two rival groups of >=2 people each proposing a different
+   corrected position) -- bjumpFixConsensus() on the backend deliberately returns every such
+   cluster rather than silently picking one, so here too the HIGHEST-vote cluster wins when
+   there's more than one, exactly the same tie-break BJumpPosition.gs's own Master-list upsert
+   uses (upsertMasterCellCorrectedPosition()), so the page and the sheet never disagree about
+   which correction is "the" one for a given nucleus. */
+let FIXES_BY_NUCID=null;
+function bjumpFixesByNucId(){
+  if(FIXES_BY_NUCID) return FIXES_BY_NUCID;
+  if(!FIXES_RESP) return null;
+  const map={};
+  (FIXES_RESP.fixes||[]).forEach(function(f){
+    const nid=String(f.nucleusId);
+    if(!map[nid]||f.votes>map[nid].votes) map[nid]=f;
+  });
+  FIXES_BY_NUCID=map;
+  return map;
+}
+function bjumpCorrectedPositionOf(i){
+  const map=bjumpFixesByNucId();
+  return (map&&map[String(BID[i])])||null;
 }
 function loadCommunity(i){
   const nid=String(BID[i]), pos=[BX[i],BY[i],BZ[i]];
@@ -1222,7 +1257,6 @@ function loadCommunity(i){
 
   /* Position corrections stay βJump's own: no other dataset has a Hoechst blob detector whose
      output the community has to be able to move. See BJumpPosition.gs and bjump-spec.md §6. */
-  const ds="&ds="+encodeURIComponent(UJ.cfg.backend.ds);
   const fixBox=document.getElementById("fixstatus");
   const showFixes=function(d){
     if(CUR_IDX!==i || !fixBox) return;
@@ -1231,19 +1265,18 @@ function loadCommunity(i){
     });
     if(mine.length){
       fixBox.innerHTML='<p class="hint"><b>Community correction agreed:</b> this nucleus should be at '
-        +escHtml(mine[0].to)+' ('+mine[0].votes+' independent votes). The embedded table still holds '
-        +'the original position until the next rebuild.</p>';
+        +escHtml(mine[0].to)+' ('+mine[0].votes+' independent votes). This is now reflected in the '
+        +'"Master cell list" sheet and the Filter-and-show Excel export \u2014 the embedded table on '
+        +'THIS page still holds the original position until the next rebuild.</p>';
     } else {
       fixBox.innerHTML='<p class="hint">A correction only moves a nucleus once <b>'+((d&&d.minVotes)||2)
         +' different people</b> propose a similar position, so yours may be recorded and still not '
         +'shown here yet.</p>';
     }
   };
-  if(FIXES_CACHE){ showFixes(FIXES_CACHE); }
-  else communityFetch(REPORT_ENDPOINT+"?bjumpFixes=1"+ds)
-        .then(function(d){ FIXES_CACHE=d; showFixes(d); })
-        .catch(function(){});
+  fetchBjumpFixes().then(showFixes).catch(function(){});
 }
+
 
 /* ── the result screen ──────────────────────────────────────────────────────────────────
    The decision tree itself is core/tree.js as of 2026-08-18 (stage P3): openIdentify /
@@ -1631,7 +1664,17 @@ function buildColumnsBjump(){
     {header:"truncated_z",get:function(m){return BTR[m.row.i]?"yes":"no";}},
     {header:"has_mesh",get:function(m){return hasMesh(m.row.i)?"yes":"no";}},
     {header:"segment_id",get:function(m){return BSEG[m.row.i]||"";}},
-    {header:"current_community_identity",get:function(m){return bjumpIdentityOf(m.row.i)||"unclassified";}}
+    {header:"current_community_identity",get:function(m){return bjumpIdentityOf(m.row.i)||"unclassified";}},
+    /* 2026-08-19 (bjump-spec §12): a community-agreed position correction, when one exists. Blank
+       for the ~95%+ of nuclei nobody has ever flagged as mispositioned -- this is an EXCEPTION
+       column, not a second copy of voxel_x/y/z, so a spreadsheet filter for "has a correction"
+       is just "corrected_voxel is not blank". voxel_x/y/z above always stay the embedded table's
+       ORIGINAL detected position; corrected_voxel is never substituted in for them, because the
+       anchor that ties a correction back to its nucleus (BJumpPosition.gs's whole design) is that
+       original coordinate -- silently overwriting it here would break that link for anyone who
+       re-derives it from an exported row instead of the live page. */
+    {header:"corrected_voxel",get:function(m){const f=bjumpCorrectedPositionOf(m.row.i); return f?f.to:"";}},
+    {header:"correction_votes",get:function(m){const f=bjumpCorrectedPositionOf(m.row.i); return f?f.votes:"";}}
   ];
   MARKERS.forEach(function(m){
     cols.push({header:m.key+"_shell_percentile",get:function(row){
@@ -1734,6 +1777,15 @@ function buildColumnsBjump(){
   }
   buildIdentityDropdown();
   window.__bjumpBuildIdentityDropdown=buildIdentityDropdown;
+
+  /* Warm the position-fixes cache eagerly too (2026-08-19), same reasoning as the identity
+     dropdown just above: by the time a user has picked filters and clicked Download, 220 rows'
+     worth of fetch has almost always already resolved, so corrected_voxel/correction_votes in
+     buildColumnsBjump() read from a populated cache rather than racing it. Not gating Download on
+     this fetch resolving -- same "don't gate an action on a slow/unreachable backend" reasoning
+     documented on runPreview() above; a still-loading cache just means those two columns come
+     back blank for this one export, which is a safe, honest degrade, not a wrong answer. */
+  fetchBjumpFixes().catch(function(){});
 })();
 
 </script>
