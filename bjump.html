@@ -1007,6 +1007,14 @@ function showCell(i, distNm){
     +(hasMesh(i)?"":"No mesh for this nucleus — it lies outside the segmented sub-volume, "
                    +"which covers only about half the imaged block.")+'</p>';
 
+  /* "Cell contacts" (2026-08-19, ported from µJump -- Søren: "We should build the cell contacts
+     for bJump now. Like for µJump"). Filled in by loadCellContactsPanel() below, same deferred-
+     container pattern #commReports/#classHistoryPanel already use just below. Unlike µJump's
+     current (2026-08-12+) type-specific search, this dataset has almost no identified cells to
+     search BY type, so βJump keeps µJump's ORIGINAL search basis instead: the K nearest MESHED
+     nuclei, any identity (see bjumpMeshedCandidates()'s own comment). */
+  h+='<div id="cellContactsPanel" style="margin:14px 0 0"></div>';
+
   /* The whole point of the tool. There is no machine prediction here, so this panel is the only
      place a cell type ever comes from. */
   /* Three panels, all rendered by core/panel.js: the light-blue consensus block (which also
@@ -1118,6 +1126,7 @@ function showCell(i, distNm){
   wireCorrection(i);
   startGuided(i);
   loadCommunity(i);
+  loadCellContactsPanel("cellContactsPanel",i);
 }
 function jumpToIndex(i){ showCell(i,null); window.scrollTo({top:0,behavior:"smooth"}); }
 
@@ -1173,6 +1182,378 @@ function wireMeshButtons(i){
         return info;
       });
     },true);   // keepMsg -- see run()
+  });
+}
+
+/* ============================================================================================
+   Cell contacts (2026-08-19, ported from µJump -- Søren: "We should build the cell contacts for
+   bJump now. Like for µJump"). Physical mesh proximity (touching membranes) between this nucleus
+   and its nearest MESHED neighbours, NOT anything synapse-based -- there is no connectivity
+   panel here to confuse it with.
+
+   Search basis is deliberately µJump's ORIGINAL "K nearest cells, any type" approach, not
+   µJump's current (2026-08-12+) type-specific radius search: βJump has almost no community-
+   identified cells to search BY type (this dataset's whole point is that the community IS the
+   classifier, starting from nothing -- see showCell()'s own "no classifier for this dataset"
+   copy), so a type dropdown here would be empty for most of the page's life. "Nearest meshed
+   cells, any identity" was confirmed with Søren as the right basis for this dataset.
+
+   The proximity algorithm itself (grid-based nearest-vertex matching, midpoint-not-vertex,
+   medoid-not-centroid clustering, reciprocity + minimum-hits-per-bucket noise filtering) is NOT
+   re-implemented here -- it is core/mesh.js's UJ.mesh.buildContactGrid/nearestInContactGrid/
+   allContactPointsWithinThreshold, exposed 2026-08-10 for exactly this feature and already
+   fully tested against µJump's own usage. Only the candidate-selection, UI, viewer-state and
+   save/read plumbing below are βJump-specific.
+
+   Saved to the backend the same way µJump does (Søren: "Save to backend now, like µJump") via
+   the existing, already dataset-generic "cell_contacts_batch" doPost / "?cellContacts=" doGet
+   branches in Code.gs -- no backend change was needed. postReport() already stamps every write
+   with ds:UJ.cfg.backend.ds ("bjump"), so nothing here has to set that explicitly on the POST;
+   the GET below sets &ds= itself since it bypasses postReport(), same convention
+   fetchBjumpIdentities() already uses just above. */
+const BCC_THRESHOLD_UM=0.04;          // 40nm prefilled default -- see µJump's CELL_CONTACT_THRESHOLD_UM
+    // for the full reasoning (this dataset's own SECGAN mesh voxel size is comparable). UI-adjustable.
+const BCC_MIN_CLUSTER_HITS=3;         // see allContactPointsWithinThreshold's own comment -- a bucket
+    // with fewer raw vertex-pair hits than this is dropped as likely mesh noise. Not itself
+    // adjustable here (it's baked into core/mesh.js), listed for reference only.
+const BCC_POINT_CLUSTER_UM=1.0;       // 1000nm prefilled default -- see CELL_CONTACT_POINT_CLUSTER_UM.
+const BCC_CANDIDATES_DEFAULT=8;       // how many nearest MESHED nuclei (any identity) to test per
+    // click -- same default µJump's original "any type" search used before it was replaced there.
+const BCC_CANDIDATES_MAX=20;          // UI-adjustable ceiling. βJump only has ~half of 220 nuclei
+    // meshed at all, so anything past this checks a large fraction of the whole meshed population.
+
+let BID_INDEX=null;
+/* Reverse lookup, nucleus_id -> master-array index -- needed because a "known" contact read back
+   from the backend only carries the OTHER nucleus's id, not its array index. Built once, lazily
+   (BID is 1..N but not guaranteed literally BID[i]===i+1, so this doesn't assume that). */
+function bjumpIndexByNucleusId(nid){
+  if(!BID_INDEX){ BID_INDEX={}; for(let j=0;j<N;j++) BID_INDEX[BID[j]]=j; }
+  const v=BID_INDEX[nid];
+  return v===undefined?-1:v;
+}
+/* The K nearest MESHED nuclei to i, any identity, nearest first -- {i,dist} shape, dist in
+   physical nm (same as kNearest's own return). Over-fetches from kNearest (which has no mesh
+   filter of its own) and filters down, since only ~half this dataset's nuclei are inside the
+   SECGAN sub-volume that ships meshes (see hasMesh's own comment) -- asking for exactly k from
+   kNearest would usually return fewer than k meshed candidates. kNearest is O(N) regardless of
+   how many are requested, so the only real cost of over-fetching is its own sort, cheap at this
+   dataset's scale (220 nuclei). */
+function bjumpMeshedCandidates(i,k){
+  const wide=kNearest(BX[i],BY[i],BZ[i],Math.min(N-1,Math.max(k*8,40)),i);
+  return wide.filter(function(c){return hasMesh(c.i);}).slice(0,k);
+}
+/* Converts a mesh vertex position (µm, real-world frame -- UJ.mesh's own output units) into this
+   page's own voxel coordinate convention, same nm/UJ_RX(,Y,Z) scaling buildState()/viewerUrl()
+   use throughout the rest of this file. */
+function bjumpMeshUmToVoxel(px,py,pz){
+  return [Math.round(px*1000/UJ_RX), Math.round(py*1000/UJ_RY), Math.round(pz*1000/UJ_RZ)];
+}
+/* Shared compute core -- fetches this nucleus's own mesh once, then for each candidate fetches
+   its mesh and runs UJ.mesh.allContactPointsWithinThreshold against the SAME grid over this
+   nucleus's own mesh (built once, reused across every candidate -- same perf fix µJump's own
+   computeCellContactsForCandidates applies, see that function's own comment for the "loading a
+   lot longer time" bug this avoids). candidates is bjumpMeshedCandidates()'s own {i,dist}[]
+   return shape. Unlike µJump, βJump has no community-proposed "extra root ID" mechanism, so each
+   mesh fetch uses only the one segment id this dataset's embedded table already carries. */
+async function computeBjumpCellContacts(rootIdStr,candidates,clusterUm,thresholdUm,onProgress){
+  if(!rootIdStr)throw new Error("This nucleus has no mesh — nothing to check contacts against.");
+  onProgress&&onProgress(0,"fetching this nucleus's mesh…");
+  const own=await UJ.mesh.fetchCombinedMesh(rootIdStr);
+  const ownGrid=UJ.mesh.buildContactGrid(own.positions,thresholdUm);
+  const results=[];
+  for(let ci=0;ci<candidates.length;ci++){
+    const nb=candidates[ci];
+    const candRoot=String(BSEG[nb.i]);
+    onProgress&&onProgress((ci+0.5)/candidates.length,"checking nearby nucleus "+(ci+1)+"/"+candidates.length+"…");
+    let candMesh;
+    try{ candMesh=await UJ.mesh.fetchCombinedMesh(candRoot); }
+    catch(e){ console.warn("[bJump cell contacts] candidate mesh fetch failed",candRoot,e&&e.message); continue; }
+    const pts=UJ.mesh.allContactPointsWithinThreshold(own.positions,ownGrid,candMesh.positions,thresholdUm,clusterUm);
+    const cellVoxel=[BX[nb.i],BY[nb.i],BZ[nb.i]];
+    if(pts.length){
+      const touchPoints=pts.map(function(p){return bjumpMeshUmToVoxel(p.point[0],p.point[1],p.point[2]);});
+      results.push({i:nb.i,nucleusId:BID[nb.i],rootId:candRoot,cellType:cellLabel(nb.i),
+        distNm:pts[0].dist*1000,voxel:touchPoints[0],touchPoints,cellVoxel});
+    }else{
+      results.push({i:nb.i,nucleusId:BID[nb.i],rootId:candRoot,cellType:cellLabel(nb.i),
+        distNm:thresholdUm*1000+1,voxel:null,touchPoints:[],cellVoxel});
+    }
+  }
+  onProgress&&onProgress(1,"done");
+  return results;
+}
+/* Silent, best-effort save -- same convention as the volume button's save_computed_volume post
+   above (only saves when already signed in). Uses postReport() rather than a raw fetch() (unlike
+   µJump's own maybeSaveCellContacts, which predates postReport()'s ds-stamping) -- ds:"bjump" is
+   therefore added automatically, avoiding the exact silent-cross-dataset-write bug µJump's own
+   code would reproduce if copied verbatim (µJump's version relies on "ujump" being the backend's
+   DEFAULT_DS, which is not true here). */
+function maybeSaveBjumpCellContacts(nucleusId,rootId,cellType,pairs,clusterUm,thresholdUm){
+  if(!GOOGLE_VERIFIED||!pairs.length)return;
+  const usedDefault=Math.abs((Number(clusterUm)||0)-BCC_POINT_CLUSTER_UM)<1e-9
+    &&Math.abs((Number(thresholdUm)||0)-BCC_THRESHOLD_UM)<1e-9;
+  postReport({
+    type:"cell_contacts_batch",nucleusId:nucleusId||"",rootId:rootId||"",cellType:cellType||"",
+    usedDefaultSettings:usedDefault,
+    pairs:pairs.map(function(p){return{contactNucleusId:p.nucleusId||"",contactRootId:p.rootId||"",
+      contactCellType:p.cellType||"",minDistanceNm:Math.round(p.distNm*10)/10,
+      contactVoxelX:p.voxel?p.voxel[0]:"",contactVoxelY:p.voxel?p.voxel[1]:"",contactVoxelZ:p.voxel?p.voxel[2]:"",
+      touchPointCount:(p.touchPoints||[]).length};}),
+    timestamp:new Date().toISOString()
+  },"").catch(function(){});
+}
+/* Live GET of already-known contacts for one nucleus (every past user's clicks, not just this
+   session) -- public, no token needed, same convention as ?bjumpIdentities=1. ds is set
+   explicitly here (this bypasses postReport(), which is the thing that normally stamps it). */
+async function fetchBjumpCellContacts(nucleusId){
+  if(!REPORT_ENDPOINT||!nucleusId)return[];
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?cellContacts="+encodeURIComponent(nucleusId)+"&ds="+encodeURIComponent(UJ.cfg.backend.ds));
+    const d=await r.json();
+    return (d&&d.contacts)||[];
+  }catch(e){ console.warn("[bJump cell contacts]",e); return []; }
+}
+/* Backend row shape (contactNucleusId/contactRootId/contactCellType/minDistanceNm/
+   contactVoxelX...) -> the same canonical {i,nucleusId,rootId,cellType,distNm,voxel,touchPoints,
+   cellVoxel} shape computeBjumpCellContacts() produces, so one renderer handles both. The backend
+   only stores ONE point per pair, so touchPoints here is at most a single-element array. */
+function bjumpKnownToRows(known){
+  return (known||[]).map(function(k){
+    const voxel=(k.contactVoxelX!=null&&k.contactVoxelX!=="")?[k.contactVoxelX,k.contactVoxelY,k.contactVoxelZ]:null;
+    const kIdx=bjumpIndexByNucleusId(k.contactNucleusId);
+    const cellVoxel=kIdx>=0?[BX[kIdx],BY[kIdx],BZ[kIdx]]:null;
+    return{i:kIdx,nucleusId:k.contactNucleusId,rootId:k.contactRootId,cellType:k.contactCellType,
+      distNm:Number(k.minDistanceNm)||0,voxel,touchPoints:voxel?[voxel]:[],cellVoxel};
+  });
+}
+/* One row per nearby nucleus (not per touch point -- same "the list should show the nearby
+   cells, not the touching points" convention µJump settled on). */
+function bjumpCellContactRowHtml(r,idx){
+  const touchN=(r.touchPoints||[]).length, touching=touchN>0;
+  const label=escHtml(r.cellType||("Nucleus "+r.nucleusId))+' &middot; nuc '+escHtml(String(r.nucleusId||""));
+  const nameHtml=(r.i!=null&&r.i>=0)
+    ?'<span class="ccjump" data-i="'+r.i+'" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted;font-weight:600" title="Jump to this nucleus">'+label+'</span>'
+    :'<span style="font-weight:600">'+label+'</span>';
+  const openBtn=r.rootId?'<button class="idbtn ccOpenOne" data-idx="'+idx+'" style="margin-left:8px;padding:1px 8px;font-size:11px;vertical-align:middle" title="Opens a 3D view (with EM imagery) of just this nucleus and the target nucleus, with a point at every place they actually touch.">Open in Neuroglancer</button>':'';
+  return '<div style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">'
+    +'<span class="dot" style="background:'+(touching?"#3fb950":"#6e7681")+';flex:0 0 auto;margin-top:5px"></span>'
+    +'<div style="flex:1 1 auto;min-width:0">'+nameHtml+openBtn
+    +'<div class="hint">'+(touching?(touchN+" touch point"+(touchN===1?"":"s")+", closest "+Number(r.distNm).toFixed(0)+" nm"):("not touching ("+Number(r.distNm).toFixed(0)+" nm gap)"))
+    +(r.rootId?' &middot; segment '+escHtml(String(r.rootId)):'')+'</div></div></div>';
+}
+function bjumpCellContactsViewerLayers(){
+  const V=UJ.cfg.viewer, S=UJ.cfg.shader;
+  const hoe=S("#0080ff",0,184,0,150);
+  return [
+    {type:"image",source:V.em,tab:"source",name:"EM (CLAHE)"},
+    {type:"image",source:V.emSecgan,tab:"source",name:"EM (SECGAN 16nm)"},
+    {type:"image",source:V.hoechst,tab:"rendering",blend:"additive",name:"Hoechst",
+     shader:hoe.shader,shaderControls:hoe.shaderControls}
+  ];
+}
+/* Golden-angle hue stepping, same technique/reasoning as µJump's cellContactPaletteColor -- gives
+   distinct colours per nearby cell without hand-picking a palette. */
+function bjumpContactPaletteColor(idx){
+  const h=(idx*137.508)%360,s=0.72,l=0.58;
+  const k=n=>(n+h/30)%12,a=s*Math.min(l,1-l);
+  const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+  const toHex=x=>Math.round(255*x).toString(16).padStart(2,"0");
+  return "#"+toHex(f(0))+toHex(f(8))+toHex(f(4));
+}
+/* "Open all in Neuroglancer" -- this nucleus + every checked neighbour that actually has touch
+   points, each neighbour's points in its own colour (bjumpContactPaletteColor), same layout
+   choice (4panel, annotation tab pre-selected) µJump settled on for its own "all" viewer. */
+function buildBjumpCellContactsAllViewerState(i,rootIdStr,cellType,rows){
+  const layers=bjumpCellContactsViewerLayers();
+  const centerLayerName=cellType||"This nucleus";
+  layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:centerLayerName,
+    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+  const matchedRootIds=Array.from(new Set(rows.filter(r=>r.rootId).map(r=>String(r.rootId))));
+  if(matchedRootIds.length){
+    const colors={};matchedRootIds.forEach(function(r){colors[r]="#3fb950";});
+    layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:"Nearby nuclei (contacts checked)",
+      segments:matchedRootIds,segmentColors:colors,objectAlpha:0.85});
+  }
+  let colorIdx=0, firstAnnLayerName=null;
+  const allTouchPoints=[];
+  rows.forEach(function(r){
+    const pts=r.touchPoints||[];
+    if(!pts.length)return;
+    allTouchPoints.push.apply(allTouchPoints,pts);
+    const color=bjumpContactPaletteColor(colorIdx++);
+    const anns=pts.map(function(v,pidx){return{type:"point",id:"touch_"+r.nucleusId+"_"+pidx,point:v};});
+    const layerName=(r.cellType||"Nearby nucleus")+" touch points (nuc "+r.nucleusId+", "+anns.length+")";
+    if(firstAnnLayerName===null)firstAnnLayerName=layerName;
+    layers.push({type:"annotation",source:"local://annotations",tab:"annotations",annotations:anns,
+      annotationColor:color,name:layerName});
+  });
+  const pts=[[BX[i],BY[i],BZ[i]]].concat(rows.filter(r=>r.cellVoxel).map(r=>r.cellVoxel)).concat(allTouchPoints);
+  let sx=0,sy=0,sz=0;pts.forEach(function(p){sx+=p[0];sy+=p[1];sz+=p[2];});
+  const posVox=[sx/pts.length,sy/pts.length,sz/pts.length];
+  const cx=BX[i]*UJ_RX,cy=BY[i]*UJ_RY,cz=BZ[i]*UJ_RZ;
+  const span=Math.max.apply(null,pts.map(function(p){const dx=p[0]*UJ_RX-cx,dy=p[1]*UJ_RY-cy,dz=p[2]*UJ_RZ-cz;return Math.hypot(dx,dy,dz);}).concat([5000]))*2.4;
+  return {dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
+    position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
+    layers:layers,
+    selectedLayer:firstAnnLayerName?{layer:firstAnnLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
+    layout:{type:"4panel",orthographicProjection:true},showSlices:false};
+}
+function openBjumpCellContactsAllViewer(i,rootIdStr,cellType,rows){
+  const state=buildBjumpCellContactsAllViewerState(i,rootIdStr,cellType,rows);
+  const url=UJ.cfg.viewer.base+"#!"+encodeURIComponent(JSON.stringify(state));
+  window.open(url,"_blank","noopener");
+}
+/* Per-pair "Open in Neuroglancer" -- just this nucleus and ONE neighbour, plus that pair's own
+   touch points. This is the view meant for actually inspecting one contact closely. */
+function buildBjumpCellContactsSingleViewerState(i,rootIdStr,cellType,row){
+  const layers=bjumpCellContactsViewerLayers();
+  const centerLayerName=cellType||"This nucleus";
+  layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:centerLayerName,
+    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+  const otherLayerName=(row.cellType||"Nearby nucleus")+" (nuc "+row.nucleusId+")";
+  if(row.rootId){
+    layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:otherLayerName,
+      segments:[String(row.rootId)],segmentColors:{[String(row.rootId)]:"#3fb950"},objectAlpha:0.85});
+  }
+  const touchPoints=row.touchPoints||[];
+  let firstAnnLayerName=null;
+  if(touchPoints.length){
+    const anns=touchPoints.map(function(v,pidx){return{type:"point",id:"touch_"+pidx,point:v};});
+    firstAnnLayerName="Touch points ("+touchPoints.length+")";
+    layers.push({type:"annotation",source:"local://annotations",tab:"annotations",annotations:anns,
+      annotationColor:bjumpContactPaletteColor(0),name:firstAnnLayerName});
+  }
+  const pts=[[BX[i],BY[i],BZ[i]]];
+  if(row.cellVoxel)pts.push(row.cellVoxel);
+  pts.push.apply(pts,touchPoints);
+  let sx=0,sy=0,sz=0;pts.forEach(function(p){sx+=p[0];sy+=p[1];sz+=p[2];});
+  const posVox=touchPoints.length?touchPoints[0]:[sx/pts.length,sy/pts.length,sz/pts.length];
+  const cx=BX[i]*UJ_RX,cy=BY[i]*UJ_RY,cz=BZ[i]*UJ_RZ;
+  const span=Math.max.apply(null,pts.map(function(p){const dx=p[0]*UJ_RX-cx,dy=p[1]*UJ_RY-cy,dz=p[2]*UJ_RZ-cz;return Math.hypot(dx,dy,dz);}).concat([3000]))*2.4;
+  return {dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
+    position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,4000),
+    layers:layers,
+    selectedLayer:firstAnnLayerName?{layer:firstAnnLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
+    layout:{type:"4panel",orthographicProjection:true},showSlices:false};
+}
+function openBjumpCellContactsSingleViewer(i,rootIdStr,cellType,row){
+  const state=buildBjumpCellContactsSingleViewerState(i,rootIdStr,cellType,row);
+  const url=UJ.cfg.viewer.base+"#!"+encodeURIComponent(JSON.stringify(state));
+  window.open(url,"_blank","noopener");
+}
+function downloadBjumpCellContactsExcel(centerNucId,centerRootId,centerType,rows,thresholdNmUsed){
+  if(typeof XLSX==="undefined")return;
+  const thresholdNm=(typeof thresholdNmUsed==="number"&&thresholdNmUsed>0)?thresholdNmUsed:Math.round(BCC_THRESHOLD_UM*1000*10)/10;
+  const data=[["Center nucleus ID","Center segment ID","Center cell type","Contact nucleus ID",
+    "Contact segment ID","Contact cell type","Closest mesh gap (nm)","Touching (<"+thresholdNm+" nm)",
+    "Touch point index","Touch points on this pair","Touch point voxel X","Touch point voxel Y","Touch point voxel Z"]];
+  rows.forEach(function(r){
+    const touching=r.distNm<thresholdNm;
+    const pts=(r.touchPoints&&r.touchPoints.length)?r.touchPoints:[null];
+    pts.forEach(function(v,pidx){
+      data.push([centerNucId,centerRootId,centerType,r.nucleusId,r.rootId,r.cellType,
+        Math.round(r.distNm*10)/10,touching?"yes":"no",
+        v?pidx+1:"",v?pts.length:"",v?v[0]:"",v?v[1]:"",v?v[2]:""]);
+    });
+  });
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Contacts");
+  XLSX.writeFile(wb,"bjump_cell_contacts_"+centerNucId+".xlsx");
+}
+/* Renders already-known contacts (fetched live) plus the "Check contacts" trigger. containerId is
+   the plain div showCell() leaves in the panel HTML; i is the master array index. */
+async function loadCellContactsPanel(containerId,i){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  el.innerHTML='<div class="hint">Loading known cell contacts…</div>';
+  const known=await fetchBjumpCellContacts(BID[i]);
+  renderCellContactsPanel(el,known,i);
+}
+function renderCellContactsPanel(el,known,i){
+  const rootId0=hasMesh(i)?String(BSEG[i]):"";
+  const uid="cc_"+i;
+  let h='<details class="rv-panel neigh" style="margin-top:0" open><summary>Cell contacts '
+    +'<span class="hint" title="Physical mesh proximity (touching membranes), NOT a synapse-based measure -- this dataset has no connectivity panel to confuse it with. Computed on demand by fetching cell meshes, same as “Compute volume”.">(mesh proximity)</span></summary>';
+  if(!rootId0){
+    h+='<p class="hint">This nucleus has no mesh, so contacts can’t be checked from here.</p></details>';
+    el.innerHTML=h;
+    return;
+  }
+  h+='<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_k">Nearest meshed nuclei to check</label>'
+    +'<input type="number" id="'+uid+'_k" value="'+BCC_CANDIDATES_DEFAULT+'" min="1" max="'+BCC_CANDIDATES_MAX+'" step="1" style="width:70px" title="How many of this nucleus\'s nearest MESHED neighbours (any identity) to test per click -- bounds how many extra mesh fetches one click triggers.">'
+    +'</div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_threshold">Max gap counted as touching</label>'
+    +'<input type="number" id="'+uid+'_threshold" value="'+Math.round(BCC_THRESHOLD_UM*1000*10)/10+'" min="0.1" step="1" style="width:70px" title="Two mesh points closer than this are treated as a touching pair. Only affects a fresh \'Check\' click -- not already-known results.">'
+    +'<span class="hint">nm</span></div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_cluster">Min. spacing between reported touch points</label>'
+    +'<input type="number" id="'+uid+'_cluster" value="'+Math.round(BCC_POINT_CLUSTER_UM*1000)+'" min="20" step="50" style="width:70px" title="Only one point is kept per this distance so a broad contact patch stays readable. Only affects a fresh \'Check\' click -- not already-known results.">'
+    +'<span class="hint">nm</span></div>'
+    +'<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">'
+    +'<button class="idbtn" id="'+uid+'_check" style="padding:3px 10px;font-size:12px">Check contacts</button>'
+    +'<button class="idbtn" id="'+uid+'_ngl" disabled style="padding:3px 10px;font-size:12px" title="Opens a 3D view (with EM imagery) of this nucleus, every checked neighbour, and all of their touch points.">Open all in Neuroglancer</button>'
+    +'<button class="idbtn" id="'+uid+'_xlsx" disabled style="padding:3px 10px;font-size:12px" title="Downloads every evaluated pair (touching or not) with its coordinates, if any.">Download as Excel</button>'
+    +'</div><div id="'+uid+'_results" style="margin-top:6px"></div></details>';
+  el.innerHTML=h;
+  const kEl=document.getElementById(uid+"_k"),clusterEl=document.getElementById(uid+"_cluster"),
+    thresholdEl=document.getElementById(uid+"_threshold"),checkBtn=document.getElementById(uid+"_check"),
+    nglBtn=document.getElementById(uid+"_ngl"),xlsxBtn=document.getElementById(uid+"_xlsx"),
+    resultsEl=document.getElementById(uid+"_results");
+  const cellType=cellLabel(i);
+  let curRows=[], curThresholdNm=Math.round(BCC_THRESHOLD_UM*1000*10)/10;
+  const knownRows=bjumpKnownToRows(known);
+  if(knownRows.length){
+    curRows=knownRows;
+    resultsEl.innerHTML=curRows.map(bjumpCellContactRowHtml).join("");
+    nglBtn.disabled=false;xlsxBtn.disabled=false;
+  }else{
+    resultsEl.innerHTML='<div class="hint">Not checked yet.</div>';
+  }
+  /* One delegated click listener, bound once on el -- handles ".ccjump" (jump to a row's own
+     nucleus, reusing the existing jumpToIndex() this page already has) and ".ccOpenOne" (that
+     row's own "Open in Neuroglancer" button), regardless of how many times resultsEl's contents
+     get replaced afterwards. */
+  el.addEventListener("click",function(e){
+    const jumpEl=e.target.closest(".ccjump");
+    if(jumpEl){ jumpToIndex(Number(jumpEl.dataset.i)); return; }
+    const openBtn=e.target.closest(".ccOpenOne");
+    if(openBtn){
+      const row=curRows[Number(openBtn.dataset.idx)];
+      if(row) openBjumpCellContactsSingleViewer(i,rootId0,cellType,row);
+    }
+  });
+  checkBtn.addEventListener("click",async function(){
+    const k=Math.min(BCC_CANDIDATES_MAX,Math.max(1,Math.round(Number(kEl.value)||BCC_CANDIDATES_DEFAULT)));
+    const clusterNm=Math.max(20,Number(clusterEl.value)||Math.round(BCC_POINT_CLUSTER_UM*1000));
+    const thresholdNm=Math.max(0.1,Number(thresholdEl.value)||Math.round(BCC_THRESHOLD_UM*1000*10)/10);
+    const orig=checkBtn.textContent;
+    checkBtn.disabled=true;kEl.disabled=true;clusterEl.disabled=true;thresholdEl.disabled=true;
+    try{
+      const candidates=bjumpMeshedCandidates(i,k);
+      const results=await computeBjumpCellContacts(rootId0,candidates,clusterNm/1000,thresholdNm/1000,function(frac,msg){
+        checkBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";
+      });
+      curRows=results;curThresholdNm=thresholdNm;
+      maybeSaveBjumpCellContacts(BID[i],rootId0,cellType,results,clusterNm/1000,thresholdNm/1000);
+      resultsEl.innerHTML=results.length?results.map(bjumpCellContactRowHtml).join(""):'<div class="hint">No meshed neighbours nearby to check.</div>';
+      nglBtn.disabled=!results.length;xlsxBtn.disabled=!results.length;
+    }catch(err){
+      console.warn("[bJump cell contacts]",err);
+      resultsEl.innerHTML='<div class="hint" style="color:var(--warn)">Failed: '+escHtml(String((err&&err.message)||err))+'</div>';
+    }finally{
+      checkBtn.textContent=orig;checkBtn.disabled=false;kEl.disabled=false;clusterEl.disabled=false;thresholdEl.disabled=false;
+    }
+  });
+  nglBtn.addEventListener("click",function(){
+    if(!curRows.length)return;
+    openBjumpCellContactsAllViewer(i,rootId0,cellType,curRows);
+  });
+  xlsxBtn.addEventListener("click",function(){
+    if(!curRows.length)return;
+    downloadBjumpCellContactsExcel(BID[i],rootId0,cellType,curRows,curThresholdNm);
   });
 }
 
@@ -1787,6 +2168,5 @@ function buildColumnsBjump(){
      back blank for this one export, which is a safe, honest degrade, not a wrong answer. */
   fetchBjumpFixes().catch(function(){});
 })();
-
 </script>
 </body></html>
