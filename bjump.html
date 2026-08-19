@@ -498,10 +498,17 @@ this project does not invent criteria it cannot source.</p>
 <div class="tabpanel" data-tabpanel="filter">
 <div class="card" id="filterCard">
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Filter and show</div>
-<p class="hint" style="margin-top:6px">Filters run against the 220 nuclei embedded in this page
-&mdash; no network needed. There is no MICrONS-style cell-type classifier for this dataset (see the
-Jump tab), so filtering here is on geometry, segmentation coverage, and the molecular-marker
-measurements, not on cell identity.</p>
+<p class="hint" style="margin-top:6px">Most filters run against the 220 nuclei embedded in this
+page &mdash; no network needed. There is no MICrONS-style cell-type <i>classifier</i> for this
+dataset (see the Jump tab), so most filtering here is on geometry, segmentation coverage, and the
+molecular-marker measurements. Current community identity, below, is the one exception: it reads
+the Master cell list sheet, since that is the only place any nucleus's community-agreed name is
+recorded.</p>
+
+<div style="margin-top:14px">
+<label style="font-size:12px" title="Reads the Master cell list sheet -- the same current_identity a signed-in user's latest identification, discrepancy or confirmation last set. Fetched once per page load and cached.">Current community identity</label>
+<div id="fIdentityBox"></div>
+</div>
 
 <div style="margin-top:14px">
 <label style="font-size:12px">3D mesh available</label>
@@ -1492,17 +1499,21 @@ function postReport(payload,okMsg){
 }
 if(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID.indexOf("REPLACE")!==0){ gamifyInit(12); }
 
-/* ── Filter and show (2026-08-18) ───────────────────────────────────────────────────────
-   βJump's own filter+step-through feature, first version. Unlike µJump's, this runs entirely
-   against the 220 nuclei already embedded in this page (BX/BY/BZ/BVOL/BPY/BTR/BSRC/BSEG plus
-   the three MARKERS) -- no network fetch needed to preview or export matches, since there is no
-   150k-row live dataset to query and no MICrONS-style cell-type/layer data to filter by. Filter
-   dimensions are what this dataset actually has: mesh availability, truncated-by-slab-face,
-   nucleus volume, signed distance from the fitted pyramidale sheet, and molecular-marker (shell)
-   percentile. Current community identity is NOT a filter here yet -- it lives only in the
-   "Master cell list" sheet (server-side), not in this page's embedded arrays, and reading it
-   live for a filter/export pass is a reasonable follow-up once that sheet is seeded and this
-   feature has real usage to justify the extra fetch.
+/* ── Filter and show (2026-08-18, identity filter added 2026-08-19) ─────────────────────────
+   βJump's own filter+step-through feature. Unlike µJump's, most of it runs entirely against the
+   220 nuclei already embedded in this page (BX/BY/BZ/BVOL/BPY/BTR/BSRC/BSEG plus the three
+   MARKERS) -- no network fetch needed to preview or export matches on those dimensions, since
+   there is no 150k-row live dataset to query. Filter dimensions are what this dataset actually
+   has: mesh availability, truncated-by-slab-face, nucleus volume, signed distance from the
+   fitted pyramidale sheet, and molecular-marker (shell) percentile.
+
+   Current community identity IS now a filter dimension (2026-08-19, once Søren imported the
+   Master cell list seed CSV -- see bjump-master-cell-list-seed.md). Unlike the dimensions above,
+   this one genuinely needs a network read: identity lives only in the "Master cell list" sheet
+   (server-side), never in this page's embedded arrays. βJump's whole sheet is 220 rows though --
+   nothing like µJump's 150k -- so a single bulk GET, fetched once and cached for the rest of the
+   session, is cheap. See fetchBjumpIdentities()/IDENTITY_BY_NID below and the new
+   `bjumpIdentities` doGet branch in BJumpPosition.gs.
 
    The step-through mechanics (persistence, Prev/Next/Reset, resume-on-same-match-set) are
    core/stepthrough.js, shared with µJump -- see its header comment. Host contract this file
@@ -1515,6 +1526,41 @@ function rowPos(row){ return [BX[row.i], BY[row.i], BZ[row.i]]; }
 function jumpToVoxel(x,y,z){
   const r=nearest(x,y,z);
   if(r.i>=0) showCell(r.i,r.dist);
+}
+
+/* Bulk identity read for the Filter-and-show identity dimension (2026-08-19). null until the
+   first fetch resolves; {} (not null) once resolved with no rows, so callers can tell "not
+   fetched yet" from "fetched, sheet empty or not imported". Keyed by nucleus_id, which is BID[i]
+   -- the embedded table's own 1..N numbering, the same numbering the Master cell list seed was
+   built from (see bjump-master-cell-list-seed.md), so no join logic is needed on this side. Never
+   requires sign-in: this is a read of already-public community consensus, same as every other
+   community-identity display already on this page. */
+let IDENTITY_BY_NID=null, IDENTITY_FETCH=null;
+function fetchBjumpIdentities(){
+  if(IDENTITY_BY_NID) return Promise.resolve(IDENTITY_BY_NID);
+  if(IDENTITY_FETCH) return IDENTITY_FETCH;
+  IDENTITY_FETCH=fetch(REPORT_ENDPOINT+"?bjumpIdentities=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      const map={};
+      if(d&&d.ok&&Array.isArray(d.identities)){
+        d.identities.forEach(function(rec){ map[rec.nucleusId]=rec; });
+      }
+      IDENTITY_BY_NID=map;
+      return map;
+    })
+    .catch(function(){ IDENTITY_BY_NID={}; return IDENTITY_BY_NID; })
+    .then(function(map){ IDENTITY_FETCH=null; return map; });
+  return IDENTITY_FETCH;
+}
+/* "" (blank current_identity) reads as unclassified -- the same convention the Master cell list
+   itself uses (upsertMasterCellRow() only ever writes a non-blank current_identity once a real
+   identification lands). Sentinel string rather than "" itself so the <select>'s own "Not
+   filtering by this" option can keep using "" without colliding. */
+const BJUMP_UNCLASSIFIED_SENTINEL="__unclassified__";
+function bjumpIdentityOf(i){
+  const rec=IDENTITY_BY_NID&&IDENTITY_BY_NID[BID[i]];
+  return rec&&rec.current?String(rec.current).trim():"";
 }
 
 const MARKER_PCT_LABELS=[
@@ -1540,6 +1586,8 @@ function runFilterBjump(){
   const volMax=parseFloat(document.getElementById("fVolMax").value);
   const pyMin=parseFloat(document.getElementById("fPyMin").value);
   const pyMax=parseFloat(document.getElementById("fPyMax").value);
+  const identEl=document.getElementById("fIdentity");
+  const identSel=identEl?identEl.value:"";        // "" = not filtering; absent until fetched+built
   const markerFilters=Array.from(document.querySelectorAll(".fmarker")).map(function(sel){
     return {key:sel.dataset.key,min:sel.value?parseFloat(sel.value):null};
   }).filter(function(f){return f.min!==null;});
@@ -1555,6 +1603,11 @@ function runFilterBjump(){
     if(isFinite(volMax)&&BVOL[i]>volMax)continue;
     if(isFinite(pyMin)&&BPY[i]<pyMin)continue;
     if(isFinite(pyMax)&&BPY[i]>pyMax)continue;
+    if(identSel){
+      const cur=bjumpIdentityOf(i);
+      if(identSel===BJUMP_UNCLASSIFIED_SENTINEL){ if(cur)continue; }
+      else if(cur!==identSel){ continue; }
+    }
     let markersOk=true;
     for(const f of markerFilters){
       const m=markerByKey[f.key];
@@ -1577,7 +1630,8 @@ function buildColumnsBjump(){
     {header:"dist_pyramidale_um",get:function(m){return BPY[m.row.i].toFixed(4);}},
     {header:"truncated_z",get:function(m){return BTR[m.row.i]?"yes":"no";}},
     {header:"has_mesh",get:function(m){return hasMesh(m.row.i)?"yes":"no";}},
-    {header:"segment_id",get:function(m){return BSEG[m.row.i]||"";}}
+    {header:"segment_id",get:function(m){return BSEG[m.row.i]||"";}},
+    {header:"current_community_identity",get:function(m){return bjumpIdentityOf(m.row.i)||"unclassified";}}
   ];
   MARKERS.forEach(function(m){
     cols.push({header:m.key+"_shell_percentile",get:function(row){
@@ -1592,10 +1646,22 @@ function buildColumnsBjump(){
   const dlBtn=document.getElementById("filterDownload");
   const statusEl=document.getElementById("filterStatus");
   const markersBox=document.getElementById("fMarkers");
+  const identBox=document.getElementById("fIdentityBox");
   if(!runBtn||!dlBtn||!markersBox)return; // filter tab markup not present on this build
   markersBox.innerHTML=markerFilterHtml();
   let lastMatches=null;
-  runBtn.addEventListener("click",function(){
+  // Shared by every filter input, including #fIdentity once it exists -- extracted so the
+  // identity <select>, which is only added to the DOM after fetchBjumpIdentities() resolves
+  // (below), can wire the exact same invalidate-on-change behaviour the static inputs get from
+  // the querySelectorAll sweep further down.
+  function invalidatePreview(){
+    lastMatches=null;
+    dlBtn.disabled=true;
+    dlBtn.title="Click \"Preview matches\" first";
+    statusEl.textContent="";
+    UJ.stepthrough.initStepThrough(null);
+  }
+  function runPreview(){
     lastMatches=runFilterBjump();
     const n=lastMatches.length;
     statusEl.textContent=n===0?"No matching nuclei — adjust filters.":
@@ -1603,7 +1669,13 @@ function buildColumnsBjump(){
     dlBtn.disabled=n===0;
     dlBtn.title=n===0?"No matches to download":"";
     UJ.stepthrough.initStepThrough(lastMatches);
-  });
+  }
+  /* Preview never waits on the identity fetch: the #fIdentity <select> is only added to the DOM
+     once fetchBjumpIdentities() resolves (below), so a user cannot even select an identity filter
+     before then -- runFilterBjump() reading a nonexistent #fIdentity is already the correct
+     "not filtering by this yet" behaviour. Gating this button on the fetch would instead make
+     ALL filter dimensions wait on a slow or unreachable backend, not just the identity one. */
+  runBtn.addEventListener("click",runPreview);
   dlBtn.addEventListener("click",function(){
     if(!lastMatches||!lastMatches.length||typeof XLSX==="undefined")return;
     const cols=buildColumnsBjump();
@@ -1618,13 +1690,50 @@ function buildColumnsBjump(){
   document.querySelectorAll("#filterCard input, #filterCard select").forEach(function(el){
     el.addEventListener("change",function(){
       if(el===runBtn||el===dlBtn)return;
-      lastMatches=null;
-      dlBtn.disabled=true;
-      dlBtn.title="Click \"Preview matches\" first";
-      statusEl.textContent="";
-      UJ.stepthrough.initStepThrough(null);
+      invalidatePreview();
     });
   });
+
+  /* Identity dropdown (2026-08-19). Fetched eagerly, not lazily on first Preview click: at 220
+     rows the read is cheap, and building the option list needs the data anyway -- a dropdown a
+     user can open before it has any options is worse than a short "loading" message. Options are
+     the DISTINCT current_identity values actually present, so there is no risk of the list
+     drifting out of sync with what canSubmitName()/upsertMasterCellRow() actually write, and no
+     separate canonicalization pass is needed when matching in runFilterBjump() -- the value
+     compared against is exactly the value it was built from.
+
+     Named (not an anonymous .then() callback) and exposed on window so bjumpcheck.js can rebuild
+     it on demand after swapping in a mocked fetch and resetting IDENTITY_BY_NID/IDENTITY_FETCH --
+     the eager call fires once at real page load against whatever fetch existed at THAT moment,
+     and resetting the cache alone can't reach back into an already-in-flight .then() chain. Same
+     testability pattern as window.__ujumpActivateTab. */
+  function buildIdentityDropdown(){
+    if(!identBox)return;
+    identBox.innerHTML='<p class="hint" style="margin-top:0">Loading current community identities from the Master cell list&hellip;</p>';
+    fetchBjumpIdentities().then(function(){
+      const counts={}; let unclassified=0;
+      for(let i=0;i<N;i++){
+        const cur=bjumpIdentityOf(i);
+        if(!cur){ unclassified++; continue; }
+        counts[cur]=(counts[cur]||0)+1;
+      }
+      const named=Object.keys(counts).sort(function(a,b){return a.localeCompare(b);});
+      let h='<select id="fIdentity" style="width:100%">';
+      h+='<option value="">Not filtering by this</option>';
+      h+='<option value="'+BJUMP_UNCLASSIFIED_SENTINEL+'">Unclassified ('+unclassified+')</option>';
+      named.forEach(function(name){
+        h+='<option value="'+escHtml(name)+'">'+escHtml(name)+' ('+counts[name]+')</option>';
+      });
+      h+='</select>';
+      identBox.innerHTML=h;
+      const identEl=document.getElementById("fIdentity");
+      if(identEl) identEl.addEventListener("change",invalidatePreview);
+    }).catch(function(){
+      identBox.innerHTML='<p class="hint" style="margin-top:0;color:var(--warn)">Could not load community identities right now &mdash; the other filters below still work. Try reloading the page to retry.</p>';
+    });
+  }
+  buildIdentityDropdown();
+  window.__bjumpBuildIdentityDropdown=buildIdentityDropdown;
 })();
 
 </script>
