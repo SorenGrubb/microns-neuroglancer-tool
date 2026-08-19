@@ -377,6 +377,8 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
+<button type="button" class="tabbtn" data-tab="references" role="tab" aria-selected="false">📚 References</button>
+<button type="button" class="tabbtn" data-tab="dashboard" role="tab" aria-selected="false" title="Charts built from this page's own data plus the community backend — the charting library loads only when you open this tab">📊 Statistics dashboard</button>
 </div>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
@@ -461,7 +463,7 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 
 <div class="tabpanel active" data-tabpanel="jump">
 <div class="card">
-<div class="units" id="units"><button data-u="voxel" class="on">voxels (<span id="unitres"></span>)</button><button data-u="nm">nanometres</button><button data-u="um">micrometres</button></div>
+<div class="units" id="units"><span style="font-size:12px;color:var(--mut)">Coordinates in voxels (<span id="unitres"></span>)</span></div>
 <label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; jump to it in the Alzheimer's volume and identify the nearest nucleus</span></label>
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Find the nearest nucleus">&#8594;</button></div>
 <p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.
@@ -566,6 +568,53 @@ recorded.</p>
 <p class="hint" id="filterStatus" style="margin-top:10px"></p>
 </div>
 </div><!-- /filter tabpanel -->
+
+<div class="tabpanel" data-tabpanel="references">
+<div class="card">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">References</div>
+
+<p class="hint" style="margin-top:8px"><b>The dataset.</b> Han, Wei <i>et al.</i>, volumetric correlative light and electron microscopy (vCLEM) of hippocampal CA1 in a one-year-old 3&times;Tg Alzheimer&rsquo;s mouse &mdash; <a class="ref" href="https://www.biorxiv.org/content/10.1101/2023.10.24.563674v4.full" target="_blank" rel="noopener">bioRxiv 2023.10.24.563674</a>, <a class="ref" href="https://pubmed.ncbi.nlm.nih.gov/37961104/" target="_blank" rel="noopener">PMID&nbsp;37961104</a>. Every nucleus position, segment ID, and pTau/A&beta;/CD11b/GFAP marker reading in this tool comes from that release. Synapses are also segmented in this dataset (a &ldquo;Synapse_supervised_learning&rdquo; layer, ~3.5&nbsp;million instances), but published only as a Neuroglancer segmentation with no query API or synapse&rarr;cell partner table &mdash; unlike &micro;Jump&rsquo;s CAVE-backed Connectivity panel, there is currently no way to ask this dataset &ldquo;which synapses does cell X have,&rdquo; only to look at them by eye.</p>
+
+<p class="hint" style="margin-top:14px"><b>This dataset publishes no cell types.</b> There is no classifier to agree or disagree with here &mdash; every identity in the Filter/Dashboard tabs is a community call, made through the same guided decision tree &micro;Jump uses. Perisomatic ultrastructure as a classification method: <a class="ref" href="https://doi.org/10.1038/s41586-024-07765-7" target="_blank" rel="noopener">Elabbady <i>et al.</i>, &ldquo;Perisomatic ultrastructure efficiently classifies cells in mouse cortex,&rdquo; Nature 640, 478&ndash;486 (2025)</a>.</p>
+<p class="hint">Brain ultrastructure overview: <a class="ref" href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/" target="_blank" rel="noopener">&ldquo;Brain Ultrastructure: Putting the Pieces Together,&rdquo; PMC7930431</a>.</p>
+<p class="hint">Neurovascular volume EM: <a class="ref" href="https://doi.org/10.3389/fcell.2022.849469" target="_blank" rel="noopener">&ldquo;Public Volume Electron Microscopy Data: An Essential Resource to Study the Brain Microvasculature,&rdquo; Frontiers in Cell and Developmental Biology 10, 849469 (2022)</a>.</p>
+<p class="hint">EM ultrastructure teaching atlas (organelle and immune-cell morphology, not a peer-reviewed source &mdash; use it to learn to recognise structures, not to cite a claim): <a class="ref" href="http://www.drjastrow.de/WAI/EM/EMAtlas.html" target="_blank" rel="noopener">Jastrow&rsquo;s EM Atlas</a>.</p>
+
+<p class="hint" style="margin-top:14px"><b>Hippocampal CA1 anatomy.</b> This volume has no cortical layers to classify by (see the Jump tab) &mdash; each nucleus instead carries a signed distance from the fitted stratum pyramidale, used throughout the Filter and Dashboard tabs. Deep-vs-superficial CA1 pyramidal cell diversity: <a class="ref" href="https://doi.org/10.1038/s41593-018-0118-0" target="_blank" rel="noopener">Soltesz &amp; Losonczy, &ldquo;CA1 pyramidal cell diversity enabling parallel information processing in the hippocampus,&rdquo; Nature Neuroscience 21, 484&ndash;493 (2018)</a>, <a class="ref" href="https://pubmed.ncbi.nlm.nih.gov/29593317/" target="_blank" rel="noopener">PMID&nbsp;29593317</a>. This dataset&rsquo;s own oriens/radiatum sidedness is deliberately left unconfirmed &mdash; see the guided-ID tree&rsquo;s own note on that.</p>
+<p class="hint">Hippocampal interneuron classification by axon target (basket/axo-axonic, O-LM, bistratified, etc.), the framework this tool&rsquo;s guided tree uses for CA1: <a class="ref" href="https://doi.org/10.1126/science.1149381" target="_blank" rel="noopener">Klausberger &amp; Somogyi, &ldquo;Neuronal Diversity and Temporal Dynamics: The Unity of Hippocampal Circuit Operations,&rdquo; Science 321, 53&ndash;57 (2008)</a>, free full text at <a class="ref" href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4487503/" target="_blank" rel="noopener">PMC4487503</a>.</p>
+
+<p class="hint" style="margin-top:14px"><b>Read these before trusting a number.</b> Nuclei come from automatic blob detection on the Hoechst channel &mdash; positions are approximate, correctable from each cell&rsquo;s own panel. Only about half the imaged block is segmented (secgan16), so many nuclei have no segment and no 3D mesh; that gap is anatomically biased towards one side of the pyramidal layer. The slab is only ~25&nbsp;&micro;m thick, so roughly a quarter of nuclei are cut by a top/bottom face and their volumes are underestimates. <b>Cell contacts are mesh surface proximity, not synapses</b> &mdash; see the note on synapse access above.</p>
+</div>
+</div><!-- /references tabpanel -->
+
+<div class="tabpanel" data-tabpanel="dashboard">
+<div class="card">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Statistics dashboard</div>
+<p class="hint" style="margin-top:6px">Charts built from the <span id="dashTotal"></span> nuclei embedded in this page, plus one bulk read of the community&rsquo;s current identifications (the same read the Filter tab&rsquo;s identity dropdown uses). The charting library only loads once this tab is opened.</p>
+<p class="hint" style="margin-top:6px">This dataset has no published cell types, so unlike &micro;Jump&rsquo;s dashboard every chart here is keyed on <b>current community identity</b> &mdash; a live consensus that can still change as more people classify. The six most-identified names get their own bucket; anything else named folds into &ldquo;Other&rdquo;, and every nucleus nobody has classified yet is &ldquo;Unclassified&rdquo;.</p>
+</div>
+
+<div class="card"><label>Nuclei per community identity</label><div id="dIdentity" style="height:340px"></div></div>
+
+<div class="card"><label>CD11b (microglia) shell reading, by community identity</label>
+<p class="hint" style="margin-top:0">Percentile rank of the shell marker reading among all 220 nuclei (see the Jump tab&rsquo;s own note on why the shell, not the nucleus, reading is the informative one). A marker is evidence towards an identity, never an identity itself.</p>
+<div id="dMarker_mg" style="height:340px"></div></div>
+<div class="card"><label>pTau shell reading, by community identity</label><div id="dMarker_tau" style="height:340px"></div></div>
+<div class="card"><label>Amyloid-&beta; shell reading, by community identity</label><div id="dMarker_ab" style="height:340px"></div></div>
+
+<div class="card"><label>Community identity, by distance from pyramidale</label>
+<p class="hint" style="margin-top:0">Which side is oriens and which is radiatum is not confirmed for this volume (see the References tab) &mdash; read the sign as a geometric fact, not an anatomical label.</p>
+<div id="dIdentityPy" style="height:400px"></div></div>
+
+<div class="card"><label>Nearest-neighbour identity composition</label>
+<p class="hint" style="margin-top:0">For each identity (rows), what its single nearest neighbouring nucleus turns out to be (columns), as a percentage of that row. All 220 nuclei are used &mdash; no sampling needed at this size.</p>
+<div id="dIdentityNeighbor" style="height:400px"></div></div>
+
+<div class="card"><label>Distance-from-pyramidale profile, by community identity</label>
+<p class="hint" style="margin-top:0">Each panel is one identity&rsquo;s own distribution as a percentage of that identity, so a rarely-used identity is still readable next to a common one &mdash; same form as &eta;Jump&rsquo;s cortical depth profile, with distance from the fitted stratum pyramidale standing in for cortical depth.</p>
+<div id="dIdentityPyProfile"></div></div>
+
+</div><!-- /dashboard tabpanel -->
 
 </div><!-- /wrap -->
 
@@ -1846,19 +1895,11 @@ function wireCorrection(i){
 }
 
 /* ── input ──────────────────────────────────────────────────────────────────────────── */
-let unit="voxel";
-const unitsEl=document.getElementById("units");
-[...unitsEl.children].forEach(function(btn){
-  btn.addEventListener("click",function(){
-    unit=btn.dataset.u;
-    [...unitsEl.children].forEach(c=>c.classList.toggle("on",c===btn));
-  });
-});
-function toVoxels(x,y,z){
-  if(unit==="voxel")return[x,y,z];
-  if(unit==="nm")return[x/UJ_RX,y/UJ_RY,z/UJ_RZ];
-  return[x*(1000/UJ_RX),y*(1000/UJ_RY),z*(1000/UJ_RZ)];
-}
+/* 2026-08-19 (Søren: "we can drop the micrometers and nanometers") -- unlike µJump/ηJump,
+   βJump's coordinate box never offered anything but voxels in practice (the #units markup is now
+   a plain label, not a toggle -- see build_bjump.py's HEAD), so toVoxels() is the identity
+   function, kept only so doJump() below reads the same either way. */
+function toVoxels(x,y,z){ return [x,y,z]; }
 document.getElementById("x").addEventListener("paste",function(ev){
   const t=(ev.clipboardData||window.clipboardData).getData("text")||"";
   const p=t.trim().split(/[\s,;]+/).filter(Boolean);
@@ -2168,5 +2209,217 @@ function buildColumnsBjump(){
      back blank for this one export, which is a safe, honest degrade, not a wrong answer. */
   fetchBjumpFixes().catch(function(){});
 })();
+
+/* ============================================================================================
+   Statistics dashboard (2026-08-19, Søren: "add references tab and a statistical dashboard
+   where we have similar community input graphs as in µJump"). Unlike µJump's dashboard, this
+   dataset has no published cell type, so every chart here is keyed on CURRENT COMMUNITY
+   IDENTITY (the same field the Filter tab's identity dropdown reads) instead. And unlike
+   µJump's Connectivity charts, there is currently no synapse-count data to chart here at all --
+   this dataset's synapses are published as a Neuroglancer segmentation with no query API and no
+   synapse->cell partner table (see the References tab's own note), so a "soma volume vs synapse
+   count" chart is not yet possible and is deliberately not attempted here.
+
+   Tab wiring: core/stepthrough.js's wireTabs() (shared with µJump/ηJump) already special-cases
+   a tab literally named "dashboard" -- clicking it calls ensureConnPlotly() then
+   initDashboardTab(), both typeof-guarded so every OTHER tab keeps working even if this whole
+   block were absent. That is why the tab bar markup in build_bjump.py uses data-tab="dashboard"
+   rather than hjump's own "dash". */
+let _bjumpPlotlyLoadPromise=null;
+function ensureConnPlotly(){
+  if(window.Plotly)return Promise.resolve();
+  if(_bjumpPlotlyLoadPromise)return _bjumpPlotlyLoadPromise;
+  _bjumpPlotlyLoadPromise=new Promise(function(resolve,reject){
+    const s=document.createElement("script");
+    s.src="https://cdn.plot.ly/plotly-2.35.2.min.js";
+    s.onload=function(){resolve();};
+    s.onerror=function(){reject(new Error("Failed to load Plotly from cdn.plot.ly"));};
+    document.head.appendChild(s);
+  });
+  return _bjumpPlotlyLoadPromise;
+}
+/* Same page accent used everywhere else on βJump (build_bjump.py's ACCENT_OVERRIDE) -- a lone
+   series wears the page's own identity colour rather than a generic categorical hue, same
+   convention hJump's dashboard uses for its own single-series charts. */
+function bjumpDashOneColor(){ return currentTheme()==="light" ? "#a4133c" : "#ff6b81"; }
+/* Sequential blue ramp for the two heatmaps (magnitude: cell counts, % of row) -- one hue,
+   monotonic lightness, light->dark on the light surface and dark->light on the dark one (same
+   inversion hJump's own ramp() uses, for the same reason: "near zero" has to recede toward
+   whichever surface colour is actually behind it). Steps are the dataviz skill's own validated
+   sequential-blue family (references/palette.md); the two darkest dark-mode anchors extend that
+   same hue down toward this page's near-black panel background. */
+function bjumpDashSeqRamp(){
+  return currentTheme()==="light"
+    ? [[0,"#eef4fc"],[0.17,"#cde2fb"],[0.33,"#9ec5f4"],[0.5,"#6da7ec"],[0.67,"#3987e5"],[0.83,"#1c5cab"],[1,"#0d366b"]]
+    : [[0,"#0d2440"],[0.17,"#123258"],[0.33,"#184f95"],[0.5,"#1c5cab"],[0.67,"#2a78d6"],[0.83,"#5598e7"],[1,"#9ec5f4"]];
+}
+const BJUMP_DASH_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d","autoScale2d"]};
+/* Object.assign is shallow -- merge one level into xaxis/yaxis so a caller overriding just a
+   title doesn't silently drop gridcolor (same fix hJump's own layout() applies, for the same
+   reason). Colours are read fresh (liveThemeColors()) at every draw call, not baked once, so a
+   redraw after a theme toggle picks up the new theme -- though note (same as µJump/ηJump) that
+   toggling theme WITHOUT a redraw only re-tints font/grid/hoverlabel via retintPlotlyCharts();
+   marker/colorscale colours stay whatever they were at last draw, matching existing precedent. */
+function bjumpDashLayout(extra){
+  const c=liveThemeColors();
+  const base={
+    margin:{l:64,r:14,t:10,b:80},
+    font:{family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:c.ink},
+    paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
+    showlegend:false,
+    hoverlabel:{bgcolor:c.panel,bordercolor:c.line,font:{color:c.ink}},
+    xaxis:{automargin:true,gridcolor:c.line,zeroline:false,tickangle:-30},
+    yaxis:{automargin:true,gridcolor:c.line,zeroline:false}
+  };
+  const out=Object.assign({},base,extra||{});
+  ["xaxis","yaxis"].forEach(function(k){ if(extra&&extra[k]) out[k]=Object.assign({},base[k],extra[k]); });
+  return out;
+}
+function bjumpDashPlot(id,traces,extra){
+  const el=document.getElementById(id); if(!el)return;
+  Plotly.react(el,traces,bjumpDashLayout(extra),BJUMP_DASH_CFG);
+}
+
+const BJUMP_DASH_TOP_IDENTITIES=6; // named identities get their own bucket; anything past this
+    // (by count) folds into "Other" -- an unbounded set of free-text community identities cannot
+    // each get their own categorical slot (see the dataviz skill's own "9th series" rule), and
+    // βJump's identities are free text, not a fixed taxonomy like µJump's cell types.
+let BDASH=null;
+/* Reads bjumpIdentityOf() (already populated by fetchBjumpIdentities(), called before this) and
+   builds every aggregate the charts below need, once. */
+function bjumpDashAggregate(){
+  const counts={};
+  for(let i=0;i<N;i++){ const cur=bjumpIdentityOf(i); counts[cur]=(counts[cur]||0)+1; }
+  const named=Object.keys(counts).filter(function(k){return k;}).sort(function(a,b){return counts[b]-counts[a];});
+  const top=named.slice(0,BJUMP_DASH_TOP_IDENTITIES);
+  const otherNamed=named.slice(BJUMP_DASH_TOP_IDENTITIES);
+  const otherCount=otherNamed.reduce(function(s,k){return s+counts[k];},0);
+  const unclassifiedCount=counts[""]||0;
+  const order=top.slice();
+  if(otherCount) order.push("Other");
+  if(unclassifiedCount) order.push("Unclassified");
+  function identityBucket(i){
+    const cur=bjumpIdentityOf(i);
+    if(!cur) return "Unclassified";
+    return top.indexOf(cur)>=0 ? cur : "Other";
+  }
+  const perBucket={};
+  order.forEach(function(b){ perBucket[b]=b==="Unclassified"?unclassifiedCount:(b==="Other"?otherCount:counts[b]); });
+  const byMarker={}; MARKERS.forEach(function(m){ byMarker[m.key]={}; order.forEach(function(b){byMarker[m.key][b]=[];}); });
+  const byPy={}; order.forEach(function(b){byPy[b]=[];});
+  for(let i=0;i<N;i++){
+    const b=identityBucket(i);
+    MARKERS.forEach(function(m){ const v=m.shellArr[i]; if(v>=0) byMarker[m.key][b].push(pct(m,v)); });
+    byPy[b].push(BPY[i]);
+  }
+  BDASH={counts:counts,order:order,identityBucket:identityBucket,perBucket:perBucket,byMarker:byMarker,byPy:byPy};
+}
+/* Equal-width bins spanning this dataset's actual BPY range -- not a fixed ±µm guess, since the
+   fitted-plane distance's real spread isn't a round number. */
+function bjumpDashPyBins(nbins){
+  let lo=Infinity,hi=-Infinity;
+  for(let i=0;i<N;i++){ if(BPY[i]<lo)lo=BPY[i]; if(BPY[i]>hi)hi=BPY[i]; }
+  const bins=nbins||6, w=(hi-lo)/bins||1;
+  return {lo:lo,hi:hi,bins:bins,w:w};
+}
+function bjumpDashIdentityPyHeatmap(){
+  const order=BDASH.order, py=bjumpDashPyBins(6);
+  const labels=[]; for(let k=0;k<py.bins;k++){
+    const a=py.lo+k*py.w, b=py.lo+(k+1)*py.w;
+    labels.push((a>=0?"+":"")+a.toFixed(0)+" to "+(b>=0?"+":"")+b.toFixed(0));
+  }
+  const z=order.map(function(){return new Array(py.bins).fill(0);});
+  for(let i=0;i<N;i++){
+    const bi=order.indexOf(BDASH.identityBucket(i));
+    let bin=Math.floor((BPY[i]-py.lo)/py.w); if(bin>=py.bins)bin=py.bins-1; if(bin<0)bin=0;
+    z[bi][bin]++;
+  }
+  return {z:z,labels:labels};
+}
+/* Every nucleus's own single nearest neighbour, bucketed by identity on both sides -- N=220, so
+   this is a plain O(N·k) pass (kNearest is itself O(N) per call) with no sampling needed, unlike
+   µJump/ηJump's own neighbour-composition charts at 150k/47k cells. */
+function bjumpDashNeighborMatrix(){
+  const order=BDASH.order, idx={}; order.forEach(function(b,k){idx[b]=k;});
+  const mat=order.map(function(){return order.map(function(){return 0;});});
+  for(let i=0;i<N;i++){
+    const nb=kNearest(BX[i],BY[i],BZ[i],1,i);
+    if(!nb.length)continue;
+    const a=idx[BDASH.identityBucket(i)], b=idx[BDASH.identityBucket(nb[0].i)];
+    mat[a][b]++;
+  }
+  return mat.map(function(row){
+    const s=row.reduce(function(x,y){return x+y;},0);
+    return s?row.map(function(v){return 100*v/s;}):row;
+  });
+}
+function bjumpDashDraw(){
+  const one=bjumpDashOneColor(), order=BDASH.order;
+
+  // 1. nuclei per community identity -- magnitude, one series, no legend needed
+  bjumpDashPlot("dIdentity",[{type:"bar",x:order,y:order.map(function(b){return BDASH.perBucket[b];}),
+    marker:{color:one},hovertemplate:"%{x}<br>%{y} nuclei<extra></extra>"}],
+    {yaxis:{title:{text:"nuclei"}}});
+
+  // 2/3/4. marker shell-percentile distributions, one box plot per marker, boxed by identity
+  MARKERS.forEach(function(m){
+    const rows=order.filter(function(b){return BDASH.byMarker[m.key][b].length;});
+    bjumpDashPlot("dMarker_"+m.key,rows.map(function(b){return{type:"box",name:b,y:BDASH.byMarker[m.key][b],
+      marker:{color:one},line:{width:1.5},boxpoints:false,
+      hovertemplate:"%{x}<br>median %{median}th pct<extra></extra>"};}),
+      {yaxis:{title:{text:m.label+" shell percentile"},range:[0,100]}});
+  });
+
+  // 5. identity x distance-from-pyramidale -- magnitude across two categories: a heatmap
+  const py=bjumpDashIdentityPyHeatmap();
+  bjumpDashPlot("dIdentityPy",[{type:"heatmap",x:py.labels,y:order,z:py.z,
+    colorscale:bjumpDashSeqRamp(),hovertemplate:"%{y}<br>%{x} µm from pyramidale<br>%{z} nuclei<extra></extra>",
+    colorbar:{title:{text:"nuclei"},thickness:10,outlinewidth:0}}],
+    {margin:{l:150,r:14,t:10,b:70},xaxis:{tickangle:0,gridcolor:"rgba(0,0,0,0)"},yaxis:{gridcolor:"rgba(0,0,0,0)"}});
+
+  // 6. nearest-neighbour identity composition -- row-normalised, so a rarely-used identity stays readable
+  const nb=bjumpDashNeighborMatrix();
+  bjumpDashPlot("dIdentityNeighbor",[{type:"heatmap",x:order,y:order,z:nb,zmin:0,
+    colorscale:bjumpDashSeqRamp(),hovertemplate:"%{y} → nearest is %{x}<br>%{z:.1f}% of them<extra></extra>",
+    colorbar:{title:{text:"% of row"},thickness:10,outlinewidth:0}}],
+    {margin:{l:150,r:14,t:10,b:110},xaxis:{gridcolor:"rgba(0,0,0,0)"},yaxis:{gridcolor:"rgba(0,0,0,0)"}});
+
+  // 7. distance-from-pyramidale profile, by identity -- small multiples. As many identities as
+  // there are cannot be as many lines on one axis (no ten-hue set survives colour-vision checks
+  // either), so each identity gets its own faceted panel, same form hJump's cortical-depth-
+  // profile chart uses.
+  const cols=3, rows2=Math.ceil(order.length/cols), traces=[], ann=[];
+  const pyb=bjumpDashPyBins(24), bins2=pyb.bins, w2=pyb.w, lo=pyb.lo;
+  order.forEach(function(b,k){
+    const h=new Array(bins2).fill(0);
+    BDASH.byPy[b].forEach(function(d){ const bi=Math.floor((d-lo)/w2); if(bi>=0&&bi<bins2)h[bi]++; });
+    const tot=BDASH.byPy[b].length||1;
+    const ax=k?String(k+1):"";
+    traces.push({type:"scatter",mode:"lines",x:h.map(function(_,bi){return lo+(bi+0.5)*w2;}),
+      y:h.map(function(v){return 100*v/tot;}),
+      line:{color:one,width:2},fill:"tozeroy",fillcolor:one+"33",xaxis:"x"+ax,yaxis:"y"+ax,
+      hovertemplate:b+"<br>%{x:.0f} µm<br>%{y:.1f}%<extra></extra>"});
+    ann.push({text:b+" ("+BDASH.perBucket[b]+")",xref:"x"+ax+" domain",yref:"y"+ax+" domain",
+      x:0.5,y:1.08,showarrow:false,font:{size:10}});
+  });
+  const gl={grid:{rows:rows2,columns:cols,pattern:"independent",roworder:"top to bottom",xgap:0.14,ygap:0.32},
+    annotations:ann,margin:{l:50,r:14,t:22,b:40},height:170*rows2};
+  for(let k=0;k<order.length;k++){
+    const ax=k?String(k+1):"";
+    gl["xaxis"+ax]={showgrid:false,zeroline:false,title:k>=order.length-cols?{text:"µm from pyramidale",font:{size:10}}:undefined};
+    gl["yaxis"+ax]={gridcolor:"rgba(0,0,0,0)",zeroline:false,title:k%cols===0?{text:"% of that identity",font:{size:10}}:undefined};
+  }
+  bjumpDashPlot("dIdentityPyProfile",traces,gl);
+}
+let __bjumpDashInited=false;
+function initDashboardTab(){
+  if(__bjumpDashInited)return; __bjumpDashInited=true;
+  const totalEl=document.getElementById("dashTotal"); if(totalEl)totalEl.textContent=fmt(N);
+  fetchBjumpIdentities().then(function(){
+    bjumpDashAggregate();
+    bjumpDashDraw();
+  });
+}
+
 </script>
 </body></html>
