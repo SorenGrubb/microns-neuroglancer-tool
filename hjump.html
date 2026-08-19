@@ -356,6 +356,13 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .leaf-search-item:last-child{border-bottom:none}
 .leaf-search-item:hover,.leaf-search-item.hi{background:var(--accent-dim);color:var(--accent)}
 .leaf-search-empty{padding:8px 12px;font-size:12px;color:var(--mut);font-style:italic}
+
+/* ===== ηJump: orange accent ======================================================
+   Injected by build_hjump.py INSIDE this stylesheet, not as a second <style> block, so the
+   page keeps exactly one style element and any future edit to µJump's CSS flows through. */
+:root{--accent:#ffb454;--accent-dim:#4a2f10;--on-accent:#241503}
+:root[data-theme="light"]{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}
+@media print{:root{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}}
 </style>
 </head><body>
 <div class="wrap">
@@ -742,8 +749,8 @@ function showCell(i, distNm){
   h+='<span style="display:inline-block;min-width:150px">spininess <b>'+HSP[i].toFixed(3)+'</b></span></div>';
 
   h+='<div class="row" style="margin-top:14px">'
-    +'<button id="meshbtn" style="flex:1;min-width:170px">Download 3D mesh (.glb)</button>'
-    +'<button id="pptxbtn" style="flex:1;min-width:170px">Download PowerPoint</button></div>';
+    +'<button class="idbtn" id="meshbtn" style="flex:1;min-width:170px">Download 3D mesh (.glb)</button>'
+    +'<button class="idbtn" id="pptxbtn" style="flex:1;min-width:170px">Download PowerPoint</button></div>';
   h+='<p class="hint" id="meshmsg"></p>';
 
   /* The community identification block and the combined change/audit trail, both core/panel.js. */
@@ -766,7 +773,7 @@ function showCell(i, distNm){
   h+='<label style="margin-top:16px;display:block">Is this really one cell?</label>';
   h+='<p class="hint" style="margin-top:0">H01\'s own caveats note that 1,468 c3 segments contain '
     +'more than one soma &mdash; if this looks like it, say so and the community consensus decides.</p>';
-  h+='<div class="row"><button id="fixmerged" style="flex:1">Actually several cells&hellip;</button></div>';
+  h+='<div class="row"><button class="idbtn" id="fixmerged" style="flex:1">Actually several cells&hellip;</button></div>';
   h+='<p class="hint" id="fixmsg"></p>';
 
   h+='<button class="jump" id="jumphere">Jump to this cell &#8599;</button>';
@@ -930,9 +937,9 @@ function renderResult(slug){
     +'color:var(--mut);margin-top:12px">Comments (optional)</label>'
     +'<textarea id="idfComment" placeholder="e.g. ambiguous ultrastructure, could also be X..."></textarea>';
   h+='<div class="row" style="margin-top:10px">'
-    +'<button id="idsubmit" style="flex:1" disabled title="Select a certainty rating first">'
+    +'<button class="idbtn" id="idsubmit" style="flex:1" disabled title="Select a certainty rating first">'
     +(agrees?"Confirm this identification":disagrees?"Submit correction":"Contribute this identification")+'</button>'
-    +'<button id="idrestart" style="flex:0 0 auto">Start over</button></div>';
+    +'<button class="idbtn" id="idrestart" style="flex:0 0 auto">Start over</button></div>';
   h+='<p class="hint" id="idmsg"></p>';
   box.innerHTML=h;
 

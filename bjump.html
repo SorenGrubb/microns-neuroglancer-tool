@@ -1000,9 +1000,9 @@ function showCell(i, distNm){
      Disable rather than let the download fail with a 404 the user cannot act on. */
   const dis=hasMesh(i)?"":" disabled";
   h+='<div class="row" style="margin-top:14px">'
-    +'<button id="meshbtn" style="flex:1;min-width:150px"'+dis+'>&#8681; 3D model</button>'
-    +'<button id="pptxbtn" style="flex:1;min-width:150px"'+dis+'>&#8681; PowerPoint</button>'
-    +'<button id="volbtn"  style="flex:1;min-width:150px"'+dis+'>Compute volume</button></div>';
+    +'<button class="idbtn" id="meshbtn" style="flex:1;min-width:150px"'+dis+'>&#8681; 3D model</button>'
+    +'<button class="idbtn" id="pptxbtn" style="flex:1;min-width:150px"'+dis+'>&#8681; PowerPoint</button>'
+    +'<button class="idbtn" id="volbtn"  style="flex:1;min-width:150px"'+dis+'>Compute volume</button></div>';
   h+='<p class="hint" id="meshmsg">'
     +(hasMesh(i)?"":"No mesh for this nucleus — it lies outside the segmented sub-volume, "
                    +"which covers only about half the imaged block.")+'</p>';
@@ -1040,10 +1040,10 @@ function showCell(i, distNm){
     +'community consensus decides.</p>';
   h+='<div class="row"><div class="coord" style="flex:2"><input type="text" id="fixcoord" '
     +'placeholder="corrected x, y, z (voxels)"></div>'
-    +'<button id="fixmove" style="flex:1">Move it here</button></div>';
+    +'<button class="idbtn" id="fixmove" style="flex:1">Move it here</button></div>';
   h+='<div class="row" style="margin-top:6px">'
-    +'<button id="fixmerged" style="flex:1">Actually several nuclei&hellip;</button>'
-    +'<button id="fixsplit" style="flex:1">Not a nucleus&hellip;</button></div>';
+    +'<button class="idbtn" id="fixmerged" style="flex:1">Actually several nuclei&hellip;</button>'
+    +'<button class="idbtn" id="fixsplit" style="flex:1">Not a nucleus&hellip;</button></div>';
   h+='<p class="hint" id="fixmsg"></p><div id="fixstatus"></div>';
 
   /* The 4th way, per bjump-spec §6: a real nucleus the detector missed entirely, so there is no
@@ -1062,7 +1062,7 @@ function showCell(i, distNm){
     +'detection at all here &mdash; this does not need to be near the cell above.</p>';
   h+='<div class="row"><div class="coord" style="flex:2"><input type="text" id="newnuccoord" '
     +'placeholder="missed nucleus x, y, z (voxels)"></div>'
-    +'<button id="fixnew" style="flex:1">Add a missed nucleus</button></div>';
+    +'<button class="idbtn" id="fixnew" style="flex:1">Add a missed nucleus</button></div>';
   h+='<div class="row" style="margin-top:6px"><input type="text" id="newnuccomment" '
     +'placeholder="comment (optional) — what it looks like" style="flex:1"></div>';
   h+='<p class="hint" id="fixnewmsg"></p>';
@@ -1290,8 +1290,8 @@ function renderResult(slug){
   h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;'
     +'color:var(--mut);margin-top:12px">Comments (optional)</label>'
     +'<textarea id="idfComment" placeholder="e.g. ambiguous ultrastructure, could also be X..."></textarea>';
-  h+='<div class="row" style="margin-top:10px"><button id="idsubmit" style="flex:1">Submit this identification</button>'
-    +'<button id="idrestart" style="flex:0 0 auto">Start over</button></div>';
+  h+='<div class="row" style="margin-top:10px"><button class="idbtn" id="idsubmit" style="flex:1">Submit this identification</button>'
+    +'<button class="idbtn" id="idrestart" style="flex:0 0 auto">Start over</button></div>';
   h+='<p class="hint" id="idmsg"></p>';
   box.innerHTML=h;
 
