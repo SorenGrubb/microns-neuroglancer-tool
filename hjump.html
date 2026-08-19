@@ -597,13 +597,16 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 <div class="tabpanel" data-tabpanel="filter">
 <div class="card" id="filterCard">
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Filter and show</div>
-<p class="hint" style="margin-top:6px">Applied to the <span id="filterTotal"></span> cells embedded in this page, entirely in your browser &mdash; nothing is fetched. Leave a section untouched to ignore it.</p>
+<p class="hint" style="margin-top:6px">Applied to the <span id="filterTotal"></span> cells embedded in this page, mostly entirely in your browser. Leave a section untouched to ignore it. The one exception is current community identity, below, which reads the community's own reports the first time you open this tab.</p>
 
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px">Cell type</div>
 <div style="max-height:230px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterTypes"></div>
 
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="From H01's own cortical-layer volume where it covers the soma, otherwise from the published #L1..#WM tag.">Cortical layer</div>
 <div class="toggles" style="margin-top:4px" id="filterLayers"></div>
+
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="What the community's own guided-ID submissions currently say each cell is -- confirmations, disagreements and new identifications, most-recent-wins. Independent of H01's own published type above.">Current community identity</div>
+<div style="max-height:230px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterIdentity"><p class="hint" style="margin:0">Loading community identities&hellip;</p></div>
 
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px">Soma volume</div>
 <div class="row" style="gap:8px;align-items:center">
@@ -1699,6 +1702,71 @@ function wireLeafSearch(idPrefix,onSelect){
   input.addEventListener("blur",function(){ setTimeout(function(){ results.classList.remove("show"); },150); });
 }
 
+/* ── current community identity, bulk (2026-08-19) ───────────────────────────────────────
+   Filter-and-show's "current community identity" dimension needs, for every cell at once, what
+   the community's guided-ID submissions currently say it is. Every submission above already maps
+   onto µJump's own payload shape (nucleusId=cell body id, rootId=c3 segment id -- see the comment
+   on the submit handler), so Code.gs's generic upsertMasterCellRow() already writes each one into
+   THIS spreadsheet's own "Master cell list" sheet, the same as it does for µJump and βJump --
+   dataset-scoped via Datasets.gs's SS(), nothing hJump-specific needed server-side.
+
+   Reuses the exact same read branch βJump's Filter-and-show identity filter uses
+   (`?bjumpIdentities=1&ds=...`) -- despite the name, that function is fully dataset-generic: it
+   reads whatever spreadsheet SS() resolves to for the ds on the query string, so ds=hjump reads
+   H01's own sheet, never βJump's. No new backend code. null until the first fetch resolves; {}
+   (not null) once resolved with no rows. Keyed by cell body id (HSB[i]), same as every other
+   per-cell lookup on this page. */
+let HJUMP_IDENTITY_BY_NID=null, HJUMP_IDENTITY_FETCH=null;
+function fetchHjumpIdentities(){
+  if(HJUMP_IDENTITY_BY_NID) return Promise.resolve(HJUMP_IDENTITY_BY_NID);
+  if(HJUMP_IDENTITY_FETCH) return HJUMP_IDENTITY_FETCH;
+  HJUMP_IDENTITY_FETCH=fetch(REPORT_ENDPOINT+"?bjumpIdentities=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      const map={};
+      if(d&&d.ok&&Array.isArray(d.identities)){
+        d.identities.forEach(function(rec){ map[rec.nucleusId]=rec; });
+      }
+      HJUMP_IDENTITY_BY_NID=map;
+      return map;
+    })
+    .catch(function(){ HJUMP_IDENTITY_BY_NID={}; return HJUMP_IDENTITY_BY_NID; })
+    .then(function(map){ HJUMP_IDENTITY_FETCH=null; return map; });
+  return HJUMP_IDENTITY_FETCH;
+}
+const HJUMP_UNCLASSIFIED_SENTINEL="__unclassified__";
+function hjumpIdentityOf(i){
+  const rec=HJUMP_IDENTITY_BY_NID&&HJUMP_IDENTITY_BY_NID[HSB[i]];
+  return rec&&rec.current?String(rec.current).trim():"";
+}
+/* Builds the checkbox list once the fetch resolves -- same checkbox-set pattern filterTypes and
+   filterLayers already use, rather than a single-select dropdown, so a user can filter for
+   several identities at once exactly like they can for several cell types. */
+function buildIdentityFilterUI(){
+  const box=document.getElementById("filterIdentity"); if(!box)return;
+  fetchHjumpIdentities().then(function(){
+    const counts={}; let unclassified=0;
+    for(let i=0;i<N;i++){
+      const cur=hjumpIdentityOf(i);
+      if(!cur){ unclassified++; continue; }
+      counts[cur]=(counts[cur]||0)+1;
+    }
+    const named=Object.keys(counts).sort(function(a,b){ return a.localeCompare(b); });
+    let h='<label style="font-size:12px;display:flex;align-items:center;gap:6px">'
+      +'<input type="checkbox" class="fidentity" value="'+HJUMP_UNCLASSIFIED_SENTINEL+'" style="width:auto"> '
+      +'Unclassified <span class="nsub">'+fmt(unclassified)+'</span></label>';
+    h+=named.map(function(n){
+      return '<label style="font-size:12px;display:flex;align-items:center;gap:6px">'
+        +'<input type="checkbox" class="fidentity" value="'+escHtml(n)+'" style="width:auto"> '
+        +escHtml(n)+' <span class="nsub">'+fmt(counts[n])+'</span></label>'; }).join("");
+    box.innerHTML=named.length||unclassified
+      ? h
+      : '<p class="hint" style="margin:0">No community identifications recorded yet.</p>';
+  }).catch(function(){
+    box.innerHTML='<p class="hint" style="margin:0;color:var(--warn)">Could not load community identities right now &mdash; the other filters above still work.</p>';
+  });
+}
+
 /* ── identity voting ───────────────────────────────────────────────────────────────────── */
 /* Same backend contract as µJump: ?identityVotes=<id> to read, report type "vote_identity" to
    write. The id here is the CELL BODY id, matching what the guided-ID submit files under. */
@@ -2295,6 +2363,7 @@ function buildFilterUI(){
     +Object.keys(MORPH_LABEL).map(function(k){
       return '<option value="'+k+'">'+escHtml(MORPH_LABEL[k])+'</option>'; }).join("")
     +'<option value="__Sp">spininess</option>';
+  buildIdentityFilterUI();
 }
 
 function runFilter(){
@@ -2302,6 +2371,7 @@ function runFilter(){
   const num=function(id){ const v=parseFloat(($(id)||{}).value); return isFinite(v)?v:null; };
   const wantTypes=[].slice.call(document.querySelectorAll(".ftype:checked")).map(function(b){ return b.value; });
   const wantLayers=[].slice.call(document.querySelectorAll(".flayer:checked")).map(function(b){ return b.value; });
+  const wantIdentities=[].slice.call(document.querySelectorAll(".fidentity:checked")).map(function(b){ return b.value; });
   const vMin=num("filterVolMin"), vMax=num("filterVolMax");
   const mKey=($("filterMorphKey")||{}).value||"", mMin=num("filterMorphMin"), mMax=num("filterMorphMax");
   let boxes=[];
@@ -2316,11 +2386,17 @@ function runFilter(){
     }
     boxes=r.boxes;
   }
-  const tSet=wantTypes.length?new Set(wantTypes):null, lSet=wantLayers.length?new Set(wantLayers):null;
+  const tSet=wantTypes.length?new Set(wantTypes):null, lSet=wantLayers.length?new Set(wantLayers):null,
+        iSet=wantIdentities.length?new Set(wantIdentities):null;
   const rows=[];
   for(let i=0;i<N;i++){
     if(tSet&&!tSet.has(typeName(i)))continue;
     if(lSet&&!lSet.has(filterLayerOf(i)))continue;
+    if(iSet){
+      const cur=hjumpIdentityOf(i);
+      const key=cur||HJUMP_UNCLASSIFIED_SENTINEL;
+      if(!iSet.has(key))continue;
+    }
     const vol=HVB[i];
     if(vMin!==null&&vol<vMin)continue;
     if(vMax!==null&&vol>vMax)continue;
@@ -2333,7 +2409,7 @@ function runFilter(){
     rows.push(i);
   }
   FILTER.rows=rows;
-  FILTER.criteria={types:wantTypes,layers:wantLayers,vMin:vMin,vMax:vMax,
+  FILTER.criteria={types:wantTypes,layers:wantLayers,identities:wantIdentities,vMin:vMin,vMax:vMax,
                    morph:mKey,mMin:mMin,mMax:mMax,boxes:boxes};
   renderFilterResults();
 }
@@ -2439,14 +2515,15 @@ function downloadFilterExcel(){
   const morphKeys=Object.keys(MORPH_LABEL);
   const head=["Cell body ID","c3 segment ID","Cell type","Broad class","Layer (volume)",
     "Layer (published tag)","Layer estimated","Cortical depth (um)","Soma volume (um3)","Spininess",
-    "Voxel X","Voxel Y","Voxel Z","Paste coordinate","Modifiers"]
+    "Voxel X","Voxel Y","Voxel Z","Paste coordinate","Modifiers","Current community identity"]
     .concat(morphKeys.map(function(k){ return MORPH_LABEL[k]; }));
   const data=[head];
   rows.forEach(function(i){
     data.push([HSB[i],c3Id(i),longName(typeName(i)),classLabel(i),
       volLayer(i),tagLayer(i),estimateLayer(HX[i],HY[i]).layer,
       Math.round(depthUm(i)),Math.round(HVB[i]*10)/10,Math.round(HSP[i]*1000)/1000,
-      HX[i],HY[i],HZ[i],[HX[i],HY[i],HZ[i]].join(", "),modifiers(i).join(" ")]
+      HX[i],HY[i],HZ[i],[HX[i],HY[i],HZ[i]].join(", "),modifiers(i).join(" "),
+      hjumpIdentityOf(i)||"unclassified"]
       .concat(morphKeys.map(function(k){ return MORPH[k][i]; })));
   });
   const wb=XLSX.utils.book_new();
@@ -2461,6 +2538,7 @@ function downloadFilterExcel(){
     ["Dataset","H01 c3 (Shapson-Coe et al., Science 2024)"],
     ["Cell types",c.types&&c.types.length?c.types.join(", "):"any"],
     ["Cortical layers",c.layers&&c.layers.length?c.layers.join(", "):"any"],
+    ["Current community identity",c.identities&&c.identities.length?c.identities.join(", "):"any"],
     ["Soma volume min (um3)",c.vMin==null?"":c.vMin],
     ["Soma volume max (um3)",c.vMax==null?"":c.vMax],
     ["Morphology count",c.morph?(MORPH_LABEL[c.morph]||c.morph):"not used"],
@@ -2486,7 +2564,7 @@ function downloadFilterExcel(){
   run.addEventListener("click",runFilter);
   document.getElementById("filterXlsx").addEventListener("click",downloadFilterExcel);
   document.getElementById("filterReset").addEventListener("click",function(){
-    document.querySelectorAll(".ftype:checked,.flayer:checked").forEach(function(b){ b.checked=false; });
+    document.querySelectorAll(".ftype:checked,.flayer:checked,.fidentity:checked").forEach(function(b){ b.checked=false; });
     ["filterVolMin","filterVolMax","filterMorphMin","filterMorphMax"]
       .forEach(function(id){ const e=document.getElementById(id); if(e) e.value=""; });
     const host=document.getElementById("regionBoxes");
