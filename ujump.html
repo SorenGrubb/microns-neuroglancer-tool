@@ -405,6 +405,12 @@ UJ.cfg.mesh = {
   dracoWrapper:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
   dracoWasm:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
 };
+/* core/stepthrough.js config (2026-08-18) -- exact same key names µJump's own inline tab/step
+   code always used, so this extraction changes nothing observable here. βJump sets its own
+   bjump_active_tab/bjump_stepthrough_v1 keys so the two tools, opened in the same browser,
+   never share (and corrupt) each other's remembered tab or step-through progress. */
+UJ.cfg.tabs = { lsKey: "ujump_active_tab", urlParam: "tab" };
+UJ.cfg.stepthrough = { lsKey: "ujump_stepthrough_v1" };
 UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
 UJ.toVox = function(p){ return [p[0]/UJ_RX, p[1]/UJ_RY, p[2]/UJ_RZ]; };
 document.addEventListener("DOMContentLoaded", function(){
@@ -418,6 +424,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/panel.js"></script>
 <script src="core/tree.js"></script>
 <script src="core/report.js"></script>
+<script src="core/stepthrough.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 </head><body>
@@ -521,51 +528,13 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <button type="button" class="tabbtn" data-tab="dashboard" role="tab" aria-selected="false" title="Live/static statistics dashboard built from this dataset + the community-reporting backend — opens inline, no separate tab or re-login">📊 Statistics dashboard</button>
 </div>
 <script>
-(function(){
-  var bar=document.getElementById("mainTabs");
-  if(!bar)return;
-  var btns=Array.prototype.slice.call(bar.querySelectorAll(".tabbtn[data-tab]"));
-  function activate(name){
-    btns.forEach(function(b){var on=b.dataset.tab===name;b.classList.toggle("active",on);b.setAttribute("aria-selected",on?"true":"false");});
-    document.querySelectorAll(".tabpanel").forEach(function(p){p.classList.toggle("active",p.dataset.tabpanel===name);});
-    try{localStorage.setItem("ujump_active_tab",name);}catch(e){}
-    /* Lazy-init the dashboard: initDashboardTab() (defined near the dashboard's own markup further
-       down, see #dashPanel) is a real ~43KB chunk of chart-rendering code plus a live network
-       fetch -- a normal Jump/Filter session should never pay for either, only whoever actually
-       opens this tab does. ensureConnPlotly() (defined later in the file, next to the
-       connectivity-panel charts that already share it) lazily fetches the Plotly CDN bundle only
-       once, the first time ANY chart anywhere in this page is needed -- reused here rather than a
-       second independent Plotly load. Guarded by window.__dashTabInited so re-clicking an
-       already-open dashboard tab doesn't re-run initDashboardTab() and reset its own "Refresh live
-       data" state. */
-    if(name==="dashboard"&&!window.__dashTabInited){
-      window.__dashTabInited=true;
-      var statusEl=document.getElementById("statusLine");
-      ensureConnPlotly().then(function(){initDashboardTab();}).catch(function(err){
-        if(statusEl)statusEl.textContent="Failed to load the charting library — "+err.message;
-      });
-    }
-  }
-  btns.forEach(function(b){b.addEventListener("click",function(){activate(b.dataset.tab);});});
-  window.__ujumpActivateTab=activate;
-  /* The .tabpanel elements this activate() call needs to toggle are defined LATER in the HTML
-     source (this script tag sits right after the tab bar itself, before any tab content), so
-     calling activate() synchronously here -- before the parser has reached them -- would find
-     zero .tabpanel elements via querySelectorAll and silently do nothing to them (the button
-     highlight would still update, since the buttons DO already exist, but the wrong panel(s)
-     could stay visible). Deferring to DOMContentLoaded guarantees the whole document, including
-     every .tabpanel, exists first. */
-  document.addEventListener("DOMContentLoaded",function(){
-    /* ?tab=... in the URL (used by links FROM the statistics dashboard, e.g.
-       "ujump.html?tab=filter", so it reads as one continuous app rather than two separate
-       pages) takes priority over the remembered localStorage tab, which in turn beats the
-       "jump" default. */
-    var fromUrl=null;try{fromUrl=new URLSearchParams(location.search).get("tab");}catch(e){}
-    var saved=null;try{saved=localStorage.getItem("ujump_active_tab");}catch(e){}
-    var pick=[fromUrl,saved].find(function(t){return t&&btns.some(function(b){return b.dataset.tab===t;});});
-    activate(pick||"jump");
-  });
-})();
+/* Tab-bar switching + the step-through-review engine moved to core/stepthrough.js
+   (2026-08-18) -- see the header comment there. window.__ujumpActivateTab is kept as the exact
+   same global name µJump has always exposed (UJ.cfg.tabs.globalActivateName defaults to it),
+   so anything that already calls it (or could in future, e.g. a dashboard-embedded link) keeps
+   working unchanged. */
+UJ.stepthrough.wireTabs();
+window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 </script>
 <div class="tabpanel active" data-tabpanel="jump">
 <div class="card">
@@ -10100,7 +10069,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(runBtn)runBtn.title="Filters changed since the last preview — click to refresh the match count";
     if(dlBtn){dlBtn.disabled=true;dlBtn.title="Filters changed since last preview — click \"Preview matches\" again";}
     if(viewAllBtn){viewAllBtn.disabled=true;viewAllBtn.title="Filters changed since last preview — click \"Preview matches\" again";}
-    initStepThrough(null);
+    UJ.stepthrough.initStepThrough(null);
   }
   const filterCard=document.getElementById("filterCard");
   const STALE_IGNORE_IDS=new Set(["filterVasc","filterEMOn","filterV1ColOn","filterRun","filterDownload","filterViewerAll","regionAddBox",
@@ -10131,7 +10100,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          (105,951 for an unfiltered preview) and an unseparated run of digits is hard to read. */
       setRunBtnLabel(noMatches?"No matching cells — adjust filters":nMatch.toLocaleString()+" matching cell"+(nMatch===1?"":"s")+" found");
       runBtn.title=noMatches?"":"Click again to re-run the filters";
-      initStepThrough(lastResult.matches);
+      UJ.stepthrough.initStepThrough(lastResult.matches);
     },10);
   });
   /* Neuroglancer local annotations (and, at large scale, big segment-ID lists) are embedded
@@ -10217,95 +10186,13 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     },10);
   });
 
-  /* Systematic step-through of the current preview's matches (added for Gary's cortical-column
-     microglia-checking workflow): unlike the "random cell" buttons on the Jump tab, this visits
-     every matched cell EXACTLY ONCE in a fixed order (the same order runFilter() returned them
-     in), so nothing is skipped and nothing repeats, with a counter showing progress. Each step
-     just calls jumpToVoxel() on that match's position -- the same function the coordinate "Go"
-     button and every random-cell button already use -- so it lands in the normal Jump-tab
-     identification panel (nucpanel/idfpanel) exactly as if it had been typed in by hand; this
-     feature only handles NAVIGATION + progress-tracking, the actual "is it a microglia?" call is
-     still made through that existing panel.
-
-     Progress (current index + which indices have been visited) is kept in localStorage, keyed
-     by a lightweight signature of the match set (count + first/last match position) rather than
-     the full list -- cheap to compute even for six-figure match counts, and good enough to tell
-     "same filter, same data" apart from "the filters changed" without hashing every row. A false
-     match (different middle rows, same length/first/last) is possible in principle but very
-     unlikely in practice, and the cost of a false positive is trivial (an oddly-numbered resume
-     point) so a full hash was judged not worth the complexity. Re-running "Preview matches" with
-     an unchanged signature resumes exactly where you left off; any change to the filters (or the
-     underlying data) starts progress over from zero. */
-  const STEP_LS_KEY="ujump_stepthrough_v1";
-  const stepCard=document.getElementById("stepThroughCard");
-  const stepCounterEl=document.getElementById("stepCounter");
-  const stepPrevBtn=document.getElementById("stepPrev");
-  const stepNextBtn=document.getElementById("stepNext");
-  const stepResetBtn=document.getElementById("stepReset");
-  let stepMatches=null,stepIndex=0,stepVisited=[];
-  function stepSig(matches){
-    if(!matches||!matches.length)return "";
-    const a=rowPos(matches[0].row),b=rowPos(matches[matches.length-1].row);
-    return matches.length+"|"+a.join(",")+"|"+b.join(",");
-  }
-  function loadStepState(){
-    try{return JSON.parse(localStorage.getItem(STEP_LS_KEY))||null;}catch(e){return null;}
-  }
-  function saveStepState(){
-    try{localStorage.setItem(STEP_LS_KEY,JSON.stringify({sig:stepSig(stepMatches),index:stepIndex,visited:stepVisited}));}catch(e){}
-  }
-  function updateStepUI(){
-    if(!stepCard)return;
-    if(!stepMatches||!stepMatches.length){stepCard.style.display="none";return;}
-    stepCard.style.display="";
-    const total=stepMatches.length;
-    const visitedCount=stepVisited.length;
-    if(stepCounterEl)stepCounterEl.textContent="Cell "+(stepIndex+1).toLocaleString()+" of "+total.toLocaleString()+" — "+visitedCount.toLocaleString()+" checked so far";
-    if(stepPrevBtn)stepPrevBtn.disabled=stepIndex<=0;
-    if(stepNextBtn)stepNextBtn.textContent=stepIndex>=total-1?"Done — restart from #1":"Next →";
-  }
-  /* initStepThrough(matches): called with the fresh match array right after every successful
-     "Preview matches" (matches=null when the filters change and invalidate the old preview). */
-  function initStepThrough(matches){
-    stepMatches=(matches&&matches.length)?matches:null;
-    if(!stepMatches){stepVisited=[];stepIndex=0;updateStepUI();return;}
-    const sig=stepSig(stepMatches);
-    const saved=loadStepState();
-    let resumeIndex=0;
-    if(saved&&sig&&saved.sig===sig){
-      resumeIndex=Math.min(Math.max(0,saved.index||0),stepMatches.length-1);
-      stepVisited=Array.isArray(saved.visited)?saved.visited.filter(i=>i>=0&&i<stepMatches.length):[];
-    } else {
-      stepVisited=[];
-    }
-    /* Jump straight to the resume point (or cell #1 for a fresh preview) rather than just
-       showing the counter -- otherwise the FIRST "Next" click would skip from cell #1 straight
-       to cell #2, since Next always advances from the current index. This also means "Preview
-       matches" itself is the action that loads the first/resumed cell into the Jump panel. */
-    stepGoTo(resumeIndex);
-  }
-  function stepGoTo(i){
-    if(!stepMatches||i<0||i>=stepMatches.length)return;
-    stepIndex=i;
-    if(!stepVisited.includes(i))stepVisited.push(i);
-    const pos=rowPos(stepMatches[i].row);
-    jumpToVoxel(pos[0],pos[1],pos[2]);
-    saveStepState();
-    updateStepUI();
-  }
-  if(stepPrevBtn)stepPrevBtn.addEventListener("click",()=>{if(stepMatches)stepGoTo(Math.max(0,stepIndex-1));});
-  if(stepNextBtn)stepNextBtn.addEventListener("click",()=>{
-    if(!stepMatches)return;
-    stepGoTo(stepIndex>=stepMatches.length-1?0:stepIndex+1);
-  });
-  if(stepResetBtn)stepResetBtn.addEventListener("click",()=>{
-    if(!stepMatches)return;
-    if(!confirm("Clear step-through progress ("+stepVisited.length.toLocaleString()+" cell(s) checked so far) for this set of "+stepMatches.length.toLocaleString()+" matched cells?"))return;
-    stepIndex=0;stepVisited=[];
-    saveStepState();
-    updateStepUI();
-  });
-  updateStepUI();
+  /* Systematic step-through of the current preview's matches -- moved to
+     core/stepthrough.js (2026-08-18), see its header comment for the full rationale (Gary's
+     cortical-column microglia-checking workflow) and the per-dataset localStorage-key change.
+     initStepThrough(null) / initStepThrough(lastResult.matches) calls elsewhere in this file
+     (search UJ.stepthrough.initStepThrough) now go through the shared module; this file no
+     longer defines stepSig/stepGoTo/etc. itself. */
+  UJ.stepthrough.initStepThrough(null);
 
   /* Live top-view / side-view preview of the region-filter box (task: visualize the box
      against the full MICrONS dataset extent). Y is the cortical-depth axis: smaller Y is

@@ -374,6 +374,10 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
+<div class="tabbar" id="mainTabs" role="tablist">
+<button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
+<button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
+</div>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -455,6 +459,7 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 })();
 </script>
 
+<div class="tabpanel active" data-tabpanel="jump">
 <div class="card">
 <div class="units" id="units"><button data-u="voxel" class="on">voxels (<span id="unitres"></span>)</button><button data-u="nm">nanometres</button><button data-u="um">micrometres</button></div>
 <label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; jump to it in the Alzheimer's volume and identify the nearest nucleus</span></label>
@@ -488,6 +493,72 @@ gap is anatomically biased towards one side of the pyramidal layer. And the slab
 radiatum is deliberately not named &mdash; that needs confirmation against a known landmark, and
 this project does not invent criteria it cannot source.</p>
 </div>
+</div><!-- /jump tabpanel -->
+
+<div class="tabpanel" data-tabpanel="filter">
+<div class="card" id="filterCard">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Filter and show</div>
+<p class="hint" style="margin-top:6px">Filters run against the 220 nuclei embedded in this page
+&mdash; no network needed. There is no MICrONS-style cell-type classifier for this dataset (see the
+Jump tab), so filtering here is on geometry, segmentation coverage, and the molecular-marker
+measurements, not on cell identity.</p>
+
+<div style="margin-top:14px">
+<label style="font-size:12px">3D mesh available</label>
+<select id="fMesh" style="width:100%">
+<option value="">Not filtering by this</option>
+<option value="yes">Has a mesh (segmented, secgan16)</option>
+<option value="no">No mesh (unsegmented or 32nm-only)</option>
+</select>
+</div>
+
+<div style="margin-top:10px">
+<label style="font-size:12px" title="About a quarter of nuclei are cut by the top or bottom of the ~25 µm-thick imaged slab; their volumes are underestimates.">Cut by a slab face (truncated_z)</label>
+<select id="fTrunc" style="width:100%">
+<option value="">Not filtering by this</option>
+<option value="yes">Truncated — volume is an underestimate</option>
+<option value="no">Not truncated</option>
+</select>
+</div>
+
+<div class="row" style="margin-top:10px;align-items:center;gap:8px">
+<label style="font-size:12px;flex:0 0 auto">Nucleus volume (µm³)</label>
+<input type="text" id="fVolMin" placeholder="min" style="width:70px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:12px;color:var(--mut)">to</span>
+<input type="text" id="fVolMax" placeholder="max" style="width:70px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:11px;color:var(--mut)">(~14% high — see Jump tab caveats)</span>
+</div>
+
+<div class="row" style="margin-top:10px;align-items:center;gap:8px">
+<label style="font-size:12px;flex:0 0 auto" title="Signed distance from the fitted stratum pyramidale sheet. Which side is oriens and which is radiatum is deliberately unconfirmed — filter by magnitude/sign as a geometric fact, not an anatomical label.">Distance from pyramidale (µm, signed)</label>
+<input type="text" id="fPyMin" placeholder="min" style="width:70px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:12px;color:var(--mut)">to</span>
+<input type="text" id="fPyMax" placeholder="max" style="width:70px;padding:4px 6px" inputmode="decimal">
+</div>
+
+<div style="margin-top:12px">
+<label style="font-size:12px" title="Percentile rank of the SHELL reading (0-1.5 µm outside the nucleus, the informative measurement — see the Jump tab's molecular-marker note). A cell in the top decile for a marker is evidence, not an identity.">Molecular marker (shell), by percentile among these 220 nuclei</label>
+<div id="fMarkers"></div>
+</div>
+
+<div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
+<button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
+<button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
+</div>
+
+<div class="card" id="stepThroughCard" style="margin-top:14px;display:none">
+<label style="font-size:12px" title="Visits every matched nucleus exactly once, in a fixed order. Each step loads it into the Jump tab, same as clicking there directly. Progress is remembered in this browser for this exact set of matches.">Systematically step through matches</label>
+<p class="hint" id="stepCounter" style="margin-top:10px;font-weight:600;color:var(--ink)"></p>
+<div class="row" style="gap:8px;margin-top:6px">
+<button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
+<button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
+</div>
+<button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched nuclei">Reset progress</button>
+</div>
+
+<p class="hint" id="filterStatus" style="margin-top:10px"></p>
+</div>
+</div><!-- /filter tabpanel -->
 
 </div><!-- /wrap -->
 
@@ -535,6 +606,12 @@ UJ.cfg.tree = { panelId: "idbox", startNode: "q1", modal: false, suggestionSourc
 /* suggestionSource:null removes the engine's "no <X> suggestion on file" crumb. µJump's default
    is "MICrONS"; leaving it here would print "no MICrONS suggestion on file" on a hippocampal
    Alzheimer's volume -- not a harmless default, a false statement about the dataset. */
+
+/* core/stepthrough.js config (2026-08-18) -- own localStorage keys so µJump and βJump, opened
+   in the same browser, never share (and corrupt) each other's remembered tab or step-through
+   progress. See core/stepthrough.js's own header comment. */
+UJ.cfg.tabs = { lsKey: "bjump_active_tab", urlParam: "tab" };
+UJ.cfg.stepthrough = { lsKey: "bjump_stepthrough_v1" };
 
 /* Same Apps Script deployment as µJump and ηJump -> one OAuth consent, one sign-in, one level.
    ds:"bjump" routes writes to the βJump spreadsheet once Datasets.gs is deployed. */
@@ -591,6 +668,15 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/panel.js"></script>
 <script src="core/tree.js"></script>
 <script src="core/report.js"></script>
+<script src="core/stepthrough.js"></script>
+<script>
+/* Tab-bar switching -- see core/stepthrough.js's header comment. Called here (not right after
+   the tab bar markup near the top of <body>) because UJ.cfg.tabs (in CONFIG, above) and
+   core/stepthrough.js (the tag right above this one) have both already loaded by the time this
+   tag runs, in document order. */
+UJ.stepthrough.wireTabs();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 
 <script type="application/json" id="bjumpdata">{"N": 220, "SOURCE": "Hoechst blob detection on gs://vclem-xh/alzheimers (Han et al., vCLEM of hippocampal CA1 in a 3xTg Alzheimer's mouse); segment ids from segmentation_secgan_16nm", "BUILT_AT_RES": [256.0, 256.0, 240.0], "TISSUE_BOX_VOX": [380, 1328, 236, 1200, 0, 107], "VIEWER_RES": [8, 8, 30], "PYRAMIDALE": {"point_um": [239.5153601611332, 185.23846972678533, 11.431140666477395], "normal": [-0.029255176518489096, 0.04213774232312552, 0.9986834059494438], "grid_um": 12.0, "thickness_um": 13.615575924851223, "sign_convention": "UNCONFIRMED - positive side not yet named"}, "SETTINGS": {"DETECT_RES": 256, "THRESHOLD_METHOD": "li", "THRESHOLD": 33.28297754551362, "MIN_DIAM_UM": 2.5, "MAX_DIAM_UM": 16.0, "SMOOTH_UM": 0.5, "PEAK_MIN_DIST_UM": 2.5, "SHELL_UM": 1.5, "PAD_MAX": 0, "CLOSE_UM": 0.8, "FILL_HOLES": true, "MERGE_FRAC": 0.65, "VOLUME_BIAS_NOTE": "nucleus volumes are systematically ~14% high (measured on synthetic spheres); consistent bias, fine for comparison, not for absolute values"}, "NB": "AQAAAAIAAAADAAAABAAAAAUAAAAGAAAABwAAAAgAAAAJAAAACgAAAAsAAAAMAAAADQAAAA4AAAAPAAAAEAAAABEAAAASAAAAEwAAABQAAAAVAAAAFgAAABcAAAAYAAAAGQAAABoAAAAbAAAAHAAAAB0AAAAeAAAAHwAAACAAAAAhAAAAIgAAACMAAAAkAAAAJQAAACYAAAAnAAAAKAAAACkAAAAqAAAAKwAAACwAAAAtAAAALgAAAC8AAAAwAAAAMQAAADIAAAAzAAAANAAAADUAAAA2AAAANwAAADgAAAA5AAAAOgAAADsAAAA8AAAAPQAAAD4AAAA/AAAAQAAAAEEAAABCAAAAQwAAAEQAAABFAAAARgAAAEcAAABIAAAASQAAAEoAAABLAAAATAAAAE0AAABOAAAATwAAAFAAAABRAAAAUgAAAFMAAABUAAAAVQAAAFYAAABXAAAAWAAAAFkAAABaAAAAWwAAAFwAAABdAAAAXgAAAF8AAABgAAAAYQAAAGIAAABjAAAAZAAAAGUAAABmAAAAZwAAAGgAAABpAAAAagAAAGsAAABsAAAAbQAAAG4AAABvAAAAcAAAAHEAAAByAAAAcwAAAHQAAAB1AAAAdgAAAHcAAAB4AAAAeQAAAHoAAAB7AAAAfAAAAH0AAAB+AAAAfwAAAIAAAACBAAAAggAAAIMAAACEAAAAhQAAAIYAAACHAAAAiAAAAIkAAACKAAAAiwAAAIwAAACNAAAAjgAAAI8AAACQAAAAkQAAAJIAAACTAAAAlAAAAJUAAACWAAAAlwAAAJgAAACZAAAAmgAAAJsAAACcAAAAnQAAAJ4AAACfAAAAoAAAAKEAAACiAAAAowAAAKQAAAClAAAApgAAAKcAAACoAAAAqQAAAKoAAACrAAAArAAAAK0AAACuAAAArwAAALAAAACxAAAAsgAAALMAAAC0AAAAtQAAALYAAAC3AAAAuAAAALkAAAC6AAAAuwAAALwAAAC9AAAAvgAAAL8AAADAAAAAwQAAAMIAAADDAAAAxAAAAMUAAADGAAAAxwAAAMgAAADJAAAAygAAAMsAAADMAAAAzQAAAM4AAADPAAAA0AAAANEAAADSAAAA0wAAANQAAADVAAAA1gAAANcAAADYAAAA2QAAANoAAADbAAAA3AAAAA==", "XB": "m2kAAJaQAADEggAAwl4AADqBAACSkgAAa0kAAPqRAAAsfwAAwFkAAAxcAABsSgAAmTwAALeBAAADRAAAZ3YAAPltAACXbAAAOZIAALNlAACSWwAABU4AAOpSAACYjgAAEFEAAPVkAAAMeQAAc0wAAJpoAAByUgAABIsAAIk5AAApZgAAppoAAICMAACAWgAA3jsAAC2bAAD4igAA3G0AAGmWAACBlAAAHGIAALdqAAB/aQAAfZAAAA1MAADOUgAAu0QAAJB8AABXOQAAhIYAAKF/AAAoXwAAyFoAAPZzAAA9kQAAeDkAAIJdAADmlwAAv30AADqgAADehwAAtZEAAPdSAABgaQAABYAAAPaZAADgNQAAsn0AAGQ9AACeigAAyD8AAMJ8AAChiAAA6H8AAB9pAAAXPAAAx4MAAI5sAAAJcAAAY0wAAOY9AAC4eQAAnn4AAMBFAABMgwAA3nsAAHSDAAAlagAA+XYAALV9AAAecgAA744AAIdpAABwVgAAsooAAJp3AABsagAAHooAABlAAAAgWAAAJVQAAF9gAAAPcwAA9UMAABecAAB4eQAAZUYAAL91AAADZQAAO14AAHiTAAC5eAAAs0oAAFVNAABnfwAARk8AAEVXAACxYgAANDMAAKdnAADDiAAAk14AAD2GAAC1kQAAclsAAGxUAAC1jgAAjIwAAA5rAAAfdAAAMVwAACpnAACWZQAAA34AAD9uAABcYQAAi24AAKdoAAB0NQAAZ2UAAHlNAAAgTgAA/EsAABdPAACDjQAAXUgAANhUAADOYAAAU50AAH2PAACUZgAAQ0YAABOAAACilQAA75MAADI9AAARNAAAaDwAAElrAACFbAAAD5IAAIhbAADihQAADUUAANk+AACGaAAAwHwAAJg9AADicwAAEYAAAAR7AAD1cwAASqEAAFOPAAASSQAAPlwAAOVZAABPfwAAxG4AAAKRAADJWgAAe30AADxCAAC/igAAnVoAADs/AAAGfwAAdT8AALlfAACchAAAbHgAAB9xAACQXwAAk3IAAJqQAACwmgAARJ4AABpKAACAVwAAM5AAAMmQAADJgQAA8pcAAPdyAADPlwAAkIYAAPRqAADicQAA6YEAAPuTAABohgAAvWAAAOGMAACibgAA2oIAAMeKAAAKmwAA/JoAAA==", "YB": "1IcAAPp5AAANhgAAjUwAAPtZAAC+aAAAs24AAIJqAABZWgAAkIQAAL1xAABQbAAAl1gAAPqBAADkQwAA4IUAAKRPAADCVwAAtYkAAKhjAAA9YgAAg4IAAChHAADRZgAAR2oAABWLAADoSwAAsjIAAJBfAAD7RAAAu3IAABRVAADVXgAA9HEAAApXAAAUdgAA/IgAAGVvAAAjdwAAEz8AADmIAAB2UQAA7zkAAHM/AABFQQAAUE0AAJMoAACBKgAAa1MAAOVmAACNYAAAyHIAAGpmAACHdgAAICsAAEhxAACpVwAA/VEAAK5RAABuZgAAdj8AAF5MAACzawAAYjUAAKxwAABCVAAAB3gAAHgvAACgbQAA4Y8AAFVlAADNgAAApH4AAOxcAADmOwAAFosAAOk4AACnVQAA+FUAADYuAAC6gAAAQlYAAExhAACjXAAAvnMAABtNAABkUwAAiUwAAFSCAADwOgAAcycAADUxAACKjgAAIngAAM82AABZSgAAsjgAAJI/AABlfAAAN4oAAE06AADgiAAAOTcAAPAnAABmSgAAWGUAACppAACVRgAAVz8AAEN7AAAPcAAA4zQAACRCAACKhgAAnm4AAMJvAAB8bwAAo3EAAFcrAAAkfgAA7XwAADhiAACtKgAANkoAAOVVAABSWwAA0SgAAHIkAADZaAAAoXYAACMuAAAhfwAARoMAAJRuAABphAAAyHIAAAhSAAD0MgAASGoAAJdsAACjYgAAEnwAABV7AACIjAAAvYsAAJ9uAACJUgAAz1EAAEBzAAAnjgAAxC4AAItBAAADbAAAVWcAAMxxAADwdAAAUj8AAEt5AADFbQAAC4AAAMwxAACshQAAEY8AABZ/AAAZNAAA510AAKhCAAAKjQAASUoAANhTAAAZZgAA2E4AAMaHAADgMQAADjgAAC6DAABwagAAj14AAItUAAAXeAAAwXIAANZkAAAGYgAAcDsAAKEtAAAWOwAAtiYAANxPAABkdgAA1iQAADFXAABycQAAq1YAAIhhAACKVAAAWk4AAHZLAABjNAAA5k8AAJYyAAAFJwAArFkAANBWAADuVgAAHm8AACQuAADRSAAAjlQAADUsAADkWwAAO2QAAOdaAABuSAAAK0YAAFREAAC9PAAAtj8AAHErAACfTgAAYlAAAA==", "ZB": "IQAmACoAKwAuAC4AMAAwADEAMgAzADgAOwA8ADwAPgA/AD8ARgBIAEgASQBKAE4ATwBTAFUAVgBXAFkAXABcAF8AYQBkAG0AcABwAHcAdwB4AHgAfgB+AIIAhACGAIgAjgCRAJUAnwCfAKsArgCyALYAuAC9AMMAxADJAMsAzgDZANoA4ADhAOIA4gDvAO8A8ADwAPAA+QD6APoAAgECAQMBAwEJAQwBFwEaAR0BIgE2ATsBPAE8AT0BPQFDAUYBRgFHAVQBVgFXAVoBWgFdAWABYgFoAWoBagFqAXMBewF+AYMBgwGHAYoBiwGMAY4BjgGPAZABkQGhAaIBpgGzAbQBtgG4AbkBugG/AcYBxwHKAcoB0wHgAeUB5QHnAe4B9wH7Af8BAgIIAgoCCwITAhYCGQIbAh4CIwIkAicCKAIrAjQCNwI8AkECQwJFAkUCSwJMAk4CUAJSAlUCVgJiAmgCcQJyAnUCdQJ4AnkCfQJ/AoACggKJAosCiwKfArcCugLCAsMCywLPAtUC2ALZAtsC3QLeAuAC4gLrAvgC+wL+AgEDAwMRAxgDHAMdAyIDJQMlAycDKwM=", "GB": "0z88AK2SMgAJQToA6JoAAE1JDwD2fxoALKwVAPZ/GgBtJBcAHw45AIHmKAAsrBUAAAAAABN4NwAAAAAAwOQxAFOQDgALUw4AiFg9AE5tHgD+VBsABF8zAHJjCABNUCIATvcaACUjKQArEwwAAAAAANj9AwA+sQUAA/0sAAAAAADY/QMACE0dANm7DAAh7CgAAAAAAAhNHQBIDR0AdP8AAEIHMwCwKAIAAAAAAH+ZAAB/mQAAhN4MAAAAAAAAAAAAAAAAAJ7SIQAAAAAASA0dANO3FAClyyAAAAAAAK9/GQByAwoAAAAAAEsDDgBxXB0AGNcAAB9oCgBIDR0AAAAAABGUCAAGGREASA0dAAAAAAAAAAAAAAAAAAAAAACstRwAAAAAABjXAAC50QEAGP85AAAAAAAAAAAAlxwKAAAAAACnFxEAE+ACAAAAAAAY1wAA7wkqAAAAAACXHAoAGNcAAFqCJAC3pAAAAAAAAAAAAAAAAAAA5bonAAAAAADL9wIAAAAAABjXAACyESwAw+g3AAAAAABMOC4AAAAAAAAAAAAY1wAAAAAAAORRFQAY1wAAYgwAAPXdIQBFkCYAAAAAAHcpAgBE/zkAS8ElABGUCABIDR0AEZQIAAAAAAAy7zMAAAAAADEoEQAAAAAAysMAALPKDADifRcAAAAAAAAAAABIDR0ASA0dAAAAAABXCi8AMIgrAAagEwBavjYASA0dAH1QEQAAAAAAe9EWAAagEwAAAAAAamUpAOfRKAD+VDsA/lQ7ABGUCADky1IAPz0QAK8lKQAAAAAAAAAAAK9DAgAGoBMAAAAAAEgNHQAF8CcAeUQCAAAAAAAAAAAAAAAAAAAAAACsTzwAAAAAAP1sdAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==", "SRCB": "AQEBAQEBAQEBAQEBAAEAAQEBAQEBAQEBAQEBAAEBAQABAQEBAAEBAQEBAAEBAQAAAAEAAQEBAAEBAAEBAQEBAAEBAQAAAAABAAEBAQAAAQABAQABAQABAQEBAAAAAQABAAEBAQABAAABAAEBAQEBAAEBAQEBAQABAAEAAQEBAAABAQABAQEBAQEAAQEAAQEBAQEBAQEAAAEBAAEBAQAAAAABAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==", "SRC_NAMES": ["none", "segmentation_secgan_16nm", "segmentation_32nm"], "VB": "LPGhQQNSbkGR9CNCbpfLQf8Iw0FmnVhCmlgmQZYR7kF6FiVCXCl8Qr6JHULNWPJBD1/LQrQN1EJgRxBD5QgdQ7xarEJsnKhCnZnkQmdDo0JDakFDsl0pQ5Xq6UHu3ptCsWzmQp/nbEOecEBDh8PSQVbXgEPfR/tBOSJGQ3lrKkP4oiBDdevzQh4srUMeAExD+v9lQzaEFUOFqRhEPOUHQopB3EPL3aVDwrOxQjZ8KEI53H1CPOd6Q+k3YUOuEUFDhjdvQ1xXikOpmJRDGZZcRBgS5kPSzO5D8c8xQ96WwEMxQrpDiE82QyBsiEOhnqFDZHcBRGTBzEKgtltDZ/iqQrSIzUOufo1DKsjwQ/JTqEI65OpD+y7XQ2JuFEMI+ShEIaE5RIKeG0NWTz1D8oDsQ/A74UGNO29Do1x5Qw9wNUQf6BFEGBMTRCOc3EMvAU9DeOR2Q6bYj0OIbk1Do1GJQ9XO7kNC+wFCdpG+QrLgl0TuN8FDClXeQ8QgUUEuk59DcooORDznekMSgOJD13OpQ05hhEOTXSNEea2lQ/vbcUN7LL9DltjvQ0jacEMZ2xRDtZC6Q9RFyENVfK5DHt3nQxDLh0PufYlDrQlUQ+6To0JMMpND/hWNQhx8gkOfkpRDtGA5Q1hy9EPuX9VCNcegQzJubkOFhrRDpoSaQ1dcWkM1noRECl5bQygbg0M48sRDB+DRQ3jiA0PsA6BDqBUuQ5pVaUP0nnND7wLjQy2Z30IdowZC96nwQ5+orkN/M29C4d6IQsNExUJ2matCdeWzQxcWs0NAWhRDfdNsQxiAwkPOjEBDgrS1QyftdEOWjfdDZxKSQ0TzZ0NwBOtCXHxhQfzmm0NUN3ZDeh+iQxx8gkKnozFDCsy3Q1somUOGnM5BizKfQ89AuEPiqapDsMFrQ7APIUGyDYFDjYCnQ1cj3EPDjz1CfeVmQ0D1tEPkNvFBKL+gQy4OmUOb8rZDKItSQ6sgq0OsmpRDHMOtQ++pvUMMc2VCVY2YQ9y+AUNYAiVDqM/lQ6bD2EOyPYJDf8nfQ6nF2ENzIWJEaJqoQ+3TcUNIP1BDDWwVQ6erHkMsfpVDPsvzQmjReUN/M29De9BcQ5vpOUPkNvFBqpn3Qti9EUNIofJCTQ+vQptqc0LoXpJCkkn8QfCORkExYVFBKNZKQQ==", "DB": "EmhYQA9fQ0Dj44hAE5BpQG4+ZkBCNZZAGk4tQNYQdkBjNIlAEgOeQJQUh0Dvh3dA40+5QJjpu0DcO9BAuTLWQPVdr0COFq5Anq3AQFI6rEDGmuVABqrbQHOgdECOlqlAfzDBQAOq9UDSN+VAH0ZsQE+l/EA5iXpA7nTnQGoe3EDN0tdAvOPEQKJoC0EVuOlA+kDzQEa50kCWaihBZpaAQIULF0GEawlBjimxQLIjikC0XZ5AF2n6QGuO8UCzd+VA8nX2QLZaAUGKeQRBXWY+QYpBGUGZKxtBskHfQIlvEEHd1Q5BqB/hQOTAAEGuPAhB82kfQUS7uUBqku9AdeWuQBCaE0FzVAJBL5kbQZn9rUCtURpBYOAVQW820kBoNi5BK8IzQXWN1UDx9+NA26saQduPcUBUd/ZAi+X5QCdlMkEE5SVBBlYmQTggF0Fb3OpAqxH5QEIMA0GwQ+pA7wgBQQgsG0GPY31At1a1QMXTU0HClxBBo4QXQVgLO0D5qAdB5pskQRdp+kCIdRhBPmcKQSTw/kCFQyxBK14JQWld90C4FBBBgmUbQW4F90C1adJA7OkOQdtUEkGgwgtBM6cZQSSOAEHOFgFBwL/sQJ5WrEC1DgRBCQykQC63/UC+dwRBDGHiQEJiHEFLTbxACwAIQbow9kDHWg1BMDYGQUwU70Ayd0pBM3LvQBoe/kBJhBFBPaIUQXsXykDlyAdBeq/dQHls9EDI9vdA35IYQTdDv0B8MIBArZIbQXPOC0HTQZtAjmWiQIpwt0BQHK9AsTANQVz6DEHuLNJADaP1QG/pEEEDQ+VAbakNQfhn+EAhCx1BZLgDQYDw80DsdsJAmcw/QHmcBkFl1/hA2GAIQa7Un0AnL99AETQOQQ3RBUFDtmpAkY0HQShSDkF0uwpBP0T1QDNzK0DSyPxAyd4JQZ4EF0G+rI9AyZHzQKh3DUEUJXdAxv0HQW3JBUHn+w1BDDHsQJ3bCkEjegRBG5ELQVuzD0ExHplA16MFQT/+yECiw9lAyDIZQRk+FkG0jv1AENkXQZA+FkFd+z9B8ysKQapa90BqVOtA7K3SQHfw1kCbvQRBEdvEQIcM+kCQdPZAsPjvQLiY4kAUJXdA/N/FQGnv0EC+isRAoUewQPApnED8EaZAwd56QKnWN0CLHjtARSY5QA==", "HMB": "rKk1QpbcZEL3T4NCDDFXQvOXfkKd3kpC5jNyQk5wg0I4z3tCquRmQtsUmkKjc4JC9siLQr07vUJV3INCg+h8QiGxz0J64NJC9CThQtfJwkIChMlCJ1qqQrslbkKb0b9Cr9hYQqNSjkJH/JNCQ7WCQuZsUULIg2BCM3W7QiImekLzN5ZC+n6fQiKmh0Jeyf1CyMHDQhejkkI/baBC+Ft2Qr0cokKNQo9C/BOLQsgRiUIV029Ch9e0Qv3m3EJq6JxCJJvRQm1180LDAbhC9OOOQj/RhEKLe45CVwCPQk/HoEIeyMtCpH6+Qgy52ULYW5tC9hRYQmlrWUL1QclCIzCgQh73gEIB/9xCOnX2Qt0+gkLwGfZC+NPSQo1TdEKNd4BCxyCmQh9xbkIFwL5Czz2tQodZb0KV8LhCR4R6QrjHq0LanYZC2BmKQs3HiEKkLGFCIIaOQitvn0KfSHdCIk25QpyYokIOwYpCQ8WHQuwml0I+Dq9C8aivQta4cEJctZVCJSWsQtSh5UJNr5JCakK4QlT64EL7LJZCeaiIQvs9g0KQl75C6r6KQpl2lkKjcpBCvfhuQvw9s0Ky+75C8j2OQrQyqELwuOBCG4nIQofRhkKVBeRCxv9bQuBJlEKAetNCLvmyQnuAlkJGPkZCDIySQpxKzEJyq81CyeWJQi8nh0KcTKZC8d7EQq0ArEKPSbpCOxmCQkjUW0KOaM5CSL/RQhS67ULISe5CEZeKQofHaEJM7ltC6NqXQtIZokJ4Q5NCVad0QjCed0IZmElC07tzQro4kEKHw5NC8bDfQie6o0KG+3JCo/PDQvE2xEKGwZNC5kbCQtWinELt9W1CJTFaQknAvEKx8LJCTUKjQp+xmUI2fZxCW3aHQkz6uUINW5tCxpHhQoeEnUJOBL9CA5vwQjMDcUJnA7hCPzC2QsM8kEKIclhCNvedQuq9kUKbgoRCMWGZQlcIAEMwZbFCy7bcQtnUlUIdN8RCaGGTQqWTg0LJLH5C8LVnQj0qh0L13M9CyzOFQqlRlkIjd4tCnaSKQpKWjUKoa69CDSCYQnaPikLQgM9CwlH0QnLh8UKfgeFCSGyTQjOYvUKI0KlC5dvJQmM7kUJgG4lC/sfJQp7+hUIRm5ZCouiFQgZVjUL0gYBCsCBYQsxcbkIUC3RC1ZBmQg==", "ABN": "r9oCQknEp0HbAFhBTqURQlOinEGuOflBljN6QQGWukHFkpNBqRAnQlpBgEF3F4dBqymNQbpkRUG/aSRCzgwHQtvxnUGDto1BK75gQRhqo0E0CZJB0bE6QjH3BELFCphBQvcGQtQ6QUIn56ZBNpQTQaME0UEwriBCk/HgQTpiPUIQat1Bo6wPQgfPEUK22MVBesuzQffWG0L2z6ZBg7sAQleSCEL14gtCR6kpQT1O5EGM+exBuuAhQrELXkGp+U9B1sCtQYyRh0GyoghCBk5dQq/KA0JHVydCEEoEQn4I/0H5wrtBDzjpQTTKtEEabuBB9/NrQmDg+EGEeIBBMwP8QDygNkLo6V9B1wyQQclfhUECZdpB+fWGQTgA8EHLRZhBazcDQkrPuEHqACtBomoDQqooP0HRsntBDp4bQm9XRUF/OaBBkJ1FQlb9P0JIsL9BZ0uyQekqKkIQkhlCUu2ZQX1NEELX0FBBiva/QOhq7kFl8gZCKIyXQWXoPkGUZp1BvOaLQdfJakECGU9C2GFUQVIAUUEM1upBJoQWQv9bB0KgH6dBlzhDQsON80EwJTFBi3ueQSrEFEIWiqxBlUs+QmG3c0E7RiJB/w+zQeMAkUHyKyVBOvWSQcGMaUEvIM5BDGRpQXbCMUK0HJhBbYQFQh4Ob0Gp9EhBpvMTQvv6FUIBYPJBFjxvQYwMgUGG8ZhBsAEkQi5iH0Jck6FBGs+hQQTvzkGSyI9BMhMtQtaKIEIh3hxCcz8SQm5OJ0LgzYRBSAmDQfTeekEtQglCRr83QvERLkKEALVBmu1tQdUiCkL9ZxZCNqcCQgw8gkGjQ/5Bv6UCQbA9G0LnIzZC5yunQdV6GEFAcx5CUwDKQaCMCEISR+hAECYqQhstJ0HZ9WZBEflUQXR1t0EwLKxBoCavQckE/kEmzpNBcd6qQf2S6kGhWRBCznbQQSeoJEKNaxJCO0MpQtyebEGiTJ5BCc9UQUjwLkLqSzlBhGAZQubnR0LgQPtB6BfaQeOPUkKaE6RBWOYZQk7NMUI/r0BCwkQoQrWBFELQ8pdCH5kYQiZZBEIJdppBnoxuQVPvakEqf5JB/kv2QWZ7BEHQSYVB/aoQQuXg4kGcEVRBtZm1QP4FJkI1lRNCDtFDQrGvDkJ7HhZC4uHbQSbMrkFXTB1BGdoNQQ==", "ABS": "rqPLQVTYtUEhhWVBRCjaQVMHikGoTsJBESaCQZyArEEVyYdBMEfqQXXmaEGSj4RBHQSbQVI3V0HYGQNCSjG7QayDlUE9MoFBVq1WQUblokER5qNBc6D/QQQSp0GluJpB587MQYkH/kGsWYpB5kABQdw1zUHqIahBuCyfQUuu/kHT089BHBe8QX0zukG2A85BBZmLQcFGvEH884dB192mQeLAnEFTUahBwJcdQW4nhkH9mo9BnPKuQQKaJUFxgENBb/SfQQS4mEG3ntpB3cuuQVktpEFufO9BJw99QftlpkFCAoJBYubOQbvcokF/64hBCbjXQZOgjEFJPGJBaPKvQDL170HIAGpBJkJ3QfWwEkGrg7pBHclHQamn2UE8b4BBfnvGQRIxnUF2Qy5Bqh6QQasYN0EvJqRB9nDMQU4JQUHcspNBb+z1QX4/6EFieKlB4JORQd8c20HtgNdBTFiEQTu3oEF3IThBU8OJQAJ8K0EgJqZBXTmAQdrbI0HoR5RBFKdaQUfBV0HkuwBCP/BKQZlQaUHnGZlBm2uoQRi8r0GX/ZZBfcz7QWonakHsCEVB2myJQVA+qkHs07tBbZHVQXEQV0ELQE9B6fGMQTHRgUFpTEtBIQ95QcK2a0Fv2MJBX7NLQU8Zy0H1qoNBCQKfQfvXY0F/fWlBXv3IQXwmiEEheqRBemd0QaC0QEHWr5RBn87hQd639UECFJJBAzuPQXXto0FarZhBNqDSQSGM9EGxlsJBxgWzQXGCsUHN9ypBGChPQeHaYkG7O6BBlbPlQSX5zkF3m0ZBJQMsQSs0nkEfcvVBgGSqQWyzZ0GYQKZB7o4sQbdbqUFysstBONWFQQZgUUGesZNBYCtjQeoymkFBDwNB8ufSQZKWcEFZni1BgqxLQWFRqEEuSZ1B/bRzQVxPk0Efn19Bj+deQfBrkEECdqpBFQOaQV1/w0HOsKVBg2KtQZ6BY0E91nxBonBVQcgSzkECIjxBfJqhQVfw1kHEe5VBaSmrQXURAEKr7D1BpNXHQZltv0EWiuhB7D7SQd1AuEGrTeVBjDurQRzRokFJ/5lBrPZmQTb9TUF6kIRBweyOQZRnF0FVKWdBCMCrQQGbj0GNmkpBcwXWQPdV6UFuCPVBJ+QFQogl6kE1OtpBc1yVQeHYKUGwpCFBiWsvQQ==", "TAN": "gEsvPuOLjToAAAAApzsHPAAAAAD36aU5AAAAAAAAAAAAAAAAlcS6QAAAAABVVfU9AAAAAAAAAABYDW49e95MPwAAAAAAAAAA6qiXOv/u0UAAAAAAKw+7PwssMDwzF9Q5DTpzPwEyT0AAAAAAAAAAAPC7S0KVqhw9u9YAOgEKOD41t6ZCVEy/Pfz1LzoN3+w+QvevO+e8dj64GDc7jNTxOcs+lj4G1SM7AAAAAAAAAABqX8I6f2yJPQAAAACA3Ko4J+JxPvXHrD4L6oA+6gITOy0qUT8SibRAAAAAAKkxuz95UQE8ABaaPKw/pjv5wTE8AAAAAAAAAADaTxY5AAAAAIBWn0AAAAAA/NlePQAAAAAMFq89MnJyPxIaJT4l1r5AaZ6kQAAAAAAAAAAAECcEQAAAAAD/0Ik5NxznPgAAAADi0exB2TekQFuDnEDZIJ84ZsGFOFXDCkCUoaY+30cyPKaOO0AAAAAAAAAAAJeVljvNg/ZAlUjVOgAAAABufSI8hnItOfIWvToxhuFAKmwaPAkG+TkTMKxArKWSPQAAgL+j6Sg/AYPDQIqjYj8AAAAAWWpXO9r6DkJInoc/AACAvwAAAACCJ7094CaRQIqYE0CwooE712Q0QQAAAABu27Y+bn2mOuyCFEEAAAAA7t9ePU1arTkAAAAAirA2PgrMfz84JRU9CWiFQAAAAABDb4pAVQUGQZwz+kAfd+09oxAIO6uNIT0EM0s8S5a4QDqpBkFAOE5B0i3lQNpuIUGs9jw7BZxwOXNmJEKonu86dQeuQWkIMUFgMxM+GcM5PCLWtj7ScgxBxs2EQKO1lTwDd7w/AAAAAHHkDEHZwBhB5q2PPQAAAAAiDzRBk9MUQIxhGUEAAAAAb3HjQIwc5TrOaHc+OZiBOWyEUD6b1VM+OstLQICfGEFLq6U+9czCPBPrUUA8azlBBSpUP48vskCnfQtBQskEQbJoij5wnYk+bQgIPTp6nkD4TIw7VsDlP3Gu+UDH5stAnKwlO7Gr30DBnHo+qBiMQNMKqUB0zvlAeki6QLGTk0DD6h86v8U9QNeXIUCboQg+/Y3tPr6iDz/ih0Q7etnMQK3MhzhJUCE9alOIQINfdz8IPEI9JDxAPgZ8wkDv9zpAQrNPQYldE0AMF4tAQa4JOnJzPj4AAAAAAAAAAA==", "TAS": "5KvkPAAAAADUdS467KgSPAAAAAAAAAAAOSQkPwAAAAAAAAAAzIL/PwAAAAC/4ohAAAAAAEdHLT1zJIA858/hPQAAAAA85ZI95IICPAmTe0E6TFs7+aK2P761bDvn2vU8c/dwPjGieD8AAAAAAAAAAHXdukLv4687z46JOTNUoj3u+uhCgSOKPaa8JThQa0M/nmzOPUtZhD3KaH8/0FxEOtvJfTx3xsQ5AAAAAKPKFzq1fiU6AnR7PQAAAABXdpY7QMczPiuFAz8Vc6A+5WntPAVJRz6h8QlAAAAAALmOnT2tMwQ9ybYpPTcuAj3E4s85WnNVOAAAAAB5Cvw6AAAAAIEZX0AGtu06vmi0OwAAAAAOMu4+PVEoPnPd8T690YFBzlbvP1pCTzkAAAAAGgb8PQAAAABWmkQ89U6oPVO7JDt7ITlCa5/8P0u4QD883dE7noxnOs8Ydj9LfxI+UHpDPAjsHT8AAAAAAAAAACAAoDwBQO8/GjLVOgAAAADWr5k7xUOEO9b7uT0O8gxAvUo8Pnr52DtR9ps/WCVOPQAAgL9W/ONA5KMYQHH5ZT0AAAAAVq/bOkXGDUL0LK8/AACAv3eaGDnfVfY+cPBHQXCk10C7J5E9Pbk4QTeylDuqagBA5M+GPaXp6kAAAAAAWgl2PbvA8Dr9Vxg9xti8Pbwlfz2nPSg+H9g2QQAAAAAMQdxAfxt8QFCBh0BpS0g/V0HbOZnXkj5wZTQ+/aqpP4EmmUBnq+VAdhD5P64AbUASwVc98y7PPf7HiUKZ3VQ57CeKQW4/vkCOKcA+6vbiOlgSxj2JDZtArcQZQFmkWT1c/gw/AAAAAIl7XEA2E49ALMHRPqfxvz34+T5AGe4rP/16i0BrtcA496lfQLDLpj1UaS8+FscmPBoCdD9Q8Zw//B5BQPqMnED+vzg+CCGEPMp0sD+GKLhApy8NP5Zl/D+YoGdAvH88QPcOnj6liLk+x7niPaRJuT/M4lk7eujGPgFtNED+UkJAeLVrPCFHRUBbuLM+N8DMP54W1z9tdkJAOHf6P+uumz9VW0o6aNP2PjnLJz/6yxc/L6DaPlBDcz5Zod48F9gyQDVklzxIymY/cd7UP4gsjz5ZoOg+Mzj8PlC/JkA3XuM/zqrcQF1x2D+qkgNASYRwO53DAj4AAAAAZhGfPA==", "MGN": "GHzXQY4AjUIDba1BTLnsQcJ6xUEAAOtB7FOuQZ8q3kG/kblBnvQDQm02m0EzM65BdmK/QT4gokFzzu1BOO7pQdhhC0Lwv7lBWUz5QaxmL0KmZ7tBXNXyQYE2z0Ei2wtCP9/hQdMU/0EYQcdBqMd5Qbr5dULPf9hBxZwDQnwK6UGrXJ5C/aboQeyp5EH9/CNCeNyfQR1p5kGe8B1Cnyj2QXQg5kFWG9tBKol0QQ9XzkGLVdhBsP0HQuI0jkFkVY1BGF0BQoDB90HfitdB6AE0Qos/80ErXQJC4YrBQf1E90FJeNVBwe3OQe1QAUJ6rNBBI8QBQviBvEEvfPxBV42EQYNeAUK+y6BBdw8eQiSZm0EyBeZBtHjUQbtPr0HuavlB9Kf4QSapuEEicqNBK6PnQXRKiEG2oKdBjNLxQRJKnUH7mkFCrSIBQj6B+kH0BrZB0sqmQczADUI+YelBLi8iQmBu6UG6CY9BF16GQeqvkkFVBRBCI7XGQRX/iEGahaVBW1jBQVp/w0F7DiJCCoypQat9lEE41t5BzlTWQdhx60GIuOJB/hb3QTL9s0E3AJBB6qOvQd3eY0JPi85BfDIDQjnxnEHitoxByPvSQRHwtUGFw5pBgRvWQUbpmUHTHNBBklOJQU3NEUKsdo1BHI/VQXLv5EHuGKxBr5HqQVUAx0GcCjtCvjL8QQV6okHOq99ByPsFQt2TBkJ1LLNBp7a4QQrFykHhcgFCrl4DQnSQBkID7PRBGEP2QS0U20Ej9oxBTNR7Qab6OEJEum5CHMsiQuvl5UGBBJJBCFwdQifZBkKE4AlCma7hQZVcuEH0A+ZBgOyPQU4rx0G9jOxBxSagQe2MlEGGAOhBVrO3QZZd3UFIvYpBIZXZQU3Gh0EM0NxBkOy5QQ1kr0HmybtB5tPvQd0r3UF4vGRC+dnOQb+t3UFbncxBx+GtQby5CEKmiNlBONTgQYqMAkJSFKpBapbhQcCAB0KCmq1BCQnZQZhM50GIPLxBfw2uQWgi/kGobKtBwOH1QRKh3UFR4eNBEYz7QYqUAkLjegtCq1H3QcCBE0LFz6RBgCgIQkXRAUJIi6BBS4LHQVSei0EGxLhB93MZQqHS20HrX49BsCo2QQARAUJY6klCkkEHQt/r7EE1IfhB1YviQYD4zkH+gahBjR2UQQ==", "MGS": "pqTJQbu6ZkKTmbVBu0X4QZslvkHCit1BVBu4QUUc1EFDeMdBM/LtQW0XnkHnTcdB/zbhQRFCq0F7Rd5BfWHSQXtrDkK8B7tBKFMGQs1OP0IxM85Br3r6QR4iokF9iRdCjJHcQSFU8EF54eBBo6haQaBpwEJYxqBBlpTzQVpa20EwV+BC/q+/QaULy0HEBypCuoqrQbVbv0EYCgJC/ejfQVW8yUF0PL1BIEdfQTW8m0E2SaRBtnAAQglnekEDjYtB7N7uQTuA4EHdaNZBfc//QXLh5EEwVPVBdC+pQd2g1UFM6cVBlIzUQZmtAUI2875BYsTJQagxj0H0KOVBCJlVQYaO80El0apB+b3+QYXHf0E5ishBNxehQZ22yUHIsh5C4FDzQYiKvUFgYqRBDZzIQS8HiEGyFchB6uTVQeE+lEEerXxCDxroQYjZ20EzlbtBBlnHQZ5V6kGiKehBjjAWQhfE0UH6s4tBr7I7Qb0FWEEhdPFBXxnNQWzOgEElkbVBdDHAQQwExEHloxVCfxjEQWdHnEFxaMtBddfJQZW61EGcuAFCU8rcQfWthEFtEZ9BJ9KqQVbSaULFx9hBZ6QBQkRqq0FkmqNBNXj/QSS0yEGKLqtBvJDeQTm1qEGW3elB4JR+QdPeBkJKmJNBwpPBQZ0b0EED3MtBXoTcQXnwikFwiB5CBmsOQnzAoEEWfv9Bqy7yQZsR9UEYN8FBNrqyQSoPzUGnigNCWbnfQQ959EGGnbZBJWfDQY4MnEFEhUpB8FdkQSV6iUIAWBpCmPwXQr6Rs0HFbk9BVzPEQa2f9EEyIxlC262+QZ1+tUHQuNRBb5yeQe1elUHAesBB7GaeQQkPrEHapKZBA9uLQSGwpEFzYJhByWStQQ18okGu+4ZB/PHFQRlStEHaxMVBtI/fQc5knEGX9BZCsmmrQQHPukFvkp9BbXysQYJw5kEgL51BIVagQYTf4kH+BZxB+GrKQRk08kF57rJBsZexQc/utEHzJpFBOhOxQacYyEEx84ZBlOHlQfaos0ElirZBnA/eQW5K6kFeqtVBZS3wQaSj4UFweb5BOIXkQQvo2UFJc7BBKt+dQeyMlkHcUchBxIz1QSZ0xUHqJodBeZtKQWHA60Gu4SdCzIrpQcnX5EEKkt9BKtjMQeB9qUGqGphBlzydQQ==", "PB": "+t66wCltE8GwGufAX8UfwQM8LcFHHCnB7K+zwNIYJcGD9CjBZVmVwPGWzMCdeLTAuh3OwD4A38ACAArBatu8wGLbIMFrPRTBC0TgwKzg8cDmyuHAtjhbwMP4DMHJpxjBMD2xwFTLccA5ECbBv4YdwX4p9MDvagjBs5/8wCGNscBU7OnA1QAMwWzFIcHydoXARN4evyKCCMHYBNbApngcwU8lvMBq0CfBBBsVwQ2eFcGf+w/B7fMjwUfaE8Ec6xbB/32cwPSszsCoHTbA0GezwDnqx8BQoCPAY7ILwWIUgsDhYPzAuy5EwGUdo8CyC9TAg4sGwTdcE8F7AZ/AwqkiwVQ1c7/P6pbAPCk1wGzRKcGl2Ec/5rcOv2M5oTy6qw7AVIUFQFU6j8CakwDBFS3TvjCTw8ADNG2/m+uewD4P4MDXZpK9ygrMv78H0j6XTF/A7jK4v4kApr/21IrAUBKLwEj24z6o14HAT1DPwG6wwMBIMC9A6rJrv6c5hMBd6Zu/uZy7wG0Cg8CFbRVAObbVP51PPr+n1JVAoAIHwIIYg8BQiAjASXlEQO8D3L8rDCTATjHzvSAsDkB/DCFAZu35v9AaesDRnHBAKqCOQEsskEDMXcg/0EyVQP0U6r92t5VAHPjtQFTlAEDEzJfAoiYIP/lqtr66HAm/RujCvxGvir9Kwaw/j9UtQPWRvL/V759AfjDaQGcPkUCSeNdAsxFyQLNe/D/uKYU9zuKKQMPpqEDR4/NAWGreQFjtBUGNeCBBVeclQW1n+UDqUt4/oRK9QJGzA0FANh5B3BH3v70hQj+efd5ATzYJQXeFwkDrXaRAWl1IP8EtMEHOSSpBUEI8QXYvEUAmUxtBc9kFQXd3JkGMusQ/5IkRQTJw5UDXvzFBFDCKQFQVD0HScepA8UWVQNm4HkHgNUFAdIheP7qZDEFkqDBBlkQSQUJeB0Hy3RVB72geQRuN10AUMBxBisKPQKLY3EA6yW9Aq4GdQDdfJUHYTR5Bt47VQOLlGkFFSidB+jMPQVwVKUFwZShB28kRQRtG5UDZmJhA1gfgQBEKGUH3oflA+LANQbGTCUEA2BhBQPolQUrC6EB0OPhA+e4dQYx6AkHU0D5BVe07Qch8JEETfhtBkyg+Qb7oEUESnCZB1uwYQQIB60DpVxdBZZ0bQQ==", "TB": "AQEBAQEBAAEBAQEBAQEBAQEBAQEBAQABAQEBAAEAAQEBAQEBAQABAAEBAAAAAAAAAAAAAQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEAAQEBAQEAAAABAAEBAQEAAQEBAQEBAQAAAQ=="}</script>
@@ -953,6 +1039,27 @@ function showCell(i, distNm){
     +'<button id="fixsplit" style="flex:1">Not a nucleus&hellip;</button></div>';
   h+='<p class="hint" id="fixmsg"></p><div id="fixstatus"></div>';
 
+  /* The 4th way, per bjump-spec §6: a real nucleus the detector missed entirely, so there is no
+     existing detection to correct -- this is deliberately NOT keyed to the cell on screen (unlike
+     Move/Merged/Split above, which all post against THIS nucleus's own id/root/coord). It posts
+     Code.gs's existing "new_cell_no_nucleus" type -- the same one µJump uses, though µJump wraps
+     it in a much larger findable-cell subsystem (proximity-matching caches, random-picker/
+     Excel-export integration) that bjump-spec §6 never asked for here. identified/certainty are
+     left blank on purpose: Code.gs already supports an "unclassified, location only" row (see the
+     new_cell_no_nucleus branch's own comment on this), so this is just that, with nothing more
+     built than the spec calls for. No backend change was needed -- postReport() already sends
+     ds:"bjump", and new_cell_no_nucleus reads/writes via SS(), the same per-dataset routing every
+     other report type on this page already relies on. */
+  h+='<label style="margin-top:16px;display:block">Know of a nucleus the detector missed?</label>';
+  h+='<p class="hint" style="margin-top:0">Paste the coordinate of a real nucleus that has no '
+    +'detection at all here &mdash; this does not need to be near the cell above.</p>';
+  h+='<div class="row"><div class="coord" style="flex:2"><input type="text" id="newnuccoord" '
+    +'placeholder="missed nucleus x, y, z (voxels)"></div>'
+    +'<button id="fixnew" style="flex:1">Add a missed nucleus</button></div>';
+  h+='<div class="row" style="margin-top:6px"><input type="text" id="newnuccomment" '
+    +'placeholder="comment (optional) — what it looks like" style="flex:1"></div>';
+  h+='<p class="hint" id="fixnewmsg"></p>';
+
   /* "Jump to this nucleus" re-centres the viewer on the cell already on screen, so unlike a
      neighbour row it is not a navigation step -- same distinction µJump draws between .jump
      and .njump. */
@@ -1284,6 +1391,37 @@ function wireCorrection(i){
     renderNotNucleusReport(back);
     const box=document.getElementById("idbox"); if(box&&box.scrollIntoView)box.scrollIntoView({behavior:"smooth",block:"nearest"});
   });
+
+  /* "Add a missed nucleus" -- deliberately NOT routed through send() above: that helper always
+     stamps the CURRENT cell's own nucleusId/rootId/coord onto the payload, which is correct for
+     Move/Merged/Split (all corrections to THIS detection) and wrong here, since a missed nucleus
+     by definition has no detection of its own to key against. Posts Code.gs's existing
+     "new_cell_no_nucleus" type directly, coord-only plus an optional comment -- no rootId,
+     nucRootId, identified or certainty, matching the "unclassified, location only" row shape
+     Code.gs already supports for exactly this case (see its own comment on openLocationOnlyReport-
+     style reports). Right-sized to what bjump-spec §6 actually asks for: flag a missed nucleus at
+     a pasted coordinate. Not built: µJump's proximity-matching caches or its integration of
+     community-reported cells into the random picker / bulk filter / Excel export -- that is a
+     considerably larger subsystem than the spec calls for here, and can follow later if wanted. */
+  const an=document.getElementById("fixnew");
+  if(an) an.addEventListener("click",function(){
+    const nmsg=document.getElementById("fixnewmsg");
+    if(!GOOGLE_VERIFIED){ nmsg.textContent="Sign in first — reports are attributed."; return; }
+    const coordEl=document.getElementById("newnuccoord");
+    const raw=(coordEl.value||"").trim().split(/[\s,;]+/).filter(Boolean);
+    if(raw.length<3){ nmsg.textContent="Paste three numbers: x, y, z in voxels."; return; }
+    const commentEl=document.getElementById("newnuccomment");
+    nmsg.textContent="sending…";
+    postReport({
+      type:"new_cell_no_nucleus",
+      coord:raw.slice(0,3).join(","),
+      comment:(commentEl&&commentEl.value||"").trim(),
+      timestamp:new Date().toISOString()
+    },"missed nucleus").then(function(d){
+      nmsg.textContent=(d&&d.ok)?"Thank you — recorded.":"Could not record that.";
+      if(d&&d.ok){ coordEl.value=""; if(commentEl)commentEl.value=""; }
+    }).catch(function(e){ nmsg.textContent="failed: "+netErr(e); });
+  });
 }
 
 /* ── input ──────────────────────────────────────────────────────────────────────────── */
@@ -1353,6 +1491,141 @@ function postReport(payload,okMsg){
     .then(function(d){ if(typeof showSubmitToast==="function") showSubmitToast(!!(d&&d.ok),okMsg||""); return d; });
 }
 if(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID.indexOf("REPLACE")!==0){ gamifyInit(12); }
+
+/* ── Filter and show (2026-08-18) ───────────────────────────────────────────────────────
+   βJump's own filter+step-through feature, first version. Unlike µJump's, this runs entirely
+   against the 220 nuclei already embedded in this page (BX/BY/BZ/BVOL/BPY/BTR/BSRC/BSEG plus
+   the three MARKERS) -- no network fetch needed to preview or export matches, since there is no
+   150k-row live dataset to query and no MICrONS-style cell-type/layer data to filter by. Filter
+   dimensions are what this dataset actually has: mesh availability, truncated-by-slab-face,
+   nucleus volume, signed distance from the fitted pyramidale sheet, and molecular-marker (shell)
+   percentile. Current community identity is NOT a filter here yet -- it lives only in the
+   "Master cell list" sheet (server-side), not in this page's embedded arrays, and reading it
+   live for a filter/export pass is a reasonable follow-up once that sheet is seeded and this
+   feature has real usage to justify the extra fetch.
+
+   The step-through mechanics (persistence, Prev/Next/Reset, resume-on-same-match-set) are
+   core/stepthrough.js, shared with µJump -- see its header comment. Host contract this file
+   provides: rowPos(row) and jumpToVoxel(x,y,z), both below. */
+function rowPos(row){ return [BX[row.i], BY[row.i], BZ[row.i]]; }
+/* core/stepthrough.js calls this with a raw voxel position; βJump's step-through matches are
+   always exact indices into the embedded arrays (not arbitrary coordinates), so a nearest-cell
+   search always resolves back to the SAME index it started from -- this just reuses the
+   existing single-cell-lookup path (showCell) rather than adding a second one. */
+function jumpToVoxel(x,y,z){
+  const r=nearest(x,y,z);
+  if(r.i>=0) showCell(r.i,r.dist);
+}
+
+const MARKER_PCT_LABELS=[
+  {value:"",label:"Not filtering by this"},
+  {value:"0.9",label:"Top 10% (percentile ≥ 0.90)"},
+  {value:"0.75",label:"Top 25% (percentile ≥ 0.75)"},
+  {value:"0.5",label:"Top 50% (percentile ≥ 0.50)"}
+];
+function markerFilterHtml(){
+  return MARKERS.map(function(m){
+    let h='<div class="row" style="margin-top:6px;align-items:center;gap:8px">';
+    h+='<label style="font-size:12px;flex:1 1 160px">'+m.label+'</label>';
+    h+='<select class="fmarker" data-key="'+m.key+'" style="flex:1 1 200px">';
+    h+=MARKER_PCT_LABELS.map(function(o){return '<option value="'+o.value+'">'+o.label+'</option>';}).join("");
+    h+='</select></div>';
+    return h;
+  }).join("");
+}
+function runFilterBjump(){
+  const meshSel=document.getElementById("fMesh").value;
+  const truncSel=document.getElementById("fTrunc").value;
+  const volMin=parseFloat(document.getElementById("fVolMin").value);
+  const volMax=parseFloat(document.getElementById("fVolMax").value);
+  const pyMin=parseFloat(document.getElementById("fPyMin").value);
+  const pyMax=parseFloat(document.getElementById("fPyMax").value);
+  const markerFilters=Array.from(document.querySelectorAll(".fmarker")).map(function(sel){
+    return {key:sel.dataset.key,min:sel.value?parseFloat(sel.value):null};
+  }).filter(function(f){return f.min!==null;});
+  const markerByKey={}; MARKERS.forEach(function(m){markerByKey[m.key]=m;});
+
+  const matches=[];
+  for(let i=0;i<N;i++){
+    if(meshSel==="yes"&&!hasMesh(i))continue;
+    if(meshSel==="no"&&hasMesh(i))continue;
+    if(truncSel==="yes"&&!BTR[i])continue;
+    if(truncSel==="no"&&BTR[i])continue;
+    if(isFinite(volMin)&&BVOL[i]<volMin)continue;
+    if(isFinite(volMax)&&BVOL[i]>volMax)continue;
+    if(isFinite(pyMin)&&BPY[i]<pyMin)continue;
+    if(isFinite(pyMax)&&BPY[i]>pyMax)continue;
+    let markersOk=true;
+    for(const f of markerFilters){
+      const m=markerByKey[f.key];
+      if(!m||m.shellArr[i]<0){markersOk=false;break;} // -1 = read failed, can't rank it
+      if(pct(m,m.shellArr[i])<f.min){markersOk=false;break;}
+    }
+    if(!markersOk)continue;
+    matches.push({row:{i:i}});
+  }
+  return matches;
+}
+function buildColumnsBjump(){
+  const markerByKey={}; MARKERS.forEach(function(m){markerByKey[m.key]=m;});
+  const cols=[
+    {header:"nucleus_id",get:function(m){return BID[m.row.i];}},
+    {header:"voxel_x",get:function(m){return BX[m.row.i];}},
+    {header:"voxel_y",get:function(m){return BY[m.row.i];}},
+    {header:"voxel_z",get:function(m){return BZ[m.row.i];}},
+    {header:"nucleus_volume_um3",get:function(m){return BVOL[m.row.i].toFixed(4);}},
+    {header:"dist_pyramidale_um",get:function(m){return BPY[m.row.i].toFixed(4);}},
+    {header:"truncated_z",get:function(m){return BTR[m.row.i]?"yes":"no";}},
+    {header:"has_mesh",get:function(m){return hasMesh(m.row.i)?"yes":"no";}},
+    {header:"segment_id",get:function(m){return BSEG[m.row.i]||"";}}
+  ];
+  MARKERS.forEach(function(m){
+    cols.push({header:m.key+"_shell_percentile",get:function(row){
+      const v=m.shellArr[row.row.i];
+      return v>=0?pct(m,v).toFixed(3):"";
+    }});
+  });
+  return cols;
+}
+(function(){
+  const runBtn=document.getElementById("filterRun");
+  const dlBtn=document.getElementById("filterDownload");
+  const statusEl=document.getElementById("filterStatus");
+  const markersBox=document.getElementById("fMarkers");
+  if(!runBtn||!dlBtn||!markersBox)return; // filter tab markup not present on this build
+  markersBox.innerHTML=markerFilterHtml();
+  let lastMatches=null;
+  runBtn.addEventListener("click",function(){
+    lastMatches=runFilterBjump();
+    const n=lastMatches.length;
+    statusEl.textContent=n===0?"No matching nuclei — adjust filters.":
+      n.toLocaleString()+" matching "+(n===1?"nucleus":"nuclei")+" found.";
+    dlBtn.disabled=n===0;
+    dlBtn.title=n===0?"No matches to download":"";
+    UJ.stepthrough.initStepThrough(lastMatches);
+  });
+  dlBtn.addEventListener("click",function(){
+    if(!lastMatches||!lastMatches.length||typeof XLSX==="undefined")return;
+    const cols=buildColumnsBjump();
+    const data=[cols.map(function(c){return c.header;})];
+    for(const m of lastMatches)data.push(cols.map(function(c){return c.get(m);}));
+    const ws=XLSX.utils.aoa_to_sheet(data);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Nuclei");
+    XLSX.writeFile(wb,"bjump_filtered_nuclei.xlsx");
+  });
+  // A filter input changing invalidates the previous preview, same UX as µJump's filter tab.
+  document.querySelectorAll("#filterCard input, #filterCard select").forEach(function(el){
+    el.addEventListener("change",function(){
+      if(el===runBtn||el===dlBtn)return;
+      lastMatches=null;
+      dlBtn.disabled=true;
+      dlBtn.title="Click \"Preview matches\" first";
+      statusEl.textContent="";
+      UJ.stepthrough.initStepThrough(null);
+    });
+  });
+})();
 
 </script>
 </body></html>
