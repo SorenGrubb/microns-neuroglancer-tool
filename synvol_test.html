@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Synapse volume decode — Stage 2 test</title>
+<style>
+  body{font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:760px;margin:40px auto;padding:0 16px;color:#0b0b0b;background:#fcfcfb;}
+  h1{font-size:19px;margin-bottom:4px;}
+  h2{font-size:15px;margin:28px 0 4px;}
+  p.lead{color:#52514e;margin-top:0;}
+  .row{display:flex;gap:8px;margin:12px 0;align-items:center;flex-wrap:wrap;}
+  label{font-size:12.5px;color:#52514e;}
+  input{width:110px;padding:7px 9px;font:inherit;border:1px solid #c3c2b7;border-radius:6px;}
+  button{padding:8px 14px;font:inherit;border:1px solid #c3c2b7;border-radius:6px;background:#fff;cursor:pointer;}
+  button:hover{background:#f0efec;}
+  button:disabled{opacity:.5;cursor:default;}
+  #log,#log2{white-space:pre-wrap;background:#f9f9f7;border:1px solid #e1e0d9;border-radius:6px;padding:12px;margin-top:8px;font:12px/1.5 ui-monospace,monospace;min-height:60px;}
+  .ok{color:#0ca30c;}
+  .err{color:#d03b3b;}
+  .note{background:#f9f9f7;border:1px solid #e1e0d9;border-radius:6px;padding:12px;margin-top:20px;font-size:12.5px;color:#52514e;}
+  code{background:#f0efec;padding:1px 4px;border-radius:3px;}
+</style>
+</head>
+<body>
+<h1>Synapse volume decode — Stage 2 feasibility test</h1>
+<p class="lead">Decodes the RAW synapse segmentation volume directly (not the mesh — see
+synmesh_test.html for that, confirmed working). This is the piece that finds synapse segment
+IDs near a voxel/cell, since this dataset has no CAVE table to query instead. Voxel
+coordinates here are in this viewer's native 8×8×30&nbsp;nm frame — the same numbers you'd
+read straight out of Neuroglancer's position box.</p>
+
+<h2>1. Single-voxel lookup</h2>
+<p class="lead" style="margin:0 0 4px">The critical test: pick a synapse you already know the
+ID of (e.g. segment <code>545931</code>, confirmed via synmesh_test.html) and find its voxel
+coordinates by clicking it in Neuroglancer with the <code>wei_synapses</code> layer visible.
+Enter those coordinates below — if this decoder is right, the returned ID should match.</p>
+<div class="row">
+  <label>X <input id="vx" type="number" value="0"></label>
+  <label>Y <input id="vy" type="number" value="0"></label>
+  <label>Z <input id="vz" type="number" value="0"></label>
+  <button id="lookupBtn">Look up voxel</button>
+</div>
+<div id="log">Waiting…</div>
+
+<h2>2. Box search</h2>
+<p class="lead" style="margin:0 0 4px">Scans a voxel box and lists every distinct segment ID
+found. Keep the box small (a few dozen voxels per side, stride 1-2) — this samples every
+voxel in the box client-side, one HTTP round trip per not-yet-fetched chunk.</p>
+<div class="row">
+  <label>Center X <input id="cx" type="number" value="0"></label>
+  <label>Center Y <input id="cy" type="number" value="0"></label>
+  <label>Center Z <input id="cz" type="number" value="0"></label>
+  <label>Half-size (voxels) <input id="half" type="number" value="20"></label>
+  <label>Stride <input id="stride" type="number" value="2"></label>
+  <button id="boxBtn">Search box</button>
+</div>
+<div id="log2">Waiting…</div>
+
+<div class="note">
+  <strong>What a success in section 1 proves:</strong> the compressed_segmentation +
+  neuroglancer_uint64_sharded_v1(hash:"identity") decoder — ported field-by-field from
+  neuroglancer's own reference implementation — correctly reconstructs real segment IDs from
+  the raw volume, not just from a self-constructed synthetic test (which already passed
+  19/19 in the sandbox, but that only proves internal consistency, not that this matches the
+  real dataset's bytes).
+  <br><br>
+  Must be opened over <code>https://</code> (or <code>http://localhost</code>), not
+  <code>file://</code>, same as synmesh_test.html.
+</div>
+
+<script>
+window.UJ = window.UJ || {};
+UJ.cfg = UJ.cfg || {};
+/* Straight from gs://vclem-xh/alzheimers/wei_synapses/syn_20241121/info, pasted by Søren
+   2026-08-19 (see project memory bjump-synapse-stage1-meshfetch.md). synvol.js takes this
+   whole scales array directly -- no live info re-fetch, unlike synmesh.js's loadInfo(). */
+UJ.cfg.synVol = {
+  volumeBase: "https://storage.googleapis.com/vclem-xh/alzheimers/wei_synapses/syn_20241121/",
+  volumeBaseAlt: "https://storage.googleapis.com/storage/v1/b/vclem-xh/o/alzheimers%2Fwei_synapses%2Fsyn_20241121%2F",
+  preferAlt: false,
+  scales: [
+    { key:"8.0x8.0x30.0", chunk_sizes:[[128,128,32]], compressed_segmentation_block_size:[16,16,4],
+      size:[57344,55296,849],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:6,shard_bits:8} },
+    { key:"16.0x16.0x30.0", chunk_sizes:[[128,128,64]], compressed_segmentation_block_size:[8,8,4],
+      size:[28672,27648,849],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:6,shard_bits:5} },
+    { key:"32.0x32.0x30.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[14336,13824,849],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:6,shard_bits:5} },
+    { key:"64.0x64.0x60.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[7168,6912,425],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:6,shard_bits:2} },
+    { key:"128.0x128.0x120.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[3584,3456,213],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:5,shard_bits:0} },
+    { key:"256.0x256.0x240.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[1792,1728,107],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:2,shard_bits:0} },
+    { key:"512.0x512.0x480.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[896,864,54],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:8,minishard_bits:0,shard_bits:0} },
+    { key:"1024.0x1024.0x960.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[448,432,27],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:6,minishard_bits:0,shard_bits:0} },
+    { key:"2048.0x2048.0x1920.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[224,216,14],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:4,minishard_bits:0,shard_bits:0} }
+  ]
+};
+</script>
+<script src="core/synvol.js"></script>
+<script>
+(function(){
+  const log1=document.getElementById("log"), log2=document.getElementById("log2");
+  function line(el,msg,cls){ const d=document.createElement("div"); if(cls)d.className=cls; d.textContent=msg; el.appendChild(d); el.scrollTop=el.scrollHeight; }
+  function clear(el){ el.innerHTML=""; }
+
+  document.getElementById("lookupBtn").addEventListener("click", async function(){
+    const v=[+document.getElementById("vx").value, +document.getElementById("vy").value, +document.getElementById("vz").value];
+    clear(log1);
+    line(log1,"Looking up voxel "+JSON.stringify(v)+" (scale 0, 8x8x30nm)…");
+    const t0=performance.now();
+    try{
+      const id = await UJ.synVol.segmentIdAt(0, v);
+      const ms=(performance.now()-t0).toFixed(0);
+      if(id===null) line(log1,"No segment at this voxel (background, or its chunk is entirely absent from the shard). "+ms+" ms.","err");
+      else line(log1,"Segment ID: "+id+"  ("+ms+" ms)","ok");
+    }catch(e){
+      line(log1,"FAILED — "+e.message,"err");
+    }
+  });
+
+  document.getElementById("boxBtn").addEventListener("click", async function(){
+    const c=[+document.getElementById("cx").value, +document.getElementById("cy").value, +document.getElementById("cz").value];
+    const half=+document.getElementById("half").value, stride=+document.getElementById("stride").value;
+    const min=[c[0]-half,c[1]-half,c[2]-half], max=[c[0]+half,c[1]+half,c[2]+half];
+    clear(log2);
+    line(log2,"Searching box "+JSON.stringify(min)+" .. "+JSON.stringify(max)+" (stride "+stride+")…");
+    const t0=performance.now();
+    try{
+      const res = await UJ.synVol.segmentIdsInBox(0, min, max, {stride:stride});
+      const ms=(performance.now()-t0).toFixed(0);
+      line(log2,res.ids.length+" distinct segment ID(s) found: "+JSON.stringify(res.ids),"ok");
+      line(log2,res.chunksFetched+" chunk(s) had data, "+res.chunksEmpty+" chunk(s) were empty/absent, "+res.voxelsSampled+" voxels sampled, "+ms+" ms.");
+    }catch(e){
+      line(log2,"FAILED — "+e.message,"err");
+    }
+  });
+})();
+</script>
+</body>
+</html>
