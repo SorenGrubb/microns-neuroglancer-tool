@@ -648,7 +648,12 @@ UJ.cfg.mesh = {
   vertexQuantizationBits: 16,
   transform: [16,0,0,0, 0,16,0,0, 0,0,30,0],
   dracoWrapper: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
-  dracoWasm: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
+  dracoWasm: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm",
+  // 2026-08-19: qualifying segType for community-proposed extra root IDs (see core/mesh.js's
+  // extraImg65RootIds -- this used to be hardcoded "img65", µJump's own segmentation name).
+  // βJump has exactly one segmentation, so every proposal made through loadBjumpRootIdPanel()
+  // below is tagged with this same string.
+  extraRootSegType: "secgan16"
 };
 
 /* Synapse contacts (2026-08-19, Søren: "Do the bigger project now, I have time") -- two
@@ -1053,6 +1058,14 @@ function cellLabel(i){
 }
 
 let CUR_IDX=null;
+/* Community-proposed extra/alternate root IDs for whichever cell's own panel is currently open
+   (2026-08-19, ported from µJump -- Søren: "also add the ability for the community to propose
+   extra/alternate root IDs for a bJump nucleus, like µJump already has"). Populated by
+   loadBjumpRootIdPanel() below every time showCell() runs; core/mesh.js's extraImg65RootIds()
+   reads this SAME global by name (typeof-guarded there, see its header comment) to fold these
+   into the main root ID's mesh/PowerPoint/volume downloads automatically -- nothing else in this
+   file has to touch those three buttons for that to work. */
+let CUR_EXTRA_ROOTS=[];
 function showCell(i, distNm){
   CUR_IDX=i;
   const pos=[BX[i],BY[i],BZ[i]], nb=kNearest(pos[0],pos[1],pos[2],3,i);
@@ -1123,6 +1136,16 @@ function showCell(i, distNm){
   h+='<p class="hint" id="meshmsg">'
     +(hasMesh(i)?"":"No mesh for this nucleus — it lies outside the segmented sub-volume, "
                    +"which covers only about half the imaged block.")+'</p>';
+
+  /* Community-proposed additional root IDs (2026-08-19, ported from µJump's "additional root /
+     nucleus IDs" panel -- Søren: "also add the ability for the community to propose extra/
+     alternate root IDs for a bJump nucleus, like µJump already has"). Segmentation is patchy
+     here too (hasMesh() itself notes only ~half the nuclei are meshed at all) -- this lets the
+     community attach a root ID even to a nucleus with none of its own, or add fragments the
+     automatic segmentation split off. Always rendered, not gated on hasMesh(i): a nucleus with
+     NO mesh today is exactly the case a community-proposed root ID is most useful for. Filled in
+     by loadBjumpRootIdPanel() below, which also populates CUR_EXTRA_ROOTS. */
+  h+='<div id="rootIdPanel" style="margin:10px 0 0"></div>';
 
   /* "Cell contacts" (2026-08-19, ported from µJump -- Søren: "We should build the cell contacts
      for bJump now. Like for µJump"). Filled in by loadCellContactsPanel() below, same deferred-
@@ -1246,6 +1269,7 @@ function showCell(i, distNm){
     const u=neuroglancerLinkForPos([Number(b.dataset.x),Number(b.dataset.y),Number(b.dataset.z)]);
     if(u) window.open(u,"_blank","noopener");
   });
+  loadBjumpRootIdPanel(String(BID[i]));
   wireMeshButtons(i);
   wireCorrection(i);
   startGuided(i);
@@ -1308,6 +1332,128 @@ function wireMeshButtons(i){
       });
     },true);   // keepMsg -- see run()
   });
+}
+
+/* ============================================================================================
+   Community-proposed additional root IDs (2026-08-19, ported from µJump's loadRootIdPanel --
+   Søren: "also add the ability for the community to propose extra/alternate root IDs for a
+   bJump nucleus, like µJump already has"). Segmentation is patchy in every one of these
+   datasets, splitting one biological cell across several mesh fragments or missing it
+   altogether -- µJump's own "additional root / nucleus IDs" panel lets the community attach
+   fragments a nucleus's own detector missed. βJump reuses the EXACT SAME backend endpoints
+   (propose_root_id/vote_root_id/remove_root_id via postReport(), the public "?rootIds=" read) --
+   no Code.gs change needed, because these sheets are keyed by nucleusId+rootId with no dataset
+   column, and βJump's own nucleus IDs are this dataset's own sequential 1..220 numbering (see
+   bjump_nuclei.csv), never overlapping with µJump's real, large MICrONS CAVE nucleus IDs -- so
+   there is no cross-dataset collision risk even without an explicit ds filter on that sheet.
+   postReport() still stamps ds:"bjump" on every write (its usual behaviour, unconditional), and
+   the read below still adds &ds= explicitly, same convention every other bJump GET already uses
+   (fetchBjumpIdentities, fetchBjumpCellContacts) in case the backend does filter on it.
+
+   Unlike µJump (which distinguishes img65/img35/nucleus65/nucleus35, because that dataset has
+   two independent segmentations plus a bare-nucleus-ID fallback), βJump has exactly ONE
+   segmentation ("secgan16" -- see hasMesh()'s own comment), so there is no segType picker here:
+   every proposal is tagged segType:"secgan16" (UJ.cfg.mesh.extraRootSegType), the same string
+   core/mesh.js's extraImg65RootIds() now checks (generalised 2026-08-19, see its own comment)
+   before folding CUR_EXTRA_ROOTS into the main root ID's mesh/PowerPoint/volume downloads. */
+async function fetchBjumpCommunityRootIds(nucleusId){
+  if(!REPORT_ENDPOINT||!nucleusId)return[];
+  try{
+    const r=await fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(nucleusId)+"&ds="+encodeURIComponent(UJ.cfg.backend.ds));
+    const d=await r.json();
+    return (d&&d.rootIds)||[];
+  }catch(e){return[];}
+}
+/* Merges the nucleus's own MICrONS/SECGAN root ID (if any -- may be "") with every
+   community-proposed root ID for this nucleus into one ordered, de-duplicated list, main first
+   when present. Mirrors µJump's mergeSelfRootIds() exactly, minus the segType branch (βJump has
+   only one qualifying type, matched against UJ.cfg.mesh.extraRootSegType rather than a literal
+   "img65"). */
+function bjumpMergeSelfRootIds(rootId,communityRoots){
+  const qualifyingType=UJ.cfg.mesh.extraRootSegType||"secgan16";
+  const ids=[];
+  if(rootId)ids.push(String(rootId));
+  (communityRoots||[]).forEach(function(x){
+    const st=x.segType||qualifyingType;
+    if(st!==qualifyingType)return;
+    const id=String(x.rootId||"");
+    if(id&&ids.indexOf(id)<0)ids.push(id);
+  });
+  return ids;
+}
+/* Community roots for a nucleus OTHER than the one currently on screen (Cell contacts'
+   candidates) -- mirrors µJump's fetchExtraRootIdsFor(), a fresh per-candidate fetch rather than
+   reading CUR_EXTRA_ROOTS, which only ever holds the on-screen cell's own extras. Returns just
+   the extras (mainRootIdStr excluded), ready to pass straight into fetchCombinedMesh's
+   extraRootIdsOverride parameter. */
+async function bjumpExtraRootIdsFor(nucleusId,mainRootIdStr){
+  const list=await fetchBjumpCommunityRootIds(nucleusId);
+  return bjumpMergeSelfRootIds("",list).filter(function(id){return id!==String(mainRootIdStr||"");});
+}
+/* The nucleus's own MICrONS/SECGAN root ID if it has one, else the first community-proposed
+   root ID for the CURRENTLY DISPLAYED cell (CUR_EXTRA_ROOTS is only ever populated for that one
+   cell) -- used wherever a single "this cell's segment" id is needed for display/highlighting
+   (the Synapse contacts viewer link, mesh-proximity search) even when hasMesh(i) is false. */
+function bjumpEffectiveRootId(i){
+  if(BSEG[i])return String(BSEG[i]);
+  if(i===CUR_IDX&&CUR_EXTRA_ROOTS&&CUR_EXTRA_ROOTS.length)return String(CUR_EXTRA_ROOTS[0].id);
+  return "";
+}
+function loadBjumpRootIdPanel(nid){
+  const el=document.getElementById("rootIdPanel");
+  CUR_EXTRA_ROOTS=[];
+  if(!el||!REPORT_ENDPOINT||!nid){if(el)el.innerHTML="";return;}
+  el.innerHTML="";
+  const qualifyingType=UJ.cfg.mesh.extraRootSegType||"secgan16";
+  const render=(list)=>{
+    CUR_EXTRA_ROOTS=list.map(function(x){return {id:x.rootId,segType:x.segType||qualifyingType};}).filter(function(o){return o.id;});
+    const isOwner=OWNER_EMAIL&&REPORTER_EMAIL===OWNER_EMAIL;
+    const n=list.length;
+    let body='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Segmentation and nucleus detection are often patchy — one cell can span several meshes, or have none at all. Proposed IDs are folded into this nucleus\'s own mesh/PowerPoint/volume downloads for everyone; vote whether each belongs.</div>';
+    if(n){
+      list.forEach(x=>{
+        body+='<div style="display:flex;align-items:center;gap:6px;margin:3px 0;flex-wrap:wrap">'
+          +'<code style="cursor:pointer" class="bridcopy" data-rid="'+x.rootId+'" title="click to copy">'+x.rootId+'</code>'
+          +'<span style="font-size:12px;color:var(--mut)">net '+(x.net>0?'+':'')+x.net+' (▲'+x.up+' ▼'+x.down+')</span>'
+          +'<button class="idbtn bridvote" data-rid="'+x.rootId+'" data-v="1" style="padding:1px 7px">▲</button>'
+          +'<button class="idbtn bridvote" data-rid="'+x.rootId+'" data-v="-1" style="padding:1px 7px">▼</button>'
+          +(x.by?'<span style="font-size:11px;color:var(--mut)">by '+String(x.by).replace(/</g,"&lt;")+'</span>':'')
+          +(isOwner?'<button class="idbtn bridremove" data-rid="'+x.rootId+'" style="padding:1px 7px;color:var(--danger)">remove</button>':'')
+          +'</div>';
+      });
+    } else {
+      body+='<div style="font-size:12px;color:var(--mut)">None proposed yet.</div>';
+    }
+    body+='<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'
+      +'<input type="text" id="bridInput" placeholder="segment ID (number)" style="flex:1;min-width:120px">'
+      +'<button class="idbtn idbtn-submit" id="bridPropose" style="padding:2px 10px">Propose</button></div>';
+    const label=()=>"additional root IDs"+(n?" ("+n+")":"");
+    el.innerHTML='<a href="#" id="bridToggle" class="nsub" style="font-size:12px;cursor:pointer;text-decoration:underline">▶ '+label()+'</a>'
+      +'<div id="bridBody" style="display:none;margin:6px 0 2px">'+body+'</div>';
+    const tog=el.querySelector("#bridToggle"),bod=el.querySelector("#bridBody");
+    const setOpen=(open)=>{bod.style.display=open?"block":"none";tog.textContent=(open?"▼ ":"▶ ")+label();window.__bridOpen=open;};
+    tog.addEventListener("click",(e)=>{e.preventDefault();setOpen(bod.style.display==="none");});
+    el.querySelectorAll(".bridcopy").forEach(b=>b.addEventListener("click",()=>{
+      navigator.clipboard&&navigator.clipboard.writeText(b.dataset.rid);
+      const o=b.textContent;b.textContent="copied";setTimeout(()=>b.textContent=o,800);
+    }));
+    el.querySelectorAll(".bridvote").forEach(b=>b.addEventListener("click",()=>{
+      if(postReport({type:"vote_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid,vote:Number(b.dataset.v)},"Vote recorded — thank you.")){window.__bridOpen=true;setTimeout(()=>loadBjumpRootIdPanel(nid),1500);}
+    }));
+    el.querySelectorAll(".bridremove").forEach(b=>b.addEventListener("click",()=>{
+      if(!confirm("Remove proposed root ID "+b.dataset.rid+" from this nucleus for everyone?"))return;
+      if(postReport({type:"remove_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid},"Removed.")){window.__bridOpen=true;setTimeout(()=>loadBjumpRootIdPanel(nid),1500);}
+    }));
+    const pb=el.querySelector("#bridPropose");
+    if(pb)pb.addEventListener("click",()=>{
+      const v=((el.querySelector("#bridInput")||{}).value||"").trim();
+      if(!/^\d{5,}$/.test(v)){alert("Enter a numeric segment ID (the long segment ID from Neuroglancer).");return;}
+      if(postReport({type:"propose_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:v,segType:qualifyingType},"Proposed — thank you.")){window.__bridOpen=true;setTimeout(()=>loadBjumpRootIdPanel(nid),1500);}
+    });
+    if(window.__bridOpen)setOpen(true);
+  };
+  fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(nid)+"&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(r=>r.json()).then(d=>render((d&&d.rootIds)||[])).catch(()=>{});
 }
 
 /* ============================================================================================
@@ -1378,8 +1524,12 @@ function bjumpMeshUmToVoxel(px,py,pz){
    nucleus's own mesh (built once, reused across every candidate -- same perf fix µJump's own
    computeCellContactsForCandidates applies, see that function's own comment for the "loading a
    lot longer time" bug this avoids). candidates is bjumpMeshedCandidates()'s own {i,dist}[]
-   return shape. Unlike µJump, βJump has no community-proposed "extra root ID" mechanism, so each
-   mesh fetch uses only the one segment id this dataset's embedded table already carries. */
+   return shape. 2026-08-19: now that βJump has its own community-proposed "extra root ID"
+   mechanism (loadBjumpRootIdPanel, mirroring µJump's), this folds those in too -- the query
+   cell's own mesh via CUR_EXTRA_ROOTS (fetchCombinedMesh's default behaviour, since this is
+   always called for whichever cell's own panel is on screen), and each CANDIDATE's own
+   community roots via a fresh bjumpExtraRootIdsFor() fetch (mirrors µJump's fetchExtraRootIdsFor,
+   since CUR_EXTRA_ROOTS only ever holds the on-screen cell's own extras, not a candidate's). */
 async function computeBjumpCellContacts(rootIdStr,candidates,clusterUm,thresholdUm,onProgress){
   if(!rootIdStr)throw new Error("This nucleus has no mesh — nothing to check contacts against.");
   onProgress&&onProgress(0,"fetching this nucleus's mesh…");
@@ -1391,7 +1541,10 @@ async function computeBjumpCellContacts(rootIdStr,candidates,clusterUm,threshold
     const candRoot=String(BSEG[nb.i]);
     onProgress&&onProgress((ci+0.5)/candidates.length,"checking nearby nucleus "+(ci+1)+"/"+candidates.length+"…");
     let candMesh;
-    try{ candMesh=await UJ.mesh.fetchCombinedMesh(candRoot); }
+    try{
+      const candExtras=await bjumpExtraRootIdsFor(BID[nb.i],candRoot);
+      candMesh=await UJ.mesh.fetchCombinedMesh(candRoot,undefined,undefined,candExtras);
+    }
     catch(e){ console.warn("[bJump cell contacts] candidate mesh fetch failed",candRoot,e&&e.message); continue; }
     const pts=UJ.mesh.allContactPointsWithinThreshold(own.positions,ownGrid,candMesh.positions,thresholdUm,clusterUm);
     const cellVoxel=[BX[nb.i],BY[nb.i],BZ[nb.i]];
@@ -1683,38 +1836,84 @@ function renderCellContactsPanel(el,known,i){
 }
 
 /* ============================================================================================
-   Synapse contacts (2026-08-19, Søren: "Do the bigger project now, I have time"). Finds
-   synapse segment IDs from the raw "wei_synapses/syn_20241121" segmentation near this
-   nucleus's own voxel position. This dataset has NO CAVE table, query API, or synapse-cell
-   partner mapping for its synapses (confirmed by listing the whole bucket folder) -- unlike
-   µJump's Connectivity panel, which depends entirely on a queryable CAVE synapse table that
-   simply doesn't exist here. The only way to find "which synapses are near this cell" is to
-   decode the raw segmentation volume directly around the cell's own voxel position, which is
-   exactly what UJ.synVol.segmentIdsInBox does (core/synvol.js, Stage 2, confirmed live
-   2026-08-19 against real segment 545931 -- see project memory bjump-synapse-stage2-
-   voldecode.md). UJ.synMesh (Stage 1, same memory doc, also confirmed live) then lets each
-   found synapse's own mesh be fetched on demand, same "3D model" convention showCell() already
-   uses for the cell's own mesh.
+   Synapse contacts (2026-08-19, Søren: "Do the bigger project now, I have time"; revised the
+   same day: "the synapses should be searched near the cell meshes associated with this cell
+   (also meshes proposed by community), not in a box near the center of the nucleus"). Finds
+   synapse segment IDs from the raw "wei_synapses/syn_20241121" segmentation near this cell.
+   This dataset has NO CAVE table, query API, or synapse-cell partner mapping for its synapses
+   (confirmed by listing the whole bucket folder) -- unlike µJump's Connectivity panel, which
+   depends entirely on a queryable CAVE synapse table that simply doesn't exist here. The only
+   way to find "which synapses are near this cell" is to decode the raw segmentation volume
+   directly, which is exactly what UJ.synVol.segmentIdsInBox does (core/synvol.js, Stage 2,
+   confirmed live 2026-08-19 against real segment 545931 -- see project memory
+   bjump-synapse-stage2-voldecode.md). UJ.synMesh (Stage 1, same memory doc, also confirmed
+   live) then lets each found synapse's own mesh be fetched on demand, same "3D model"
+   convention showCell() already uses for the cell's own mesh.
 
-   Search basis is a voxel BOX centered on this nucleus's own [BX,BY,BZ], half-size and stride
-   both UI-adjustable -- the same shape as synvol_test.html's box search, which is what Søren
-   used to confirm this live. A box, not a mesh-based proximity test like Cell contacts above:
-   there is no cheap way to test "is this voxel inside the cell's own mesh" at this dataset's
-   scale, and a box around the nucleus centre is a reasonable first cut for "synapses near this
-   cell" -- a tighter, membrane-relative search is a natural follow-up once this basic version
-   is in daily use and its false-positive rate (voxels in the box that are near the nucleus
-   centre but not actually against this cell's own membrane, e.g. a neighbouring cell's) is
-   better understood in practice.
+   SEARCH BASIS (revised 2026-08-19): a small box run around EVERY (sampled) vertex of this
+   cell's own combined mesh -- its main root ID plus every community-proposed extra root ID
+   (see the "Community-proposed additional root IDs" block above, ported from µJump the same
+   day) -- rather than one big box around the nucleus centroid. A synapse sits against the
+   cell's actual MEMBRANE, which for a real neuron can extend far past its own nucleus (dendrite/
+   axon processes); a box around the centroid only ever covered the volume immediately around
+   the nucleus itself, missing synapses on any process running away from it, and had no way to
+   exclude a NEIGHBOURING cell's synapses if that neighbour's membrane happened to pass through
+   the same box. Walking the mesh surface instead searches where the membrane actually is,
+   wherever it goes. A full-resolution mesh can have many thousands of vertices, so a vertex
+   STRIDE (computed from a UI-adjustable target sample count, not a fixed constant, since mesh
+   size varies a lot cell to cell) subsamples it, and each sampled vertex gets its own small box
+   (radius UI-adjustable) rather than one huge box, exactly mirroring the "a synapse is a small
+   structure, sample sparsely over a wide area rather than exhaustively over a small one"
+   reasoning UJ.synVol.segmentIdsInBox's own header comment already lays out. Nearby vertices
+   commonly land in the same synVol chunk, and core/synvol.js's fetchChunk() caches per chunk
+   (see its own header comment), so this is far cheaper than the vertex count alone suggests.
+
+   FALLBACK: a cell with no mesh at all -- neither its own MICrONS/SECGAN root ID nor any
+   community-proposed one -- has no mesh surface to walk. Rather than leaving such a cell with
+   no synapse search at all (hasMesh()'s own comment notes only about half this dataset's nuclei
+   are meshed), this falls back to the ORIGINAL box-around-the-nucleus-centroid search from the
+   first version of this feature, clearly labelled as a fallback in the results.
 
    NOT saved to the backend (unlike Cell contacts, which Søren separately asked to persist
    there): results here are recomputed fresh every time this panel loads, no new Code.gs
    schema was created for it. Worth revisiting once there's a sense of how often the same cell
    gets searched more than once and whether the community would benefit from seeing each
    other's results the way Cell contacts already does. */
-const BSYN_HALF_DEFAULT_VOX=20, BSYN_HALF_MAX_VOX=80, BSYN_STRIDE_DEFAULT=2, BSYN_STRIDE_MAX=8;
-    // Defaults match the box Søren used for the live Stage 2 confirmation (half 20, stride 2,
-    // ~3s for ~9000 sampled voxels) -- a reasonable "not too slow, not too coarse" starting
-    // point, not a hard limit; both are UI-adjustable per search up to the MAX values above.
+const BSYN_RADIUS_DEFAULT_VOX=6, BSYN_RADIUS_MAX_VOX=30;
+    // Radius (voxels) of the small box searched around EACH sampled mesh vertex -- a synapse is
+    // a small structure (tens of voxels across at most, see synvol.js's own comment), so this
+    // stays small; it is NOT the old whole-cell search half-size.
+const BSYN_TARGET_VERTS_DEFAULT=250, BSYN_TARGET_VERTS_MAX=2000;
+    // How many of the mesh's own vertices to sample, roughly -- the actual stride is computed
+    // from the fetched mesh's real vertex count (meshVertexCount/targetVerts, minimum 1), so a
+    // small mesh still gets searched thoroughly and a huge one doesn't take forever.
+const BSYN_FALLBACK_HALF_DEFAULT_VOX=20, BSYN_FALLBACK_HALF_MAX_VOX=80,
+      BSYN_FALLBACK_STRIDE_DEFAULT=2, BSYN_FALLBACK_STRIDE_MAX=8;
+    // Only used when this cell has no mesh at all (see FALLBACK above) -- unchanged from the
+    // first version of this feature, including the box Søren used for the live Stage 2
+    // confirmation (half 20, stride 2, ~3s for ~9000 sampled voxels).
+
+/* Runs a small UJ.synVol.segmentIdsInBox around each of (a stride-sampled subset of) a mesh's
+   own vertices. meshPositions is a flat Float32Array of x,y,z triples in µm (UJ.mesh's own
+   output units, see bjumpMeshUmToVoxel) -- exactly what UJ.mesh.fetchCombinedMesh returns as
+   .positions. Returns the same {ids,chunksFetched,chunksEmpty,voxelsSampled} shape
+   segmentIdsInBox itself does, plus verticesSampled/vertexStride for the results summary. */
+async function bjumpSynapseSearchNearMesh(meshPositions,radiusVox,vertexStride){
+  const nVerts=meshPositions.length/3;
+  const stride=Math.max(1,Math.round(vertexStride)||1);
+  const boxStride=Math.max(1,Math.round(radiusVox/3));
+  const ids=new Set();
+  let chunksFetched=0,chunksEmpty=0,voxelsSampled=0,verticesSampled=0;
+  for(let v=0; v<nVerts; v+=stride){
+    verticesSampled++;
+    const c=bjumpMeshUmToVoxel(meshPositions[v*3],meshPositions[v*3+1],meshPositions[v*3+2]);
+    const min=[c[0]-radiusVox,c[1]-radiusVox,c[2]-radiusVox], max=[c[0]+radiusVox,c[1]+radiusVox,c[2]+radiusVox];
+    const res=await UJ.synVol.segmentIdsInBox(0,min,max,{stride:boxStride});
+    res.ids.forEach(function(id){ids.add(id);});
+    chunksFetched+=res.chunksFetched; chunksEmpty+=res.chunksEmpty; voxelsSampled+=res.voxelsSampled;
+  }
+  return {ids:[...ids],chunksFetched,chunksEmpty,voxelsSampled,verticesSampled,vertexStride:stride};
+}
 
 function bjumpSynapseRowHtml(idStr, idx){
   return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">'
@@ -1765,23 +1964,22 @@ function loadSynapseContactsPanel(containerId,i){
   if(!el)return;
   const uid="syn_"+i;
   let h='<details class="rv-panel neigh" style="margin-top:0"><summary>Synapse contacts '
-    +'<span class="hint" title="Searches the raw synapse segmentation volume for segment IDs near this nucleus\'s own voxel position -- this dataset has no CAVE table or annotation list for synapses, so this is the only way to find them.">(raw-volume search)</span></summary>';
+    +'<span class="hint" title="Searches the raw synapse segmentation volume for segment IDs near this cell\'s own mesh surface (main root ID plus any community-proposed extra root IDs) -- this dataset has no CAVE table or annotation list for synapses, so this is the only way to find them. Falls back to a box around the nucleus centre if this cell has no mesh at all.">(mesh-surface search)</span></summary>';
   h+='<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
-    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_half">Search half-size</label>'
-    +'<input type="number" id="'+uid+'_half" value="'+BSYN_HALF_DEFAULT_VOX+'" min="2" max="'+BSYN_HALF_MAX_VOX+'" step="1" style="width:70px" title="Voxels in every direction from this nucleus\'s centre -- the box searched is (2x this+1) voxels wide, tall and deep.">'
+    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_radius">Radius from mesh surface</label>'
+    +'<input type="number" id="'+uid+'_radius" value="'+BSYN_RADIUS_DEFAULT_VOX+'" min="2" max="'+BSYN_RADIUS_MAX_VOX+'" step="1" style="width:70px" title="How far (voxels) from each sampled point on the membrane to search.">'
     +'<span class="hint">voxels</span></div>'
     +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
-    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_stride">Sample every</label>'
-    +'<input type="number" id="'+uid+'_stride" value="'+BSYN_STRIDE_DEFAULT+'" min="1" max="'+BSYN_STRIDE_MAX+'" step="1" style="width:70px" title="Voxel spacing sampled per axis -- 1 checks every voxel (slow for a large box), higher values are faster but can miss very small/thin synapses.">'
-    +'<span class="hint">voxels</span></div>'
+    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_verts">Sample about</label>'
+    +'<input type="number" id="'+uid+'_verts" value="'+BSYN_TARGET_VERTS_DEFAULT+'" min="10" max="'+BSYN_TARGET_VERTS_MAX+'" step="10" style="width:70px" title="Roughly how many of the mesh\'s own vertices to check -- higher is more thorough but slower. The actual spacing is computed from this cell\'s real vertex count.">'
+    +'<span class="hint">mesh vertices</span></div>'
     +'<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">'
     +'<button class="idbtn" id="'+uid+'_search" style="padding:3px 10px;font-size:12px">Search</button>'
     +'</div><div id="'+uid+'_results" style="margin-top:6px"></div></details>';
   el.innerHTML=h;
-  const halfEl=document.getElementById(uid+"_half"),strideEl=document.getElementById(uid+"_stride"),
+  const radiusEl=document.getElementById(uid+"_radius"),vertsEl=document.getElementById(uid+"_verts"),
     searchBtn=document.getElementById(uid+"_search"),resultsEl=document.getElementById(uid+"_results");
   resultsEl.innerHTML='<div class="hint">Not searched yet.</div>';
-  const rootId0=BSEG[i]?String(BSEG[i]):"";
   const cellType=cellLabel(i);
   let curIds=[];
   /* One delegated click listener (same pattern as renderCellContactsPanel above) -- handles
@@ -1804,27 +2002,52 @@ function loadSynapseContactsPanel(containerId,i){
     const openBtn=e.target.closest(".synOpenBtn");
     if(openBtn){
       const id=curIds[Number(openBtn.dataset.idx)];
-      if(id) openBjumpSynapseViewer(i,rootId0,cellType,id);
+      if(id) openBjumpSynapseViewer(i,bjumpEffectiveRootId(i),cellType,id);
     }
   });
   searchBtn.addEventListener("click",async function(){
-    const half=Math.min(BSYN_HALF_MAX_VOX,Math.max(2,Math.round(Number(halfEl.value)||BSYN_HALF_DEFAULT_VOX)));
-    const stride=Math.min(BSYN_STRIDE_MAX,Math.max(1,Math.round(Number(strideEl.value)||BSYN_STRIDE_DEFAULT)));
-    const pos=[BX[i],BY[i],BZ[i]];
-    const min=[pos[0]-half,pos[1]-half,pos[2]-half], max=[pos[0]+half,pos[1]+half,pos[2]+half];
+    const radius=Math.min(BSYN_RADIUS_MAX_VOX,Math.max(2,Math.round(Number(radiusEl.value)||BSYN_RADIUS_DEFAULT_VOX)));
+    const targetVerts=Math.min(BSYN_TARGET_VERTS_MAX,Math.max(10,Math.round(Number(vertsEl.value)||BSYN_TARGET_VERTS_DEFAULT)));
     const orig=searchBtn.textContent;
-    searchBtn.disabled=true;halfEl.disabled=true;strideEl.disabled=true;searchBtn.textContent="searching…";
+    searchBtn.disabled=true;radiusEl.disabled=true;vertsEl.disabled=true;searchBtn.textContent="searching…";
     try{
-      const res=await UJ.synVol.segmentIdsInBox(0,min,max,{stride:stride});
+      let res,summary;
+      try{
+        /* Main path: walk this cell's own combined mesh surface (main root ID + any
+           community-proposed extras -- fetchCombinedMesh folds CUR_EXTRA_ROOTS in automatically
+           since this is always the on-screen cell, see its own header comment). Throws when this
+           cell has NO root ID at all (neither its own nor a community-proposed one), which is
+           the signal to fall back to the box search below. */
+        const rootId0=BSEG[i]?String(BSEG[i]):"";
+        searchBtn.textContent="fetching mesh…";
+        const mesh=await UJ.mesh.fetchCombinedMesh(rootId0);
+        searchBtn.textContent="searching…";
+        const nVerts=mesh.positions.length/3;
+        const stride=Math.max(1,Math.round(nVerts/targetVerts));
+        res=await bjumpSynapseSearchNearMesh(mesh.positions,radius,stride);
+        summary=res.ids.length
+          ?res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled across '+res.verticesSampled+' of '+fmt(nVerts)+' mesh vertices (every '+res.vertexStride+(mesh.rootIds.length>1?', '+mesh.rootIds.length+' root ID fragments combined':'')+').'
+          :'No synapse segments found near this cell\'s mesh surface ('+res.verticesSampled+' of '+fmt(nVerts)+' vertices sampled, radius '+radius+' voxels). Try a larger radius or a finer vertex sample.';
+      }catch(meshErr){
+        /* Fallback: this cell has no mesh (own or community-proposed) at all -- see the module
+           header comment's FALLBACK section. Reuses the original box-around-nucleus-centre
+           search from the first version of this feature rather than leaving the cell with no
+           synapse search at all. */
+        const half=BSYN_FALLBACK_HALF_DEFAULT_VOX, boxStride=BSYN_FALLBACK_STRIDE_DEFAULT;
+        const pos=[BX[i],BY[i],BZ[i]];
+        const min=[pos[0]-half,pos[1]-half,pos[2]-half], max=[pos[0]+half,pos[1]+half,pos[2]+half];
+        res=await UJ.synVol.segmentIdsInBox(0,min,max,{stride:boxStride});
+        summary=(res.ids.length?'':'No synapse segments found. ')+'<b>No mesh available for this cell (main or community-proposed)</b> — fell back to a '+(half*2+1)+'-voxel box around the nucleus centre instead of the mesh surface. Propose a root ID above for a more accurate, membrane-relative search.'+(res.ids.length?' '+res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled.':'');
+      }
       curIds=res.ids;
       resultsEl.innerHTML=curIds.length
-        ?curIds.map(bjumpSynapseRowHtml).join("")+'<div class="hint" style="margin-top:4px">'+res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled.</div>'
-        :'<div class="hint">No synapse segments found in this box ('+res.voxelsSampled+' voxels sampled). Try a larger half-size or a finer stride.</div>';
+        ?curIds.map(bjumpSynapseRowHtml).join("")+'<div class="hint" style="margin-top:4px">'+summary+'</div>'
+        :'<div class="hint">'+summary+'</div>';
     }catch(err){
       console.warn("[bJump synapse contacts]",err);
       resultsEl.innerHTML='<div class="hint" style="color:var(--warn)">Failed: '+escHtml(String((err&&err.message)||err))+'</div>';
     }finally{
-      searchBtn.disabled=false;halfEl.disabled=false;strideEl.disabled=false;searchBtn.textContent=orig;
+      searchBtn.disabled=false;radiusEl.disabled=false;vertsEl.disabled=false;searchBtn.textContent=orig;
     }
   });
 }
