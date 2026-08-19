@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Synapse mesh fetch — Stage 1 test</title>
+<style>
+  body{font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#0b0b0b;background:#fcfcfb;}
+  h1{font-size:19px;margin-bottom:4px;}
+  p.lead{color:#52514e;margin-top:0;}
+  .row{display:flex;gap:8px;margin:16px 0;}
+  input{flex:1;padding:8px 10px;font:inherit;border:1px solid #c3c2b7;border-radius:6px;}
+  button{padding:8px 14px;font:inherit;border:1px solid #c3c2b7;border-radius:6px;background:#fff;cursor:pointer;}
+  button:hover{background:#f0efec;}
+  button:disabled{opacity:.5;cursor:default;}
+  #log{white-space:pre-wrap;background:#f9f9f7;border:1px solid #e1e0d9;border-radius:6px;padding:12px;margin-top:16px;font:12px/1.5 ui-monospace,monospace;min-height:80px;}
+  .ok{color:#0ca30c;}
+  .err{color:#d03b3b;}
+  .note{background:#f9f9f7;border:1px solid #e1e0d9;border-radius:6px;padding:12px;margin-top:20px;font-size:12.5px;color:#52514e;}
+</style>
+</head>
+<body>
+<h1>Synapse mesh fetch — Stage 1 feasibility test</h1>
+<p class="lead">Given ONE synapse segment ID (from the raw <code>wei_synapses/syn_20241121</code> segmentation), fetch and decode its mesh directly from the bucket. This does not search for synapses near a cell — you supply the ID yourself, found by clicking a synapse in Neuroglancer with that layer visible and reading its segment ID off the selection panel.</p>
+
+<div class="row">
+  <input id="segId" type="text" placeholder="Synapse segment ID, e.g. 123456789" inputmode="numeric">
+  <button id="fetchBtn">Fetch mesh</button>
+  <button id="dlBtn" disabled>Download .glb</button>
+</div>
+
+<div id="log">Waiting for a segment ID…</div>
+
+<div class="note">
+  <strong>What a success here proves:</strong> the synapse layer's mesh format
+  (<code>neuroglancer_multilod_draco</code>, murmurhash3_x86_128 sharding — confirmed by
+  reading <code>mesh/info</code> directly) decodes correctly with the exact same algorithm
+  core/mesh.js already uses for βJump's own cell meshes, just pointed at a different bucket.
+  It does <em>not</em> prove anything about finding synapse IDs near a given cell — that's the
+  much harder Stage 2 (decoding the raw segmentation volume, since this dataset has no
+  CAVE table or annotation list to query instead).
+  <br><br>
+  This page must be opened over <code>https://</code> (or <code>http://localhost</code>) for
+  <code>fetch()</code>'s Range requests to work — opening the raw file from disk
+  (<code>file://</code>) will fail with a CORS/network error unrelated to the mesh logic itself.
+</div>
+
+<script>
+window.UJ = window.UJ || {};
+UJ.cfg = UJ.cfg || {};
+/* Config for the synapse mesh source — gs://vclem-xh/alzheimers/wei_synapses/syn_20241121/mesh/.
+   Defaults below come straight from that layer's own mesh/info file (fetched and read directly,
+   2026-08-19); loadInfo() re-fetches and overwrites them at runtime from the live file, so these
+   are just the starting point (and the fallback if that live re-fetch is blocked). */
+UJ.cfg.synMesh = {
+  meshBase: "https://storage.googleapis.com/vclem-xh/alzheimers/wei_synapses/syn_20241121/mesh/",
+  meshBaseAlt: "https://storage.googleapis.com/storage/v1/b/vclem-xh/o/alzheimers%2Fwei_synapses%2Fsyn_20241121%2Fmesh%2F",
+  meshBaseAltSuffix: "?alt=media",
+  preferAlt: false,
+  vertexQuantizationBits: 16,
+  transform: [16,0,0,0, 0,16,0,0, 0,0,30,0],
+  preshiftBits: 6,
+  minishardBits: 8,
+  shardBits: 10,
+  dracoWrapper: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
+  dracoWasm: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
+};
+</script>
+<script src="core/synmesh.js"></script>
+<script>
+(function(){
+  const logEl=document.getElementById("log");
+  const segInput=document.getElementById("segId");
+  const fetchBtn=document.getElementById("fetchBtn");
+  const dlBtn=document.getElementById("dlBtn");
+  let lastId=null;
+  function log(msg,cls){
+    const line=document.createElement("div");
+    if(cls)line.className=cls;
+    line.textContent=msg;
+    logEl.appendChild(line);
+    logEl.scrollTop=logEl.scrollHeight;
+  }
+  function clearLog(){logEl.innerHTML="";}
+
+  fetchBtn.addEventListener("click",async function(){
+    const id=segInput.value.trim();
+    if(!id){log("Enter a segment ID first.","err");return;}
+    clearLog();
+    fetchBtn.disabled=true;dlBtn.disabled=true;
+    log("Fetching mesh for segment "+id+"…");
+    const t0=performance.now();
+    try{
+      const res=await UJ.synMesh.fetchSynapseMesh(id,function(frac,msg){
+        log("  "+Math.round(frac*100)+"% — "+msg);
+      });
+      const ms=(performance.now()-t0).toFixed(0);
+      log("OK — "+(res.positions.length/3).toLocaleString()+" vertices, "+(res.indices.length/3).toLocaleString()+" triangles, LOD "+res.lod+"/"+(res.numLods-1)+", "+(res.bytes/1024).toFixed(1)+" KB fetched, "+ms+" ms.","ok");
+      lastId=id;
+      dlBtn.disabled=false;
+    }catch(e){
+      log("FAILED — "+e.message,"err");
+    }finally{
+      fetchBtn.disabled=false;
+    }
+  });
+
+  dlBtn.addEventListener("click",async function(){
+    if(!lastId)return;
+    dlBtn.disabled=true;
+    log("Building .glb…");
+    try{
+      const res=await UJ.synMesh.downloadSynapseGLB(lastId,function(frac,msg){log("  "+Math.round(frac*100)+"% — "+msg);});
+      log("Saved "+res.filename+" ("+res.vertices.toLocaleString()+" vertices).","ok");
+    }catch(e){
+      log("FAILED — "+e.message,"err");
+    }finally{
+      dlBtn.disabled=false;
+    }
+  });
+
+  segInput.addEventListener("keydown",function(e){if(e.key==="Enter")fetchBtn.click();});
+})();
+</script>
+</body>
+</html>
