@@ -651,6 +651,72 @@ UJ.cfg.mesh = {
   dracoWasm: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
 };
 
+/* Synapse contacts (2026-08-19, Søren: "Do the bigger project now, I have time") -- two
+   independent, standalone-tested modules (see project memory bjump-synapse-stage1-
+   meshfetch.md / bjump-synapse-stage2-voldecode.md), both confirmed working live against
+   this dataset's real "wei_synapses/syn_20241121" layer before being wired in here:
+     - UJ.synMesh fetches ONE synapse's mesh given its segment ID (Stage 1, confirmed live
+       2026-08-19 against segment 545931).
+     - UJ.synVol decodes the raw segmentation VOLUME to find which segment IDs exist at/near
+       a voxel -- the only way to do that for this dataset, which has no CAVE table or
+       annotation list for synapses at all (confirmed by bucket listing). Confirmed live
+       2026-08-19: segment 545931's own voxel position correctly round-trips back to
+       "545931" through this decoder too.
+   Both are deliberately separate from core/mesh.js (a different bucket, different sharding
+   scheme for the volume, no Draco for the volume decode at all) rather than a change to that
+   shared, tested module -- see synmesh.js/synvol.js's own header comments for the full
+   reasoning. */
+UJ.cfg.synMesh = {
+  meshBase: "https://storage.googleapis.com/vclem-xh/alzheimers/wei_synapses/syn_20241121/mesh/",
+  meshBaseAlt: "https://storage.googleapis.com/storage/v1/b/vclem-xh/o/alzheimers%2Fwei_synapses%2Fsyn_20241121%2Fmesh%2F",
+  meshBaseAltSuffix: ".shard?alt=media",
+  preferAlt: false,
+  vertexQuantizationBits: 16,
+  transform: [16,0,0,0, 0,16,0,0, 0,0,30,0],
+  preshiftBits: 6,
+  minishardBits: 8,
+  shardBits: 10,
+  dracoWrapper: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
+  dracoWasm: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
+};
+/* Straight from gs://vclem-xh/alzheimers/wei_synapses/syn_20241121/info (pasted by Søren
+   2026-08-19). Scale 0 (8x8x30nm) is this viewer's own native voxel frame (UJ.cfg.res above)
+   -- no coordinate conversion needed to search around a cell's own [BX,BY,BZ]. */
+UJ.cfg.synVol = {
+  volumeBase: "https://storage.googleapis.com/vclem-xh/alzheimers/wei_synapses/syn_20241121/",
+  volumeBaseAlt: "https://storage.googleapis.com/storage/v1/b/vclem-xh/o/alzheimers%2Fwei_synapses%2Fsyn_20241121%2F",
+  preferAlt: false,
+  scales: [
+    { key:"8.0x8.0x30.0", chunk_sizes:[[128,128,32]], compressed_segmentation_block_size:[16,16,4],
+      size:[57344,55296,849],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:6,shard_bits:8} },
+    { key:"16.0x16.0x30.0", chunk_sizes:[[128,128,64]], compressed_segmentation_block_size:[8,8,4],
+      size:[28672,27648,849],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:6,shard_bits:5} },
+    { key:"32.0x32.0x30.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[14336,13824,849],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:6,shard_bits:5} },
+    { key:"64.0x64.0x60.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[7168,6912,425],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:6,shard_bits:2} },
+    { key:"128.0x128.0x120.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[3584,3456,213],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:5,shard_bits:0} },
+    { key:"256.0x256.0x240.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[1792,1728,107],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:9,minishard_bits:2,shard_bits:0} },
+    { key:"512.0x512.0x480.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[896,864,54],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:8,minishard_bits:0,shard_bits:0} },
+    { key:"1024.0x1024.0x960.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[448,432,27],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:6,minishard_bits:0,shard_bits:0} },
+    { key:"2048.0x2048.0x1920.0", chunk_sizes:[[64,64,64]], compressed_segmentation_block_size:[8,8,8],
+      size:[224,216,14],
+      sharding:{hash:"identity",data_encoding:"gzip",minishard_index_encoding:"gzip",preshift_bits:4,minishard_bits:0,shard_bits:0} }
+  ]
+};
+
 /* core/tree.js renders the guided identification INLINE, into the #idbox that showCell() puts
    inside its .idcta block -- not into µJump's overlay #idfpanel, which βJump has no markup for.
    modal:false is what stops the engine toggling a .show class this page never styles and
@@ -719,6 +785,8 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 
 <script src="core/mesh.js"></script>
+<script src="core/synmesh.js"></script>
+<script src="core/synvol.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/ontology.js"></script>
 <script src="core/panel.js"></script>
@@ -1064,6 +1132,13 @@ function showCell(i, distNm){
      nuclei, any identity (see bjumpMeshedCandidates()'s own comment). */
   h+='<div id="cellContactsPanel" style="margin:14px 0 0"></div>';
 
+  /* "Synapse contacts" (2026-08-19, Søren: "Do the bigger project now, I have time"). Unlike
+     Cell contacts above (mesh-proximity between two CELLS), this searches the raw synapse
+     segmentation volume for segment IDs near this nucleus's own voxel position -- see
+     loadSynapseContactsPanel()'s own comment for why that's the only way to do it for this
+     dataset (no CAVE table, no annotation list). */
+  h+='<div id="synapseContactsPanel" style="margin:14px 0 0"></div>';
+
   /* The whole point of the tool. There is no machine prediction here, so this panel is the only
      place a cell type ever comes from. */
   /* Three panels, all rendered by core/panel.js: the light-blue consensus block (which also
@@ -1176,6 +1251,7 @@ function showCell(i, distNm){
   startGuided(i);
   loadCommunity(i);
   loadCellContactsPanel("cellContactsPanel",i);
+  loadSynapseContactsPanel("synapseContactsPanel",i);
 }
 function jumpToIndex(i){ showCell(i,null); window.scrollTo({top:0,behavior:"smooth"}); }
 
@@ -1603,6 +1679,153 @@ function renderCellContactsPanel(el,known,i){
   xlsxBtn.addEventListener("click",function(){
     if(!curRows.length)return;
     downloadBjumpCellContactsExcel(BID[i],rootId0,cellType,curRows,curThresholdNm);
+  });
+}
+
+/* ============================================================================================
+   Synapse contacts (2026-08-19, Søren: "Do the bigger project now, I have time"). Finds
+   synapse segment IDs from the raw "wei_synapses/syn_20241121" segmentation near this
+   nucleus's own voxel position. This dataset has NO CAVE table, query API, or synapse-cell
+   partner mapping for its synapses (confirmed by listing the whole bucket folder) -- unlike
+   µJump's Connectivity panel, which depends entirely on a queryable CAVE synapse table that
+   simply doesn't exist here. The only way to find "which synapses are near this cell" is to
+   decode the raw segmentation volume directly around the cell's own voxel position, which is
+   exactly what UJ.synVol.segmentIdsInBox does (core/synvol.js, Stage 2, confirmed live
+   2026-08-19 against real segment 545931 -- see project memory bjump-synapse-stage2-
+   voldecode.md). UJ.synMesh (Stage 1, same memory doc, also confirmed live) then lets each
+   found synapse's own mesh be fetched on demand, same "3D model" convention showCell() already
+   uses for the cell's own mesh.
+
+   Search basis is a voxel BOX centered on this nucleus's own [BX,BY,BZ], half-size and stride
+   both UI-adjustable -- the same shape as synvol_test.html's box search, which is what Søren
+   used to confirm this live. A box, not a mesh-based proximity test like Cell contacts above:
+   there is no cheap way to test "is this voxel inside the cell's own mesh" at this dataset's
+   scale, and a box around the nucleus centre is a reasonable first cut for "synapses near this
+   cell" -- a tighter, membrane-relative search is a natural follow-up once this basic version
+   is in daily use and its false-positive rate (voxels in the box that are near the nucleus
+   centre but not actually against this cell's own membrane, e.g. a neighbouring cell's) is
+   better understood in practice.
+
+   NOT saved to the backend (unlike Cell contacts, which Søren separately asked to persist
+   there): results here are recomputed fresh every time this panel loads, no new Code.gs
+   schema was created for it. Worth revisiting once there's a sense of how often the same cell
+   gets searched more than once and whether the community would benefit from seeing each
+   other's results the way Cell contacts already does. */
+const BSYN_HALF_DEFAULT_VOX=20, BSYN_HALF_MAX_VOX=80, BSYN_STRIDE_DEFAULT=2, BSYN_STRIDE_MAX=8;
+    // Defaults match the box Søren used for the live Stage 2 confirmation (half 20, stride 2,
+    // ~3s for ~9000 sampled voxels) -- a reasonable "not too slow, not too coarse" starting
+    // point, not a hard limit; both are UI-adjustable per search up to the MAX values above.
+
+function bjumpSynapseRowHtml(idStr, idx){
+  return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">'
+    +'<span style="flex:1 1 auto;font-family:ui-monospace,monospace">segment '+escHtml(idStr)+'</span>'
+    +'<button class="idbtn synMeshBtn" data-idx="'+idx+'" style="padding:1px 8px;font-size:11px" title="Fetch this synapse\'s own mesh and download it as a .glb">3D model</button>'
+    +'<button class="idbtn synOpenBtn" data-idx="'+idx+'" style="padding:1px 8px;font-size:11px" title="Opens a 3D view of this nucleus and this synapse together">Open in Neuroglancer</button>'
+    +'</div>';
+}
+function bjumpSynapseViewerLayers(){
+  const V=UJ.cfg.viewer, S=UJ.cfg.shader;
+  const hoe=S("#0080ff",0,184,0,150);
+  return [
+    {type:"image",source:V.em,tab:"source",name:"EM (CLAHE)"},
+    {type:"image",source:V.emSecgan,tab:"source",name:"EM (SECGAN 16nm)"},
+    {type:"image",source:V.hoechst,tab:"rendering",blend:"additive",name:"Hoechst",
+     shader:hoe.shader,shaderControls:hoe.shaderControls}
+  ];
+}
+/* Per-synapse "Open in Neuroglancer" -- this nucleus's own segment (if it has one) plus the
+   synapse segment, from the SEPARATE "synapses" source (UJ.cfg.viewer.synapses), centred on
+   this nucleus's own voxel position (the synapse's own centroid isn't computed here -- it was
+   found by a voxel-box search, not a mesh fetch, so the nucleus centre is what's actually
+   known without an extra network round trip; the synapse layer itself is still visible and
+   selected, so it's easy to see and click on once the view opens). */
+function openBjumpSynapseViewer(i, rootIdStr, cellType, synapseIdStr){
+  const layers=bjumpSynapseViewerLayers();
+  const centerLayerName=cellType||"This nucleus";
+  if(rootIdStr){
+    layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:centerLayerName,
+      segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+  }
+  const synLayerName="Synapse "+synapseIdStr;
+  layers.push({type:"segmentation",source:UJ.cfg.viewer.synapses,tab:"source",name:synLayerName,
+    segments:[String(synapseIdStr)],segmentColors:{[String(synapseIdStr)]:"#3fb950"},objectAlpha:0.9});
+  const posVox=[BX[i],BY[i],BZ[i]];
+  const state={dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
+    position:posVox,crossSectionScale:2.0,projectionScale:4000,
+    layers:layers,selectedLayer:{layer:synLayerName,visible:true},
+    layout:{type:"4panel",orthographicProjection:true},showSlices:false};
+  const url=UJ.cfg.viewer.base+"#!"+encodeURIComponent(JSON.stringify(state));
+  window.open(url,"_blank","noopener");
+}
+/* containerId is the plain div showCell() leaves in the panel HTML (see the synapseContactsPanel
+   comment there); i is the master array index. Unlike Cell contacts, there is no "already-known"
+   fetch here (nothing is persisted), so this only ever renders the empty search form. */
+function loadSynapseContactsPanel(containerId,i){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  const uid="syn_"+i;
+  let h='<details class="rv-panel neigh" style="margin-top:0"><summary>Synapse contacts '
+    +'<span class="hint" title="Searches the raw synapse segmentation volume for segment IDs near this nucleus\'s own voxel position -- this dataset has no CAVE table or annotation list for synapses, so this is the only way to find them.">(raw-volume search)</span></summary>';
+  h+='<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_half">Search half-size</label>'
+    +'<input type="number" id="'+uid+'_half" value="'+BSYN_HALF_DEFAULT_VOX+'" min="2" max="'+BSYN_HALF_MAX_VOX+'" step="1" style="width:70px" title="Voxels in every direction from this nucleus\'s centre -- the box searched is (2x this+1) voxels wide, tall and deep.">'
+    +'<span class="hint">voxels</span></div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_stride">Sample every</label>'
+    +'<input type="number" id="'+uid+'_stride" value="'+BSYN_STRIDE_DEFAULT+'" min="1" max="'+BSYN_STRIDE_MAX+'" step="1" style="width:70px" title="Voxel spacing sampled per axis -- 1 checks every voxel (slow for a large box), higher values are faster but can miss very small/thin synapses.">'
+    +'<span class="hint">voxels</span></div>'
+    +'<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">'
+    +'<button class="idbtn" id="'+uid+'_search" style="padding:3px 10px;font-size:12px">Search</button>'
+    +'</div><div id="'+uid+'_results" style="margin-top:6px"></div></details>';
+  el.innerHTML=h;
+  const halfEl=document.getElementById(uid+"_half"),strideEl=document.getElementById(uid+"_stride"),
+    searchBtn=document.getElementById(uid+"_search"),resultsEl=document.getElementById(uid+"_results");
+  resultsEl.innerHTML='<div class="hint">Not searched yet.</div>';
+  const rootId0=BSEG[i]?String(BSEG[i]):"";
+  const cellType=cellLabel(i);
+  let curIds=[];
+  /* One delegated click listener (same pattern as renderCellContactsPanel above) -- handles
+     both per-row buttons regardless of how many times resultsEl gets replaced by a re-search. */
+  el.addEventListener("click",function(e){
+    const meshBtn=e.target.closest(".synMeshBtn");
+    if(meshBtn){
+      const id=curIds[Number(meshBtn.dataset.idx)];
+      if(!id)return;
+      const orig=meshBtn.textContent;
+      meshBtn.disabled=true;meshBtn.textContent="…";
+      UJ.synMesh.downloadSynapseGLB(id).then(function(){
+        meshBtn.textContent=orig;meshBtn.disabled=false;
+      }).catch(function(err){
+        meshBtn.textContent="failed";meshBtn.title=(err&&err.message)||String(err);
+        setTimeout(function(){ meshBtn.textContent=orig;meshBtn.disabled=false; },2500);
+      });
+      return;
+    }
+    const openBtn=e.target.closest(".synOpenBtn");
+    if(openBtn){
+      const id=curIds[Number(openBtn.dataset.idx)];
+      if(id) openBjumpSynapseViewer(i,rootId0,cellType,id);
+    }
+  });
+  searchBtn.addEventListener("click",async function(){
+    const half=Math.min(BSYN_HALF_MAX_VOX,Math.max(2,Math.round(Number(halfEl.value)||BSYN_HALF_DEFAULT_VOX)));
+    const stride=Math.min(BSYN_STRIDE_MAX,Math.max(1,Math.round(Number(strideEl.value)||BSYN_STRIDE_DEFAULT)));
+    const pos=[BX[i],BY[i],BZ[i]];
+    const min=[pos[0]-half,pos[1]-half,pos[2]-half], max=[pos[0]+half,pos[1]+half,pos[2]+half];
+    const orig=searchBtn.textContent;
+    searchBtn.disabled=true;halfEl.disabled=true;strideEl.disabled=true;searchBtn.textContent="searching…";
+    try{
+      const res=await UJ.synVol.segmentIdsInBox(0,min,max,{stride:stride});
+      curIds=res.ids;
+      resultsEl.innerHTML=curIds.length
+        ?curIds.map(bjumpSynapseRowHtml).join("")+'<div class="hint" style="margin-top:4px">'+res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled.</div>'
+        :'<div class="hint">No synapse segments found in this box ('+res.voxelsSampled+' voxels sampled). Try a larger half-size or a finer stride.</div>';
+    }catch(err){
+      console.warn("[bJump synapse contacts]",err);
+      resultsEl.innerHTML='<div class="hint" style="color:var(--warn)">Failed: '+escHtml(String((err&&err.message)||err))+'</div>';
+    }finally{
+      searchBtn.disabled=false;halfEl.disabled=false;strideEl.disabled=false;searchBtn.textContent=orig;
+    }
   });
 }
 
