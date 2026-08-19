@@ -1070,7 +1070,6 @@ function showCell(i, distNm){
   CUR_IDX=i;
   const pos=[BX[i],BY[i],BZ[i]], nb=kNearest(pos[0],pos[1],pos[2],3,i);
   const st=stratum(i), seg=BSEG[i], src=BSRC[i];
-  const url=viewerUrl(pos,seg,src);
   /* core/panel.js's contract: CUR_NUCID/CUR_ROOT identify the cell every report it files is
      filed against, and CUR_CELLTYPE_DISPLAY must be cleared here so a name from the PREVIOUS
      cell can never leak into this one's PowerPoint title in the window before its community
@@ -1259,7 +1258,16 @@ function showCell(i, distNm){
     el.addEventListener("click",function(){ jumpToIndex(Number(el.dataset.i)); });
   });
   const jh=panelEl.querySelector("#jumphere");
-  if(jh) jh.addEventListener("click",function(){ window.open(url,"_blank","noopener"); });
+  /* 2026-08-19, Søren: this used to open Neuroglancer in a new tab -- but the whole point of the
+     button is "re-centre on THIS nucleus's own coordinate", which is far more useful done in
+     place (e.g. when the coordinate that led here was a bit off) than as an external tab. Mirrors
+     µJump's own .jump button (ujump.html's delegated .jump,.njump handler): set #x/#y/#z to the
+     nucleus's exact voxel position and click #go, which re-runs doJump() -> nearest() -> showCell()
+     and lands with distNm essentially 0. */
+  if(jh) jh.addEventListener("click",function(){
+    const xEl=document.getElementById("x"), yEl=document.getElementById("y"), zEl=document.getElementById("z"), goEl=document.getElementById("go");
+    if(xEl&&yEl&&zEl&&goEl){ xEl.value=pos[0]; yEl.value=pos[1]; zEl.value=pos[2]; goEl.click(); }
+  });
   /* core/panel.js's document-level delegation for .jumpview does not exist here (it lives in
      µJump's main script), so wire the organelle rows' Jump buttons ourselves. Delegated on the
      panel rather than bound per button, because #commReports is filled asynchronously. */
@@ -1893,6 +1901,54 @@ const BSYN_FALLBACK_HALF_DEFAULT_VOX=20, BSYN_FALLBACK_HALF_MAX_VOX=80,
     // first version of this feature, including the box Søren used for the live Stage 2
     // confirmation (half 20, stride 2, ~3s for ~9000 sampled voxels).
 
+/* 2026-08-19, Søren: "the synapse mesh should overlap with the mesh of interest, otherwise they
+   do not belong to that mesh" -- bjumpSynapseSearchNearMesh above only proves a synapse segment
+   ID was seen somewhere in a small box near SOME point on the cell's mesh surface, which is
+   coarser than it sounds: a neighbouring cell's synapse can easily fall inside that box too,
+   especially at the larger end of the radius range. This step tightens that up by fetching each
+   CANDIDATE's own synapse mesh (UJ.synMesh.fetchSynapseMesh -- confirmed to decode into the same
+   µm/real-world coordinate frame core/mesh.js's cell meshes use, both being derived from
+   geometrically-aligned segmentations of the same 8x8x30nm imaging volume) and reusing the exact
+   same grid-based mesh-contact algorithm Cell contacts already relies on
+   (UJ.mesh.buildContactGrid/allContactPointsWithinThreshold, see computeBjumpCellContacts's own
+   header comment) to test actual surface-to-surface proximity, not box-to-vertex proximity.
+
+   Threshold is larger than Cell contacts' own BCC_THRESHOLD_UM (40nm, tuned for two membranes
+   pressed together) because a synapse has a real cleft (~20nm) PLUS both meshes here are
+   independently reconstructed/decimated, so their surfaces don't align as tightly as two directly
+   adjacent cell membranes do. minHits is 1, not allContactPointsWithinThreshold's whole-cell
+   default of 3: a synapse mesh is tiny (tens to a couple hundred vertices), so demanding 3
+   independent mutual-nearest hits in the same cluster bucket would silently reject genuine small
+   contacts -- unlike Cell contacts, there is no "noisy mesh reconstruction" risk here worth
+   filtering that hard for an object this size.
+
+   A synapse whose mesh CAN'T be fetched (network error, no fragments, etc.) is kept but marked
+   "unverified" rather than silently dropped -- discarding it would look identical to "confirmed
+   not touching" in the UI, which is a much stronger (and here, unsupported) claim. */
+const BSYN_OVERLAP_THRESHOLD_UM_DEFAULT=0.15, BSYN_OVERLAP_THRESHOLD_UM_MAX=1.0;
+    // 150nm prefilled default. UI-adjustable, 20nm-1000nm range.
+const BSYN_OVERLAP_CLUSTER_UM=0.3;
+const BSYN_OVERLAP_MIN_HITS=1;
+
+/* Runs allContactPointsWithinThreshold between the cell's own mesh (already fetched, grid built
+   ONCE by the caller and reused across every candidate -- same perf pattern
+   computeBjumpCellContacts already uses) and one candidate synapse's own mesh. Returns
+   {status:"touching"|"not-touching"|"unverified", distUm:number|null}. */
+async function bjumpVerifySynapseOverlap(cellPositions,cellGrid,synapseIdStr,thresholdUm){
+  let synMesh;
+  try{
+    synMesh=await UJ.synMesh.fetchSynapseMesh(synapseIdStr);
+  }catch(err){
+    return {status:"unverified",distUm:null,error:(err&&err.message)||String(err)};
+  }
+  if(!synMesh||!synMesh.positions||!synMesh.positions.length)
+    return {status:"unverified",distUm:null,error:"empty synapse mesh"};
+  const pts=UJ.mesh.allContactPointsWithinThreshold(
+    cellPositions,cellGrid,synMesh.positions,thresholdUm,BSYN_OVERLAP_CLUSTER_UM,BSYN_OVERLAP_MIN_HITS);
+  if(pts&&pts.length) return {status:"touching",distUm:pts[0].dist};
+  return {status:"not-touching",distUm:null};
+}
+
 /* Runs a small UJ.synVol.segmentIdsInBox around each of (a stride-sampled subset of) a mesh's
    own vertices. meshPositions is a flat Float32Array of x,y,z triples in µm (UJ.mesh's own
    output units, see bjumpMeshUmToVoxel) -- exactly what UJ.mesh.fetchCombinedMesh returns as
@@ -1915,9 +1971,16 @@ async function bjumpSynapseSearchNearMesh(meshPositions,radiusVox,vertexStride){
   return {ids:[...ids],chunksFetched,chunksEmpty,voxelsSampled,verticesSampled,vertexStride:stride};
 }
 
-function bjumpSynapseRowHtml(idStr, idx){
+/* status is the overlap-verification result (see bjumpVerifySynapseOverlap): "touching" (mesh
+   overlap confirmed), "unverified" (synapse mesh couldn't be fetched -- kept, not discarded, see
+   that function's own comment), or absent/undefined for the fallback-box search path, which has
+   no cell mesh to verify against at all. */
+function bjumpSynapseRowHtml(idStr, idx, status){
+  let tag="";
+  if(status==="touching") tag='<span class="tag none" style="color:var(--good,#3fb950)" title="This synapse\'s own mesh was confirmed to overlap this cell\'s mesh surface.">mesh-confirmed</span>';
+  else if(status==="unverified") tag='<span class="tag none" style="color:var(--warn)" title="Could not fetch this synapse\'s own mesh to confirm overlap -- kept rather than silently dropped.">unverified</span>';
   return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">'
-    +'<span style="flex:1 1 auto;font-family:ui-monospace,monospace">segment '+escHtml(idStr)+'</span>'
+    +'<span style="flex:1 1 auto;font-family:ui-monospace,monospace">segment '+escHtml(idStr)+(tag?' '+tag:'')+'</span>'
     +'<button class="idbtn synMeshBtn" data-idx="'+idx+'" style="padding:1px 8px;font-size:11px" title="Fetch this synapse\'s own mesh and download it as a .glb">3D model</button>'
     +'<button class="idbtn synOpenBtn" data-idx="'+idx+'" style="padding:1px 8px;font-size:11px" title="Opens a 3D view of this nucleus and this synapse together">Open in Neuroglancer</button>'
     +'</div>';
@@ -1993,18 +2056,23 @@ function openBjumpSynapseAllViewer(i,rootIdStr,cellType,synapseIds){
   const url=UJ.cfg.viewer.base+"#!"+encodeURIComponent(JSON.stringify(state));
   window.open(url,"_blank","noopener");
 }
-function downloadBjumpSynapseContactsExcel(nucleusId,rootId,cellType,synapseIds,meta){
+/* statuses is a parallel array to synapseIds (see bjumpVerifySynapseOverlap) -- "touching",
+   "unverified", or "" for the fallback-box search path (no cell mesh existed to verify against).
+   Kept as its own column rather than folded into a filtered synapseIds list because the whole
+   point of "unverified" is that it's a distinct, visible claim from "confirmed touching". */
+function downloadBjumpSynapseContactsExcel(nucleusId,rootId,cellType,synapseIds,meta,statuses){
   if(typeof XLSX==="undefined")return;
-  meta=meta||{};
+  meta=meta||{};statuses=statuses||[];
   const data=[["Nucleus ID","Segment ID","Cell type","Search method","Radius (voxels)",
-    "Mesh vertices sampled","Mesh vertices total","Vertex stride","Synapse index","Synapse segment ID"]];
+    "Mesh vertices sampled","Mesh vertices total","Vertex stride","Overlap verification",
+    "Synapse index","Synapse segment ID"]];
   const base=[nucleusId,rootId||"",cellType||"",meta.method||"",
     meta.radiusVox!=null?meta.radiusVox:"",meta.verticesSampled!=null?meta.verticesSampled:"",
     meta.totalVerts!=null?meta.totalVerts:"",meta.vertexStride!=null?meta.vertexStride:""];
   if(synapseIds.length){
-    synapseIds.forEach(function(id,idx){ data.push(base.concat([idx+1,id])); });
+    synapseIds.forEach(function(id,idx){ data.push(base.concat([statuses[idx]||"",idx+1,id])); });
   } else {
-    data.push(base.concat(["",""]));
+    data.push(base.concat(["","",""]));
   }
   const ws=XLSX.utils.aoa_to_sheet(data);
   const wb=XLSX.utils.book_new();
@@ -2025,6 +2093,10 @@ function loadSynapseContactsPanel(containerId,i){
     +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_verts">Sample about</label>'
     +'<input type="number" id="'+uid+'_verts" value="'+BSYN_TARGET_VERTS_DEFAULT+'" min="10" max="'+BSYN_TARGET_VERTS_MAX+'" step="10" style="width:70px" title="Roughly how many of the mesh\'s own vertices to check -- higher is more thorough but slower. The actual spacing is computed from this cell\'s real vertex count.">'
     +'<span class="hint">mesh vertices</span></div>'
+    +'<div class="row" style="gap:8px;align-items:center;margin-top:4px">'
+    +'<label class="hint" style="flex:1 1 auto" for="'+uid+'_overlap">Confirm overlap within</label>'
+    +'<input type="number" id="'+uid+'_overlap" value="'+Math.round(BSYN_OVERLAP_THRESHOLD_UM_DEFAULT*1000)+'" min="20" max="'+Math.round(BSYN_OVERLAP_THRESHOLD_UM_MAX*1000)+'" step="10" style="width:70px" title="Each candidate synapse\'s own mesh is fetched and checked against this cell\'s mesh -- only kept if a point on the synapse mesh is this close to this cell\'s mesh surface. A synapse whose own mesh could not be fetched is kept and marked \'unverified\' rather than dropped.">'
+    +'<span class="hint">nm (mesh-surface search only)</span></div>'
     +'<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">'
     +'<button class="idbtn" id="'+uid+'_search" style="padding:3px 10px;font-size:12px">Search</button>'
     +'<button class="idbtn" id="'+uid+'_nglall" disabled style="padding:3px 10px;font-size:12px" title="Opens a 3D view (with EM imagery) of this cell and every synapse found, each in its own colour.">Open all in Neuroglancer</button>'
@@ -2032,11 +2104,12 @@ function loadSynapseContactsPanel(containerId,i){
     +'</div><div id="'+uid+'_results" style="margin-top:6px"></div></details>';
   el.innerHTML=h;
   const radiusEl=document.getElementById(uid+"_radius"),vertsEl=document.getElementById(uid+"_verts"),
+    overlapEl=document.getElementById(uid+"_overlap"),
     searchBtn=document.getElementById(uid+"_search"),resultsEl=document.getElementById(uid+"_results"),
     nglAllBtn=document.getElementById(uid+"_nglall"),xlsxBtn=document.getElementById(uid+"_xlsx");
   resultsEl.innerHTML='<div class="hint">Not searched yet.</div>';
   const cellType=cellLabel(i);
-  let curIds=[], curMeta={};
+  let curIds=[], curMeta={}, curStatuses=[];
   /* One delegated click listener (same pattern as renderCellContactsPanel above) -- handles
      both per-row buttons regardless of how many times resultsEl gets replaced by a re-search. */
   el.addEventListener("click",function(e){
@@ -2065,16 +2138,17 @@ function loadSynapseContactsPanel(containerId,i){
     if(curIds.length) openBjumpSynapseAllViewer(i,bjumpEffectiveRootId(i),cellType,curIds);
   });
   xlsxBtn.addEventListener("click",function(){
-    downloadBjumpSynapseContactsExcel(BID[i],bjumpEffectiveRootId(i),cellType,curIds,curMeta);
+    downloadBjumpSynapseContactsExcel(BID[i],bjumpEffectiveRootId(i),cellType,curIds,curMeta,curStatuses);
   });
   searchBtn.addEventListener("click",async function(){
     const radius=Math.min(BSYN_RADIUS_MAX_VOX,Math.max(2,Math.round(Number(radiusEl.value)||BSYN_RADIUS_DEFAULT_VOX)));
     const targetVerts=Math.min(BSYN_TARGET_VERTS_MAX,Math.max(10,Math.round(Number(vertsEl.value)||BSYN_TARGET_VERTS_DEFAULT)));
+    const overlapUm=Math.min(BSYN_OVERLAP_THRESHOLD_UM_MAX,Math.max(0.02,(Number(overlapEl.value)||Math.round(BSYN_OVERLAP_THRESHOLD_UM_DEFAULT*1000))/1000));
     const orig=searchBtn.textContent;
-    searchBtn.disabled=true;radiusEl.disabled=true;vertsEl.disabled=true;searchBtn.textContent="searching…";
+    searchBtn.disabled=true;radiusEl.disabled=true;vertsEl.disabled=true;overlapEl.disabled=true;searchBtn.textContent="searching…";
     nglAllBtn.disabled=true;xlsxBtn.disabled=true;
     try{
-      let res,summary,meta;
+      let res,summary,meta,ids,statuses=[];
       try{
         /* Main path: walk this cell's own combined mesh surface (main root ID + any
            community-proposed extras -- fetchCombinedMesh folds CUR_EXTRA_ROOTS in automatically
@@ -2088,33 +2162,55 @@ function loadSynapseContactsPanel(containerId,i){
         const nVerts=mesh.positions.length/3;
         const stride=Math.max(1,Math.round(nVerts/targetVerts));
         res=await bjumpSynapseSearchNearMesh(mesh.positions,radius,stride);
-        meta={method:"mesh-surface",radiusVox:radius,verticesSampled:res.verticesSampled,totalVerts:nVerts,vertexStride:res.vertexStride};
-        summary=res.ids.length
-          ?res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled across '+res.verticesSampled+' of '+fmt(nVerts)+' mesh vertices (every '+res.vertexStride+(mesh.rootIds.length>1?', '+mesh.rootIds.length+' root ID fragments combined':'')+').'
-          :'No synapse segments found near this cell\'s mesh surface ('+res.verticesSampled+' of '+fmt(nVerts)+' vertices sampled, radius '+radius+' voxels). Try a larger radius or a finer vertex sample.';
+        /* Overlap verification (2026-08-19, Søren: "the synapse mesh should overlap with the
+           mesh of interest, otherwise they do not belong to that mesh") -- see
+           bjumpVerifySynapseOverlap's own header comment. Only possible on this path: the
+           fallback-box path below has no cell mesh to verify against at all. Grid is built ONCE
+           over this cell's own mesh and reused for every candidate. */
+        ids=[];
+        if(res.ids.length){
+          const cellGrid=UJ.mesh.buildContactGrid(mesh.positions,overlapUm);
+          let touching=0,unverified=0,discarded=0;
+          for(let k=0;k<res.ids.length;k++){
+            searchBtn.textContent="verifying overlap ("+(k+1)+"/"+res.ids.length+")…";
+            const v=await bjumpVerifySynapseOverlap(mesh.positions,cellGrid,res.ids[k],overlapUm);
+            if(v.status==="not-touching"){ discarded++; continue; }
+            if(v.status==="touching") touching++; else unverified++;
+            ids.push(res.ids[k]); statuses.push(v.status);
+          }
+          meta={method:"mesh-surface",radiusVox:radius,verticesSampled:res.verticesSampled,totalVerts:nVerts,vertexStride:res.vertexStride};
+          summary=ids.length
+            ?res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled across '+res.verticesSampled+' of '+fmt(nVerts)+' mesh vertices (every '+res.vertexStride+(mesh.rootIds.length>1?', '+mesh.rootIds.length+' root ID fragments combined':'')+'). Overlap check (within '+Math.round(overlapUm*1000)+'nm): '+touching+' confirmed touching'+(unverified?', '+unverified+' unverified (mesh fetch failed)':'')+(discarded?', '+discarded+' discarded (no mesh overlap -- likely a neighbouring cell\'s synapse)':'')+'.'
+            :(discarded?'Found '+discarded+' synapse segment(s) near the mesh surface, but none had a mesh that actually overlapped this cell\'s own mesh (within '+Math.round(overlapUm*1000)+'nm) -- likely a neighbouring cell\'s synapse. Try a larger overlap threshold if you believe this is wrong.':'No synapse segments found near this cell\'s mesh surface ('+res.verticesSampled+' of '+fmt(nVerts)+' vertices sampled, radius '+radius+' voxels). Try a larger radius or a finer vertex sample.');
+        } else {
+          meta={method:"mesh-surface",radiusVox:radius,verticesSampled:res.verticesSampled,totalVerts:nVerts,vertexStride:res.vertexStride};
+          summary='No synapse segments found near this cell\'s mesh surface ('+res.verticesSampled+' of '+fmt(nVerts)+' vertices sampled, radius '+radius+' voxels). Try a larger radius or a finer vertex sample.';
+        }
       }catch(meshErr){
         /* Fallback: this cell has no mesh (own or community-proposed) at all -- see the module
            header comment's FALLBACK section. Reuses the original box-around-nucleus-centre
            search from the first version of this feature rather than leaving the cell with no
-           synapse search at all. */
+           synapse search at all. No overlap verification here -- there is no cell mesh to check
+           against, so every found ID is kept as-is (statuses left blank). */
         const half=BSYN_FALLBACK_HALF_DEFAULT_VOX, boxStride=BSYN_FALLBACK_STRIDE_DEFAULT;
         const pos=[BX[i],BY[i],BZ[i]];
         const min=[pos[0]-half,pos[1]-half,pos[2]-half], max=[pos[0]+half,pos[1]+half,pos[2]+half];
         res=await UJ.synVol.segmentIdsInBox(0,min,max,{stride:boxStride});
+        ids=res.ids.slice(); statuses=ids.map(function(){return "";});
         meta={method:"fallback-box (half "+half+" voxels)",radiusVox:"",verticesSampled:"",totalVerts:"",vertexStride:""};
-        summary=(res.ids.length?'':'No synapse segments found. ')+'<b>No mesh available for this cell (main or community-proposed)</b> — fell back to a '+(half*2+1)+'-voxel box around the nucleus centre instead of the mesh surface. Propose a root ID above for a more accurate, membrane-relative search.'+(res.ids.length?' '+res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled.':'');
+        summary=(res.ids.length?'':'No synapse segments found. ')+'<b>No mesh available for this cell (main or community-proposed)</b> — fell back to a '+(half*2+1)+'-voxel box around the nucleus centre instead of the mesh surface (no overlap check was possible). Propose a root ID above for a more accurate, membrane-verified search.'+(res.ids.length?' '+res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled.':'');
       }
-      curIds=res.ids;curMeta=meta;
+      curIds=ids;curMeta=meta;curStatuses=statuses;
       resultsEl.innerHTML=curIds.length
-        ?curIds.map(bjumpSynapseRowHtml).join("")+'<div class="hint" style="margin-top:4px">'+summary+'</div>'
+        ?curIds.map(function(id,idx){return bjumpSynapseRowHtml(id,idx,curStatuses[idx]);}).join("")+'<div class="hint" style="margin-top:4px">'+summary+'</div>'
         :'<div class="hint">'+summary+'</div>';
       nglAllBtn.disabled=!curIds.length;xlsxBtn.disabled=!curIds.length;
     }catch(err){
       console.warn("[bJump synapse contacts]",err);
       resultsEl.innerHTML='<div class="hint" style="color:var(--warn)">Failed: '+escHtml(String((err&&err.message)||err))+'</div>';
-      curIds=[];curMeta={};nglAllBtn.disabled=true;xlsxBtn.disabled=true;
+      curIds=[];curMeta={};curStatuses=[];nglAllBtn.disabled=true;xlsxBtn.disabled=true;
     }finally{
-      searchBtn.disabled=false;radiusEl.disabled=false;vertsEl.disabled=false;searchBtn.textContent=orig;
+      searchBtn.disabled=false;radiusEl.disabled=false;vertsEl.disabled=false;overlapEl.disabled=false;searchBtn.textContent=orig;
     }
   });
 }
