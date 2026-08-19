@@ -1959,6 +1959,58 @@ function openBjumpSynapseViewer(i, rootIdStr, cellType, synapseIdStr){
 /* containerId is the plain div showCell() leaves in the panel HTML (see the synapseContactsPanel
    comment there); i is the master array index. Unlike Cell contacts, there is no "already-known"
    fetch here (nothing is persisted), so this only ever renders the empty search form. */
+/* "Open all in Neuroglancer" / "Download as Excel" for Synapse contacts (2026-08-19, Søren:
+   "I also want a show all synapses in neuroglancer and a download excel (which should be for
+   all the synapses)") -- mirrors Cell contacts' own "Open all in Neuroglancer"/"Download as
+   Excel" pair (buildBjumpCellContactsAllViewerState/downloadBjumpCellContactsExcel above), same
+   golden-angle palette (bjumpContactPaletteColor, already shared) for telling synapses apart at
+   a glance. Unlike Cell contacts, there are no per-synapse TOUCH-POINT coordinates here (a
+   synapse search only ever returns segment IDs, not a computed contact location) -- the "all"
+   viewer centres on the cell's own voxel position rather than an average of touch points, and
+   the Excel export's columns describe the SEARCH (method/radius/vertices), not a distance. */
+function buildBjumpSynapseAllViewerState(i,rootIdStr,cellType,synapseIds){
+  const layers=bjumpSynapseViewerLayers();
+  const centerLayerName=cellType||"This nucleus";
+  if(rootIdStr){
+    layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:centerLayerName,
+      segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+  }
+  const synLayerName="Synapses ("+synapseIds.length+")";
+  if(synapseIds.length){
+    const colors={};
+    synapseIds.forEach(function(id,idx){colors[String(id)]=bjumpContactPaletteColor(idx);});
+    layers.push({type:"segmentation",source:UJ.cfg.viewer.synapses,tab:"source",name:synLayerName,
+      segments:synapseIds.map(String),segmentColors:colors,objectAlpha:0.9});
+  }
+  const posVox=[BX[i],BY[i],BZ[i]];
+  return {dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
+    position:posVox,crossSectionScale:2.0,projectionScale:6000,
+    layers:layers,selectedLayer:synapseIds.length?{layer:synLayerName,visible:true}:{layer:centerLayerName,visible:true},
+    layout:{type:"4panel",orthographicProjection:true},showSlices:false};
+}
+function openBjumpSynapseAllViewer(i,rootIdStr,cellType,synapseIds){
+  const state=buildBjumpSynapseAllViewerState(i,rootIdStr,cellType,synapseIds);
+  const url=UJ.cfg.viewer.base+"#!"+encodeURIComponent(JSON.stringify(state));
+  window.open(url,"_blank","noopener");
+}
+function downloadBjumpSynapseContactsExcel(nucleusId,rootId,cellType,synapseIds,meta){
+  if(typeof XLSX==="undefined")return;
+  meta=meta||{};
+  const data=[["Nucleus ID","Segment ID","Cell type","Search method","Radius (voxels)",
+    "Mesh vertices sampled","Mesh vertices total","Vertex stride","Synapse index","Synapse segment ID"]];
+  const base=[nucleusId,rootId||"",cellType||"",meta.method||"",
+    meta.radiusVox!=null?meta.radiusVox:"",meta.verticesSampled!=null?meta.verticesSampled:"",
+    meta.totalVerts!=null?meta.totalVerts:"",meta.vertexStride!=null?meta.vertexStride:""];
+  if(synapseIds.length){
+    synapseIds.forEach(function(id,idx){ data.push(base.concat([idx+1,id])); });
+  } else {
+    data.push(base.concat(["",""]));
+  }
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Synapses");
+  XLSX.writeFile(wb,"bjump_synapse_contacts_"+nucleusId+".xlsx");
+}
 function loadSynapseContactsPanel(containerId,i){
   const el=document.getElementById(containerId);
   if(!el)return;
@@ -1975,13 +2027,16 @@ function loadSynapseContactsPanel(containerId,i){
     +'<span class="hint">mesh vertices</span></div>'
     +'<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap">'
     +'<button class="idbtn" id="'+uid+'_search" style="padding:3px 10px;font-size:12px">Search</button>'
+    +'<button class="idbtn" id="'+uid+'_nglall" disabled style="padding:3px 10px;font-size:12px" title="Opens a 3D view (with EM imagery) of this cell and every synapse found, each in its own colour.">Open all in Neuroglancer</button>'
+    +'<button class="idbtn" id="'+uid+'_xlsx" disabled style="padding:3px 10px;font-size:12px" title="Downloads every synapse segment ID found, with the search settings used.">Download as Excel</button>'
     +'</div><div id="'+uid+'_results" style="margin-top:6px"></div></details>';
   el.innerHTML=h;
   const radiusEl=document.getElementById(uid+"_radius"),vertsEl=document.getElementById(uid+"_verts"),
-    searchBtn=document.getElementById(uid+"_search"),resultsEl=document.getElementById(uid+"_results");
+    searchBtn=document.getElementById(uid+"_search"),resultsEl=document.getElementById(uid+"_results"),
+    nglAllBtn=document.getElementById(uid+"_nglall"),xlsxBtn=document.getElementById(uid+"_xlsx");
   resultsEl.innerHTML='<div class="hint">Not searched yet.</div>';
   const cellType=cellLabel(i);
-  let curIds=[];
+  let curIds=[], curMeta={};
   /* One delegated click listener (same pattern as renderCellContactsPanel above) -- handles
      both per-row buttons regardless of how many times resultsEl gets replaced by a re-search. */
   el.addEventListener("click",function(e){
@@ -2003,15 +2058,23 @@ function loadSynapseContactsPanel(containerId,i){
     if(openBtn){
       const id=curIds[Number(openBtn.dataset.idx)];
       if(id) openBjumpSynapseViewer(i,bjumpEffectiveRootId(i),cellType,id);
+      return;
     }
+  });
+  nglAllBtn.addEventListener("click",function(){
+    if(curIds.length) openBjumpSynapseAllViewer(i,bjumpEffectiveRootId(i),cellType,curIds);
+  });
+  xlsxBtn.addEventListener("click",function(){
+    downloadBjumpSynapseContactsExcel(BID[i],bjumpEffectiveRootId(i),cellType,curIds,curMeta);
   });
   searchBtn.addEventListener("click",async function(){
     const radius=Math.min(BSYN_RADIUS_MAX_VOX,Math.max(2,Math.round(Number(radiusEl.value)||BSYN_RADIUS_DEFAULT_VOX)));
     const targetVerts=Math.min(BSYN_TARGET_VERTS_MAX,Math.max(10,Math.round(Number(vertsEl.value)||BSYN_TARGET_VERTS_DEFAULT)));
     const orig=searchBtn.textContent;
     searchBtn.disabled=true;radiusEl.disabled=true;vertsEl.disabled=true;searchBtn.textContent="searching…";
+    nglAllBtn.disabled=true;xlsxBtn.disabled=true;
     try{
-      let res,summary;
+      let res,summary,meta;
       try{
         /* Main path: walk this cell's own combined mesh surface (main root ID + any
            community-proposed extras -- fetchCombinedMesh folds CUR_EXTRA_ROOTS in automatically
@@ -2025,6 +2088,7 @@ function loadSynapseContactsPanel(containerId,i){
         const nVerts=mesh.positions.length/3;
         const stride=Math.max(1,Math.round(nVerts/targetVerts));
         res=await bjumpSynapseSearchNearMesh(mesh.positions,radius,stride);
+        meta={method:"mesh-surface",radiusVox:radius,verticesSampled:res.verticesSampled,totalVerts:nVerts,vertexStride:res.vertexStride};
         summary=res.ids.length
           ?res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled across '+res.verticesSampled+' of '+fmt(nVerts)+' mesh vertices (every '+res.vertexStride+(mesh.rootIds.length>1?', '+mesh.rootIds.length+' root ID fragments combined':'')+').'
           :'No synapse segments found near this cell\'s mesh surface ('+res.verticesSampled+' of '+fmt(nVerts)+' vertices sampled, radius '+radius+' voxels). Try a larger radius or a finer vertex sample.';
@@ -2037,15 +2101,18 @@ function loadSynapseContactsPanel(containerId,i){
         const pos=[BX[i],BY[i],BZ[i]];
         const min=[pos[0]-half,pos[1]-half,pos[2]-half], max=[pos[0]+half,pos[1]+half,pos[2]+half];
         res=await UJ.synVol.segmentIdsInBox(0,min,max,{stride:boxStride});
+        meta={method:"fallback-box (half "+half+" voxels)",radiusVox:"",verticesSampled:"",totalVerts:"",vertexStride:""};
         summary=(res.ids.length?'':'No synapse segments found. ')+'<b>No mesh available for this cell (main or community-proposed)</b> — fell back to a '+(half*2+1)+'-voxel box around the nucleus centre instead of the mesh surface. Propose a root ID above for a more accurate, membrane-relative search.'+(res.ids.length?' '+res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled.':'');
       }
-      curIds=res.ids;
+      curIds=res.ids;curMeta=meta;
       resultsEl.innerHTML=curIds.length
         ?curIds.map(bjumpSynapseRowHtml).join("")+'<div class="hint" style="margin-top:4px">'+summary+'</div>'
         :'<div class="hint">'+summary+'</div>';
+      nglAllBtn.disabled=!curIds.length;xlsxBtn.disabled=!curIds.length;
     }catch(err){
       console.warn("[bJump synapse contacts]",err);
       resultsEl.innerHTML='<div class="hint" style="color:var(--warn)">Failed: '+escHtml(String((err&&err.message)||err))+'</div>';
+      curIds=[];curMeta={};nglAllBtn.disabled=true;xlsxBtn.disabled=true;
     }finally{
       searchBtn.disabled=false;radiusEl.disabled=false;vertsEl.disabled=false;searchBtn.textContent=orig;
     }
