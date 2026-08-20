@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Grubb Lab — Brain ultrastructure &amp; the neurovascular unit</title>
-<meta name="description" content="Volume electron microscopy of the brain microvasculature and neurovascular unit. Home of µJump, a MICrONS cell explorer, ηJump for the H01 human cortex dataset, and βJump for an Alzheimer’s model hippocampus.">
+<meta name="description" content="Volume electron microscopy of the brain microvasculature and neurovascular unit. Home of µJump, a MICrONS cell explorer, δJump for the Allen V1 Deep Dive, ηJump for the H01 human cortex dataset, and βJump for an Alzheimer’s model hippocampus.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='none' stroke='%2327c9a3' stroke-width='9'/><circle cx='50' cy='50' r='13' fill='%2327c9a3'/></svg>">
 <style>
   :root{
@@ -111,6 +111,20 @@
     .feature.beta .cta{background:#ff6b81;color:#2a0a12}
   }
 
+  /* ── the δJump card is purple ──────────────────────────────────────────────────────────
+     Søren, 2026-08-20. The same two purples δJump itself uses (#6d28d9 light, #b388ff dark),
+     so card and tool read as one thing. Distinct from the βJump rose and the ηJump amber, and
+     far enough from µJump's teal that the four cards are tellable apart at a glance.
+     Measured the same way as the blocks above — kicker/logo 7.10:1 on the light card and
+     6.28:1 on the dark one; CTA text 7.10:1 light and 6.97:1 dark. All well past AA. */
+  .feature.delta{--teal:#6d28d9;--teal-soft:#f0eafe}
+  .feature.delta .cta{background:#6d28d9;color:#ffffff}
+  @media (prefers-color-scheme:dark){
+    .feature.delta{--teal:#b388ff;--teal-soft:#2a1a44}
+    /* dark text on the light violet fill, not white — same reason as above */
+    .feature.delta .cta{background:#b388ff;color:#1a0b2e}
+  }
+
 </style>
 </head>
 <body>
@@ -152,6 +166,31 @@
       <span class="chip">Bulk filter &amp; Excel export</span>
     </div>
     <span class="cta">Open µJump &rarr;</span>
+  </a>
+
+  <a class="feature delta" href="/djump.html">
+    <div class="kicker">Interactive tool</div>
+    <div class="logo"><span class="mu">&delta;</span><span class="jm">Jump</span></div>
+    <p class="desc">
+      The same mouse visual cortex, imaged again by the Allen Institute as the
+      <em>V1 Deep Dive</em> &mdash; a second, independent volume spanning pia to white matter.
+      Its classifier only ever named neurons, so more than three quarters of the 207,455 detected
+      nuclei have no cell type at all: the glia and vascular cells are simply waiting to be
+      identified. Cortical layers here are fitted from the dataset itself rather than traced by
+      hand. Viewing the segmentation needs a free CAVE account. Your points and level are shared
+      with the other tools.
+    </p>
+    <div class="chips">
+      <span class="chip">Mouse visual cortex</span>
+      <span class="chip">207,455 nuclei</span>
+      <span class="chip">159,378 unclassified</span>
+      <span class="chip">Coordinate &amp; ID search</span>
+      <span class="chip">Guided decision tree</span>
+      <span class="chip">Community voting</span>
+      <span class="chip">Layers fitted from the data</span>
+      <span class="chip">3D mesh, PowerPoint &amp; Excel</span>
+    </div>
+    <span class="cta">Open &delta;Jump &rarr;</span>
   </a>
 
   <a class="feature eta" href="/hjump.html">
@@ -259,6 +298,14 @@
       (<a href="https://doi.org/10.1038/s41586-025-08790-w" rel="noopener">Nature 640, 435–447, 2025</a>).
       Hand-verified identifications, traced vessel outlines and traced pia/white-matter surfaces are
       original work from this lab.
+    </p>
+    <p>
+      δJump uses the Allen Institute's V1 Deep Dive (V1DD) volume of mouse visual cortex, released
+      publicly as the <code>v1dd_public</code> CAVE datastack
+      (<a href="https://alleninstitute.org/brain-science/connectomics" rel="noopener">Allen Institute
+      Connectomics</a>); viewing its segmentation requires a free CAVE account. Its cortical layer
+      model is not taken from a published atlas — it is fitted here from the depths of the dataset's
+      own layer-named neuron types, after correcting for the tilt of the imaged block.
     </p>
   </div>
 </section>
