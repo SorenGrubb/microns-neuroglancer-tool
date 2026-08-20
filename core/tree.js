@@ -194,11 +194,25 @@ function openLocationOnlyReport(pos){
 }
 /* Substring match against the leaf display names -- deliberately not a prefix/startsWith
    match, so partial words anywhere in a multi-word name are found (e.g. typing "pericy"
-   must also surface "Venular smooth muscle cell/pericyte", not just "Pericyte"). */
+   must also surface "Venular smooth muscle cell/pericyte", not just "Pericyte").
+
+   LEAF_NAMES (core/ontology.js) is shared verbatim across every tool built on this module, so
+   it carries slugs no single dataset's own guided-ID tree ever leads to -- neocortex-layer
+   excitatory subtypes (exc_l23_it, exc_l4, ...) are µJump/ηJump's, meaningless in bJump's
+   hippocampal CA1. The tree itself already can't reach them there (bjump_logic.js overrides the
+   relevant nodes), but this search box is a SEPARATE "jump straight to any leaf" entry point
+   that used to ignore that entirely -- typing "layer" would surface every cortical layer name
+   regardless of which tool was open. UJ.cfg.tree.excludeLeaves (optional; bJump sets it, µJump
+   doesn't) is a per-dataset denylist of slugs this search must never surface, checked here so
+   there is exactly one place a dataset has to say "these don't apply to me". */
 function searchLeaves(query){
   const q=query.trim().toLowerCase();
   if(!q)return[];
-  return Object.keys(LEAF_NAMES).filter(slug=>LEAF_NAMES[slug].toLowerCase().includes(q)).slice(0,8);
+  const excluded=(typeof UJ!=="undefined"&&UJ.cfg&&UJ.cfg.tree&&UJ.cfg.tree.excludeLeaves)||null;
+  return Object.keys(LEAF_NAMES).filter(slug=>{
+    if(excluded&&excluded.indexOf(slug)>=0)return false;
+    return LEAF_NAMES[slug].toLowerCase().includes(q);
+  }).slice(0,8);
 }
 /* Generic "fast jump to a cell type" search box. idPrefix keeps the two places this is used
    (next to the main "Guided identification" button, and inside the guided-ID panel itself)

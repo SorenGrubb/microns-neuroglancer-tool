@@ -729,7 +729,22 @@ UJ.cfg.synVol = {
    startNode "q1" rather than µJump's "q2": q1 is overridden at the top of bjump_logic.js to ask
    which CA1 stratum the cell sits in (µJump's q1 asks for a CORTICAL layer, which is meaningless
    here), and that context question is worth asking before the vascular-relationship branch. */
-UJ.cfg.tree = { panelId: "idbox", startNode: "q1", modal: false, suggestionSource: null };
+UJ.cfg.tree = { panelId: "idbox", startNode: "q1", modal: false, suggestionSource: null,
+  /* 2026-08-19, Søren: "I don't want the user in bJump to be able to pick cortex specific
+     cells like layer 2/3 pyramidal cells." The guided-ID TREE itself is already safe -- the
+     IIFE at the top of bjump_logic.js overrides q1/ne_exc/ne_inh so the forward path only ever
+     offers CA1 leaves (ca1_pyramidal + the reused inh_* interneuron slugs). But core/tree.js's
+     "already know it? jump straight there" search box (searchLeaves(), wired to #idfLeaf) is a
+     SEPARATE entry point that bypasses the tree path entirely -- it searches ALL of
+     core/ontology.js's shared LEAF_NAMES by substring, with no awareness of which leaves any
+     one tool's tree actually leads to. Typing "layer" or "pyramidal" there surfaced every
+     neocortex layer-specific excitatory subtype (exc_l23_it, exc_l4, exc_l5_it/et/np, exc_l6_it/
+     ct) verbatim, which are meaningless for hippocampal CA1 and would let a user attach a
+     cortical-layer identity to a CA1 nucleus. excludeLeaves lists exactly those 7 slugs;
+     searchLeaves() (core/tree.js) filters them out when this dataset's UJ.cfg.tree config sets
+     the option -- µJump's own config doesn't set it, so its search is unaffected. */
+  excludeLeaves: ["exc_l23_it","exc_l4","exc_l5_it","exc_l5_et","exc_l5_np","exc_l6_it","exc_l6_ct"]
+};
 /* suggestionSource:null removes the engine's "no <X> suggestion on file" crumb. µJump's default
    is "MICrONS"; leaving it here would print "no MICrONS suggestion on file" on a hippocampal
    Alzheimer's volume -- not a harmless default, a false statement about the dataset. */
@@ -908,6 +923,142 @@ function pct(m, v){
             +"cloud; volume transmission rather than discrete targeting",
        leaf:"inh_neurogliaform"}]};
 })();
+
+/* ── CA1 reference-image gallery (SCAFFOLD) ────────────────────────────────────────────
+   2026-08-19, Søren: "let's make the scaffold for the CA1-specific reference image [gallery]."
+
+   core/tree.js already has a generic extension point for this -- see its own comment: "a
+   dataset without curated example images simply gets no gallery." At the tree's start node it
+   calls `typeof categoryGalleryHtml==="function"`; at every other node,
+   `typeof galleryHtml==="function"` with `leavesUnder(ID_NODE)` (also core/tree.js, walks
+   whatever TREE currently holds -- already CA1-only here thanks to the ontology overrides
+   above). Both are bare globals, purely typeof-checked, so defining them under these EXACT
+   names is the whole integration -- no change needed to core/tree.js itself. µJump defines its
+   own pair directly in ujump.html against UJ.ontology.IMAGE_LIBRARY; these are bJump's.
+
+   Deliberately NOT reusing UJ.ontology.IMAGE_LIBRARY's own entries, even for slugs bJump shares
+   with µJump (endothelial_cell, astrocyte, microglia, ...): those coordinates are voxel
+   positions in MICrONS' visual-cortex volume, meaningless (or silently wrong) in bJump's own
+   CA1 voxel frame, and the images themselves come from a different EM acquisition entirely
+   (different tissue, stain, pixel size) -- showing them here would misrepresent what this
+   dataset's own ultrastructure looks like. No image has been captured or curated for bJump yet,
+   so every entry below starts with files:[] -- a real, EMPTY scaffold, not invented content.
+   The structure, slug coverage and rendering are complete and already wired in; populating it
+   later is just pushing {file,mod,coord} objects into these arrays, the exact same shape
+   µJump's own IMAGE_LIBRARY entries already use (see core/ontology.js).
+
+   Slug coverage mirrors exactly what bJump's own (CA1-overridden) TREE can actually reach: the
+   vascular-relationship categories (free-in-lumen / vessel-wall / perivascular-space) are
+   UNCHANGED from µJump, so their leaf slugs are the same; ca1_pyramidal and the four reused
+   inh_* interneuron slugs replace µJump's neocortex-layer excitatory subtypes (see
+   UJ.cfg.tree.excludeLeaves in bjump_config.js for why those are also gone from bJump's leaf
+   search). Leptomeningeal slugs (pia_mater_fibroblast, arachnoid_barrier_cell, ...) and
+   dendritic_cell are left out entirely: bJump's 23 µm CA1 slab does not include meninges, and
+   µJump's own library has no images for dendritic_cell either. */
+const BJUMP_IMG_BASE = "images/bjump/";  // TODO Søren: create this folder under grubblab.com/bjump/ once real images exist
+function bjumpImgSrc(dir,file){ return BJUMP_IMG_BASE+dir+"/"+file; }
+/* coord is [x,y,z] VOXELS in bJump's own frame; root (optional) activates that segment the same
+   way µJump's IMAGE_LIBRARY root override does. Reuses this page's OWN viewerUrl()/buildState()
+   (see above) rather than reimplementing a Neuroglancer-state builder, so a gallery thumbnail's
+   link always matches whatever segmentation/layer conventions the rest of bJump uses. */
+function bjumpExampleUrl(coord,rootOverride){
+  return viewerUrl(coord, rootOverride?Number(rootOverride):0, rootOverride?1:0);
+}
+const BJUMP_IMAGE_LIBRARY={
+ // Free in vascular lumen
+ erythrocyte:{dir:"A_free_in_lumen/erythrocyte",files:[]},
+ platelet:{dir:"A_free_in_lumen/platelet",files:[]},
+ neutrophil:{dir:"A_free_in_lumen/neutrophil",files:[]},
+ lymphocyte:{dir:"A_free_in_lumen/lymphocyte",files:[]},
+ monocyte:{dir:"A_free_in_lumen/monocyte",files:[]},
+ // Vessel wall
+ endothelial_cell:{dir:"B_vessel_wall/endothelial_cell",files:[]},
+ smooth_muscle_cell:{dir:"B_vessel_wall/smooth_muscle_cell",files:[]},
+ pericyte:{dir:"B_vessel_wall/pericyte",files:[]},
+ pericyte_ensheathing:{dir:"B_vessel_wall/pericyte_ensheathing",files:[]},
+ pericyte_mesh:{dir:"B_vessel_wall/pericyte_mesh",files:[]},
+ pericyte_thin_strand:{dir:"B_vessel_wall/pericyte_thin_strand",files:[]},
+ venular_smooth_muscle_pericyte:{dir:"B_vessel_wall/venular_smooth_muscle_pericyte",files:[]},
+ // Perivascular space
+ perivascular_macrophage:{dir:"C_perivascular_space/perivascular_macrophage",files:[]},
+ perivascular_fibroblast:{dir:"C_perivascular_space/perivascular_fibroblast",files:[]},
+ // CA1 principal cell + interneurons (parenchyma) -- bJump-specific, replacing µJump's
+ // neocortex-layer excitatory subtypes
+ ca1_pyramidal:{dir:"D_ca1_neurons/ca1_pyramidal",files:[]},
+ inh_basket:{dir:"D_ca1_neurons/inh_basket",files:[]},
+ inh_martinotti:{dir:"D_ca1_neurons/inh_martinotti",files:[]},
+ inh_bipolar:{dir:"D_ca1_neurons/inh_bipolar",files:[]},
+ inh_neurogliaform:{dir:"D_ca1_neurons/inh_neurogliaform",files:[]},
+ // Parenchyma glia
+ astrocyte:{dir:"E_parenchyma_glia/astrocyte",files:[]},
+ microglia:{dir:"E_parenchyma_glia/microglia",files:[]},
+ oligodendrocyte:{dir:"E_parenchyma_glia/oligodendrocyte",files:[]},
+ opc:{dir:"E_parenchyma_glia/opc",files:[]}
+};
+/* Same markup/CSS classes (.idf-gal/.idf-cell/.idf-thumb/.idf-empty/.nocoord/.mod) µJump's own
+   galleryHtml() uses -- already styled, copied verbatim into bjump.html's stylesheet, so no CSS
+   change was needed here. Global name "galleryHtml" is core/tree.js's own hook contract (see
+   this module's header comment) -- do not rename. */
+function galleryHtml(slugs){
+  let g='<div class="idf-gal"><h4>Reference images for the options above</h4><div class="idf-cells">';
+  for(const slug of slugs){
+    const lib=BJUMP_IMAGE_LIBRARY[slug]; if(!lib) continue;
+    const nm=LEAF_NAMES[slug]||slug;
+    g+='<div class="idf-cell"><div class="idf-cell-name">'+escHtml(nm)+'</div><div class="idf-thumbs">';
+    if(!lib.files.length) g+='<span class="idf-empty">no images yet</span>';
+    for(const f of lib.files){
+      if(f.coord){
+        const url=bjumpExampleUrl(f.coord,f.root);
+        g+='<a class="idf-thumb" href="'+escHtml(url)+'" target="_blank" rel="noopener" '
+          +'title="'+escHtml(nm)+' ('+escHtml(f.mod)+') — open source in Neuroglancer">'
+          +'<img src="'+escHtml(bjumpImgSrc(lib.dir,f.file))+'" loading="lazy">'
+          +'<span class="mod">'+escHtml(f.mod)+'</span></a>';
+      } else {
+        g+='<div class="idf-thumb nocoord" title="'+escHtml(nm)+' ('+escHtml(f.mod)+') — no '
+          +'coordinate on file yet, so it can\'t be opened in Neuroglancer">'
+          +'<img src="'+escHtml(bjumpImgSrc(lib.dir,f.file))+'" loading="lazy">'
+          +'<span class="mod">'+escHtml(f.mod)+'</span></div>';
+      }
+    }
+    g+='</div></div>';
+  }
+  g+='</div></div>';
+  return g;
+}
+/* Shown once, at the tree's own start node (bJump's overridden q1, the CA1-stratum question) --
+   core/tree.js calls this instead of galleryHtml() specifically there (see its own comment).
+   µJump's equivalent shows one example per vascular-relationship category; bJump's start node
+   asks about STRATUM instead, so the natural analogue is one example per stratum -- which is
+   exactly the landmark bjump-spec.md §4/§8 says is still needed to confirm which side of the
+   fitted pyramidale plane is oriens and which is radiatum (see stratum()'s own comment). Left
+   as an honest scaffold, same as BJUMP_IMAGE_LIBRARY above: no confirmed example coordinate
+   exists yet for any of the four strata, so every entry renders as "no coordinate on file yet"
+   until one is added here. Global name "categoryGalleryHtml" is core/tree.js's own hook
+   contract -- do not rename. */
+const BJUMP_STRATUM_EXAMPLES=[
+  {label:"Stratum oriens",file:"stratum_oriens_01_TEM.png",mod:"TEM",dir:"F_strata/oriens",coord:null},
+  {label:"Stratum pyramidale",file:"stratum_pyramidale_01_TEM.png",mod:"TEM",dir:"F_strata/pyramidale",coord:null},
+  {label:"Stratum radiatum",file:"stratum_radiatum_01_TEM.png",mod:"TEM",dir:"F_strata/radiatum",coord:null},
+  {label:"Stratum lacunosum-moleculare",file:"stratum_lm_01_TEM.png",mod:"TEM",dir:"F_strata/lacunosum_moleculare",coord:null}
+];
+function categoryGalleryHtml(){
+  let g='<div class="idf-gal"><h4>What each stratum looks like (one example)</h4><div class="idf-cells">';
+  for(const c of BJUMP_STRATUM_EXAMPLES){
+    g+='<div class="idf-cell"><div class="idf-cell-name">'+escHtml(c.label)+'</div><div class="idf-thumbs">';
+    if(c.coord){
+      const url=bjumpExampleUrl(c.coord,c.root);
+      g+='<a class="idf-thumb" href="'+escHtml(url)+'" target="_blank" rel="noopener" '
+        +'title="'+escHtml(c.label)+' ('+escHtml(c.mod)+') — open source in Neuroglancer">'
+        +'<img src="'+escHtml(bjumpImgSrc(c.dir,c.file))+'" loading="lazy">'
+        +'<span class="mod">'+escHtml(c.mod)+'</span></a>';
+    } else {
+      g+='<span class="idf-empty">no image yet</span>';
+    }
+    g+='</div></div>';
+  }
+  g+='</div></div>';
+  return g;
+}
 
 const SRC_NAME = ["none","secgan16","seg32"];
 function hasMesh(i){ return BSRC[i]===1; }               // only the SECGAN volume ships meshes
