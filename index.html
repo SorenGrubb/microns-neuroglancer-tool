@@ -152,14 +152,19 @@
     <div class="kicker">Interactive tool</div>
     <div class="logo"><span class="mu">µ</span><span class="jm">Jump</span></div>
     <p class="desc">
-      A MICrONS cell explorer. Paste a coordinate to jump into the minnie65 mouse visual cortex,
-      identify the nearest cell and its neighbours, and open it in Neuroglancer with the
-      segmentation and nucleus pre-selected — then help build a community consensus on each cell's
-      identity.
+      Mouse visual cortex, from the MICrONS <em>minnie65</em> volume released by the MICrONS
+      Consortium. 144,118 nuclei were detected; 94,008 carry a published cell type spanning all
+      sixteen classes, from pyramidal neurons to pericytes, and 50,110 carry none. This is the
+      most heavily annotated of the four &mdash; hand-verified identifications, traced vessel
+      outlines and traced pia and white-matter surfaces from this lab sit on top of the machine
+      predictions.
     </p>
     <div class="chips">
-      <span class="chip">Coordinate jump</span>
-      <span class="chip">Cell &amp; neighbour identification</span>
+      <span class="chip">Mouse visual cortex</span>
+      <span class="chip">144,118 nuclei</span>
+      <span class="chip">94,008 classified</span>
+      <span class="chip">50,110 unclassified</span>
+      <span class="chip">Coordinate &amp; ID search</span>
       <span class="chip">Guided decision tree</span>
       <span class="chip">Community voting</span>
       <span class="chip">Cortical layers &amp; vasculature</span>
@@ -172,17 +177,17 @@
     <div class="kicker">Interactive tool</div>
     <div class="logo"><span class="mu">&delta;</span><span class="jm">Jump</span></div>
     <p class="desc">
-      The same mouse visual cortex, imaged again by the Allen Institute as the
-      <em>V1 Deep Dive</em> &mdash; a second, independent volume spanning pia to white matter.
-      Its classifier only ever named neurons, so more than three quarters of the 207,455 detected
-      nuclei have no cell type at all: the glia and vascular cells are simply waiting to be
-      identified. Cortical layers here are fitted from the dataset itself rather than traced by
-      hand. Viewing the segmentation needs a free CAVE account. Your points and level are shared
-      with the other tools.
+      Mouse visual cortex again, but a <em>different animal and a different volume</em> &mdash; the
+      Allen Institute's V1 Deep Dive, spanning pia to white matter. 207,455 nuclei were detected,
+      the most of the four, but its classifier only ever named neurons: just 48,077 carry a cell
+      type and 159,378 carry none, so every glial and vascular cell in the block is still waiting
+      to be identified. Cortical layers are fitted from the dataset's own layer-named neurons
+      rather than traced by hand. Viewing the segmentation needs a free CAVE account.
     </p>
     <div class="chips">
       <span class="chip">Mouse visual cortex</span>
       <span class="chip">207,455 nuclei</span>
+      <span class="chip">48,077 classified</span>
       <span class="chip">159,378 unclassified</span>
       <span class="chip">Coordinate &amp; ID search</span>
       <span class="chip">Guided decision tree</span>
@@ -197,14 +202,17 @@
     <div class="kicker">Interactive tool</div>
     <div class="logo"><span class="mu">&eta;</span><span class="jm">Jump</span></div>
     <p class="desc">
-      The same idea in <em>human</em> cortex. H01 is a cubic-millimetre sample of human temporal
-      lobe; paste a coordinate to find the nearest cell body, see its published type, cortical
-      layer and ultrastructural counts, and open it in Neuroglancer with the segment selected.
-      Your points and level are shared with µJump.
+      <em>Human</em> temporal lobe &mdash; a cubic millimetre of adult human cortex from the H01
+      volume (Lichtman lab and Google Research). 47,447 cell bodies were detected; 46,173 carry a
+      published cell type and only 1,274 carry none, making this the most completely classified of
+      the four. The draw here is the species: the same decision tree applied to human tissue, where
+      oligodendrocytes outnumber every other cell type more than twofold.
     </p>
     <div class="chips">
       <span class="chip">Human cortex</span>
-      <span class="chip">47,447 classified cells</span>
+      <span class="chip">47,447 cells</span>
+      <span class="chip">46,173 classified</span>
+      <span class="chip">1,274 unclassified</span>
       <span class="chip">Coordinate &amp; ID search</span>
       <span class="chip">Guided decision tree</span>
       <span class="chip">Community voting</span>
@@ -219,16 +227,18 @@
     <div class="kicker">Interactive tool</div>
     <div class="logo"><span class="mu">&beta;</span><span class="jm">Jump</span></div>
     <p class="desc">
-      The same idea in a <em>diseased</em> brain. A volumetric CLEM dataset of hippocampal CA1 in
-      an Alzheimer's model mouse, with amyloid-&beta;, pTau and microglial marker channels
-      registered to the electron microscopy. Nothing here is pre-classified &mdash; there is no
-      machine prediction to agree with, so the community is the classifier. Your points and level
-      are shared with &micro;Jump and &eta;Jump.
+      Hippocampal CA1 in a <em>diseased</em> brain &mdash; a volumetric CLEM dataset of an
+      Alzheimer's model mouse, with amyloid-&beta;, pTau and microglial marker channels registered
+      to the electron microscopy. 220 nuclei were detected and none of them carry a cell type:
+      there is no machine prediction to agree with, so the community is the only classifier. The
+      nuclei were found by blob detection on the Hoechst channel, which makes correcting the
+      detections themselves part of the work.
     </p>
     <div class="chips">
-      <span class="chip">Alzheimer's model</span>
-      <span class="chip">Hippocampal CA1</span>
-      <span class="chip">220 nuclei, none pre-classified</span>
+      <span class="chip">Alzheimer's model, hippocampal CA1</span>
+      <span class="chip">220 nuclei</span>
+      <span class="chip">0 classified</span>
+      <span class="chip">220 unclassified</span>
       <span class="chip">Amyloid-&beta;, pTau &amp; CD11b readout</span>
       <span class="chip">Guided decision tree</span>
       <span class="chip">Community voting</span>
@@ -237,6 +247,13 @@
     </div>
     <span class="cta">Open &beta;Jump &rarr;</span>
   </a>
+
+  <!-- Stated once here rather than repeated on three of the four cards, so the descriptions
+       stay strictly parallel and comparable. -->
+  <p class="note" style="margin:22px 0 0">
+    One account across all four tools &mdash; your points, level and submission history follow you
+    between them. Signing in is optional; you can browse and explore without it.
+  </p>
 </div>
 
 <section>

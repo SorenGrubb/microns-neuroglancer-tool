@@ -304,6 +304,14 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .idf-result .celltype{margin:6px 0;font-size:22px;font-weight:600}
 .idf-flag{color:var(--warn);font-size:12px;margin-top:6px}
 .idf-actions{display:flex;gap:10px;margin-top:14px;justify-content:center}
+/* 2026-08-20, Søren: "hJump is showing the first 25 matches instead, which is wrong. I want to
+   have the cell identity appear under the step through matches, so you can see what cell you are
+   stepping to, like in the Jump screen." Same class names µJump/bJump/dJump's shared
+   core/panel.js step-through vote panel uses (see the 2026-08-20 fix there), reproduced locally
+   since hJump doesn't share that module -- keeps the visual language identical across all four
+   tools even though the underlying code is hJump's own. */
+.stepvote-panel{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.stepvote-headline{font-size:13px;color:var(--ink);margin-bottom:8px}
 .idf-certainty{margin-top:14px}
 .cert-scale{display:flex;gap:8px;justify-content:center;margin-top:6px}
 .cert-opt{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:14px;font-weight:600;cursor:pointer}
@@ -644,6 +652,29 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 <a class="idbtn" id="filterViewer" style="flex:1;text-align:center;text-decoration:none;pointer-events:none;opacity:.45" target="_blank" rel="noopener" title="Preview matches first">Open all in Neuroglancer &#8599;</a>
 </div>
 <p class="hint" id="filterStatus"></p>
+
+<!-- 2026-08-20, Søren: "hJump is showing the first 25 matches instead, which is wrong. I want to
+     have the cell identity appear under the step through matches, so you can see what cell you
+     are stepping to, like in the Jump screen." µJump/bJump/dJump all have this "Systematically
+     step through matches" card (core/stepthrough.js, shared) -- hJump had nothing equivalent, so
+     Preview matches just built the static "first 25 matches" list below and stopped there. This
+     is a hand-written equivalent (hJump doesn't load core/stepthrough.js, same reasoning as every
+     other hJump-local addition this session -- see hjump-architecture-correction-2026-08-19): a
+     visits-one-cell-at-a-time counter with Prev/Next/Reset and a live identity headline, backed
+     by hjumpStepGoTo()/initHjumpStepThrough() near runFilter(). The "first 25 matches" preview
+     list below is left in place -- it's still useful as an at-a-glance overview -- this ADDS the
+     per-cell walkthrough, it doesn't replace the overview. -->
+<div class="card" id="stepThroughCard" style="margin-top:14px;display:none">
+<label style="font-size:12px" title="Visits every matched cell exactly once, in a fixed order. Each step loads it into this browser's memory the same way clicking a search result does, and shows its current identity below. Progress is remembered in this browser for this exact set of matches.">Systematically step through matches</label>
+<p class="hint" id="stepCounter" style="margin-top:10px;font-weight:600;color:var(--ink)"></p>
+<div class="row" style="gap:8px;margin-top:6px">
+<button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
+<button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
+</div>
+<div id="stepVotePanel"></div>
+<button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched cells">Reset progress</button>
+</div>
+
 <div id="filterResults"></div>
 </div>
 </div><!-- /tabpanel filter -->
@@ -2650,6 +2681,97 @@ function buildFilterUI(){
   buildOrganelleFilterUI();
 }
 
+/* ── step-through review (2026-08-20) ────────────────────────────────────────────────────────
+   Hand-written equivalent of µJump's/bJump's/dJump's shared core/stepthrough.js "Systematically
+   step through matches" widget -- hJump doesn't load that module (same hjump-architecture-
+   correction-2026-08-19 reasoning as every other hJump-local addition today), so this reproduces
+   its behaviour directly against hJump's own data shapes: FILTER.rows is already a flat array of
+   numeric cell indices (not {row:{i}} objects like µJump/bJump use), so this is actually simpler
+   than the shared version -- no rowPos()/jumpToVoxel() indirection is needed, jumpToIndex(i)
+   already does exactly what's needed. localStorage persistence mirrors core/stepthrough.js's own
+   design (resume on the next Preview run against the SAME match set, reset on a different one). */
+var HJUMP_STEP_MATCHES=null, HJUMP_STEP_INDEX=0, HJUMP_STEP_VISITED=[];
+function hjumpStepLsKey(){ return "hjump_stepthrough_v1"; }
+function hjumpStepSig(matches){
+  if(!matches||!matches.length)return "";
+  return matches.length+"|"+matches[0]+"|"+matches[matches.length-1];
+}
+function hjumpLoadStepState(){
+  try{ return JSON.parse(localStorage.getItem(hjumpStepLsKey()))||null; }catch(e){ return null; }
+}
+function hjumpSaveStepState(){
+  try{ localStorage.setItem(hjumpStepLsKey(),JSON.stringify({sig:hjumpStepSig(HJUMP_STEP_MATCHES),index:HJUMP_STEP_INDEX,visited:HJUMP_STEP_VISITED})); }catch(e){}
+}
+/* Best label for cell index i, same precedence µJump/bJump use elsewhere: a community
+   identification (once one exists) is shown IN PLACE of H01's own published type, not alongside
+   it as a footnote -- matching "user reports take precedence" everywhere else on this page.
+   Falls back to H01's published type, then to "Unclassified" for the rare cell with neither
+   (H01's own published-type table is neuron-only; a handful of loaded cell bodies carry no type
+   at all -- typeName() already returns "unclassified" for those, see its own definition). */
+function hjumpStepHeadline(i){
+  const comm=hjumpIdentityOf(i);
+  if(comm)return comm;
+  return longName(typeName(i));
+}
+function hjumpUpdateStepUI(){
+  const card=document.getElementById("stepThroughCard");
+  if(!card)return;
+  if(!HJUMP_STEP_MATCHES||!HJUMP_STEP_MATCHES.length){ card.style.display="none"; return; }
+  card.style.display="";
+  const total=HJUMP_STEP_MATCHES.length, visitedCount=HJUMP_STEP_VISITED.length;
+  const counterEl=document.getElementById("stepCounter");
+  if(counterEl)counterEl.textContent="Cell "+fmt(HJUMP_STEP_INDEX+1)+" of "+fmt(total)+" — "+fmt(visitedCount)+" checked so far";
+  const prevBtn=document.getElementById("stepPrev"), nextBtn=document.getElementById("stepNext");
+  if(prevBtn)prevBtn.disabled=HJUMP_STEP_INDEX<=0;
+  if(nextBtn)nextBtn.textContent=HJUMP_STEP_INDEX>=total-1?"Done — restart from #1":"Next →";
+  const panel=document.getElementById("stepVotePanel");
+  if(panel){
+    const i=HJUMP_STEP_MATCHES[HJUMP_STEP_INDEX];
+    panel.innerHTML='<div class="stepvote-panel"><div class="stepvote-headline">Currently: <b>'
+      +escHtml(hjumpStepHeadline(i))+'</b></div></div>';
+  }
+}
+function hjumpStepGoTo(i){
+  if(!HJUMP_STEP_MATCHES||i<0||i>=HJUMP_STEP_MATCHES.length)return;
+  HJUMP_STEP_INDEX=i;
+  if(HJUMP_STEP_VISITED.indexOf(i)<0)HJUMP_STEP_VISITED.push(i);
+  jumpToIndex(HJUMP_STEP_MATCHES[i]);
+  hjumpSaveStepState();
+  hjumpUpdateStepUI();
+}
+var HJUMP_STEP_WIRED=false;
+function initHjumpStepThrough(matches){
+  if(!HJUMP_STEP_WIRED){
+    const prevBtn=document.getElementById("stepPrev"), nextBtn=document.getElementById("stepNext"),
+          resetBtn=document.getElementById("stepReset");
+    if(prevBtn)prevBtn.addEventListener("click",function(){ if(HJUMP_STEP_MATCHES)hjumpStepGoTo(Math.max(0,HJUMP_STEP_INDEX-1)); });
+    if(nextBtn)nextBtn.addEventListener("click",function(){
+      if(!HJUMP_STEP_MATCHES)return;
+      hjumpStepGoTo(HJUMP_STEP_INDEX>=HJUMP_STEP_MATCHES.length-1?0:HJUMP_STEP_INDEX+1);
+    });
+    if(resetBtn)resetBtn.addEventListener("click",function(){
+      if(!HJUMP_STEP_MATCHES)return;
+      if(!confirm("Clear step-through progress ("+fmt(HJUMP_STEP_VISITED.length)+" cell(s) checked so far) for this set of "+fmt(HJUMP_STEP_MATCHES.length)+" matched cells?"))return;
+      HJUMP_STEP_INDEX=0; HJUMP_STEP_VISITED=[];
+      hjumpSaveStepState();
+      hjumpUpdateStepUI();
+    });
+    HJUMP_STEP_WIRED=true;
+  }
+  HJUMP_STEP_MATCHES=(matches&&matches.length)?matches:null;
+  if(!HJUMP_STEP_MATCHES){ HJUMP_STEP_VISITED=[]; HJUMP_STEP_INDEX=0; hjumpUpdateStepUI(); return; }
+  const sig=hjumpStepSig(HJUMP_STEP_MATCHES);
+  const saved=hjumpLoadStepState();
+  let resumeIndex=0;
+  if(saved&&sig&&saved.sig===sig){
+    resumeIndex=Math.min(Math.max(0,saved.index||0),HJUMP_STEP_MATCHES.length-1);
+    HJUMP_STEP_VISITED=Array.isArray(saved.visited)?saved.visited.filter(function(i){return i>=0&&i<HJUMP_STEP_MATCHES.length;}):[];
+  } else {
+    HJUMP_STEP_VISITED=[];
+  }
+  hjumpStepGoTo(resumeIndex);
+}
+
 function runFilter(){
   const $=function(id){ return document.getElementById(id); };
   const num=function(id){ const v=parseFloat(($(id)||{}).value); return isFinite(v)?v:null; };
@@ -2704,6 +2826,7 @@ function runFilter(){
   FILTER.criteria={types:wantTypes,layers:wantLayers,identities:wantIdentities,organelles:wantOrganelles,
                    vMin:vMin,vMax:vMax,morph:mKey,mMin:mMin,mMax:mMax,boxes:boxes};
   renderFilterResults();
+  initHjumpStepThrough(rows);
 }
 
 function renderFilterResults(){
@@ -2858,6 +2981,7 @@ function downloadFilterExcel(){
 (function wireFilter(){
   const run=document.getElementById("filterRun"); if(!run)return;
   buildFilterUI();
+  initHjumpStepThrough(null);            // wires Prev/Next/Reset once, leaves the card hidden
   run.addEventListener("click",runFilter);
   document.getElementById("filterXlsx").addEventListener("click",downloadFilterExcel);
   document.getElementById("filterReset").addEventListener("click",function(){
@@ -2869,6 +2993,7 @@ function downloadFilterExcel(){
     document.getElementById("filterMorphKey").value="";
     document.getElementById("filterRegionOn").checked=false;
     FILTER.rows=[]; renderFilterResults();
+    initHjumpStepThrough(null);
   });
   addRegionBox();                                   // start with one empty box
   const addB=document.getElementById("regionAddBox");

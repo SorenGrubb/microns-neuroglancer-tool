@@ -196,9 +196,35 @@ function renderStepVotePanel(){
   var el=document.getElementById("stepVotePanel");
   if(!el)return;
   var nid=(typeof CUR_NUCID!=="undefined"&&CUR_NUCID)||"";
+  if(!nid){el.innerHTML="";return;}
   var micronsName=window.CUR_MICRONS_NAME||null;
   var commName=window.CUR_COMMUNITY_TOP_NAME||null;
-  if(!nid||(!micronsName&&!commName)||!REPORT_ENDPOINT){el.innerHTML="";return;}
+  /* 2026-08-20, Søren: "I want to have the cell identity appear under the step through matches,
+     so you can see what cell you are stepping to, like in the Jump screen. It worked earlier for
+     uJump, not sure why it went away?" It never actually worked THIS way -- the old code returned
+     an empty panel (el.innerHTML="") whenever neither a MICrONS prediction nor a community
+     identity existed to VOTE on, which for large stretches of an unclassified dataset meant a
+     blank panel on nearly every step. That was deliberate at the time (a panel with nothing
+     votable had nothing to show), but it's not what someone stepping through matches needs: they
+     need to know WHICH CELL they're looking at even when nobody has identified it yet, exactly
+     like the main Jump-tab panel always shows a headline. window.CUR_CELLTYPE_DISPLAY is that same
+     headline text (set synchronously by showNucleus()/showCell() and kept in sync here once a
+     community name wins -- see the "window.CUR_CELLTYPE_DISPLAY=win.name" line below) -- reusing
+     it, rather than re-deriving a name, is what keeps this panel and the main panel from ever
+     disagreeing. Falls back to commName/micronsName (this function's own two locals, already
+     computed above) ahead of a generic nucleus-id placeholder: this function's SECOND call site
+     just above (right after "window.CUR_COMMUNITY_TOP_NAME=win.name") fires BEFORE the sibling
+     "window.CUR_CELLTYPE_DISPLAY=win.name" line runs a few lines further down in the same
+     .then() callback -- without this fallback the headline would flash the generic placeholder
+     for one render even though commName is already the right answer at that exact moment. Falls
+     all the way to a nucleus-id label only when NOTHING has named this cell yet, the same
+     "Nucleus <id>" convention bJump's own cellLabel() already uses elsewhere on this page. */
+  var headline='<div class="stepvote-headline">Currently: <b>'
+    +escHtml(window.CUR_CELLTYPE_DISPLAY||commName||micronsName||("Nucleus "+nid+" — not yet identified"))+'</b></div>';
+  if(!REPORT_ENDPOINT){el.innerHTML='<div class="stepvote-panel">'+headline+'</div>';return;}
+  // Render the headline immediately, synchronously -- don't make it wait on the votes fetch below,
+  // which is only needed for the OPTIONAL vote-button rows underneath.
+  el.innerHTML='<div class="stepvote-panel">'+headline+'</div>';
   fetch(REPORT_ENDPOINT+"?identityVotes="+encodeURIComponent(nid)+panelDsQS()).then(function(r){return r.json();}).then(function(d){
     var list=(d&&d.identityVotes)||[];
     var map={};list.forEach(function(v){map[String(v.identity).toLowerCase()]=v;});
@@ -206,8 +232,8 @@ function renderStepVotePanel(){
     var rows=sameAsMicrons
       ?stepVoteRowHtml("Original / community-confirmed",micronsName,map)
       :stepVoteRowHtml("Original (MICrONS)",micronsName,map)+stepVoteRowHtml("Community",commName,map);
-    if(!rows){el.innerHTML="";return;}
-    el.innerHTML='<div class="stepvote-panel"><div class="stepvote-title">Vote on this cell&rsquo;s classification</div>'+rows+'</div>';
+    el.innerHTML='<div class="stepvote-panel">'+headline
+      +(rows?'<div class="stepvote-title">Vote on this cell&rsquo;s classification</div>'+rows:'')+'</div>';
     el.querySelectorAll(".stepvote").forEach(function(b){
       b.addEventListener("click",function(){
         b.disabled=true;
@@ -218,7 +244,7 @@ function renderStepVotePanel(){
         }
       });
     });
-  }).catch(function(){});
+  }).catch(function(){}); // headline is already showing; a failed votes fetch just means no vote rows this time
 }
 
 /* ==== cell history (audit trail) + community reports  (was ujump.html lines 6035-6352) ==== */
