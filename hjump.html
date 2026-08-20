@@ -1310,6 +1310,211 @@ function galleryHtml(slugs){
   return g;
 }
 
+/* ── organelle reporting (2026-08-20, Søren: "I should be able to report the same organelles in
+   hJump and bJump as in uJump") ─────────────────────────────────────────────────────────────
+   µJump's/bJump's "Report an organelle" form lives in core/panel.js as organelleFlagHtml() /
+   wireOrganelleFlag() / organelleFormHtml() / wireOrganelleForm() -- hJump does NOT load
+   core/panel.js (see hjump-architecture-correction-2026-08-19: an earlier attempt to force hJump
+   onto the full shared-module stack silently destroyed this file's own independently-maintained
+   panel/report code), so this is a hand-written equivalent rather than a shared call site.
+
+   The DATA it reads (ORGANELLE_GROUPS/ORGANELLE_KINDS/ORGANELLE_KIND_BY_VALUE/
+   organReportPointLabels/ORGANELLE_KIND_OPTIONS_HTML) IS shared -- it was moved out of
+   core/panel.js into core/ontology.js this same day specifically so hJump (which already loads
+   ontology.js) gets the full 61-kind, 13-topic-group list for free rather than hand-duplicating
+   it here and letting it drift. Only the FORM MARKUP/WIRING is hJump-local, because it has to
+   read hJump's own host state (ID_CTX.body/ID_CTX.seg/ID_CTX.pos, not µJump/bJump's
+   ID_CTX.nucId/ID_CTX.root) and build its own Neuroglancer link via viewerUrl() rather than
+   panel.js's neuroglancerLinkForPos().
+
+   Deliberately mirrors organelleFormHtml()'s element ids (organRows/organAddRow/organSubmit/
+   organComment/organThanks) and CSS classes (organ-row-kind/organ-centriole-fields/
+   organ-cilium-fields/orx,ory,orz/orbx..orty,ortz) verbatim, even though nothing here shares code
+   with panel.js -- so this file's own markup/behaviour stays recognizable next to µJump's/
+   bJump's if anyone compares the three, and so a future refactor extracting the FORM machinery
+   itself (not just the data) into a shared module has matching hooks to key off.
+
+   Unlike hJump's own cell-identification submit (which requires Google sign-in -- "use the
+   sign-in button at the top of the page"), organelle reports here are NOT gated on
+   GOOGLE_VERIFIED, matching µJump's/bJump's own organelle-report forms exactly (see bJump's own
+   comment: "organelle reports can be anonymous, same as µJump"). No separate name-entry field is
+   offered though (unlike µJump's/bJump's forms, which build their own inline Google-sign-in
+   button for an unauthenticated reporter) -- hJump has no per-form GSI wiring anywhere else on
+   this page either, so an anonymous report here is simply anonymous, same as an anonymous vote;
+   whoever wants credit can use the page-level sign-in button before reporting. */
+function organelleFlagHtml(){
+  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Also want to log an organelle\'s location on this cell? <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Report an organelle &rarr;</span></span>'
+    +'<div id="organelleInlineBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
+}
+function wireOrganelleFlag(slug){
+  const toggle=document.getElementById("idfOrganelleToggle"),body=document.getElementById("organelleInlineBody");
+  if(!toggle||!body)return;
+  let wired=false;
+  toggle.addEventListener("click",()=>{
+    const showing=body.style.display!=="none";
+    if(showing){
+      body.style.display="none";
+      toggle.innerHTML="Report an organelle &rarr;";
+      return;
+    }
+    body.style.display="";
+    toggle.innerHTML="Hide organelle form &uarr;";
+    if(!wired){body.innerHTML=organelleFormHtml(slug);wireOrganelleForm(body,slug);wired=true;}
+  });
+}
+function organelleFormHtml(slug){
+  const name=(slug&&typeof LEAF_NAMES!=="undefined")?LEAF_NAMES[slug]:null;
+  let h='<p class="hint">Mark where an organelle or extracellular structure sits on this cell — centriole, primary cilium, or any of the others in the topic-organized list below. Add one row per structure — mix and match freely, and log more than one of the same kind if the cell has more than one (e.g. two centrioles, or several mitochondria).</p>';
+  h+='<div class="meta">'+(name?"Identified as: <b>"+escHtml(name)+"</b> &middot; ":"")+(ID_CTX.body?"cell body "+ID_CTX.body:"no cell body id on file")+(ID_CTX.seg?" &middot; c3 segment "+ID_CTX.seg:"")+(ID_CTX.pos?" &middot; voxel ("+ID_CTX.pos.join(", ")+")":"")+'</div>';
+  h+='<div id="organRows"></div>';
+  h+='<button type="button" class="idbtn" id="organAddRow" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another structure</button>';
+  h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:14px">Comments (optional)</label>'
+    +'<textarea id="organComment" placeholder="e.g. cilium is short / hard to trace to a clear tip..."></textarea>';
+  h+='<div class="meta" style="margin-top:8px'+(GOOGLE_VERIFIED?';color:var(--accent)':'')+'">'
+    +(GOOGLE_VERIFIED?'Submitting as '+escHtml(REPORTER_NAME)+' &mdash; signed in with Google.'
+      :'Reporting anonymously &mdash; sign in with the button at the top of the page first if you want credit for this report.')+'</div>';
+  h+='<div class="idf-actions"><button class="idbtn idbtn-submit" id="organSubmit">Submit organelle report</button></div>'
+    +'<div id="organThanks"></div>';
+  return h;
+}
+function wireOrganelleForm(container,slug){
+  const name=(slug&&typeof LEAF_NAMES!=="undefined")?LEAF_NAMES[slug]:null;
+  const rowsEl=container.querySelector("#organRows");
+  function renumberRows(){
+    [...rowsEl.children].forEach((row,i)=>{const n=row.querySelector(".organ-row-num");if(n)n.textContent=String(i+1);});
+  }
+  function wirePasteSplit(xEl,yEl,zEl,focusAfter){
+    xEl.addEventListener("input",e=>{
+      const p=e.target.value.split(/[\s,]+/).filter(s=>s!=="");
+      if(p.length>=3){e.target.value=p[0];yEl.value=p[1];zEl.value=p[2];if(focusAfter)focusAfter.focus();}
+    });
+  }
+  // Opens H01's Neuroglancer directly at the row's coordinate, with this cell's own c3 segment
+  // already selected (viewerUrl(pos, segId) -- same builder celltypeLink() uses elsewhere on this
+  // page), keeping ID_CTX as-is rather than re-running the search and losing the in-progress form.
+  function wireJump(btn,xEl,yEl,zEl){
+    btn.addEventListener("click",()=>{
+      const x=xEl.value,y=yEl.value,z=zEl.value;
+      if(x===""||y===""||z===""){alert("Fill in x, y and z first.");return;}
+      window.open(viewerUrl([+x,+y,+z],ID_CTX.seg),"_blank","noopener");
+    });
+  }
+  function addRow(){
+    const isFirstRow=rowsEl.children.length===0;
+    const row=document.createElement("div");
+    row.className="merged-row";
+    row.style.cssText="border:1px solid var(--line);border-radius:6px;padding:10px;margin-top:8px";
+    row.innerHTML=
+      '<div class="row" style="justify-content:space-between;align-items:center">'
+      +'<span style="font-size:12px;color:var(--mut)">Structure <span class="organ-row-num"></span></span>'
+      +'<button type="button" class="organ-row-remove" style="background:none;border:none;color:var(--mut);cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Remove this structure">&times;</button>'
+      +'</div>'
+      +'<label style="display:block;font-size:11px;color:var(--mut);margin-top:6px">What is this?</label>'
+      +'<select class="organ-row-kind" style="width:100%">'+ORGANELLE_KIND_OPTIONS_HTML+'</select>'
+      +'<div class="organ-centriole-fields" style="margin-top:6px">'
+      +'<label style="display:block;font-size:11px;color:var(--mut)">Approx. location (voxel)</label>'
+      +'<div class="row" style="gap:8px;margin-top:2px">'
+      +'<div class="coord"><input type="text" class="orx" inputmode="decimal" placeholder="x"></div>'
+      +'<div class="coord"><input type="text" class="ory" inputmode="decimal" placeholder="y"></div>'
+      +'<div class="coord"><input type="text" class="orz" inputmode="decimal" placeholder="z"></div>'
+      +'<button type="button" class="idbtn organ-jump-c" style="padding:4px 10px;font-size:12px;width:auto">Jump &#8599;</button>'
+      +'</div></div>'
+      +'<div class="organ-cilium-fields" style="margin-top:6px;display:none">'
+      +'<label class="organ-point-label-a" style="display:block;font-size:11px;color:var(--mut)">Base (voxel)</label>'
+      +'<div class="row" style="gap:8px;margin-top:2px">'
+      +'<div class="coord"><input type="text" class="orbx" inputmode="decimal" placeholder="x"></div>'
+      +'<div class="coord"><input type="text" class="orby" inputmode="decimal" placeholder="y"></div>'
+      +'<div class="coord"><input type="text" class="orbz" inputmode="decimal" placeholder="z"></div>'
+      +'<button type="button" class="idbtn organ-jump-base" style="padding:4px 10px;font-size:12px;width:auto">Jump &#8599;</button>'
+      +'</div>'
+      +'<label class="organ-point-label-b" style="display:block;font-size:11px;color:var(--mut);margin-top:6px">Tip (voxel)</label>'
+      +'<div class="row" style="gap:8px;margin-top:2px">'
+      +'<div class="coord"><input type="text" class="ortx" inputmode="decimal" placeholder="x"></div>'
+      +'<div class="coord"><input type="text" class="orty" inputmode="decimal" placeholder="y"></div>'
+      +'<div class="coord"><input type="text" class="ortz" inputmode="decimal" placeholder="z"></div>'
+      +'<button type="button" class="idbtn organ-jump-tip" style="padding:4px 10px;font-size:12px;width:auto">Jump &#8599;</button>'
+      +'</div></div>'
+      +'<p class="hint" style="margin-top:2px">Paste "x, y, z" into an x field — it splits automatically.</p>';
+    rowsEl.appendChild(row);
+    row.querySelector(".organ-row-remove").addEventListener("click",()=>{
+      if(rowsEl.children.length<=1){alert("At least one structure is needed — remove the whole report by collapsing this section instead if that’s not what you meant to report.");return;}
+      row.remove();renumberRows();
+    });
+    const kindEl=row.querySelector(".organ-row-kind");
+    const centrioleFields=row.querySelector(".organ-centriole-fields"),ciliumFields=row.querySelector(".organ-cilium-fields");
+    const pointLabelA=row.querySelector(".organ-point-label-a"),pointLabelB=row.querySelector(".organ-point-label-b");
+    kindEl.addEventListener("change",()=>{
+      const info=ORGANELLE_KIND_BY_VALUE[kindEl.value];
+      const isCilium=!!(info&&info.vector);
+      centrioleFields.style.display=isCilium?"none":"";
+      ciliumFields.style.display=isCilium?"":"none";
+      const pl=organReportPointLabels(kindEl.value);
+      if(pointLabelA)pointLabelA.textContent=pl[0]+" (voxel)";
+      if(pointLabelB)pointLabelB.textContent=pl[1]+" (voxel)";
+    });
+    if(isFirstRow){
+      kindEl.value="centriole";
+    }else{
+      kindEl.value="cilium";
+      centrioleFields.style.display="none";
+      ciliumFields.style.display="";
+    }
+    const cx=row.querySelector(".orx"),cy=row.querySelector(".ory"),cz=row.querySelector(".orz");
+    const bx=row.querySelector(".orbx"),by=row.querySelector(".orby"),bz=row.querySelector(".orbz");
+    const tx=row.querySelector(".ortx"),ty=row.querySelector(".orty"),tz=row.querySelector(".ortz");
+    wirePasteSplit(cx,cy,cz);wireJump(row.querySelector(".organ-jump-c"),cx,cy,cz);
+    wirePasteSplit(bx,by,bz,tx);wireJump(row.querySelector(".organ-jump-base"),bx,by,bz);
+    wirePasteSplit(tx,ty,tz);wireJump(row.querySelector(".organ-jump-tip"),tx,ty,tz);
+    renumberRows();
+  }
+  addRow();
+  container.querySelector("#organAddRow").addEventListener("click",()=>addRow());
+  const submitBtn=container.querySelector("#organSubmit");
+  submitBtn.addEventListener("click",()=>{
+    const rows=[...rowsEl.children];
+    let allFilled=true;
+    const subs=rows.map(row=>{
+      const kind=row.querySelector(".organ-row-kind").value;
+      const info=ORGANELLE_KIND_BY_VALUE[kind];
+      if(info&&info.vector){
+        const bx=row.querySelector(".orbx").value.trim(),by=row.querySelector(".orby").value.trim(),bz=row.querySelector(".orbz").value.trim();
+        const tx=row.querySelector(".ortx").value.trim(),ty=row.querySelector(".orty").value.trim(),tz=row.querySelector(".ortz").value.trim();
+        if(bx===""||by===""||bz===""||tx===""||ty===""||tz==="")allFilled=false;
+        return{kind,pointA:bx+","+by+","+bz,pointB:tx+","+ty+","+tz};
+      }
+      const x=row.querySelector(".orx").value.trim(),y=row.querySelector(".ory").value.trim(),z=row.querySelector(".orz").value.trim();
+      if(x===""||y===""||z==="")allFilled=false;
+      return{kind,pointA:x+","+y+","+z,pointB:""};
+    });
+    if(!allFilled){alert("Please fill in every coordinate field for each structure listed (both points for a cilium or NR type II).");return;}
+    const commentEl=container.querySelector("#organComment");
+    const comment=commentEl?commentEl.value.trim():"";
+    const path=idfPathText();
+    const groupId=(ID_CTX.body||"nobody")+"_"+Date.now()+"_org";
+    submitBtn.disabled=true;submitBtn.textContent="submitting…";
+    Promise.all(subs.map((s,i)=>postReport({
+      type:"organelle_location",
+      timestamp:new Date().toISOString(),
+      nucleusId:ID_CTX.body||"",rootId:ID_CTX.seg||"",
+      coord:ID_CTX.pos?ID_CTX.pos.join(","):"",
+      groupId,subIndex:i+1,subCount:subs.length,
+      kind:s.kind,pointA:s.pointA,pointB:s.pointB,
+      identified:(typeof canonSubmitName==="function"?canonSubmitName(name):name)||"",
+      comment,path
+    }))).then(results=>{
+      const allOk=results.every(d=>d&&d.ok);
+      const thanks=container.querySelector("#organThanks");
+      if(allOk){
+        submitBtn.textContent="Submitted — thank you!";
+        if(thanks)thanks.innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">Thanks — logged '+subs.length+(subs.length===1?" structure.":" structures.")+'</div>';
+        if(typeof loadMyStats==="function") loadMyStats();
+      } else {
+        submitBtn.disabled=false;submitBtn.textContent="Try again";
+      }
+    }).catch(()=>{ submitBtn.disabled=false;submitBtn.textContent="Try again"; });
+  });
+}
+
 /* ── result screen ──────────────────────────────────────────────────────────────────── */
 function h01Verdict(slug){
   const eq=H01_EQUIV[slug];
@@ -1342,6 +1547,12 @@ function renderResult(slug){
   const cw = (typeof CONFUSED_WITH==="object") ? CONFUSED_WITH[slug] : null;
   if(cw) h+='<div class="meta">Commonly confused with <b>'+escHtml(cw.withName)+'</b> &mdash; '+escHtml(cw.note)
     +(cw.ref?' <a class="ref" href="'+escHtml(cw.ref)+'" target="_blank" rel="noopener">'+escHtml(cw.refLabel||"source")+'</a>':'')+'</div>';
+
+  // 2026-08-20, Søren: "I should be able to report the same organelles in hJump and bJump as in
+  // uJump." Same call site µJump's/bJump's own renderResult() use -- right after "Often/Commonly
+  // confused with", before the certainty scale. See the organelleFlagHtml() block above for why
+  // this is a hand-written equivalent rather than a shared core/panel.js call.
+  h+=organelleFlagHtml();
 
   /* 2026-08-20, Søren: "hJump should have the same certainty scale as uJump and bJump." Both of
      those use a 1-5 numeric pill scale (µJump's own renderResult(), bJump's renderResult() in
@@ -1440,6 +1651,7 @@ function renderResult(slug){
       }
     }).catch(function(){ submitBtn.disabled=false; submitBtn.textContent="Try again"; });
   });
+  wireOrganelleFlag(slug);
   ensureGallery();
 }
 function idfPathText(){

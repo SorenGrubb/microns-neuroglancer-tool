@@ -2639,6 +2639,18 @@ function renderResult(slug){
               +escHtml(cw.refLabel||"reference")+'</a>':'')+'</p>';
   }
 
+  /* 2026-08-20, Søren: "I should be able to report the same organelles in hJump and bJump as in
+     uJump." bJump already loads core/panel.js verbatim (see the module's own header) -- which
+     already defines the full 13-topic/60-kind ORGANELLE_GROUPS ontology and the entire inline
+     report form (organelleFlagHtml/organelleFormHtml/wireOrganelleForm) -- but nothing in this
+     file ever actually called it, so the "Report an organelle" entry point µJump's own
+     renderResult() has (see its own organelleFlagHtml()/wireOrganelleFlag() calls) was silently
+     missing from bJump's result screen despite all the machinery already being loaded. host
+     contract check: ID_CTX here is {nucId,root,pos} (see startGuided() below), which is exactly
+     what organelleFormHtml()/wireOrganelleForm() read -- no shape mismatch, no other change
+     needed. */
+  h+=organelleFlagHtml();
+
   /* µJump's exact markup and the same 1-5 scale, so getCertainty() in core/tree.js reads it and
      the two datasets' rows stay directly comparable in the sheet. The stylesheet styles
      `.cert-opt.sel` -- using any other class leaves the button visually unchanged, so there is no
@@ -2669,6 +2681,7 @@ function renderResult(slug){
   });
   const sb=document.getElementById("idsubmit");
   if(sb) sb.addEventListener("click",function(){ submitIdentification(slug); });
+  wireOrganelleFlag(slug);
 }
 
 /* Opens the shared engine against the cell currently on screen. ID_CTX is what every downstream

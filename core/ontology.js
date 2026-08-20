@@ -239,8 +239,210 @@ const IMAGE_LIBRARY={
  dural_border_cell:{dir:"F_leptomeninges/dural_border_cell",files:[]}
 };
 
+
+/* ==== organelle/structure ontology (moved here from core/panel.js, 2026-08-20) ====
+   Moved so hJump -- which loads this file but deliberately NOT core/panel.js (see
+   hjump-architecture-correction-2026-08-19) -- gets ORGANELLE_GROUPS etc. for free, instead of
+   hand-duplicating a 61-kind list that would drift from µJump's/bJump's. core/panel.js still
+   defines every FUNCTION that consumes this data (organelleFlagHtml, organelleFormHtml,
+   wireOrganelleForm, organelleStructRowsHtml, organelleCountParts) -- only the pure data (plus
+   organReportPointLabels/ORGANELLE_KIND_OPTIONS_HTML, which are one-liners derived from it)
+   moved. See the pointer comment left in core/panel.js at the old location. ==== */
+/* ==== organelle/structure ontology + read-back renderers  (was ujump.html lines 4688-4919) ==== */
+/* ---------- Organelle/structure kinds (2026-08-02, expanded 2026-08-06) ----------
+   Søren, 2026-08-02: "Instead of report centriole/cilium, it should be report an organelle...
+   there should also be options for lysosomes, peroxisomes, golgi apparatus, endoplasmic
+   reticulum, mitochondria, multivesicular bodies, lipid droplet, phagosome, glycogen, adherens
+   junction, gap junction, tight junction, GFAP, synapse. All these should be a single
+   annotation. I still want centrioles to be the default one and primary cilia to be the default
+   if adding another one."
+   Søren, 2026-08-06, on top of that original 16: "we need to have 'Nucleoplasmic reticulum (type
+   I)' and 'Nucleoplasmic reticulum (type II)'. We could also have 'Nuclear pore' and the
+   endoplasmic reticulum could be divided into 'Rough endoplasmic reticulum' and 'Smooth
+   endoplasmic reticulum'. We also need [33 more, see the full list below] ... I guess it should
+   be called 'Organelles and Extracellular Structures' and the list should be organized into
+   topics." The single flat "er" kind was retired in favour of er_rough/er_smooth (an existing
+   historical report with kind:"er" still displays fine -- see the "unrecognized kind" fallback
+   below -- it just won't be double-counted into the new split kinds).
+   Søren, same day, immediate follow-up: "Also add peg-and-socket junction, myoendothelial
+   junction, tripartite junction, Astrocyte endfoot, Microglia plug, Swelling, Synaptic vesicle,
+   Extracellular vesicle and Perivascular debris." The first 6 vascular/perivascular-contact terms
+   got their own new "Vascular & perivascular contacts" group (distinct from the generic
+   adherens/gap/tight "Cell junctions" group -- these are all specific neurovascular-unit contact
+   types, matching Søren's own research focus); Synaptic/Extracellular vesicle joined "Vesicles &
+   trafficking"; Swelling joined "Pathology".
+   Søren, same day, one more addition: "I want to add a 'What the... is this?' for some organelle
+   or extracellular structure that the user wants an expert opinion on." A dedicated "Not sure
+   what this is?" group, ONE kind (ask_expert), placed FIRST in ORGANELLE_GROUPS so it's the most
+   discoverable option in both dropdowns and the Filter-and-show checkbox list -- deliberately
+   just another ORGANELLE_KINDS entry rather than a bespoke new reporting flow, so it inherits
+   every existing mechanism for free: the report form's whole-submission "Comments (optional)"
+   field already lets a reporter describe what's puzzling them, and checking its Filter-and-show
+   box is how Søren (playing "the expert") finds and reviews every flagged point across the whole
+   dataset. Given its own bespoke colour (matches --warn, #e3b341) instead of an auto-generated
+   one, for the same "make this one stand out" reason centriole/cilium keep their own colours.
+   Søren, same day, one more refinement pass: "Centrioles should still be the default for
+   reporting an organelle. GFAP should be part of the cytoskeleton. We can add dendritic spine and
+   axonal bouton to the category with synapse and rename that category. Tunelling nanotube should
+   be in the cell junctions category." GFAP moved Markers & contacts -> Cytoskeleton (it's an
+   intermediate-filament protein, so this is a straightforward reclassification, not a new kind).
+   Tunneling nanotube moved Pathology -> Cell junctions. "Markers & contacts" (which would have
+   been left with only "Synapse" after GFAP moved out) was renamed "Synaptic structures" and gained
+   two new kinds, dendritic_spine and axonal_bouton. Separately: the two organelle-report forms'
+   addRow() functions used to rely on "centriole" simply being the first <option> in the dropdown
+   for their first-row default -- true before "ask_expert" was inserted at the very front of
+   ORGANELLE_GROUPS earlier the same day, silently NOT true after. Both now set
+   `kindEl.value="centriole"` explicitly for the first row (see the two addRow() comments below),
+   so this default no longer depends on list ordering at all, no matter what's added or reordered
+   in ORGANELLE_GROUPS in the future.
+
+   ORGANELLE_GROUPS is the source of truth: an ordered list of {label, kinds:[...]} topic groups,
+   each kind the same {value,label,short,vector} shape as before. ORGANELLE_KINDS (flat,
+   derived below) is kept for every consumer that doesn't care about grouping -- this ONE
+   structure drives every "what is this?" dropdown (the main organelle-report form's
+   .organ-row-kind AND the merged-nucleus mini-widget's .mrOrganKind, now rendered as <optgroup>
+   sections so a 49-item list stays navigable), every read-back display
+   (organelleStructRowsHtml/organelleCountParts below), AND (new) the Filter-and-show "Organelles
+   and extracellular structures" checkbox list (built from window.ORGANELLE_GROUPS -- exposed on
+   window for that LATER <script> tag's UI).
+   VERIFIED 2026-08-16: top-level `const`/`let` in one classic <script> tag ARE visible to
+   every later <script> tag on the page -- they share one global lexical environment. Proof in
+   this very file: `const N` (main block) is used bare at lines ~9951/10661/10733/10795 in four
+   later blocks, and the vessel filters that depend on it work in production. What is NOT true:
+   they are not properties of `window` (so `window.X` and `typeof window.X` fail), and a second
+   `const X` anywhere on the page throws SyntaxError that silently kills that whole block.
+   So the `window.` exposure here is belt-and-braces rather than required; harmless, left alone. `vector:true` is still what distinguishes cilium (the one kind needing
+   base+tip, i.e. two points) from every other kind, which is "a single annotation" (one x/y/z
+   point) -- adding a 50th kind later only means appending one entry to the right group here,
+   never touching any function that loops over ORGANELLE_KINDS/ORGANELLE_GROUPS generically.
+   `short` is the compact name used in count summaries ("2× centriole, 1× Golgi apparatus"),
+   separate from the fuller dropdown `label`. kind VALUES are stored verbatim in the "Organelle
+   locations" sheet's free-text `kind` column (see doPost's organelle_location branch in
+   Code.gs.txt) -- no backend schema change was needed for any of these additions, since that
+   column was never an enum server-side. */
+const ORGANELLE_GROUPS=[
+  {label:"Not sure what this is?",kinds:[
+    {value:"ask_expert",label:"What the… is this? (ask an expert)",short:"flagged: ask expert",vector:false}
+  ]},
+  {label:"Nucleus",kinds:[
+    {value:"nucleolus",label:"Nucleolus",short:"nucleolus",vector:false},
+    {value:"chromatin",label:"Chromatin",short:"chromatin",vector:false},
+    {value:"nuclear_pore",label:"Nuclear pore",short:"nuclear pore",vector:false},
+    {value:"nucleoplasmic_reticulum_1",label:"Nucleoplasmic reticulum (type I)",short:"NR type I",vector:false},
+    /* vector:true added 2026-08-07 (Søren: "we also need to update the nr type 2 reporting so that
+       is 2 coordinte inputs") -- unlike type I, type II is the channel/hole-like form that runs
+       through a stretch of tissue (matches his own "All own data.xlsx" hole-measurement columns,
+       which record a start and end coordinate per hole), so it needs the same base+tip shape as
+       cilium rather than a single point. This is the exact scenario the ORGANELLE_GROUPS design
+       comment above anticipated ("a future vector kind... would automatically get the two-point
+       fields too, with zero changes needed here") -- confirmed true: no changes needed to the
+       report forms, storage, or point-viewer, all of which already key off .vector generically
+       rather than a hardcoded ==="cilium" check. Only addition beyond the flag itself: pointLabels
+       so the two coordinate fields read "Coordinate 1"/"Coordinate 2" instead of the cilium-specific
+       "Base"/"Tip" wording (a reticulum channel doesn't have a biological "base" or "tip") -- see
+       organReportPointLabels() below, used by every render/form site that used to hardcode
+       "Base"/"Tip". */
+    {value:"nucleoplasmic_reticulum_2",label:"Nucleoplasmic reticulum (type II)",short:"NR type II",vector:true,pointLabels:["Coordinate 1","Coordinate 2"]}
+  ]},
+  {label:"Centriole & cilium",kinds:[
+    {value:"centriole",label:"Centriole / centrosome",short:"centriole",vector:false},
+    {value:"cilium",label:"Primary cilium (base + tip)",short:"cilium",vector:true,pointLabels:["Base","Tip"]}
+  ]},
+  {label:"Endomembrane system",kinds:[
+    {value:"er_rough",label:"Rough endoplasmic reticulum",short:"rough ER",vector:false},
+    {value:"er_smooth",label:"Smooth endoplasmic reticulum",short:"smooth ER",vector:false},
+    {value:"golgi",label:"Golgi apparatus",short:"Golgi apparatus",vector:false},
+    {value:"lysosome",label:"Lysosome",short:"lysosome",vector:false},
+    {value:"peroxisome",label:"Peroxisome",short:"peroxisome",vector:false},
+    {value:"mitochondria",label:"Mitochondria",short:"mitochondrion",vector:false},
+    {value:"mvb",label:"Multivesicular body",short:"MVB",vector:false},
+    {value:"endosome",label:"Endosome",short:"endosome",vector:false}
+  ]},
+  {label:"Vesicles & trafficking",kinds:[
+    {value:"pinocytic_vesicle",label:"Pinocytic vesicle",short:"pinocytic vesicle",vector:false},
+    {value:"caveolae",label:"Caveolae",short:"caveolae",vector:false},
+    {value:"secretory_vesicle",label:"Secretory vesicle",short:"secretory vesicle",vector:false},
+    {value:"transport_vesicle",label:"Transport vesicle",short:"transport vesicle",vector:false},
+    {value:"autophagosome",label:"Autophagosome",short:"autophagosome",vector:false},
+    {value:"phagosome",label:"Phagosome",short:"phagosome",vector:false},
+    {value:"weibel_palade_body",label:"Weibel-Palade body",short:"Weibel-Palade body",vector:false},
+    {value:"synaptic_vesicle",label:"Synaptic vesicle",short:"synaptic vesicle",vector:false},
+    {value:"extracellular_vesicle",label:"Extracellular vesicle",short:"extracellular vesicle",vector:false}
+  ]},
+  {label:"Cytoskeleton",kinds:[
+    {value:"microtubules",label:"Microtubules",short:"microtubules",vector:false},
+    {value:"microfilaments",label:"Microfilaments",short:"microfilaments",vector:false},
+    {value:"intermediate_filaments",label:"Intermediate filaments",short:"intermediate filaments",vector:false},
+    {value:"contractile_elements",label:"Contractile elements",short:"contractile elements",vector:false},
+    {value:"gfap",label:"GFAP",short:"GFAP",vector:false}
+  ]},
+  {label:"Cell junctions",kinds:[
+    {value:"adherens_junction",label:"Adherens junction",short:"adherens junction",vector:false},
+    {value:"gap_junction",label:"Gap junction",short:"gap junction",vector:false},
+    {value:"tight_junction",label:"Tight junction",short:"tight junction",vector:false},
+    {value:"tunneling_nanotube",label:"Tunneling nanotube",short:"tunneling nanotube",vector:false}
+  ]},
+  {label:"Vascular & perivascular contacts",kinds:[
+    {value:"peg_and_socket_junction",label:"Peg-and-socket junction",short:"peg-and-socket junction",vector:false},
+    {value:"myoendothelial_junction",label:"Myoendothelial junction",short:"myoendothelial junction",vector:false},
+    {value:"tripartite_junction",label:"Tripartite junction",short:"tripartite junction",vector:false},
+    {value:"astrocyte_endfoot",label:"Astrocyte endfoot",short:"astrocyte endfoot",vector:false},
+    {value:"microglia_plug",label:"Microglia plug",short:"microglia plug",vector:false},
+    {value:"perivascular_debris",label:"Perivascular debris",short:"perivascular debris",vector:false}
+  ]},
+  {label:"Cytoplasmic inclusions",kinds:[
+    {value:"lipid_droplet",label:"Lipid droplet",short:"lipid droplet",vector:false},
+    {value:"glycogen",label:"Glycogen",short:"glycogen",vector:false},
+    {value:"ribosome",label:"Ribosome",short:"ribosome",vector:false},
+    {value:"lipofuscin_granule",label:"Lipofuscin granule",short:"lipofuscin granule",vector:false},
+    {value:"corpora_amylacea",label:"Corpora amylacea",short:"corpora amylacea",vector:false}
+  ]},
+  {label:"Surface & membrane specializations",kinds:[
+    {value:"microvillus",label:"Microvillus",short:"microvillus",vector:false},
+    {value:"glycocalyx",label:"Glycocalyx",short:"glycocalyx",vector:false},
+    {value:"myelin_sheath",label:"Myelin sheath",short:"myelin sheath",vector:false}
+  ]},
+  {label:"Synaptic structures",kinds:[
+    {value:"synapse",label:"Synapse",short:"synapse",vector:false},
+    {value:"dendritic_spine",label:"Dendritic spine",short:"dendritic spine",vector:false},
+    {value:"axonal_bouton",label:"Axonal bouton",short:"axonal bouton",vector:false}
+  ]},
+  {label:"Extracellular matrix & structures",kinds:[
+    {value:"elastin",label:"Elastin",short:"elastin",vector:false},
+    {value:"fibrin",label:"Fibrin",short:"fibrin",vector:false},
+    {value:"collagen",label:"Collagen",short:"collagen",vector:false},
+    {value:"extracellular_space",label:"Extracellular space",short:"extracellular space",vector:false},
+    {value:"glia_limitans",label:"Glia limitans",short:"glia limitans",vector:false},
+    {value:"basement_membrane",label:"Basement membrane",short:"basement membrane",vector:false}
+  ]},
+  {label:"Pathology",kinds:[
+    {value:"amyloid_beta_plaque",label:"Amyloid beta plaque",short:"amyloid-β plaque",vector:false},
+    {value:"tau_tangle",label:"Tau tangle",short:"tau tangle",vector:false},
+    {value:"dystrophic_neurite",label:"Dystrophic neurite",short:"dystrophic neurite",vector:false},
+    {value:"swelling",label:"Swelling",short:"swelling",vector:false}
+  ]}
+];
+window.ORGANELLE_GROUPS=ORGANELLE_GROUPS;
+const ORGANELLE_KINDS=ORGANELLE_GROUPS.reduce((a,g)=>a.concat(g.kinds),[]);
+const ORGANELLE_KIND_BY_VALUE={};ORGANELLE_KINDS.forEach(k=>ORGANELLE_KIND_BY_VALUE[k.value]=k);
+/* Shared label lookup for the two coordinate fields of any vector (2-point) kind -- added
+   2026-08-07 alongside nucleoplasmic_reticulum_2 becoming the 2nd vector kind (cilium was the
+   only one before). Every render/form site that used to hardcode "Base"/"Tip" now calls this
+   instead, so a kind's own pointLabels (falling back to a generic "Point 1"/"Point 2" if a
+   future vector kind is added without specifying any) drives the wording everywhere at once. */
+function organReportPointLabels(kindValue){
+  const info=ORGANELLE_KIND_BY_VALUE[kindValue];
+  return (info&&info.pointLabels)||["Point 1","Point 2"];
+}
+/* <optgroup>-sectioned <option> list shared verbatim by both organelle-reporting forms (see the
+   big comment above) -- topic-organized per Søren's "the list should be organized into topics"
+   now that it has grown to 49 entries. */
+const ORGANELLE_KIND_OPTIONS_HTML=ORGANELLE_GROUPS.map(g=>'<optgroup label="'+g.label+'">'+g.kinds.map(k=>'<option value="'+k.value+'">'+k.label+'</option>').join("")+'</optgroup>').join("");
+
 UJ.ontology = {
   TREE: TREE, LEAF_NAMES: LEAF_NAMES, CONFUSED_WITH: CONFUSED_WITH,
   IMAGE_LIBRARY: IMAGE_LIBRARY, canonSubmitName: canonSubmitName,
-  familyOf: familyOf, confirmMajorClassChange: confirmMajorClassChange
+  familyOf: familyOf, confirmMajorClassChange: confirmMajorClassChange,
+  ORGANELLE_GROUPS: ORGANELLE_GROUPS, ORGANELLE_KINDS: ORGANELLE_KINDS,
+  ORGANELLE_KIND_BY_VALUE: ORGANELLE_KIND_BY_VALUE, organReportPointLabels: organReportPointLabels
 };

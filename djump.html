@@ -1910,10 +1910,20 @@ document.getElementById("refreshBtn").addEventListener("click",function(){loadLi
 <script>
 /* V1DD has ONE imaged volume, so there is no minnie35-style wider fallback: em35/seg35
    deliberately alias em/seg, which makes every "outside the predicted volume" fallback
-   path a no-op instead of a broken layer. TODO(stage-b): the nuc layer is unverified --
-   gs://v1dd_imagery/v1dd_nuclei/ exists and the bucket is public, but its info file has
-   not been read yet. If the nuclei layer fails to load, that is why. */
-const SRC={em:"precomputed://gs://v1dd_imagery/image/aligned_image",em35:"precomputed://gs://v1dd_imagery/image/aligned_image",seg:"graphene://https://api.em.brain.allentech.org/segmentation/table/v1dd_public",seg35:"graphene://https://api.em.brain.allentech.org/segmentation/table/v1dd_public",nuc:"precomputed://gs://v1dd_imagery/v1dd_nuclei"};
+   path a no-op instead of a broken layer.
+
+   seg carries the middleauth+ prefix even though the datastack reports the source
+   without it. Shipped it verbatim first and the segmentation layer came up EMPTY in
+   Spelunker (EM fine, coordinates fine, nothing drawn): without middleauth+ Neuroglancer
+   never runs the auth handshake, so every chunk request is refused and the layer just
+   silently renders nothing. Unlike a broken URL there is no error to see.
+
+   nuc is the NUCLEUS segmentation volume, verified 2026-08-20:
+   gs://v1dd_imagery/v1dd_nuclei/segmentation, uint32, mip 0 at 77.6x77.6x45 nm,
+   size 23232x14784x17600, offset 1143/1872/17. Note the /segmentation suffix -- the
+   bucket also holds v1dd_nuclei/predictions/, and pointing at the parent prefix gives an
+   equally silent empty layer. uint32 comfortably holds V1DD nucleus ids (~1e5-6e5). */
+const SRC={em:"precomputed://gs://v1dd_imagery/image/aligned_image",em35:"precomputed://gs://v1dd_imagery/image/aligned_image",seg:"graphene://middleauth+https://api.em.brain.allentech.org/segmentation/table/v1dd_public",seg35:"graphene://middleauth+https://api.em.brain.allentech.org/segmentation/table/v1dd_public",nuc:"precomputed://gs://v1dd_imagery/v1dd_nuclei/segmentation"};
 /* The raw EM imagery renders low-contrast by default (Neuroglancer's default shader linearly
    maps the full 0-255 raw intensity range to black-white, but this tissue's actual signal sits
    in a much narrower band). This normalizes the default grayscale shader's input range to
@@ -1922,7 +1932,7 @@ const SRC={em:"precomputed://gs://v1dd_imagery/image/aligned_image",em35:"precom
 /* MICrONS used [86,172] because its signal sits in a narrow band. V1DD contrast has not
    been characterised, so the full range is used until Søren tunes it against the EM. */
 const EM_SHADER_CONTROLS={normalized:{range:[0,255]}};
-const NUC_INFO="https://storage.googleapis.com/v1dd_imagery/v1dd_nuclei/info";
+const NUC_INFO="https://storage.googleapis.com/v1dd_imagery/v1dd_nuclei/segmentation/info";
 const DIM={x:[UJ_RX*1e-9,"m"],y:[UJ_RY*1e-9,"m"],z:[UJ_RZ*1e-9,"m"]};
 /* Distance (nm) past which the nearest MICrONS-detected nucleus is no longer treated as a
    credible stand-in for what's actually at a query coordinate. Tighter than the 5000nm/5um
@@ -4783,10 +4793,11 @@ const CAVE_NUCLEUS_TABLE="nucleus_detection_v0";
    version picker to 1300 below keeps this tool's own root ID (also v1300-derived) consistent by
    default; picking a newer version is fine too, it just means re-deriving the root ID for THIS
    cell at that version may be needed if it's since been edited (zero synapses back is the tell). */
-/* V1DD's datastack info reports the segmentation WITHOUT a middleauth+ prefix, unlike
-   MICrONS. Kept exactly as the server states it; if Neuroglancer then fails to send
-   credentials and the segmentation layer comes up empty, prepend "middleauth+". */
-const CAVE_SEG_SOURCE="graphene://"+CAVE_SERVER+"/segmentation/table/"+CAVE_DATASTACK;
+/* V1DD's datastack info reports the segmentation WITHOUT a middleauth+ prefix. Taking it
+   at face value produced an empty segmentation layer in Spelunker; the prefix is what
+   makes Neuroglancer perform the auth handshake, so it is required here exactly as it is
+   for MICrONS. Do not "correct" this back to match the datastack info. */
+const CAVE_SEG_SOURCE="graphene://middleauth+"+CAVE_SERVER+"/segmentation/table/"+CAVE_DATASTACK;
 const CAVE_VERSIONS=["1196","365"];
 /* V1DD issues its OWN token; a MICrONS/daf-apis token returns 401 invalid_token here. */
 const CAVE_TOKEN_GUIDE_URL="https://global.em.brain.allentech.org/auth/api/v1/create_token";
