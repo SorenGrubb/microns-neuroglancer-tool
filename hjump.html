@@ -312,6 +312,9 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
    tools even though the underlying code is hJump's own. */
 .stepvote-panel{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 .stepvote-headline{font-size:13px;color:var(--ink);margin-bottom:8px}
+.stepvote-idcard{margin-bottom:10px}
+.stepvote-idcard .celltype{font-size:17px;margin:6px 0 2px}
+.stepvote-idcard .ids{margin-top:6px}
 .idf-certainty{margin-top:14px}
 .cert-scale{display:flex;gap:8px;justify-content:center;margin-top:6px}
 .cert-opt{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:14px;font-weight:600;cursor:pointer}
@@ -2727,8 +2730,32 @@ function hjumpUpdateStepUI(){
   const panel=document.getElementById("stepVotePanel");
   if(panel){
     const i=HJUMP_STEP_MATCHES[HJUMP_STEP_INDEX];
-    panel.innerHTML='<div class="stepvote-panel"><div class="stepvote-headline">Currently: <b>'
-      +escHtml(hjumpStepHeadline(i))+'</b></div></div>';
+    /* 2026-08-20 (5th pass), Søren: "what I wanted was to have this window underneath it with the
+       cell identity and layer model and all" -- same rich read-only id-card µJump/bJump/dJump now
+       show under "Systematically step through matches", ported to hJump's own step-through widget
+       rather than core/panel.js's renderStepVotePanel() (hJump never used that shared function --
+       hjumpUpdateStepUI() is its own hand-rolled equivalent, see showCell()'s companion markup
+       above for the same pieces: classOf/classLabel is H01's published class tag, layerHtml(i) is
+       H01's own layer call -- hJump's equivalent of µJump's V1-column badge/dJump's cortical-layer
+       badge -- and c3Id/HSB are its two id spaces (c3 segment, cell body). No token-substitution
+       trick needed here (contrast core/panel.js's "@@STEPCARD_NAME@@", see its own "5th pass"
+       comment for why THAT was necessary): hjumpStepHeadline(i) already recomputes fresh from i
+       every time hjumpUpdateStepUI() re-runs, and this function already gets called again once a
+       community identification resolves (see hjumpIdentityOf()'s callers), so the name here can
+       never go stale the way core/panel.js's captured-once string could. */
+    const modsHtml=modifiers(i).map(m=>' <span class="tag none" title="Morphological modifier from the H01 classification">'+escHtml(m)+'</span>').join("");
+    panel.innerHTML='<div class="stepvote-panel"><div class="stepvote-idcard">'
+      +'<span class="tag '+classOf(i)+'">'+escHtml(classLabel(i))+'</span> '+layerHtml(i)+modsHtml
+      +'<div class="celltype">'+escHtml(hjumpStepHeadline(i))+'</div>'
+      +'<div class="ids"><div class="idrow"><span class="k">c3 segment</span><span class="idval" title="click to copy" data-c="'+c3Id(i)+'">'+c3Id(i)+'</span></div>'
+      +'<div class="idrow"><span class="k">cell body</span><span class="idval" title="click to copy" data-c="'+HSB[i]+'">'+HSB[i]+'</span></div></div>'
+      +'</div></div>';
+    panel.querySelectorAll(".idval").forEach(function(v){
+      v.addEventListener("click",function(){
+        if(navigator.clipboard)navigator.clipboard.writeText(v.dataset.c);
+        var o=v.textContent;v.textContent="copied";setTimeout(function(){v.textContent=o;},900);
+      });
+    });
   }
 }
 function hjumpStepGoTo(i){

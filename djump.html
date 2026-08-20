@@ -268,6 +268,9 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
    convention as every other row in this file. */
 .stepvote-panel{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 .stepvote-headline{font-size:13px;color:var(--ink);margin-bottom:8px}
+.stepvote-idcard{margin-bottom:10px}
+.stepvote-idcard .celltype{font-size:17px;margin:6px 0 2px}
+.stepvote-idcard .ids{margin-top:6px}
 .stepvote-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px}
 .stepvote-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
 .stepvote-row:last-child{margin-bottom:0}
@@ -3338,6 +3341,7 @@ function showNucleus(pos){
      have no single "MICrONS predicted this" fact to vote on). CUR_COMMUNITY_TOP_NAME is set
      asynchronously, by loadCommunityReports() once it determines a winning community identity. */
   window.CUR_MICRONS_NAME=null;window.CUR_COMMUNITY_TOP_NAME=null;
+  window.CUR_STEP_CARD_HTML=null; // see the "5th pass" comment further down where this gets (re)built
   /* Checked FIRST, ahead of even the standalone-annotation check below: a community-reported,
      identified sub-cell of a merged-nucleus detection sits INSIDE a real MICrONS nucleus
      detection (unlike a standalone point), so without this check the normal nearest() lookup a
@@ -3473,6 +3477,27 @@ function showNucleus(pos){
   window.CUR_HAS_CELL=true;
   const v1=v1ColumnInfo(i);
   if(v1)h+=v1ColumnBadgeHtml(v1);
+  /* 2026-08-20 (5th pass), Søren: "what I wanted was to have this window underneath it with the
+     cell identity and layer model and all" -- ported verbatim from µJump's showNucleus() (see its
+     own "4th/5th pass" comments for the full history: the empty-panel bug, the 5.5s network-gate
+     bug, the rowPos scope bug, and finally the CUR_CELLTYPE_DISPLAY-staleness bug that made the
+     card freeze on "Unclassified" even after a community identification won -- fixed by having
+     core/panel.js prefer commName/micronsName over CUR_CELLTYPE_DISPLAY when substituting the
+     "@@STEPCARD_NAME@@" token, since CUR_CELLTYPE_DISPLAY can still hold the stale
+     synchronously-set value at the moment this function's OWN THIRD renderStepVotePanel() call
+     site fires). dJump reuses the exact same v1ColumnBadgeHtml() as µJump for its layer-model
+     badge (V1DD is a V1-column dataset too), so nothing else about this card differs. */
+  const stepTagHtml=merged
+    ?'<span class="tag" style="background:#3a2a10;color:#f0883e;border:1px solid #f0883e">merged nucleus segmentation</span>'
+    :own
+    ?'<span class="tag" style="background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)">verified identification</span>'
+    :'<span class="tag '+ti.ab+'">'+(ti.cls?ti.cls.replace("_"," "):"nucleus &middot; no prediction")+'</span>';
+  window.CUR_STEP_CARD_HTML=stepTagHtml
+    +'<div class="celltype">@@STEPCARD_NAME@@'+(!merged&&!own&&ti.mtype?' <span class="nsub">/ '+escHtml(ti.mtype)+'</span>':'')+'</div>'
+    +(v1?v1ColumnBadgeHtml(v1):'')
+    +'<div class="ids"><div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+nid+'">'+nid+'</span></div>'
+    +(root?'<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span></div>':'')
+    +'</div>';
   h+=renderLocationDiagram(pos);
   h+='<div class="meta">nearest nucleus at voxel '+coordSpan(NX[i],NY[i],NZ[i])+' &middot; '+(r.dist/1000).toFixed(2)+' &micro;m from query</div>';
   /* nearest() has no distance cap, so a query point that MICrONS's automatic nucleus detector

@@ -270,6 +270,9 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
    convention as every other row in this file. */
 .stepvote-panel{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 .stepvote-headline{font-size:13px;color:var(--ink);margin-bottom:8px}
+.stepvote-idcard{margin-bottom:10px}
+.stepvote-idcard .celltype{font-size:17px;margin:6px 0 2px}
+.stepvote-idcard .ids{margin-top:6px}
 .stepvote-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px}
 .stepvote-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
 .stepvote-row:last-child{margin-bottom:0}
@@ -549,19 +552,6 @@ recorded.</p>
 <div style="margin-top:12px">
 <label style="font-size:12px" title="Percentile rank of the SHELL reading (0-1.5 µm outside the nucleus, the informative measurement — see the Jump tab's molecular-marker note). A cell in the top decile for a marker is evidence, not an identity.">Molecular marker (shell), by percentile among these 220 nuclei</label>
 <div id="fMarkers"></div>
-</div>
-
-<!-- 2026-08-20, Søren: "I should also be able to filter for all those organelles in the Filter
-     and show... like in uJump" -- explicit follow-up choice: a REAL narrowing filter across all
-     61 organelle/extracellular-structure kinds (not just the 2 µJump's own Filter-and-show
-     narrows on), based on community organelle reports. Reads the same ?allOrganelles=1&ds=bjump
-     bulk endpoint the "Report an organelle" form writes to (see fetchBjumpOrganelles() in
-     bjump_logic.js) -- checking any box here keeps a nucleus if at least ONE of the checked kinds
-     has been reported on it (OR across checked kinds, same "match any checked option" semantics
-     as every other multi-value filter already on this page). -->
-<div style="margin-top:12px">
-<label style="font-size:12px" title="Reads the Organelle locations sheet -- every organelle/extracellular structure the community has reported via 'Report an organelle' on the result screen. Checking one or more boxes keeps a nucleus if AT LEAST ONE checked kind has been reported on it. Fetched once per page load and cached.">Organelles &amp; extracellular structures (community-reported)</label>
-<div id="fOrganellesBox"></div>
 </div>
 
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
@@ -1367,6 +1357,29 @@ function showCell(i, distNm){
      the "no cell types" paragraph in the About-this-dataset card) -- so renderStepVotePanel()
      only ever shows the "Community" row here, never "Original (MICrONS)". */
   window.CUR_MICRONS_NAME=null; window.CUR_COMMUNITY_TOP_NAME=null;
+  /* 2026-08-20 (5th pass), Søren: "what I wanted was to have this window underneath it with the
+     cell identity and layer model and all" -- same rich read-only id-card µJump's showNucleus()
+     now builds (see its "4th pass" comment), reusing the SAME pieces this function's own headline
+     above uses: the stratum tag (bJump's nearest thing to a "layer model" -- CA1 has no cortical
+     layers or V1 column, but strata are the equivalent anatomical banding) + segment presence, the
+     cell name, and the nucleus/segment ids. No MICrONS/type tag here since bJump has no classifier
+     at all (see this function's own "no classifier for this dataset" text above) -- the tag row is
+     just the stratum + segment status. Uses the same "@@STEPCARD_NAME@@" token core/panel.js
+     substitutes with the CURRENT name on every render (see its "5th pass" comment for exactly why
+     that has to be a re-substituted token and not a name baked in here once) -- a community
+     identification can win moments after this card is first built. Reset to null on every cell,
+     same as CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME just above, so an early return further down
+     (none currently exist in this function, but future branches should keep the pattern) can never
+     leave a stale card showing. */
+  window.CUR_STEP_CARD_HTML=null;
+  window.CUR_STEP_CARD_HTML='<span class="tag '+st.cls+'">'+escHtml(st.label)+'</span>'
+    +(seg?' <span class="tag non">segment '+seg+'</span>'
+         :' <span class="tag none" title="This nucleus lies outside the segmented sub-volume">no segment</span>')
+    +(BTR[i]?' <span class="tag none" title="Cut by the top or bottom face of the 25 µm slab — its volume is an underestimate">truncated</span>':'')
+    +'<div class="celltype">@@STEPCARD_NAME@@</div>'
+    +'<div class="ids"><div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+BID[i]+'">'+BID[i]+'</span></div>'
+    +(seg?'<div class="idrow"><span class="k">segment ID</span><span class="idval" title="click to copy" data-c="'+seg+'">'+seg+'</span></div>':'')
+    +'</div>';
   ID_CTX={nucId:CUR_NUCID,root:CUR_ROOT,pos:pos.slice()};
 
   /* Søren, 2026-08-16: the cell NAME is the Neuroglancer link -- no separate button. There is no

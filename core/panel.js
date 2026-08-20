@@ -207,24 +207,63 @@ function renderStepVotePanel(){
      blank panel on nearly every step. That was deliberate at the time (a panel with nothing
      votable had nothing to show), but it's not what someone stepping through matches needs: they
      need to know WHICH CELL they're looking at even when nobody has identified it yet, exactly
-     like the main Jump-tab panel always shows a headline. window.CUR_CELLTYPE_DISPLAY is that same
-     headline text (set synchronously by showNucleus()/showCell() and kept in sync here once a
-     community name wins -- see the "window.CUR_CELLTYPE_DISPLAY=win.name" line below) -- reusing
-     it, rather than re-deriving a name, is what keeps this panel and the main panel from ever
-     disagreeing. Falls back to commName/micronsName (this function's own two locals, already
-     computed above) ahead of a generic nucleus-id placeholder: this function's SECOND call site
-     just above (right after "window.CUR_COMMUNITY_TOP_NAME=win.name") fires BEFORE the sibling
-     "window.CUR_CELLTYPE_DISPLAY=win.name" line runs a few lines further down in the same
-     .then() callback -- without this fallback the headline would flash the generic placeholder
-     for one render even though commName is already the right answer at that exact moment. Falls
-     all the way to a nucleus-id label only when NOTHING has named this cell yet, the same
-     "Nucleus <id>" convention bJump's own cellLabel() already uses elsewhere on this page. */
-  var headline='<div class="stepvote-headline">Currently: <b>'
-    +escHtml(window.CUR_CELLTYPE_DISPLAY||commName||micronsName||("Nucleus "+nid+" — not yet identified"))+'</b></div>';
-  if(!REPORT_ENDPOINT){el.innerHTML='<div class="stepvote-panel">'+headline+'</div>';return;}
+     like the main Jump-tab panel always shows a headline. Falls all the way to a nucleus-id label
+     only when NOTHING has named this cell yet, the same "Nucleus <id>" convention bJump's own
+     cellLabel() already uses elsewhere on this page.
+
+     2026-08-20 (5th pass), found via idcard_commcheck.js: the name here is picked with
+     commName/micronsName FIRST, window.CUR_CELLTYPE_DISPLAY only as a fallback -- NOT the other
+     way around, even though CUR_CELLTYPE_DISPLAY is the same headline text the main Jump-tab
+     panel shows. Reason: showNucleus() sets CUR_CELLTYPE_DISPLAY="Unclassified" SYNCHRONOUSLY for
+     a genuinely-unclassified cell -- a real, truthy string, not null -- and that value only gets
+     overwritten once loadCommunityReports()'s community-report fetch resolves AND finds a winning
+     name (the "window.CUR_CELLTYPE_DISPLAY=win.name" line below), AND only when #ctHeadline exists
+     in the DOM. This function's own THIRD call site (right after "window.CUR_COMMUNITY_TOP_NAME=
+     win.name", a few lines before that CUR_CELLTYPE_DISPLAY update runs) fires BEFORE
+     CUR_CELLTYPE_DISPLAY is updated -- so at that exact render, CUR_CELLTYPE_DISPLAY is still the
+     STALE "Unclassified" string, which is truthy and therefore used to win over the fresh, correct
+     commName if CUR_CELLTYPE_DISPLAY were checked first. Since no further render happens after
+     CUR_CELLTYPE_DISPLAY finally catches up, the panel was left permanently stuck on
+     "Unclassified" even though the community name had already won. commName/micronsName are this
+     function's own locals, re-read from window.* fresh on every call, so preferring them avoids
+     the staleness entirely; CUR_CELLTYPE_DISPLAY still matters as the fallback for cases
+     commName/micronsName can't express (a merged-nucleus sum name, or an own verified override)
+     where it's the only name available and isn't racing anything. */
+  var curName=commName||micronsName||window.CUR_CELLTYPE_DISPLAY||null;
+  /* 2026-08-20 (4th pass): "what I wanted was to have this window underneath it with the cell
+     identity and layer model and all" -- the plain one-line headline above (still built as the
+     FALLBACK, for cells/branches that don't set the richer card -- see showNucleus()'s own reset
+     comment) wasn't what Søren meant by "the cell identity". window.CUR_STEP_CARD_HTML, when
+     present, is host-page-built read-only markup (tag + celltype headline + layer/V1-column
+     badge + nucleus ID + root ID) reusing the exact same pieces the Jump-tab panel itself
+     renders for this cell -- see showNucleus()'s "4th pass" comment for where it's built. Using
+     it here, rather than re-deriving a smaller summary, is what keeps this card and the Jump-tab
+     panel from ever visually disagreeing. */
+  /* The "@@STEPCARD_NAME@@" token (see showNucleus()'s "4th pass" comment) gets the CURRENT name
+     substituted in on every render, not just the first -- this is what keeps the card's name in
+     sync when a community identification wins moments after the cell first loaded, the same
+     freshness the plain-text fallback below already had via curName directly. */
+  var headline=window.CUR_STEP_CARD_HTML
+    ?'<div class="stepvote-idcard">'+window.CUR_STEP_CARD_HTML.split("@@STEPCARD_NAME@@").join(escHtml(curName||("Nucleus "+nid)))+'</div>'
+    :'<div class="stepvote-headline">Currently: <b>'
+      +escHtml(curName||("Nucleus "+nid+" — not yet identified"))+'</b></div>';
+  // Same click-to-copy behaviour the .idval pills already have inside #nucpanel (see
+  // panel.querySelectorAll(".idval") in showNucleus()/showCell()) -- wired here too since the
+  // rich card's nucleus-ID/root-ID rows (window.CUR_STEP_CARD_HTML) reuse the same .idval class
+  // but live in a different container (#stepVotePanel) that isn't covered by that wiring.
+  function wireIdCopy(){
+    el.querySelectorAll(".idval").forEach(function(v){
+      v.addEventListener("click",function(){
+        if(navigator.clipboard)navigator.clipboard.writeText(v.dataset.c);
+        var o=v.textContent;v.textContent="copied";setTimeout(function(){v.textContent=o;},900);
+      });
+    });
+  }
+  if(!REPORT_ENDPOINT){el.innerHTML='<div class="stepvote-panel">'+headline+'</div>';wireIdCopy();return;}
   // Render the headline immediately, synchronously -- don't make it wait on the votes fetch below,
   // which is only needed for the OPTIONAL vote-button rows underneath.
   el.innerHTML='<div class="stepvote-panel">'+headline+'</div>';
+  wireIdCopy();
   fetch(REPORT_ENDPOINT+"?identityVotes="+encodeURIComponent(nid)+panelDsQS()).then(function(r){return r.json();}).then(function(d){
     var list=(d&&d.identityVotes)||[];
     var map={};list.forEach(function(v){map[String(v.identity).toLowerCase()]=v;});
@@ -234,6 +273,7 @@ function renderStepVotePanel(){
       :stepVoteRowHtml("Original (MICrONS)",micronsName,map)+stepVoteRowHtml("Community",commName,map);
     el.innerHTML='<div class="stepvote-panel">'+headline
       +(rows?'<div class="stepvote-title">Vote on this cell&rsquo;s classification</div>'+rows:'')+'</div>';
+    wireIdCopy();
     el.querySelectorAll(".stepvote").forEach(function(b){
       b.addEventListener("click",function(){
         b.disabled=true;
