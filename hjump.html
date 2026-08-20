@@ -628,6 +628,13 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 <button type="button" class="idbtn" id="regionAddBox" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another box</button>
 <p class="hint" style="margin-top:6px">A cell matches if it falls inside <b>any</b> box. Each box is drawn in its own colour in the Neuroglancer link, on its own toggleable layer.</p>
 
+<!-- 2026-08-20, Søren: "I should also be able to filter for all those organelles in the Filter
+     and show in both of them, like in the uJump" -- explicit follow-up choice: a REAL narrowing
+     filter across all 61 organelle/extracellular-structure kinds, based on community organelle
+     reports (see bJump's identical addition the same day for the full reasoning). -->
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="Reads the Organelle locations sheet -- every organelle/extracellular structure the community has reported via 'Report an organelle' on the result screen. Checking one or more boxes keeps a cell if AT LEAST ONE checked kind has been reported on it. Fetched once per page load and cached.">Organelles &amp; extracellular structures (community-reported)</div>
+<div style="max-height:230px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterOrganelles"><p class="hint" style="margin:0">Loading community organelle reports&hellip;</p></div>
+
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
 <button class="idbtn" id="filterReset" style="flex:0 0 auto">Reset</button>
@@ -1958,6 +1965,63 @@ function hjumpIdentityOf(i){
   const rec=HJUMP_IDENTITY_BY_NID&&HJUMP_IDENTITY_BY_NID[HSB[i]];
   return rec&&rec.current?String(rec.current).trim():"";
 }
+
+/* Bulk organelle read for the Filter-and-show "Organelles & extracellular structures" dimension
+   (2026-08-20). Reads the SAME ?allOrganelles=1 bulk endpoint µJump's dashboard and bJump's own
+   Filter-and-show organelle filter use (Code.gs, already ds-aware via SS()/setDsFromRequest() --
+   no backend change needed), with &ds=hjump so it reads H01's own "Organelle locations" sheet.
+   Keyed by cell body id (HSB[i]), matching the nucleusId this page's own organelle-report submit
+   writes (see wireOrganelleForm() above: nucleusId:ID_CTX.body). Value is a Set of kind strings,
+   same shape as bJump's ORGANELLES_BY_NID. */
+let HJUMP_ORGANELLES_BY_NID=null, HJUMP_ORGANELLES_FETCH=null;
+function fetchHjumpOrganelles(){
+  if(HJUMP_ORGANELLES_BY_NID) return Promise.resolve(HJUMP_ORGANELLES_BY_NID);
+  if(HJUMP_ORGANELLES_FETCH) return HJUMP_ORGANELLES_FETCH;
+  HJUMP_ORGANELLES_FETCH=fetch(REPORT_ENDPOINT+"?allOrganelles=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      const map={};
+      if(d&&Array.isArray(d.organelles)){
+        d.organelles.forEach(function(rec){
+          const nid=rec.nucleusId, kind=rec.kind;
+          if(!nid||!kind)return;
+          if(!map[nid])map[nid]=new Set();
+          map[nid].add(kind);
+        });
+      }
+      HJUMP_ORGANELLES_BY_NID=map;
+      return map;
+    })
+    .catch(function(){ HJUMP_ORGANELLES_BY_NID={}; return HJUMP_ORGANELLES_BY_NID; })
+    .then(function(map){ HJUMP_ORGANELLES_FETCH=null; return map; });
+  return HJUMP_ORGANELLES_FETCH;
+}
+function hjumpOrganelleKindsOf(i){
+  const s=HJUMP_ORGANELLES_BY_NID&&HJUMP_ORGANELLES_BY_NID[String(HSB[i])];
+  return s?Array.from(s):[];
+}
+/* Checkbox list, topic-grouped via ORGANELLE_GROUPS (core/ontology.js, shared with µJump/bJump).
+   Same eager-fetch-and-build pattern as buildIdentityFilterUI() just below -- cheap at this
+   dataset's size, live per-kind counts so a user can see which kinds have any data before
+   filtering on them. */
+function buildOrganelleFilterUI(){
+  const box=document.getElementById("filterOrganelles"); if(!box)return;
+  fetchHjumpOrganelles().then(function(){
+    const counts={};
+    for(let i=0;i<N;i++){ hjumpOrganelleKindsOf(i).forEach(function(k){ counts[k]=(counts[k]||0)+1; }); }
+    box.innerHTML=ORGANELLE_GROUPS.map(function(g){
+      const inner=g.kinds.map(function(k){
+        const n=counts[k.value]||0;
+        return '<label style="font-size:12px;display:flex;align-items:center;gap:6px'+(n===0?';color:var(--mut)':'')+'">'
+          +'<input type="checkbox" class="forganelle" value="'+escHtml(k.value)+'" style="width:auto"> '
+          +escHtml(k.label)+' <span class="nsub">'+fmt(n)+'</span></label>'; }).join("");
+      return '<div style="margin-bottom:8px"><div class="nsub" style="text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'
+        +escHtml(g.label)+'</div>'+inner+'</div>';
+    }).join("");
+  }).catch(function(){
+    box.innerHTML='<p class="hint" style="margin:0;color:var(--warn)">Could not load community organelle reports right now &mdash; the other filters above still work.</p>';
+  });
+}
 /* Builds the checkbox list once the fetch resolves -- same checkbox-set pattern filterTypes and
    filterLayers already use, rather than a single-select dropdown, so a user can filter for
    several identities at once exactly like they can for several cell types. */
@@ -2583,6 +2647,7 @@ function buildFilterUI(){
       return '<option value="'+k+'">'+escHtml(MORPH_LABEL[k])+'</option>'; }).join("")
     +'<option value="__Sp">spininess</option>';
   buildIdentityFilterUI();
+  buildOrganelleFilterUI();
 }
 
 function runFilter(){
@@ -2591,6 +2656,7 @@ function runFilter(){
   const wantTypes=[].slice.call(document.querySelectorAll(".ftype:checked")).map(function(b){ return b.value; });
   const wantLayers=[].slice.call(document.querySelectorAll(".flayer:checked")).map(function(b){ return b.value; });
   const wantIdentities=[].slice.call(document.querySelectorAll(".fidentity:checked")).map(function(b){ return b.value; });
+  const wantOrganelles=[].slice.call(document.querySelectorAll(".forganelle:checked")).map(function(b){ return b.value; });
   const vMin=num("filterVolMin"), vMax=num("filterVolMax");
   const mKey=($("filterMorphKey")||{}).value||"", mMin=num("filterMorphMin"), mMax=num("filterMorphMax");
   let boxes=[];
@@ -2616,6 +2682,13 @@ function runFilter(){
       const key=cur||HJUMP_UNCLASSIFIED_SENTINEL;
       if(!iSet.has(key))continue;
     }
+    if(wantOrganelles.length){
+      // OR across checked kinds -- a cell matches if it has AT LEAST ONE reported structure of
+      // ANY checked kind (see the "Real filter, all 61 kinds" decision, same semantics as bJump's
+      // identical addition the same day).
+      const have=hjumpOrganelleKindsOf(i);
+      if(!wantOrganelles.some(function(k){ return have.indexOf(k)>=0; }))continue;
+    }
     const vol=HVB[i];
     if(vMin!==null&&vol<vMin)continue;
     if(vMax!==null&&vol>vMax)continue;
@@ -2628,8 +2701,8 @@ function runFilter(){
     rows.push(i);
   }
   FILTER.rows=rows;
-  FILTER.criteria={types:wantTypes,layers:wantLayers,identities:wantIdentities,vMin:vMin,vMax:vMax,
-                   morph:mKey,mMin:mMin,mMax:mMax,boxes:boxes};
+  FILTER.criteria={types:wantTypes,layers:wantLayers,identities:wantIdentities,organelles:wantOrganelles,
+                   vMin:vMin,vMax:vMax,morph:mKey,mMin:mMin,mMax:mMax,boxes:boxes};
   renderFilterResults();
 }
 
@@ -2734,7 +2807,8 @@ function downloadFilterExcel(){
   const morphKeys=Object.keys(MORPH_LABEL);
   const head=["Cell body ID","c3 segment ID","Cell type","Broad class","Layer (volume)",
     "Layer (published tag)","Layer estimated","Cortical depth (um)","Soma volume (um3)","Spininess",
-    "Voxel X","Voxel Y","Voxel Z","Paste coordinate","Modifiers","Current community identity"]
+    "Voxel X","Voxel Y","Voxel Z","Paste coordinate","Modifiers","Current community identity",
+    "Organelle kinds reported"]
     .concat(morphKeys.map(function(k){ return MORPH_LABEL[k]; }));
   const data=[head];
   rows.forEach(function(i){
@@ -2742,7 +2816,10 @@ function downloadFilterExcel(){
       volLayer(i),tagLayer(i),estimateLayer(HX[i],HY[i]).layer,
       Math.round(depthUm(i)),Math.round(HVB[i]*10)/10,Math.round(HSP[i]*1000)/1000,
       HX[i],HY[i],HZ[i],[HX[i],HY[i],HZ[i]].join(", "),modifiers(i).join(" "),
-      hjumpIdentityOf(i)||"unclassified"]
+      hjumpIdentityOf(i)||"unclassified",
+      /* Same "every filter dimension gets its own export column" convention as bJump's identical
+         addition -- short labels, semicolon-joined (comma is Søren's Excel decimal separator). */
+      hjumpOrganelleKindsOf(i).map(function(k){ const info=ORGANELLE_KIND_BY_VALUE[k]; return info?info.short:k; }).sort().join("; ")]
       .concat(morphKeys.map(function(k){ return MORPH[k][i]; })));
   });
   const wb=XLSX.utils.book_new();
@@ -2758,6 +2835,7 @@ function downloadFilterExcel(){
     ["Cell types",c.types&&c.types.length?c.types.join(", "):"any"],
     ["Cortical layers",c.layers&&c.layers.length?c.layers.join(", "):"any"],
     ["Current community identity",c.identities&&c.identities.length?c.identities.join(", "):"any"],
+    ["Organelles (any of)",c.organelles&&c.organelles.length?c.organelles.join(", "):"any"],
     ["Soma volume min (um3)",c.vMin==null?"":c.vMin],
     ["Soma volume max (um3)",c.vMax==null?"":c.vMax],
     ["Morphology count",c.morph?(MORPH_LABEL[c.morph]||c.morph):"not used"],
@@ -2783,7 +2861,7 @@ function downloadFilterExcel(){
   run.addEventListener("click",runFilter);
   document.getElementById("filterXlsx").addEventListener("click",downloadFilterExcel);
   document.getElementById("filterReset").addEventListener("click",function(){
-    document.querySelectorAll(".ftype:checked,.flayer:checked,.fidentity:checked").forEach(function(b){ b.checked=false; });
+    document.querySelectorAll(".ftype:checked,.flayer:checked,.fidentity:checked,.forganelle:checked").forEach(function(b){ b.checked=false; });
     ["filterVolMin","filterVolMax","filterMorphMin","filterMorphMax"]
       .forEach(function(id){ const e=document.getElementById(id); if(e) e.value=""; });
     const host=document.getElementById("regionBoxes");

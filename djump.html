@@ -714,12 +714,11 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div class="toggles" style="margin-top:4px" id="filterLayers">
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Leptomeninges"> Leptomeninges</label>
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 1"> Layer 1</label>
-<label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 2/3"> Layer 2/3</label>
+<label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 2"> Layer 2</label>
+<label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 3"> Layer 3</label>
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 4"> Layer 4</label>
-<label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 5a"> Layer 5a</label>
-<label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 5b"> Layer 5b</label>
-<label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 6a"> Layer 6a</label>
-<label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 6b"> Layer 6b</label>
+<label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 5"> Layer 5</label>
+<label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 6"> Layer 6</label>
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="White matter"> White matter</label>
 </div>
 </div>
@@ -1251,7 +1250,7 @@ function groupedDotChart(divId,seriesList,yTitle,tight,useRank){
   },tight?TIGHT_BOX_LAYOUT:{})),PLOTLY_CFG);
 }
 
-const LAYER_COLORS={"Leptomeninges":"#c9c2b4","Layer 1":"#e8d9b5","Layer 2/3":"#d9b56a","Layer 4":"#b5883a",
+const LAYER_COLORS={"Leptomeninges":"#c9c2b4","Layer 1":"#e8d9b5","Layer 2":"#e0c68d","Layer 3":"#cfa451","Layer 5":"#8a6b3a","Layer 6":"#4a5a3a","Layer 2/3":"#d9b56a","Layer 4":"#b5883a",
   "Layer 5a":"#8a6b3a","Layer 5b":"#6b4a2a","Layer 6a":"#4a5a3a","Layer 6b":"#3a4a2a",
   "White matter":"#8a8a8a","Unknown":"#e0e0e0"};
 
@@ -2377,7 +2376,7 @@ function estimateDepthGridded(vx,vy,vz){
 }
 /* Simple SVG cross-section of the cortical column (not a rotatable 3D model — kept dependency-free)
    showing labeled, coloured layer bands and a yellow dot at the query's estimated depth. */
-const LAYER_COLORS={"Layer 1":"#8ecae6","Layer 2/3":"#219ebc","Layer 4":"#2a9d8f","Layer 5a":"#fb8500","Layer 5b":"#d62828","Layer 6a":"#6a4c93","Layer 6b":"#4d3579"};
+const LAYER_COLORS={"Layer 1":"#8ecae6","Layer 2":"#3fb0cd","Layer 3":"#1a7f9b","Layer 2/3":"#219ebc","Layer 4":"#2a9d8f","Layer 5":"#fb8500","Layer 6":"#6a4c93","Layer 5a":"#fb8500","Layer 5b":"#d62828","Layer 6a":"#6a4c93","Layer 6b":"#4d3579"};
 /* Canonical (fixed-thickness) layer boundaries for the connectivity graphs' depth axes (2026-08-04)
    -- every REAL synapse/soma depth used as a data value is still computed per-point from its own
    true local pia/WM surfaces via estimateDepthGridded() above, but a scatter of points spread
@@ -2481,7 +2480,7 @@ const STICK_FONT={
   "M":[[[0,0],[0,1]],[[0,1],[0.3,0.45]],[[0.3,0.45],[0.6,1]],[[0.6,1],[0.6,0]]],
   "/":[[[0,0],[0.6,1]]]
 };
-const SHORT_LAYER_LABEL={"Layer 1":"L1","Layer 2/3":"L2/3","Layer 4":"L4","Layer 5a":"L5A","Layer 5b":"L5B","Layer 6a":"L6A","Layer 6b":"L6B"};
+const SHORT_LAYER_LABEL={"Layer 1":"L1","Layer 2":"L2","Layer 3":"L3","Layer 2/3":"L2/3","Layer 4":"L4","Layer 5":"L5","Layer 6":"L6","Layer 5a":"L5A","Layer 5b":"L5B","Layer 6a":"L6A","Layer 6b":"L6B"};
 /* Turns a short label into an array of {type:"line",...} annotations tracing its characters'
    strokes with STICK_FONT, anchored at physical nm coordinates (xNm,yNm,zNm) -- (xNm,yNm) is
    the bottom-left of the first glyph, zNm is held constant so the whole label lies flat in the

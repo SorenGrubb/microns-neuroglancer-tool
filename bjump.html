@@ -550,6 +550,19 @@ recorded.</p>
 <div id="fMarkers"></div>
 </div>
 
+<!-- 2026-08-20, Søren: "I should also be able to filter for all those organelles in the Filter
+     and show... like in uJump" -- explicit follow-up choice: a REAL narrowing filter across all
+     61 organelle/extracellular-structure kinds (not just the 2 µJump's own Filter-and-show
+     narrows on), based on community organelle reports. Reads the same ?allOrganelles=1&ds=bjump
+     bulk endpoint the "Report an organelle" form writes to (see fetchBjumpOrganelles() in
+     bjump_logic.js) -- checking any box here keeps a nucleus if at least ONE of the checked kinds
+     has been reported on it (OR across checked kinds, same "match any checked option" semantics
+     as every other multi-value filter already on this page). -->
+<div style="margin-top:12px">
+<label style="font-size:12px" title="Reads the Organelle locations sheet -- every organelle/extracellular structure the community has reported via 'Report an organelle' on the result screen. Checking one or more boxes keeps a nucleus if AT LEAST ONE checked kind has been reported on it. Fetched once per page load and cached.">Organelles &amp; extracellular structures (community-reported)</label>
+<div id="fOrganellesBox"></div>
+</div>
+
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
 <button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
@@ -2930,6 +2943,45 @@ function bjumpIdentityOf(i){
   return rec&&rec.current?String(rec.current).trim():"";
 }
 
+/* Bulk organelle read for the Filter-and-show "Organelles & extracellular structures" dimension
+   (2026-08-20, Søren: "I should also be able to filter for all those organelles in the Filter and
+   show... like in uJump" -- explicit follow-up choice was "Real filter, all 61 kinds", not just
+   µJump's own 2-kind Filter-and-show narrowing). Reads the SAME ?allOrganelles=1 bulk endpoint
+   µJump's dashboard already uses (Code.gs, already ds-aware via SS()/setDsFromRequest() -- no
+   backend change was needed, see the 2026-08-20 investigation), with &ds=bjump so it reads THIS
+   dataset's own "Organelle locations" sheet rather than µJump's. Keyed and cached exactly like
+   fetchBjumpIdentities() just above -- same null/in-flight/resolved-map shape, same "never
+   requires sign-in" reasoning (organelle reports are public community data, same as identities).
+   Value is a Set of kind strings (not a count) -- the filter only cares "has this nucleus got AT
+   LEAST ONE report of kind X", not how many. */
+let ORGANELLES_BY_NID=null, ORGANELLES_FETCH=null;
+function fetchBjumpOrganelles(){
+  if(ORGANELLES_BY_NID) return Promise.resolve(ORGANELLES_BY_NID);
+  if(ORGANELLES_FETCH) return ORGANELLES_FETCH;
+  ORGANELLES_FETCH=fetch(REPORT_ENDPOINT+"?allOrganelles=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      const map={};
+      if(d&&Array.isArray(d.organelles)){
+        d.organelles.forEach(function(rec){
+          const nid=rec.nucleusId, kind=rec.kind;
+          if(!nid||!kind)return;
+          if(!map[nid])map[nid]=new Set();
+          map[nid].add(kind);
+        });
+      }
+      ORGANELLES_BY_NID=map;
+      return map;
+    })
+    .catch(function(){ ORGANELLES_BY_NID={}; return ORGANELLES_BY_NID; })
+    .then(function(map){ ORGANELLES_FETCH=null; return map; });
+  return ORGANELLES_FETCH;
+}
+function bjumpOrganelleKindsOf(i){
+  const s=ORGANELLES_BY_NID&&ORGANELLES_BY_NID[String(BID[i])];
+  return s?Array.from(s):[];
+}
+
 const MARKER_PCT_LABELS=[
   {value:"",label:"Not filtering by this"},
   {value:"0.9",label:"Top 10% (percentile ≥ 0.90)"},
@@ -2959,6 +3011,12 @@ function runFilterBjump(){
     return {key:sel.dataset.key,min:sel.value?parseFloat(sel.value):null};
   }).filter(function(f){return f.min!==null;});
   const markerByKey={}; MARKERS.forEach(function(m){markerByKey[m.key]=m;});
+  // Checked organelle kinds -- [] means "not filtering by this" (every nucleus passes). Any
+  // number checked means OR: a nucleus matches if it has AT LEAST ONE reported structure of ANY
+  // checked kind, same "match any checked option" semantics as every other multi-value filter on
+  // this page (e.g. current community identity's dropdown is single-select so this doesn't come
+  // up there, but it's the natural reading of a checkbox LIST specifically).
+  const organelleSel=Array.from(document.querySelectorAll(".forganelle:checked")).map(function(cb){return cb.value;});
 
   const matches=[];
   for(let i=0;i<N;i++){
@@ -2974,6 +3032,10 @@ function runFilterBjump(){
       const cur=bjumpIdentityOf(i);
       if(identSel===BJUMP_UNCLASSIFIED_SENTINEL){ if(cur)continue; }
       else if(cur!==identSel){ continue; }
+    }
+    if(organelleSel.length){
+      const have=bjumpOrganelleKindsOf(i);
+      if(!organelleSel.some(function(k){return have.indexOf(k)>=0;}))continue;
     }
     let markersOk=true;
     for(const f of markerFilters){
@@ -3008,7 +3070,20 @@ function buildColumnsBjump(){
        original coordinate -- silently overwriting it here would break that link for anyone who
        re-derives it from an exported row instead of the live page. */
     {header:"corrected_voxel",get:function(m){const f=bjumpCorrectedPositionOf(m.row.i); return f?f.to:"";}},
-    {header:"correction_votes",get:function(m){const f=bjumpCorrectedPositionOf(m.row.i); return f?f.votes:"";}}
+    {header:"correction_votes",get:function(m){const f=bjumpCorrectedPositionOf(m.row.i); return f?f.votes:"";}},
+    /* 2026-08-20: every other filter dimension on this tab already gets its own export column
+       (current_community_identity, corrected_voxel, the per-marker percentile columns below) --
+       "organelle_kinds_reported" is that same convention applied to the new organelle filter, so
+       a spreadsheet user can see WHICH checked kind(s) actually matched each exported row without
+       re-querying the backend. Short labels (organReportPointLabels's sibling, .short on
+       ORGANELLE_KIND_BY_VALUE), semicolon-joined -- Søren's Excel uses comma as the decimal
+       separator, so a comma-joined list here would misread as multiple columns if ever pasted
+       into a formula context; semicolon avoids that ambiguity for free. */
+    {header:"organelle_kinds_reported",get:function(m){
+      return bjumpOrganelleKindsOf(m.row.i).map(function(k){
+        const info=ORGANELLE_KIND_BY_VALUE[k]; return info?info.short:k;
+      }).sort().join("; ");
+    }}
   ];
   MARKERS.forEach(function(m){
     cols.push({header:m.key+"_shell_percentile",get:function(row){
@@ -3111,6 +3186,42 @@ function buildColumnsBjump(){
   }
   buildIdentityDropdown();
   window.__bjumpBuildIdentityDropdown=buildIdentityDropdown;
+
+  /* Organelle filter checkbox list (2026-08-20) -- same eager-fetch-and-build reasoning as
+     buildIdentityDropdown() just above: cheap at this dataset's size, and a box a user can
+     interact with before it has any real content is worse than a short "loading" message.
+     Topic-grouped via ORGANELLE_GROUPS (shared ontology, now in core/ontology.js), same grouping
+     the "Report an organelle" dropdown itself uses, so the two stay visually consistent. Each
+     kind's checkbox shows its own live count ("N nuclei") so a user can see at a glance which
+     kinds actually have any data before filtering on them -- a kind with 0 reports is still
+     listed (completeness matters more than a shorter list), just visibly says so. */
+  const organellesBox=document.getElementById("fOrganellesBox");
+  function buildOrganelleFilterBox(){
+    if(!organellesBox)return;
+    organellesBox.innerHTML='<p class="hint" style="margin-top:0">Loading community organelle reports&hellip;</p>';
+    fetchBjumpOrganelles().then(function(){
+      const counts={};
+      for(let i=0;i<N;i++){
+        bjumpOrganelleKindsOf(i).forEach(function(k){counts[k]=(counts[k]||0)+1;});
+      }
+      let h='<div style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding:8px">';
+      ORGANELLE_GROUPS.forEach(function(g){
+        h+='<div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:8px">'+escHtml(g.label)+'</div>';
+        g.kinds.forEach(function(k){
+          const n=counts[k.value]||0;
+          h+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0'+(n===0?';color:var(--mut)':'')+'">'
+            +'<input type="checkbox" class="forganelle" value="'+escHtml(k.value)+'"> '+escHtml(k.label)+' ('+n+')</label>';
+        });
+      });
+      h+='</div>';
+      organellesBox.innerHTML=h;
+      organellesBox.querySelectorAll(".forganelle").forEach(function(cb){cb.addEventListener("change",invalidatePreview);});
+    }).catch(function(){
+      organellesBox.innerHTML='<p class="hint" style="margin-top:0;color:var(--warn)">Could not load community organelle reports right now &mdash; the other filters below still work. Try reloading the page to retry.</p>';
+    });
+  }
+  buildOrganelleFilterBox();
+  window.__bjumpBuildOrganelleFilterBox=buildOrganelleFilterBox;
 
   /* Warm the position-fixes cache eagerly too (2026-08-19), same reasoning as the identity
      dropdown just above: by the time a user has picked filters and clicked Download, 220 rows'
