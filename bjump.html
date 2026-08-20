@@ -562,6 +562,17 @@ recorded.</p>
 <button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
 <button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
 </div>
+<!-- 2026-08-20, Søren: "Beneath the Systematically step through matches we have the cells shown
+     in uJump when going through the cells, this should be the same for bJump." µJump has an
+     #stepVotePanel div right here -- core/panel.js's renderStepVotePanel() (already shared, and
+     already called from bJump's own loadCommunityReports() chain) renders a compact "Original vs
+     community" identity-vote widget into it for whichever cell step-through just navigated to.
+     bJump was missing the div itself, so that already-shared, already-firing render call had
+     nowhere to land and silently no-opped every time. Adding the div is the whole fix -- no new
+     JS wiring needed, see bjump_logic.js's showCell() for the one companion change (resetting
+     CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME per cell, same as µJump, so a stale name can't leak
+     from the previous stepped-to cell while this one's own community fetch is still in flight). -->
+<div id="stepVotePanel"></div>
 <button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched nuclei">Reset progress</button>
 </div>
 
@@ -1332,6 +1343,16 @@ function showCell(i, distNm){
      fetch resolves -- the same reasoning as showNucleus()'s own reset block in µJump. */
   CUR_NUCID=String(BID[i]); CUR_ROOT=seg?String(seg):"";
   window.CUR_CELLTYPE_DISPLAY=null; window.CUR_POS=pos.slice();
+  /* CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME feed core/panel.js's step-through vote widget
+     (#stepVotePanel, shown beneath "Systematically step through matches" on the Filter-and-show
+     tab -- 2026-08-20, Søren: "the cells shown in uJump when going through the cells" were
+     missing here). Reset on every cell for the same reason µJump's showNucleus() resets them:
+     otherwise the PREVIOUS cell's community-winning name could render in this cell's vote panel
+     during the window before loadCommunity(i)'s own fetch resolves. CUR_MICRONS_NAME stays null
+     for the whole session -- bJump has no MICrONS-style classifier to name a prediction from (see
+     the "no cell types" paragraph in the About-this-dataset card) -- so renderStepVotePanel()
+     only ever shows the "Community" row here, never "Original (MICrONS)". */
+  window.CUR_MICRONS_NAME=null; window.CUR_COMMUNITY_TOP_NAME=null;
   ID_CTX={nucId:CUR_NUCID,root:CUR_ROOT,pos:pos.slice()};
 
   /* Søren, 2026-08-16: the cell NAME is the Neuroglancer link -- no separate button. There is no
