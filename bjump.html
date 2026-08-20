@@ -1084,12 +1084,23 @@ function stratum(i){
 
    Two small SVGs, both rendered fresh into every cell panel (cheap -- 220 points at most):
 
-   1. renderBjumpBrainLocator() -- a fixed, hand-drawn, deliberately schematic sagittal mouse
-      brain outline with the hippocampus/CA1 region highlighted, so someone unfamiliar with
-      mouse neuroanatomy has a "you are here" reference the way a paper figure would give one.
+   1. renderBjumpBrainLocator() -- a fixed, hand-drawn, deliberately schematic mouse brain
+      outline with the hippocampus/CA1 region highlighted, so someone unfamiliar with mouse
+      neuroanatomy has a "you are here" reference the way a paper figure would give one.
       NOT anatomically precise (labelled as such) -- there is no traced brain atlas asset
       available offline, and a wrong-but-confident outline would be worse than an honest
       schematic. Same for every cell; not query-dependent.
+
+      2026-08-20, Søren: the original draft here was a sagittal (side-view) outline -- nose,
+      olfactory bulb, single arched cortex, one solid hippocampus blob. Søren pointed out that
+      Han et al.'s own locator figure is a CORONAL section (a coronal cut through the brain, not
+      a side view) -- it shows a rounded double-dome outline (the two cortical hemispheres,
+      split down the midline by the interhemispheric fissure) with the hippocampus drawn as a
+      thin CURVED BAND/CRESCENT (not a solid blob) running under the cortex on one side, and a
+      small highlighted patch INSIDE that band marking the specific imaged region. Redrawn below
+      to match that: a coronal (front-view) double-hemisphere outline, hippocampus as an open
+      crescent stroke, small red patch nested inside it for the imaged CA1 block. Still a
+      schematic, not a traced atlas asset -- proportions are illustrative, not measured.
 
    2. renderBjumpBlockMap(i) -- replaces the idea of a cortical-layer diagram (meaningless here,
       see stratum()'s own comment) with literally what Søren asked for: a square showing this
@@ -1113,22 +1124,28 @@ function stratum(i){
       guess from without the visual confirmation the spec already calls for, so this widget
       deliberately shows RAW POSITION only, and does not attempt to encode stratum. */
 function renderBjumpBrainLocator(){
-  const W=170,H=130;
+  const W=170,H=140;
   let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:170px;display:block;'
     +'margin:0 auto;background:var(--bg);border:1px solid var(--line);border-radius:6px" '
     +'xmlns="http://www.w3.org/2000/svg">';
-  /* Sagittal outline, anterior (nose/olfactory bulb) at left, cerebellum bump at right. */
-  svg+='<path d="M10,70 C8,45 25,20 55,15 C90,8 130,10 150,25 C165,35 162,55 155,60 '
-    +'C160,70 158,85 145,90 C120,105 70,108 40,98 C18,90 10,85 10,70 Z" '
+  /* Coronal (front-view) outline -- two cortical hemispheres side by side, split by the
+     interhemispheric fissure at the midline, matching the plane Han et al.'s own locator
+     figure uses (not the sagittal side-view this widget originally drew). */
+  svg+='<path d="M22,102 C10,85 12,50 40,25 C55,12 75,10 85,18 C95,10 115,12 130,25 '
+    +'C158,50 160,85 148,102 C138,118 115,124 85,124 C55,124 32,118 22,102 Z" '
     +'fill="none" stroke="var(--ink)" stroke-width="1.5"/>';
-  svg+='<circle cx="14" cy="60" r="9" fill="none" stroke="var(--ink)" stroke-width="1.2"/>'; // olfactory bulb
-  /* Hippocampus / CA1, approximate -- a curved band under the cortical mantle, roughly where
-     Han et al.'s own figure situates the imaged block. */
-  svg+='<path d="M60,50 C75,42 100,42 112,55 C118,63 112,72 100,72 C85,72 68,66 60,58 Z" '
-    +'fill="#ff3b3b" opacity="0.55" stroke="#ff3b3b" stroke-width="1">'
+  svg+='<path d="M85,18 L85,32" stroke="var(--ink)" stroke-width="1.2"/>'; // interhemispheric fissure
+  /* Hippocampus / CA1, approximate -- an open crescent band curving under the cortical mantle
+     of one hemisphere (right, as drawn), the way Han et al.'s figure draws it as a curved band
+     rather than a solid blob. */
+  svg+='<path d="M97,38 C118,44 129,62 121,79 C115,91 100,94 89,85" '
+    +'fill="none" stroke="#2f6fed" stroke-width="7" stroke-linecap="round" opacity="0.75">'
     +'<title>Hippocampus (CA1) -- approximate location</title></path>';
-  svg+='<text x="85" y="118" font-size="8" text-anchor="middle" style="fill:var(--ink)" '
-    +'font-family="monospace">CA1, imaged block</text>';
+  /* Small patch nested inside the hippocampal band marking the specific imaged CA1 region. */
+  svg+='<circle cx="113" cy="69" r="6.5" fill="#ff3b3b" opacity="0.85" stroke="#ff3b3b" stroke-width="1">'
+    +'<title>CA1, imaged block -- approximate location</title></circle>';
+  svg+='<text x="85" y="134" font-size="8" text-anchor="middle" style="fill:var(--ink)" '
+    +'font-family="monospace">CA1, imaged block (coronal)</text>';
   svg+='</svg>';
   return svg;
 }
