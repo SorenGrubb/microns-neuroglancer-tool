@@ -8468,6 +8468,25 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      "no data" sentinel for MS rows -- a merged sub-cell has no vessel-proximity/V1-column data
      of its own, which is honest (not a bug to fix), not a blocker for it being findable by type. */
   function rowPos(row){return row.space==="MS"?row.subRef.pos:(row.space==="N"?[NX[row.i],NY[row.i],NZ[row.i]]:[ST_X[row.i],ST_Y[row.i],ST_Z[row.i]]);}
+  /* 2026-08-20 (3rd pass), Søren: "still no change" after passes 1+2 -- both were correct
+     fixes to renderStepVotePanel() itself, but live-page debugging (Claude-in-Chrome,
+     instrumenting stepGoTo/jumpToVoxel/showNucleus with wrapped functions) found the panel
+     was never even being REACHED: core/stepthrough.js's stepGoTo() guards its jump with
+     `if(typeof rowPos==="function"&&typeof jumpToVoxel==="function")`, reading rowPos as a
+     bare global identifier -- but rowPos is declared inside THIS file's own big
+     "(function(){ ... })()" Filter-and-show IIFE (opens above at buildAllIdentities()), so
+     it was never actually visible as a global, and typeof rowPos from stepthrough.js's own
+     top-level scope has always read "undefined" -- confirmed live via
+     `typeof window.rowPos` on the deployed page. stepGoTo() silently no-opped the jump (no
+     thrown error, just skipped straight to updateStepUI()), so Prev/Next always advanced the
+     COUNTER text correctly while never calling jumpToVoxel/showNucleus/CUR_NUCID at all --
+     which is exactly why the identity panel (this file's and the shared core/panel.js's pass-1
+     and pass-2 fixes) never had a live nucleus to render for. Exporting it here mirrors the
+     existing "function ensureCommunityOverride(){...} window.ensureCommunityOverride=...
+     ensureCommunityOverride();" pattern two functions above -- the one export this closure was
+     always missing for stepthrough.js to reach in. This is the ACTUAL fix; passes 1+2 were
+     real bugs but neither could matter until the jump itself started firing. */
+  window.rowPos=rowPos;
   /* Maps each of the 22 guided-ID leaf slugs (LEAF_NAMES, defined earlier in the file) to the
      exact row.type string(s) in ALL_IDENTITIES that represent it, for the "see another example"
      feature on the result screen. own is the exact OWN_TYPE_NAMES string for Søren's verified

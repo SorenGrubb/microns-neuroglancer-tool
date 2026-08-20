@@ -8548,6 +8548,13 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
      "no data" sentinel for MS rows -- a merged sub-cell has no vessel-proximity/V1-column data
      of its own, which is honest (not a bug to fix), not a blocker for it being findable by type. */
   function rowPos(row){return row.space==="MS"?row.subRef.pos:(row.space==="N"?[NX[row.i],NY[row.i],NZ[row.i]]:[ST_X[row.i],ST_Y[row.i],ST_Z[row.i]]);}
+  /* 2026-08-20 (3rd pass, mirrors the same fix in ujump.html) -- rowPos was scoped inside this
+     file's own Filter-and-show IIFE, invisible to core/stepthrough.js's
+     `typeof rowPos==="function"` guard, so stepGoTo() silently skipped the actual cell jump on
+     every Prev/Next click -- the counter advanced but CUR_NUCID never got set, so the identity
+     panel (added in passes 1+2) never had a live cell to render for. See ujump.html's copy of
+     this same comment for the full live-debugging trail. */
+  window.rowPos=rowPos;
   /* Maps each of the 22 guided-ID leaf slugs (LEAF_NAMES, defined earlier in the file) to the
      exact row.type string(s) in ALL_IDENTITIES that represent it, for the "see another example"
      feature on the result screen. own is the exact OWN_TYPE_NAMES string for Søren's verified
