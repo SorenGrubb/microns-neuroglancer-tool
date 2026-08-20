@@ -925,6 +925,94 @@ function stratum(i){
           cls:"none"};
 }
 
+/* ── "Where is this?" context widgets ──────────────────────────────────────────────────
+   2026-08-19, Søren: "guide the user to where we are looking in the mouse brain... and then
+   have the model not as cortical layers, but as a square where we indicate where within that
+   square the cell is located... the model in context of the brain should reflect [that
+   dendrites point downward in the Neuroglancer view]."
+
+   Two small SVGs, both rendered fresh into every cell panel (cheap -- 220 points at most):
+
+   1. renderBjumpBrainLocator() -- a fixed, hand-drawn, deliberately schematic sagittal mouse
+      brain outline with the hippocampus/CA1 region highlighted, so someone unfamiliar with
+      mouse neuroanatomy has a "you are here" reference the way a paper figure would give one.
+      NOT anatomically precise (labelled as such) -- there is no traced brain atlas asset
+      available offline, and a wrong-but-confident outline would be worse than an honest
+      schematic. Same for every cell; not query-dependent.
+
+   2. renderBjumpBlockMap(i) -- replaces the idea of a cortical-layer diagram (meaningless here,
+      see stratum()'s own comment) with literally what Søren asked for: a square showing this
+      cell's X/Y position within the whole imaged 245x238 µm CA1 block, every other nucleus
+      shown faintly for population context. Extent is computed from the EMBEDDED table's own
+      BX/BY range (not hardcoded), so it stays correct if the embed is ever regenerated.
+
+      Orientation: deliberately NOT flipping the Y axis when mapping voxel Y -> SVG y. Voxel Y
+      already increases downward in this dataset's own frame (same convention core/mesh.js's
+      Y-flip-for-glTF comment documents, and the same frame buildState() hands to Neuroglancer
+      unmodified) -- so leaving it unflipped means "down" in this square is the SAME physical
+      direction as "down" in the Neuroglancer view, satisfied by construction rather than by any
+      claim about which way dendrites point. That dendrite observation is a genuinely useful
+      landmark for the SEPARATE, still-open oriens/radiatum sign question (see stratum()'s
+      comment and bjump-spec.md §4/§8) -- but resolving that needs one confirmed visual read
+      against a known pyramidal cell, and a same-day geometric check here (correlating BPY
+      against BX/BY/BZ across all 220 nuclei) found the fitted plane's normal tracks the
+      dataset's Z axis far more than Y (r=0.90 vs 0.18) -- expected, since Z is by far this
+      block's thinnest dimension (~23 µm vs ~225 µm in X/Y), so a PCA smallest-variance axis is
+      biased toward it regardless of the true sheet orientation. That makes Z a poor axis to
+      guess from without the visual confirmation the spec already calls for, so this widget
+      deliberately shows RAW POSITION only, and does not attempt to encode stratum. */
+function renderBjumpBrainLocator(){
+  const W=170,H=130;
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:170px;display:block;'
+    +'margin:0 auto;background:var(--bg);border:1px solid var(--line);border-radius:6px" '
+    +'xmlns="http://www.w3.org/2000/svg">';
+  /* Sagittal outline, anterior (nose/olfactory bulb) at left, cerebellum bump at right. */
+  svg+='<path d="M10,70 C8,45 25,20 55,15 C90,8 130,10 150,25 C165,35 162,55 155,60 '
+    +'C160,70 158,85 145,90 C120,105 70,108 40,98 C18,90 10,85 10,70 Z" '
+    +'fill="none" stroke="var(--ink)" stroke-width="1.5"/>';
+  svg+='<circle cx="14" cy="60" r="9" fill="none" stroke="var(--ink)" stroke-width="1.2"/>'; // olfactory bulb
+  /* Hippocampus / CA1, approximate -- a curved band under the cortical mantle, roughly where
+     Han et al.'s own figure situates the imaged block. */
+  svg+='<path d="M60,50 C75,42 100,42 112,55 C118,63 112,72 100,72 C85,72 68,66 60,58 Z" '
+    +'fill="#ff3b3b" opacity="0.55" stroke="#ff3b3b" stroke-width="1">'
+    +'<title>Hippocampus (CA1) -- approximate location</title></path>';
+  svg+='<text x="85" y="118" font-size="8" text-anchor="middle" style="fill:var(--ink)" '
+    +'font-family="monospace">CA1, imaged block</text>';
+  svg+='</svg>';
+  return svg;
+}
+const BJUMP_BLOCK=(function(){
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for(let k=0;k<N;k++){
+    if(BX[k]<minX)minX=BX[k]; if(BX[k]>maxX)maxX=BX[k];
+    if(BY[k]<minY)minY=BY[k]; if(BY[k]>maxY)maxY=BY[k];
+  }
+  const padX=Math.round((maxX-minX)*0.06)||1, padY=Math.round((maxY-minY)*0.06)||1;
+  return {minX:minX-padX,maxX:maxX+padX,minY:minY-padY,maxY:maxY+padY};
+})();
+function renderBjumpBlockMap(i){
+  const W=170,H=170,pad=6;
+  const spanX=BJUMP_BLOCK.maxX-BJUMP_BLOCK.minX, spanY=BJUMP_BLOCK.maxY-BJUMP_BLOCK.minY;
+  if(!(spanX>0)||!(spanY>0)) return "";
+  const sx=function(vx){ return pad+((vx-BJUMP_BLOCK.minX)/spanX)*(W-2*pad); };
+  /* Deliberately NOT flipped -- see this module's own header comment. */
+  const sy=function(vy){ return pad+((vy-BJUMP_BLOCK.minY)/spanY)*(H-2*pad); };
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:170px;display:block;'
+    +'margin:0 auto;background:var(--bg);border:1px solid var(--line);border-radius:6px" '
+    +'xmlns="http://www.w3.org/2000/svg">';
+  svg+='<rect x="'+pad+'" y="'+pad+'" width="'+(W-2*pad)+'" height="'+(H-2*pad)+'" fill="none" '
+    +'stroke="var(--line)" stroke-dasharray="2,2"/>';
+  for(let k=0;k<N;k++){
+    if(k===i) continue;
+    svg+='<circle cx="'+sx(BX[k]).toFixed(1)+'" cy="'+sy(BY[k]).toFixed(1)+'" r="1.3" '
+      +'fill="var(--ink)" opacity="0.18"/>';
+  }
+  svg+='<circle cx="'+sx(BX[i]).toFixed(1)+'" cy="'+sy(BY[i]).toFixed(1)+'" r="5" fill="#ff3b3b" '
+    +'stroke="#fff" stroke-width="1"><title>Nucleus '+BID[i]+'</title></circle>';
+  svg+='</svg>';
+  return svg;
+}
+
 /* ── lookup ─────────────────────────────────────────────────────────────────────────── */
 function nearest(vx,vy,vz){
   let b=-1,bd=Infinity;
@@ -1109,6 +1197,19 @@ function showCell(i, distNm){
     +(BTR[i]?' <b>(underestimate &mdash; truncated)</b>':'')
     +(distNm!=null?' &middot; '+(distNm/1000).toFixed(2)+' &micro;m from your query':'')
     +' &middot; Hoechst '+BHO[i].toFixed(0)+'</p>';
+
+  /* "Where is this?" -- see renderBjumpBrainLocator()/renderBjumpBlockMap()'s own header
+     comment for the full reasoning (2026-08-19, Søren). */
+  h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">'
+    +'<div style="flex:1 1 150px;max-width:180px">'+renderBjumpBrainLocator()
+    +'<p class="hint" style="text-align:center;margin:4px 0 0">Schematic, not to scale &mdash; '
+    +'hippocampal CA1 in the mouse brain. <a class="ref" '
+    +'href="https://www.biorxiv.org/content/10.1101/2023.10.24.563674v4.full" target="_blank" '
+    +'rel="noopener">Han et al., bioRxiv 2023.10.24.563674</a></p></div>'
+    +'<div style="flex:1 1 150px;max-width:180px">'+renderBjumpBlockMap(i)
+    +'<p class="hint" style="text-align:center;margin:4px 0 0">Position within the imaged '
+    +'245&times;238&nbsp;&micro;m CA1 block &mdash; same up/down sense as the Neuroglancer '
+    +'view.</p></div></div>';
 
   h+='<div class="meta">nucleus '+copyCode(BID[i])
     +(seg?' &middot; segment '+copyCode(seg)+' <span class="hint">('+SRC_NAME[src]+')</span>':'')
