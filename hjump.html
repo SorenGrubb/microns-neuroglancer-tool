@@ -1343,10 +1343,20 @@ function renderResult(slug){
   if(cw) h+='<div class="meta">Commonly confused with <b>'+escHtml(cw.withName)+'</b> &mdash; '+escHtml(cw.note)
     +(cw.ref?' <a class="ref" href="'+escHtml(cw.ref)+'" target="_blank" rel="noopener">'+escHtml(cw.refLabel||"source")+'</a>':'')+'</div>';
 
-  h+='<div class="idf-certainty"><label>How certain are you?</label><div class="idf-opts" id="idfCert" style="flex-direction:row;flex-wrap:wrap">'
-    +["certain","fairly sure","unsure"].map(function(c){
-        return '<button class="idf-opt" data-c="'+c+'" style="flex:1;min-width:110px;text-align:center">'+c+'</button>';}).join("")
-    +'</div></div>';
+  /* 2026-08-20, Søren: "hJump should have the same certainty scale as uJump and bJump." Both of
+     those use a 1-5 numeric pill scale (µJump's own renderResult(), bJump's renderResult() in
+     bjump_logic.js -- see its own comment: "µJump's exact markup and the same 1-5 scale") --
+     #certScale/.cert-opt/.cert-opt.sel, read via core/tree.js's getCertainty(). hJump doesn't
+     load core/tree.js (see hjump-architecture-correction-2026-08-19 -- it keeps its own
+     independent guided-ID/report code on purpose), so this reuses the exact same class names and
+     CSS (already present in this file's <style>, was simply unused until now) but is wired by
+     hJump's own local handler below rather than core/tree.js's getCertainty(), matching how the
+     rest of this file's report flow already works. Replaces the previous "certain / fairly sure /
+     unsure" 3-option text scale -- certainty was write-only in this file (grepped: the ONLY other
+     reference is the certainty:certainty payload field a few lines down; nothing here ever reads
+     it back for display), so switching representations needed no other change. */
+  h+='<div class="idf-certainty"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:12px">How certain are you of this identification? <span class="cert-required">(required to submit)</span></label>'
+    +'<div class="cert-scale" id="certScale">'+[1,2,3,4,5].map(function(n){return '<button type="button" class="cert-opt" data-val="'+n+'">'+n+'</button>';}).join("")+'</div></div>';
   h+='<label style="margin-top:10px;display:block">Comment (optional)</label>'
     +'<textarea id="idfComment" placeholder="What decided it for you? Anything unusual?"></textarea>';
 
@@ -1373,13 +1383,10 @@ function renderResult(slug){
   });
   let certainty="";
   const submitBtn=document.getElementById("idfsubmit");
-  panel.querySelectorAll("#idfCert .idf-opt").forEach(function(b){
+  panel.querySelectorAll("#certScale .cert-opt").forEach(function(b){
     b.addEventListener("click",function(){
-      certainty=b.dataset.c;
-      panel.querySelectorAll("#idfCert .idf-opt").forEach(function(o){
-        o.style.borderColor = (o===b) ? "var(--accent)" : "var(--line)";
-        o.style.color       = (o===b) ? "var(--accent)" : "var(--ink)";
-      });
+      certainty=b.dataset.val;
+      panel.querySelectorAll("#certScale .cert-opt").forEach(function(o){o.classList.toggle("sel",o===b);});
       submitBtn.disabled=false; submitBtn.title="";
     });
   });
