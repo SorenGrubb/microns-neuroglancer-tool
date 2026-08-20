@@ -381,6 +381,21 @@ function loadCommunityReports(nid,cellPos){
   el.innerHTML="";
   if(!REPORT_ENDPOINT||!nid)return;
   PANEL_CUR_NID=String(nid);
+  /* 2026-08-20 (2nd pass), Søren: "still don't see it for any of the datasets" after the first
+     pass -- confirmed live via the actual grubblab.com page that the headline-when-nothing's-
+     votable fix above was correct but USELESS in practice: renderStepVotePanel()'s only call
+     sites were both inside THIS function's own fetch(...).then() chain (lines below), so nothing
+     painted the panel until the ?nucleusId= round trip to Apps Script actually resolved --
+     measured 5+ seconds on a live cell, sometimes longer. A reviewer clicking Next every second or
+     two would see a permanently empty panel, never wait long enough to see it appear. Calling it
+     here, BEFORE the fetch even starts, paints the headline instantly from whatever
+     window.CUR_CELLTYPE_DISPLAY already holds (set synchronously by showNucleus()/showCell(),
+     already reset for this new cell by the time loadCommunityReports() runs -- see the
+     CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME reset in showCell()/showNucleus()). The two later
+     calls (once the fetch resolves, and again once a community name wins) then upgrade it from
+     "not yet identified" to a real name as that data arrives -- this call is what makes the
+     panel non-empty on the very first render instead of only after a slow network round trip. */
+  if(typeof renderStepVotePanel==="function")renderStepVotePanel();
   const stale=function(){return PANEL_CUR_NID!==String(nid);};
   fetch(REPORT_ENDPOINT+"?nucleusId="+encodeURIComponent(nid)+panelDsQS())
     .then(r=>r.json())
