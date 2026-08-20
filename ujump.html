@@ -728,7 +728,11 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
 <button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
 </div>
-<div id="stepVotePanel"></div>
+<!-- 2026-08-20 (6th pass): mount point for the REAL #nucpanel, relocated here while stepping
+     through matches (core/stepthrough.js's "3. Full-panel relocation") -- not a separate/parallel
+     identity display. Replaces the old #stepVotePanel (retired, see core/panel.js's
+     renderStepVotePanel() header). -->
+<div id="stepNucMount"></div>
 <button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched cells">Reset progress</button>
 </div>
 </div>
@@ -3266,7 +3270,6 @@ function showNucleus(pos){
      have no single "MICrONS predicted this" fact to vote on). CUR_COMMUNITY_TOP_NAME is set
      asynchronously, by loadCommunityReports() once it determines a winning community identity. */
   window.CUR_MICRONS_NAME=null;window.CUR_COMMUNITY_TOP_NAME=null;
-  window.CUR_STEP_CARD_HTML=null; // see the "4th pass" comment further down where this gets (re)built
   /* Checked FIRST, ahead of even the standalone-annotation check below: a community-reported,
      identified sub-cell of a merged-nucleus detection sits INSIDE a real MICrONS nucleus
      detection (unlike a standalone point), so without this check the normal nearest() lookup a
@@ -3402,44 +3405,13 @@ function showNucleus(pos){
   window.CUR_HAS_CELL=true;
   const v1=v1ColumnInfo(i);
   if(v1)h+=v1ColumnBadgeHtml(v1);
-  /* 2026-08-20 (4th pass), Søren: "what I wanted was to have this window underneath it with the
-     cell identity and layer model and all" -- passes 1-3 got the step-through card showing a
-     plain "Currently: NAME" line, correctly and promptly, but too thin: Søren wanted the SAME
-     richness the Jump tab's own panel shows (tag, headline, the V1-column layer badge just built
-     above, nucleus ID, root ID), not just a name. Captured here as read-only markup, reusing the
-     exact tag/celltype-display/v1-badge/id-row pieces this same branch already built for
-     #nucpanel (ti/own/merged/nid/root/v1 are all already in scope from earlier in this
-     function) -- core/panel.js's renderStepVotePanel() appends this under the step-through card
-     when present, falling back to the plain headline when it's null. window.CUR_STEP_CARD_HTML is
-     reset to null at the top of showNucleus() (see the CUR_MICRONS_NAME reset comment there) so a
-     stale rich card from a PREVIOUS plain-prediction cell never lingers when navigating to one of
-     the early-return branches above (merged-sub, standalone, out-of-region) that don't reach this
-     point -- those fall back to the plain "Currently: NAME" text instead, which is still correct,
-     just less rich, for those rarer cases.
-
-     The celltype name uses the literal token "@@STEPCARD_NAME@@" instead of baking in
-     escHtml(window.CUR_CELLTYPE_DISPLAY) directly: this whole string is built ONCE, synchronously,
-     right when the cell loads -- but a community identification can win and overwrite
-     CUR_CELLTYPE_DISPLAY moments later (loadCommunityReports()'s async .then(), same place that
-     already rewrites #ctHeadline in the main panel). Without a live substitution, the rich card
-     would freeze on "Unclassified" (or the original MICrONS name) forever even after the plain
-     "Currently: NAME" fallback text elsewhere correctly updated -- confirmed with a mocked
-     community report that resolves to "Astrocyte" 600ms after showNucleus(), where the card kept
-     reading "Unclassified" while the vote-rows below correctly showed Astrocyte. core/panel.js's
-     renderStepVotePanel() replaces this token with the CURRENT CUR_CELLTYPE_DISPLAY on every
-     render (it already re-renders on the same community-resolution timeline), so the card always
-     shows the up-to-date name without this file needing to rebuild the whole card string again. */
-  const stepTagHtml=merged
-    ?'<span class="tag" style="background:#3a2a10;color:#f0883e;border:1px solid #f0883e">merged nucleus segmentation</span>'
-    :own
-    ?'<span class="tag" style="background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)">verified identification</span>'
-    :'<span class="tag '+ti.ab+'">'+(ti.cls?ti.cls.replace("_"," "):"nucleus &middot; no prediction")+'</span>';
-  window.CUR_STEP_CARD_HTML=stepTagHtml
-    +'<div class="celltype">@@STEPCARD_NAME@@'+(!merged&&!own&&ti.mtype?' <span class="nsub">/ '+escHtml(ti.mtype)+'</span>':'')+'</div>'
-    +(v1?v1ColumnBadgeHtml(v1):'')
-    +'<div class="ids"><div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+nid+'">'+nid+'</span></div>'
-    +(root?'<div class="idrow"><span class="k">root ID</span><span class="idval" title="click to copy" data-c="'+root+'">'+root+'</span></div>':'')
-    +'</div>';
+  /* 2026-08-20 (4th-5th pass, RETIRED by the 6th pass): a read-only "id-card" summary used to be
+     built here and fed into core/panel.js's renderStepVotePanel() under the step-through card.
+     Søren, after seeing it: "I just want a copy... it should just show the same there as in Jump
+     ... We should not make something parallel." Replaced with core/stepthrough.js's panel
+     relocation (see its "3. Full-panel relocation" comment) -- the real #nucpanel now physically
+     moves under the step-through card while stepping, so there is exactly one identity/voting/
+     correction UI, not two to keep in sync. Nothing needs to happen here any more. */
   h+=renderLocationDiagram(pos);
   h+='<div class="meta">nearest nucleus at voxel '+coordSpan(NX[i],NY[i],NZ[i])+' &middot; '+(r.dist/1000).toFixed(2)+' &micro;m from query</div>';
   /* nearest() has no distance cap, so a query point that MICrONS's automatic nucleus detector
@@ -3663,10 +3635,10 @@ document.getElementById("go").addEventListener("click",()=>{
      Back/Forward button enabled-state either way, since NAV_INDEX itself didn't change. */
   if(window.CUR_HAS_CELL)pushNavHistory(pos,navLabel,navFromHistory);
   else renderNavControls();
-  /* Step-through review vote panel (see its own comment) -- covers every navigation path, not
-     just Prev/Next, so its content is always correct whatever cell ends up on screen. Re-called
-     again once the async community-report fetch resolves (see loadCommunityReports() above). */
-  if(typeof renderStepVotePanel==="function")renderStepVotePanel();
+  /* Step-through's own Prev/Next (core/stepthrough.js's stepGoTo()) already relocates #nucpanel
+     into the step-through mount right after it calls jumpToVoxel() -- see stepGoTo()'s comment.
+     No hook needed here for a plain Jump-tab search: #nucpanel is already sitting in its Jump-tab
+     home in that case, this callback just repopulated it in place, same as always. */
 });
 renderNavControls();renderRecentlyViewedPanel();
 document.getElementById("copy").addEventListener("click",async()=>{const url=document.getElementById("url").textContent;try{await navigator.clipboard.writeText(url);document.getElementById("copy").textContent="Copied";setTimeout(()=>document.getElementById("copy").textContent="Copy link",1200);}catch(_){}});

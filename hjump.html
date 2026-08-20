@@ -532,6 +532,14 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
        A Jump or Filter session should never pay for either -- only whoever opens this tab does.
        DASH.init() is idempotent, so re-clicking an already-drawn tab costs nothing. */
     if(name==="dash" && window.DASH) DASH.init();
+    /* 2026-08-20 (6th pass): relocate the real #nucpanel under the step-through card when
+       returning to the filter tab mid-session (e.g. switched away and back); put it back on the
+       Jump tab otherwise. See hjumpRelocateNucPanel()/hjumpRestoreNucPanel(), defined later in
+       this file -- safe to reference here since this function only ever RUNS after the whole
+       document (and every later <script> block) has parsed, via a click handler or
+       DOMContentLoaded, never at define-time. */
+    if(name==="filter"){ if(typeof HJUMP_STEP_MATCHES!=="undefined"&&HJUMP_STEP_MATCHES&&typeof hjumpRelocateNucPanel==="function")hjumpRelocateNucPanel(); }
+    else if(typeof hjumpRestoreNucPanel==="function") hjumpRestoreNucPanel();
   }
   btns.forEach(function(b){b.addEventListener("click",function(){activate(b.dataset.tab);});});
   window.__hjumpActivateTab=activate;
@@ -674,7 +682,12 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 <button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
 <button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
 </div>
-<div id="stepVotePanel"></div>
+<!-- 2026-08-20 (6th pass): mount point for the REAL #nucpanel, relocated here while stepping
+     through matches (hjumpRelocateNucPanel()/hjumpRestoreNucPanel(), hJump's own hand-written
+     equivalent of core/stepthrough.js's "3. Full-panel relocation") -- not a separate/parallel
+     identity display. Replaces the old #stepVotePanel (its hand-built read-only id-card retired
+     after Søren: "I just want a copy... it should just show the same there as in Jump"). -->
+<div id="stepNucMount"></div>
 <button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched cells">Reset progress</button>
 </div>
 
@@ -2719,7 +2732,11 @@ function hjumpStepHeadline(i){
 function hjumpUpdateStepUI(){
   const card=document.getElementById("stepThroughCard");
   if(!card)return;
-  if(!HJUMP_STEP_MATCHES||!HJUMP_STEP_MATCHES.length){ card.style.display="none"; return; }
+  if(!HJUMP_STEP_MATCHES||!HJUMP_STEP_MATCHES.length){
+    card.style.display="none";
+    if(typeof hjumpRestoreNucPanel==="function")hjumpRestoreNucPanel(); // filters cleared -- put the real panel back on the Jump tab, not orphaned in a hidden card
+    return;
+  }
   card.style.display="";
   const total=HJUMP_STEP_MATCHES.length, visitedCount=HJUMP_STEP_VISITED.length;
   const counterEl=document.getElementById("stepCounter");
@@ -2727,35 +2744,32 @@ function hjumpUpdateStepUI(){
   const prevBtn=document.getElementById("stepPrev"), nextBtn=document.getElementById("stepNext");
   if(prevBtn)prevBtn.disabled=HJUMP_STEP_INDEX<=0;
   if(nextBtn)nextBtn.textContent=HJUMP_STEP_INDEX>=total-1?"Done — restart from #1":"Next →";
-  const panel=document.getElementById("stepVotePanel");
-  if(panel){
-    const i=HJUMP_STEP_MATCHES[HJUMP_STEP_INDEX];
-    /* 2026-08-20 (5th pass), Søren: "what I wanted was to have this window underneath it with the
-       cell identity and layer model and all" -- same rich read-only id-card µJump/bJump/dJump now
-       show under "Systematically step through matches", ported to hJump's own step-through widget
-       rather than core/panel.js's renderStepVotePanel() (hJump never used that shared function --
-       hjumpUpdateStepUI() is its own hand-rolled equivalent, see showCell()'s companion markup
-       above for the same pieces: classOf/classLabel is H01's published class tag, layerHtml(i) is
-       H01's own layer call -- hJump's equivalent of µJump's V1-column badge/dJump's cortical-layer
-       badge -- and c3Id/HSB are its two id spaces (c3 segment, cell body). No token-substitution
-       trick needed here (contrast core/panel.js's "@@STEPCARD_NAME@@", see its own "5th pass"
-       comment for why THAT was necessary): hjumpStepHeadline(i) already recomputes fresh from i
-       every time hjumpUpdateStepUI() re-runs, and this function already gets called again once a
-       community identification resolves (see hjumpIdentityOf()'s callers), so the name here can
-       never go stale the way core/panel.js's captured-once string could. */
-    const modsHtml=modifiers(i).map(m=>' <span class="tag none" title="Morphological modifier from the H01 classification">'+escHtml(m)+'</span>').join("");
-    panel.innerHTML='<div class="stepvote-panel"><div class="stepvote-idcard">'
-      +'<span class="tag '+classOf(i)+'">'+escHtml(classLabel(i))+'</span> '+layerHtml(i)+modsHtml
-      +'<div class="celltype">'+escHtml(hjumpStepHeadline(i))+'</div>'
-      +'<div class="ids"><div class="idrow"><span class="k">c3 segment</span><span class="idval" title="click to copy" data-c="'+c3Id(i)+'">'+c3Id(i)+'</span></div>'
-      +'<div class="idrow"><span class="k">cell body</span><span class="idval" title="click to copy" data-c="'+HSB[i]+'">'+HSB[i]+'</span></div></div>'
-      +'</div></div>';
-    panel.querySelectorAll(".idval").forEach(function(v){
-      v.addEventListener("click",function(){
-        if(navigator.clipboard)navigator.clipboard.writeText(v.dataset.c);
-        var o=v.textContent;v.textContent="copied";setTimeout(function(){v.textContent=o;},900);
-      });
-    });
+  /* 2026-08-20 (6th pass), Søren, after seeing the 5th pass's read-only id-card: "I just want a
+     copy... it should just show the same there as in Jump ... We should not make something
+     parallel." Replaced the hand-built card above with the same physical-relocation approach
+     µJump/βJump/δJump now use (core/stepthrough.js's "3. Full-panel relocation") -- hJump doesn't
+     load that shared module, so this is its own equivalent: the REAL #nucpanel (already populated
+     by jumpToIndex()->showCell(i,...) just above, in hjumpStepGoTo()) is physically moved into
+     #stepNucMount, and moved back to its Jump-tab home when you switch away (see the tab
+     activate() function's own relocation hook, a few hundred lines up). Same node, same JS state,
+     nothing duplicated -- so there's no separate freshness/staleness concern to maintain here any
+     more (contrast the retired card's own "no token-substitution trick needed... never go stale"
+     comment, which was already about avoiding a problem the OLD approach invented for itself). */
+  hjumpRelocateNucPanel();
+}
+var HJUMP_NUC_HOME_PARENT=null, HJUMP_NUC_HOME_NEXT=null;
+function hjumpRelocateNucPanel(){
+  const np=document.getElementById("nucpanel"), mount=document.getElementById("stepNucMount");
+  if(!np||!mount)return;
+  if(!HJUMP_NUC_HOME_PARENT){ HJUMP_NUC_HOME_PARENT=np.parentNode; HJUMP_NUC_HOME_NEXT=np.nextSibling; }
+  if(np.parentNode!==mount)mount.appendChild(np);
+}
+function hjumpRestoreNucPanel(){
+  const np=document.getElementById("nucpanel");
+  if(!np||!HJUMP_NUC_HOME_PARENT)return;
+  if(np.parentNode!==HJUMP_NUC_HOME_PARENT){
+    if(HJUMP_NUC_HOME_NEXT&&HJUMP_NUC_HOME_NEXT.parentNode===HJUMP_NUC_HOME_PARENT)HJUMP_NUC_HOME_PARENT.insertBefore(np,HJUMP_NUC_HOME_NEXT);
+    else HJUMP_NUC_HOME_PARENT.appendChild(np);
   }
 }
 function hjumpStepGoTo(i){

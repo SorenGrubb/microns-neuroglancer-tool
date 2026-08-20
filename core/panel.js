@@ -185,13 +185,16 @@ function stepVoteRowHtml(label,name,votesMap){
       :'<button type="button" class="idbtn stepvote" data-nm="'+escHtml(name)+'" data-v="-1" aria-label="Downvote '+escHtml(label)+' classification: '+escHtml(name)+'" title="Disagree">&#9660;</button>')
     +'</div>';
 }
-/* Renders (or clears) #stepVotePanel, inside #stepThroughCard on the Filter-and-show tab. Safe to
-   call from anywhere, any time -- no-ops cleanly if the panel isn't in the DOM (e.g. before the
-   Filter tab has ever been opened) or there's no current nucleus. When window.CUR_MICRONS_NAME
-   and window.CUR_COMMUNITY_TOP_NAME resolve to the SAME name (a cell everyone agrees on), only
-   ONE row is shown instead of two identical-looking vote targets -- voting on either would cast
-   an identical vote for the identical string, so showing both would just be visual clutter with
-   no added function. */
+/* RETIRED, 2026-08-20 (6th pass on the step-through-identity thread). This used to render a
+   read-only summary + a simplified up/down vote widget into #stepVotePanel under the step-through
+   card. Søren, after seeing it: "I just want a copy... it should just show the same there as in
+   Jump ... We should not make something parallel." That #stepVotePanel div no longer exists in
+   any host page (µJump/βJump/δJump all removed it -- see each build's own note) -- instead the
+   REAL cell panel (#nucpanel or βJump's #panel) is physically relocated under the step-through
+   card while stepping (core/stepthrough.js's "3. Full-panel relocation"), so there's exactly one
+   identity/voting/correction UI to keep working, not two. This function is left defined, unused
+   and uncalled, only so a stray external reference doesn't throw -- delete it outright once
+   nothing in any host page mentions it any more. Do not add new calls to it. */
 function renderStepVotePanel(){
   var el=document.getElementById("stepVotePanel");
   if(!el)return;
@@ -421,21 +424,6 @@ function loadCommunityReports(nid,cellPos){
   el.innerHTML="";
   if(!REPORT_ENDPOINT||!nid)return;
   PANEL_CUR_NID=String(nid);
-  /* 2026-08-20 (2nd pass), Søren: "still don't see it for any of the datasets" after the first
-     pass -- confirmed live via the actual grubblab.com page that the headline-when-nothing's-
-     votable fix above was correct but USELESS in practice: renderStepVotePanel()'s only call
-     sites were both inside THIS function's own fetch(...).then() chain (lines below), so nothing
-     painted the panel until the ?nucleusId= round trip to Apps Script actually resolved --
-     measured 5+ seconds on a live cell, sometimes longer. A reviewer clicking Next every second or
-     two would see a permanently empty panel, never wait long enough to see it appear. Calling it
-     here, BEFORE the fetch even starts, paints the headline instantly from whatever
-     window.CUR_CELLTYPE_DISPLAY already holds (set synchronously by showNucleus()/showCell(),
-     already reset for this new cell by the time loadCommunityReports() runs -- see the
-     CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME reset in showCell()/showNucleus()). The two later
-     calls (once the fetch resolves, and again once a community name wins) then upgrade it from
-     "not yet identified" to a real name as that data arrives -- this call is what makes the
-     panel non-empty on the very first render instead of only after a slow network round trip. */
-  if(typeof renderStepVotePanel==="function")renderStepVotePanel();
   const stale=function(){return PANEL_CUR_NID!==String(nid);};
   fetch(REPORT_ENDPOINT+"?nucleusId="+encodeURIComponent(nid)+panelDsQS())
     .then(r=>r.json())
@@ -448,14 +436,6 @@ function loadCommunityReports(nid,cellPos){
       window.CUR_COMMUNITY_IDS=Array.from(new Set(reports.map(function(r){return r.identified;}).filter(Boolean).map(String)));
       try{var _myn=String((typeof REPORTER_NAME!=="undefined"&&REPORTER_NAME)||"").trim().toLowerCase();var _mine={};if(_myn){reports.forEach(function(r){if(r&&r.identified&&String(r.reporterName||"").trim().toLowerCase()===_myn)_mine[String(r.identified).toLowerCase()]=1;});}window.MY_PROPOSED_IDS=_mine;}catch(_mp){window.MY_PROPOSED_IDS={};}
       if(typeof loadIdentityVotesPanel==="function")loadIdentityVotesPanel(nid,window.__idvBase||[]);
-      /* Placed BEFORE the early-return just below so it always fires, whether or not this
-         nucleus has any community reports -- CUR_COMMUNITY_TOP_NAME may still be null at this
-         point (set further down, only if ranked.length), which is correct: renderStepVotePanel()
-         just shows the "Original (MICrONS)" row alone in that case. Re-called again after
-         ranked/win resolves below when there IS a winning community name, so the panel never has
-         to guess -- it always reflects window.CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME as of the
-         moment it's called. */
-      if(typeof renderStepVotePanel==="function")renderStepVotePanel();
       if(!reports.length&&!mergedGroups.length&&!notNucleusReports.length&&!organelleGroups.length)return;
       let html="";
       if(reports.length){
@@ -492,8 +472,7 @@ function loadCommunityReports(nid,cellPos){
         const users=n=>n+' '+(n>1?'users':'user');
         if(ranked.length){
           const win=ranked[0];
-          window.CUR_COMMUNITY_TOP_NAME=win.name; // see CUR_COMMUNITY_TOP_NAME's reset comment in showNucleus() -- feeds the step-through vote panel
-          if(typeof renderStepVotePanel==="function")renderStepVotePanel();
+          window.CUR_COMMUNITY_TOP_NAME=win.name; // see CUR_COMMUNITY_TOP_NAME's reset comment in showNucleus()
           /* Promote the winning name to the cell's HEADLINE when the cell was otherwise
              unclassified -- the point of letting the first reporter name a cell is that the cell
              then carries that name, not that it stays "Unclassified" with the name in small print

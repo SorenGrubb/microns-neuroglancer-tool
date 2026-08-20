@@ -566,17 +566,12 @@ recorded.</p>
 <button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
 <button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
 </div>
-<!-- 2026-08-20, Søren: "Beneath the Systematically step through matches we have the cells shown
-     in uJump when going through the cells, this should be the same for bJump." µJump has an
-     #stepVotePanel div right here -- core/panel.js's renderStepVotePanel() (already shared, and
-     already called from bJump's own loadCommunityReports() chain) renders a compact "Original vs
-     community" identity-vote widget into it for whichever cell step-through just navigated to.
-     bJump was missing the div itself, so that already-shared, already-firing render call had
-     nowhere to land and silently no-opped every time. Adding the div is the whole fix -- no new
-     JS wiring needed, see bjump_logic.js's showCell() for the one companion change (resetting
-     CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME per cell, same as µJump, so a stale name can't leak
-     from the previous stepped-to cell while this one's own community fetch is still in flight). -->
-<div id="stepVotePanel"></div>
+<!-- 2026-08-20 (6th pass): mount point for the REAL #panel (bJump's cell panel), relocated here
+     while stepping through matches (core/stepthrough.js's "3. Full-panel relocation", configured
+     via bjump_config.js's UJ.cfg.stepthrough.nucPanelId="panel") -- not a separate/parallel
+     identity display. Replaces the old #stepVotePanel (retired, see core/panel.js's
+     renderStepVotePanel() header) that this comment used to describe. -->
+<div id="stepNucMount"></div>
 <button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched nuclei">Reset progress</button>
 </div>
 
@@ -768,7 +763,11 @@ UJ.cfg.tree = { panelId: "idbox", startNode: "q1", modal: false, suggestionSourc
    in the same browser, never share (and corrupt) each other's remembered tab or step-through
    progress. See core/stepthrough.js's own header comment. */
 UJ.cfg.tabs = { lsKey: "bjump_active_tab", urlParam: "tab" };
-UJ.cfg.stepthrough = { lsKey: "bjump_stepthrough_v1" };
+/* nucPanelId: "panel" -- 2026-08-20 (6th pass): core/stepthrough.js's full-panel relocation
+   (see its own "3. Full-panel relocation" comment) needs to know which element IS the real cell
+   panel. µJump/δJump both use #nucpanel; βJump's own showCell() (bjump_logic.js) writes into
+   #panel instead -- a different id, not a different concept. */
+UJ.cfg.stepthrough = { lsKey: "bjump_stepthrough_v1", nucPanelId: "panel" };
 
 /* Same Apps Script deployment as µJump and ηJump -> one OAuth consent, one sign-in, one level.
    ds:"bjump" routes writes to the βJump spreadsheet once Datasets.gs is deployed. */
@@ -1357,29 +1356,15 @@ function showCell(i, distNm){
      the "no cell types" paragraph in the About-this-dataset card) -- so renderStepVotePanel()
      only ever shows the "Community" row here, never "Original (MICrONS)". */
   window.CUR_MICRONS_NAME=null; window.CUR_COMMUNITY_TOP_NAME=null;
-  /* 2026-08-20 (5th pass), Søren: "what I wanted was to have this window underneath it with the
-     cell identity and layer model and all" -- same rich read-only id-card µJump's showNucleus()
-     now builds (see its "4th pass" comment), reusing the SAME pieces this function's own headline
-     above uses: the stratum tag (bJump's nearest thing to a "layer model" -- CA1 has no cortical
-     layers or V1 column, but strata are the equivalent anatomical banding) + segment presence, the
-     cell name, and the nucleus/segment ids. No MICrONS/type tag here since bJump has no classifier
-     at all (see this function's own "no classifier for this dataset" text above) -- the tag row is
-     just the stratum + segment status. Uses the same "@@STEPCARD_NAME@@" token core/panel.js
-     substitutes with the CURRENT name on every render (see its "5th pass" comment for exactly why
-     that has to be a re-substituted token and not a name baked in here once) -- a community
-     identification can win moments after this card is first built. Reset to null on every cell,
-     same as CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME just above, so an early return further down
-     (none currently exist in this function, but future branches should keep the pattern) can never
-     leave a stale card showing. */
-  window.CUR_STEP_CARD_HTML=null;
-  window.CUR_STEP_CARD_HTML='<span class="tag '+st.cls+'">'+escHtml(st.label)+'</span>'
-    +(seg?' <span class="tag non">segment '+seg+'</span>'
-         :' <span class="tag none" title="This nucleus lies outside the segmented sub-volume">no segment</span>')
-    +(BTR[i]?' <span class="tag none" title="Cut by the top or bottom face of the 25 µm slab — its volume is an underestimate">truncated</span>':'')
-    +'<div class="celltype">@@STEPCARD_NAME@@</div>'
-    +'<div class="ids"><div class="idrow"><span class="k">nucleus ID</span><span class="idval" title="click to copy" data-c="'+BID[i]+'">'+BID[i]+'</span></div>'
-    +(seg?'<div class="idrow"><span class="k">segment ID</span><span class="idval" title="click to copy" data-c="'+seg+'">'+seg+'</span></div>':'')
-    +'</div>';
+  /* 2026-08-20 (5th pass, RETIRED by the 6th pass): a read-only "id-card" summary (stratum tag +
+     segment status + name + ids) used to be built here and fed into core/panel.js's
+     renderStepVotePanel() under the step-through card. Søren, after seeing it: "I just want a
+     copy... it should just show the same there as in Jump ... We should not make something
+     parallel." Replaced with core/stepthrough.js's panel relocation (see its "3. Full-panel
+     relocation" comment) -- the real #panel now physically moves under the step-through card
+     while stepping (bjump_config.js sets UJ.cfg.stepthrough.nucPanelId="panel" since bJump's own
+     cell panel doesn't use the #nucpanel id µJump/δJump/hJump share). Nothing needs to happen
+     here any more. */
   ID_CTX={nucId:CUR_NUCID,root:CUR_ROOT,pos:pos.slice()};
 
   /* Søren, 2026-08-16: the cell NAME is the Neuroglancer link -- no separate button. There is no

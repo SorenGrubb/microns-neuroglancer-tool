@@ -37,8 +37,25 @@
 
    UJ.cfg.tabs = { lsKey, urlParam } -- defaults "ujump_active_tab"/"tab" (µJump's original
    values, so its own behavior/URLs are unchanged); βJump sets "bjump_active_tab"/"tab".
-   UJ.cfg.stepthrough = { lsKey } -- default "ujump_stepthrough_v1"; βJump sets
-   "bjump_stepthrough_v1".
+   UJ.cfg.stepthrough = { lsKey, nucPanelId } -- lsKey defaults "ujump_stepthrough_v1"; βJump sets
+   "bjump_stepthrough_v1". nucPanelId defaults "nucpanel" (µJump/δJump's id); βJump sets "panel"
+   (its own cell panel has a different id).
+
+   3. Full-panel relocation (2026-08-20, 6th pass on the step-through-identity thread — Søren:
+      "I just want a copy... it should just show the same there as in Jump", after passes 4-5's
+      read-only summary card turned out to be "a scraped version" of the real thing. Passes 4-5's
+      window.CUR_STEP_CARD_HTML + core/panel.js's renderStepVotePanel() are RETIRED by this —
+      see core/panel.js's own note at the top of its (now unused) renderStepVotePanel(). Rather
+      than build and maintain a second, parallel identity/voting/correction UI with its own IDs
+      (favourites, connections, synapse search, root-ID panel, community-report history, the
+      guided-ID tree — all of it), this physically MOVES the single real panel (#nucpanel, or
+      whatever UJ.cfg.stepthrough.nucPanelId names) into a mount point under the step-through card
+      whenever a step-through cell is on screen, and moves it back to its original spot in the
+      Jump tab when you switch away. It is the exact same DOM node, filled by the exact same
+      showNucleus()/showCell() call the Jump tab uses — every button, fetch, and id inside it
+      keeps working unmodified, because nothing about it was duplicated. The host page needs one
+      new element: `#stepNucMount`, sitting wherever the panel should appear under the
+      step-through card.
 */
 (function(){
   window.UJ = window.UJ || {};
@@ -47,6 +64,30 @@
 
   function tabsCfg(){ try{ return (UJ&&UJ.cfg&&UJ.cfg.tabs)||{}; }catch(_e){ return {}; } }
   function stepCfg(){ try{ return (UJ&&UJ.cfg&&UJ.cfg.stepthrough)||{}; }catch(_e){ return {}; } }
+
+  /* ---------- 3. Full-panel relocation --------------------------------------------------
+     See the module header's "3. Full-panel relocation" comment for the why. nucHomeParent/
+     nucHomeNext are captured the FIRST time the panel is moved, so it can always be put back
+     exactly where it started (nextSibling, not just "append to parent", so it lands back in the
+     right place among its Jump-tab siblings rather than at the end). */
+  var nucHomeParent=null, nucHomeNext=null;
+  function nucPanelId(){ return stepCfg().nucPanelId||"nucpanel"; }
+  function relocateNucPanel(){
+    var np=document.getElementById(nucPanelId()), mount=document.getElementById("stepNucMount");
+    if(!np||!mount)return;
+    if(!nucHomeParent){nucHomeParent=np.parentNode;nucHomeNext=np.nextSibling;}
+    if(np.parentNode!==mount)mount.appendChild(np);
+  }
+  function restoreNucPanel(){
+    var np=document.getElementById(nucPanelId());
+    if(!np||!nucHomeParent)return;
+    if(np.parentNode!==nucHomeParent){
+      if(nucHomeNext&&nucHomeNext.parentNode===nucHomeParent)nucHomeParent.insertBefore(np,nucHomeNext);
+      else nucHomeParent.appendChild(np);
+    }
+  }
+  UJ.stepthrough.relocateNucPanel=relocateNucPanel;
+  UJ.stepthrough.restoreNucPanel=restoreNucPanel;
 
   /* ---------- 1. Tab bar switching ---------------------------------------------------- */
   function wireTabs(){
@@ -66,6 +107,13 @@
           if(statusEl)statusEl.textContent="Failed to load the charting library — "+err.message;
         });
       }
+      /* See "3. Full-panel relocation" above: leaving the filter tab puts the real cell panel
+         back in its Jump-tab home; returning to it while a step-through session is already
+         active (e.g. switched away and back) re-relocates it rather than leaving it stranded on
+         the Jump tab. stepMatches is declared further down in this file (section 2) but, as a
+         plain `function`, is hoisted -- safe to reference here regardless of source order. */
+      if(name==="filter"){ if(stepMatches)relocateNucPanel(); }
+      else { restoreNucPanel(); }
     }
     btns.forEach(function(b){b.addEventListener("click",function(){activate(b.dataset.tab);});});
     UJ.stepthrough.activateTab=activate;
@@ -114,6 +162,11 @@
       var pos=rowPos(stepMatches[i].row);
       jumpToVoxel(pos[0],pos[1],pos[2]);
     }
+    /* jumpToVoxel() above already re-filled #nucpanel (showNucleus()/showCell() synchronously
+       rebuild it, same as any other jump) -- relocate it into the step-through mount now so the
+       freshly-loaded cell appears under the card, not back on the (currently hidden) Jump tab.
+       Safe to call every step: a no-op once it's already sitting in the mount. */
+    relocateNucPanel();
     saveStepState();
     updateStepUI();
   }
@@ -143,7 +196,13 @@
       stepWired=true;
     }
     stepMatches=(matches&&matches.length)?matches:null;
-    if(!stepMatches){stepVisited=[];stepIndex=0;updateStepUI();return;}
+    if(!stepMatches){
+      stepVisited=[];stepIndex=0;updateStepUI();
+      restoreNucPanel(); // filters changed/cleared -- nothing left to step through, so the real
+                          // panel (if it was relocated here) goes back to its Jump-tab home rather
+                          // than sitting orphaned in a now-hidden step-through card.
+      return;
+    }
     var sig=stepSig(stepMatches);
     var saved=loadStepState();
     var resumeIndex=0;
