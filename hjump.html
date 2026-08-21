@@ -2893,27 +2893,16 @@ function renderFilterResults(){
     vb.removeAttribute("href"); vb.style.pointerEvents="none"; vb.style.opacity=".45";
     vb.textContent="Open all in Neuroglancer ↗";
   }
-  // a short preview, not the whole list -- 30k rows of DOM would freeze the tab
-  const PREVIEW=25;
+  /* 2026-08-20 (7th pass), Søren: "hJump still has the first 25 matches, we don't need them
+     anymore" -- now that "Systematically step through matches" relocates the REAL cell panel
+     under the step-through card (6th pass), this static "first 25 matches" preview list is
+     redundant: stepping through IS the browse-your-matches workflow, with live full identity
+     info per cell instead of a name and a coordinate. Left in place: the "nothing matches" empty
+     state, since that's still useful feedback distinct from the step-through card (which just
+     hides itself when there's nothing to step through). */
   out.innerHTML=rows.length
-    ? '<div class="neigh" style="margin-top:10px"><h4>First '+Math.min(PREVIEW,rows.length)+' matches</h4>'
-      +rows.slice(0,PREVIEW).map(function(i){
-        return '<div class="nrow"><div class="nleft"><span class="dot '+classOf(i)+'"></span><div>'
-          +'<div class="ntype fjump" data-i="'+i+'" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" '
-          +'title="Open this cell on the Jump tab">'+escHtml(longName(typeName(i)))+'</div>'
-          +'<div class="nsub">'+escHtml(filterLayerOf(i))+' &middot; soma '+HVB[i].toFixed(0)
-          +' &micro;m&sup3; &middot; body '+HSB[i]+' &middot; voxel '+HX[i]+', '+HY[i]+', '+HZ[i]+'</div>'
-          +'</div></div></div>'; }).join("")
-      +(rows.length>PREVIEW?'<div class="nsub" style="margin-top:6px">…and '+fmt(rows.length-PREVIEW)+' more — download the Excel for the full list.</div>':"")
-      +'</div>'
+    ? ""
     : '<div class="nsub" style="margin-top:8px">Nothing matches. Try loosening a filter.</div>';
-  out.querySelectorAll(".fjump").forEach(function(b){
-    b.addEventListener("click",function(){
-      if(window.__hjumpActivateTab) window.__hjumpActivateTab("jump");
-      jumpToIndex(+b.dataset.i);
-      scrollTop();
-    });
-  });
 }
 
 /* One segmentation layer per cell type, each its own colour, so a mixed result set is readable
