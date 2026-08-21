@@ -1922,7 +1922,18 @@ const IDX_BY_TYPE={}, UNASSIGNED_IDX=[];
    exact canonical string a guided-ID submission stores (see canonSubmitName in core/ontology.js).
    "microglia"/"opc" are NOT H01 labels -- H01 never separates them -- so they are pools this page
    adds, which is why they must be seeded explicitly below alongside D.CT_NAMES. */
-const H01_SPLIT_IDENTITY={"Microglia":"microglia","OPC":"opc"};
+const H01_SPLIT_IDENTITY={"microglia":"microglia","opc":"opc",
+  "oligodendrocyte precursor cell":"opc"};
+/* Matched on a lowercased, trimmed string rather than the exact leaf name. The canonical
+   submissions are "Microglia" and "OPC" (core/ontology.js LEAF_NAMES), but an identity can also
+   reach the sheet from an older leaf label or a differently-cased free-text override, and an
+   exact-match lookup would silently drop those — the same casing trap that once produced
+   duplicate dashboard buckets. */
+function h01SplitFor(name){
+  return name?H01_SPLIT_IDENTITY[String(name).trim().toLowerCase()]:undefined;
+}
+/* Shown even at zero: their absence would be indistinguishable from a bug. */
+const ALWAYS_SHOW_TYPES={microglia:1,opc:1};
 /* Rebuilt once the community identities arrive (see buildIdentityFilterUI). Before that fetch
    resolves HJUMP_IDENTITY_BY_NID is null, hjumpIdentityOf() returns "", and this produces exactly
    H01's own pools -- so the page is correct at first paint and simply gets more specific. */
@@ -1930,11 +1941,11 @@ function rebuildTypePools(){
   let haveIdent=false;
   try { haveIdent=!!HJUMP_IDENTITY_BY_NID; } catch(_tdz){ haveIdent=false; }
   D.CT_NAMES.forEach(function(t){ IDX_BY_TYPE[t]=[]; });
-  for(const k in H01_SPLIT_IDENTITY) IDX_BY_TYPE[H01_SPLIT_IDENTITY[k]]=[];
+  for(const k in ALWAYS_SHOW_TYPES) IDX_BY_TYPE[k]=[];
   UNASSIGNED_IDX.length=0;
   for(let i=0;i<N;i++){
     const t=typeName(i);
-    const split=haveIdent?H01_SPLIT_IDENTITY[hjumpIdentityOf(i)]:undefined;
+    const split=haveIdent?h01SplitFor(hjumpIdentityOf(i)):undefined;
     const bucket=split||t;
     if(IDX_BY_TYPE[bucket]) IDX_BY_TYPE[bucket].push(i);
     /* "no confident call" stays keyed on what H01 itself said: a community-resolved cell is no
@@ -1952,11 +1963,17 @@ function renderTypeCheckboxes(){
   const box=document.getElementById("filterTypes"); if(!box)return;
   const was=new Set([].slice.call(box.querySelectorAll(".ftype:checked")).map(function(e){ return e.value; }));
   box.innerHTML=TYPE_GROUPS.map(function(g){
-    const inner=g.types.filter(function(t){ return IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length; })
+    const inner=g.types.filter(function(t){ return (IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length)||ALWAYS_SHOW_TYPES[t]; })
       .map(function(t){
-        return '<label style="font-size:12px;display:flex;align-items:center;gap:6px">'
-          +'<input type="checkbox" class="ftype" value="'+escHtml(t)+'" style="width:auto"> '
-          +escHtml(longName(t))+' <span class="nsub">'+fmt(IDX_BY_TYPE[t].length)+'</span></label>'; }).join("");
+        const n=(IDX_BY_TYPE[t]||[]).length;
+        const off=!n;
+        return '<label style="font-size:12px;display:flex;align-items:center;gap:6px'
+          +(off?';opacity:.5':'')+'"'
+          +(off?' title="No cell has been community-identified as this yet. Identify one of the merged Microglia / OPC cells and it will move here."':'')
+          +'>'
+          +'<input type="checkbox" class="ftype" value="'+escHtml(t)+'" style="width:auto"'
+          +(off?' disabled':'')+'> '
+          +escHtml(longName(t))+' <span class="nsub">'+fmt(n)+'</span></label>'; }).join("");
     return inner?'<div style="margin-bottom:8px"><div class="nsub" style="text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'
       +escHtml(g.label)+'</div>'+inner+'</div>':"";
   }).join("");
