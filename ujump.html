@@ -8641,18 +8641,59 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     "Leptomeninges":["Arachnoid barrier cell","Fibroblast reticular cell","Inner arachnoid fibroblast","Dural border cell","Pia mater fibroblast","Pial sheath fibroblast"]
   };
 
+  /* Only offer a cell type that actually EXISTS in this dataset, and show how many there are.
+
+     This list used to be CATEGORY_MEMBERS rendered verbatim. That was harmless in µJump, where
+     every listed type has cells -- but the same markup travelled into δJump, where V1DD's tables
+     contain no glia, no vascular cells and no 23P at all, so ticking "23P" returned nothing with
+     no hint why (Søren, 2026-08-20). ηJump's filter has always been built this way; this brings
+     µJump and δJump in line with it.
+
+     The tally mirrors buildAllIdentities()'s own precedence (own-verified > merged-nucleus
+     breakdown > MICrONS prediction, plus standalone points) but deliberately does NOT call it:
+     calling it here would populate its ALL_IDENTITIES cache before the community data has
+     arrived and freeze a stale snapshot. One consequence -- a type that exists ONLY as community
+     reports, with no predicted, verified or standalone cell, is not offered. Re-run
+     window.buildFilterTypeCheckboxes() to pick one up once such rows exist. */
+  function filterTypeTally(){
+    const t=new Map(),add=n=>{if(n)t.set(n,(t.get(n)||0)+1);};
+    for(let i=0;i<N;i++){
+      const ot=OWN_TYPE[i];
+      if(ot!==255){add(OWN_TYPE_NAMES[ot]);continue;}
+      const k=NT[i];if(k===0)continue;
+      const mg=mergedInfo(i);
+      if(mg){for(const m of mg)add(m.type);continue;}
+      add(CT_NAMES[k-1]);
+    }
+    for(let i=0;i<ST_N;i++)add(OWN_TYPE_NAMES[ST_TYPE[i]]);
+    return t;
+  }
+  /* Long name for the hover tooltip. Quotes are stripped rather than passed through escHtml():
+     the escHtml that wins at this point in the file is the 3-char one that does NOT escape
+     quotes, so an apostrophe-free but quote-bearing label would break out of the attribute --
+     see the escHtml shadow bug. */
+  function typeTitle(n){
+    const L=(typeof LABELS!=="undefined"&&LABELS[n])?LABELS[n]:"";
+    return String(L||n).replace(/"/g,"");
+  }
+  /* Declared out here rather than inside the builder: updateAttentionUI() dims this box and a
+     change listener is bound to it further down, both in this same scope. */
   const typeBox=document.getElementById("filterTypes");
-  if(typeBox){
+  window.buildFilterTypeCheckboxes=function(){
+    if(!typeBox)return;
+    const tally=filterTypeTally();
+    const countFor=v=>{const al=TYPE_ALIASES[v]||[v];let n=0;for(const a of al)n+=(tally.get(a)||0);return n;};
     let html="";
     for(const cat of CATEGORY_ORDER){
-      const members=CATEGORY_MEMBERS[cat];
-      if(!members||!members.length)continue;
+      const members=(CATEGORY_MEMBERS[cat]||[]).filter(n=>countFor(n)>0);
+      if(!members.length)continue;
       html+='<div style="margin-top:8px"><b style="font-size:12px;color:var(--mut)">'+cat+'</b><div class="toggles" style="margin-top:4px">';
-      for(const n of members)html+='<label style="font-size:12px"><input type="checkbox" class="ftype" value="'+n+'"> '+n+'</label>';
+      for(const n of members)html+='<label style="font-size:12px" title="'+typeTitle(n)+'"><input type="checkbox" class="ftype" value="'+n+'"> '+n+' <span class="nsub">'+countFor(n).toLocaleString()+'</span></label>';
       html+="</div></div>";
     }
     typeBox.innerHTML=html;
-  }
+  };
+  window.buildFilterTypeCheckboxes();
   /* "Organelles and extracellular structures" checkboxes in "Add to the Neuroglancer view" --
      same generation pattern as the cell-type checkboxes just above (topic sub-headline + one
      .toggles div per topic), built from window.ORGANELLE_GROUPS (defined in an earlier <script>

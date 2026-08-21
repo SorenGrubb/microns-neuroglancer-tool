@@ -923,7 +923,28 @@ function classLabel(i){ const c=classOf(i);
   return c==="exc"?"excitatory":c==="inh"?"inhibitory":c==="non"?"non-neuronal":"unclassified"; }
 
 /* Display name: H01's type strings are lower-case slugs; µJump shows Sentence case headlines. */
-function longName(t){ return String(t).charAt(0).toUpperCase()+String(t).slice(1); }
+/* H01 publishes its own label strings ("pyramidal", "microglia/opc", "blood-vessel-cell").
+   Capitalising the first letter left ηJump calling the same cells different things from µJump
+   and δJump -- "Oligodendrocyte" matched by luck, "Blood-vessel-cell" did not. This maps each
+   published label to the shared vocabulary in core/ontology.js for DISPLAY ONLY; the raw H01
+   string stays the stored value and the checkbox value, so nothing already in the spreadsheet
+   moves. Two labels deliberately keep an H01-specific qualifier, because collapsing them would
+   claim more than the data supports: "microglia/opc" is a genuinely merged class in H01 that
+   cannot be split into µJump's separate microglia and OPC, and "excitatory/spiny-with-atypical-
+   tree" is a morphological catch-all with no µJump equivalent. */
+const H01_LONG_NAME={
+  "pyramidal":"Pyramidal neuron",
+  "spiny-stellate":"Spiny stellate neuron",
+  "excitatory/spiny-with-atypical-tree":"Excitatory neuron — atypical dendritic tree",
+  "interneuron":"Interneuron",
+  "astrocyte":"Astrocyte",
+  "oligodendrocyte":"Oligodendrocyte",
+  "microglia/opc":"Microglia / OPC (merged in H01)",
+  "blood-vessel-cell":"Blood vessel cell",
+  "unclassified-neuron":"Unclassified neuron",
+  "unknown-type":"Unknown type"
+};
+function longName(t){ return H01_LONG_NAME[t] || (String(t).charAt(0).toUpperCase()+String(t).slice(1)); }
 
 /* ── lookup ─────────────────────────────────────────────────────────────────────────── */
 function nearest(vx,vy,vz){
