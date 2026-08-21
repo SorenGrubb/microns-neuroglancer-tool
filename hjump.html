@@ -940,6 +940,8 @@ const H01_LONG_NAME={
   "astrocyte":"Astrocyte",
   "oligodendrocyte":"Oligodendrocyte",
   "microglia/opc":"Microglia / OPC (merged in H01)",
+  "microglia":"Microglia (community-resolved)",
+  "opc":"OPC (community-resolved)",
   "blood-vessel-cell":"Blood vessel cell",
   "unclassified-neuron":"Unclassified neuron",
   "unknown-type":"Unknown type"
@@ -1911,19 +1913,65 @@ function idSearch(){
 const TYPE_GROUPS=[
   {label:"Neurons — excitatory", types:["pyramidal","spiny-stellate","excitatory/spiny-with-atypical-tree"]},
   {label:"Neurons — inhibitory", types:["interneuron"]},
-  {label:"Glia",                 types:["astrocyte","oligodendrocyte","microglia/opc"]},
+  {label:"Glia",                 types:["astrocyte","oligodendrocyte","microglia/opc","microglia","opc"]},
   {label:"Vascular",             types:["blood-vessel-cell"]},
   {label:"No confident call",    types:["unclassified-neuron","unknown-type"]}
 ];
 const IDX_BY_TYPE={}, UNASSIGNED_IDX=[];
-(function buildPools(){
+/* The only two community identities that move a cell between H01 cell-type pools. Keyed by the
+   exact canonical string a guided-ID submission stores (see canonSubmitName in core/ontology.js).
+   "microglia"/"opc" are NOT H01 labels -- H01 never separates them -- so they are pools this page
+   adds, which is why they must be seeded explicitly below alongside D.CT_NAMES. */
+const H01_SPLIT_IDENTITY={"Microglia":"microglia","OPC":"opc"};
+/* Rebuilt once the community identities arrive (see buildIdentityFilterUI). Before that fetch
+   resolves HJUMP_IDENTITY_BY_NID is null, hjumpIdentityOf() returns "", and this produces exactly
+   H01's own pools -- so the page is correct at first paint and simply gets more specific. */
+function rebuildTypePools(){
+  let haveIdent=false;
+  try { haveIdent=!!HJUMP_IDENTITY_BY_NID; } catch(_tdz){ haveIdent=false; }
   D.CT_NAMES.forEach(function(t){ IDX_BY_TYPE[t]=[]; });
+  for(const k in H01_SPLIT_IDENTITY) IDX_BY_TYPE[H01_SPLIT_IDENTITY[k]]=[];
+  UNASSIGNED_IDX.length=0;
   for(let i=0;i<N;i++){
     const t=typeName(i);
-    if(IDX_BY_TYPE[t]) IDX_BY_TYPE[t].push(i);
-    if(H01_NO_CALL[t]) UNASSIGNED_IDX.push(i);
+    const split=haveIdent?H01_SPLIT_IDENTITY[hjumpIdentityOf(i)]:undefined;
+    const bucket=split||t;
+    if(IDX_BY_TYPE[bucket]) IDX_BY_TYPE[bucket].push(i);
+    /* "no confident call" stays keyed on what H01 itself said: a community-resolved cell is no
+       longer uncalled, so a resolved microglia/opc drops out of this list too. */
+    if(H01_NO_CALL[t]&&!split) UNASSIGNED_IDX.push(i);
   }
-})();
+}
+rebuildTypePools();
+/* Both cell-type lists are redrawn after the community identities land, so a resolved
+   microglia/opc moves out of the merged bucket into its own. Checked boxes and the current
+   dropdown selection are preserved -- the redraw happens seconds after load and must not quietly
+   undo a filter the user has already set up. A pool that empties (or appears) is reflected
+   because both lists skip types with no cells. */
+function renderTypeCheckboxes(){
+  const box=document.getElementById("filterTypes"); if(!box)return;
+  const was=new Set([].slice.call(box.querySelectorAll(".ftype:checked")).map(function(e){ return e.value; }));
+  box.innerHTML=TYPE_GROUPS.map(function(g){
+    const inner=g.types.filter(function(t){ return IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length; })
+      .map(function(t){
+        return '<label style="font-size:12px;display:flex;align-items:center;gap:6px">'
+          +'<input type="checkbox" class="ftype" value="'+escHtml(t)+'" style="width:auto"> '
+          +escHtml(longName(t))+' <span class="nsub">'+fmt(IDX_BY_TYPE[t].length)+'</span></label>'; }).join("");
+    return inner?'<div style="margin-bottom:8px"><div class="nsub" style="text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'
+      +escHtml(g.label)+'</div>'+inner+'</div>':"";
+  }).join("");
+  [].slice.call(box.querySelectorAll(".ftype")).forEach(function(e){ if(was.has(e.value)) e.checked=true; });
+}
+function renderRandomTypeSelect(){
+  const sel=document.getElementById("randomTypeSelect"); if(!sel)return;
+  const was=sel.value;
+  sel.innerHTML=TYPE_GROUPS.map(function(g){
+    const opts=g.types.filter(function(t){ return IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length; })
+      .map(function(t){ return '<option value="'+escHtml(t)+'">'+escHtml(longName(t))+' ('+fmt(IDX_BY_TYPE[t].length)+')</option>'; }).join("");
+    return opts?'<optgroup label="'+escHtml(g.label)+'">'+opts+'</optgroup>':"";
+  }).join("");
+  if(was) sel.value=was;
+}
 function pickRandom(a){ return (a&&a.length)?a[Math.floor(Math.random()*a.length)]:-1; }
 
 /* Cells the community has identified, from the backend. Cached for the session -- it is a whole-
@@ -2096,6 +2144,11 @@ function buildOrganelleFilterUI(){
 function buildIdentityFilterUI(){
   const box=document.getElementById("filterIdentity"); if(!box)return;
   fetchHjumpIdentities().then(function(){
+    /* The identities are in, so a community-resolved microglia/opc can now be counted under
+       Microglia or OPC. Rebuild the pools before drawing anything that reads them. */
+    rebuildTypePools();
+    renderTypeCheckboxes();
+    renderRandomTypeSelect();
     const counts={}; let unclassified=0;
     for(let i=0;i<N;i++){
       const cur=hjumpIdentityOf(i);
@@ -2489,14 +2542,7 @@ function renderContactRows(i,rows,thresholdNm,clusterNm){
       fail(""); jumpToIndex(pickRandom(list));
     });
   });
-  const sel=$("randomTypeSelect");
-  if(sel){
-    sel.innerHTML=TYPE_GROUPS.map(function(g){
-      const opts=g.types.filter(function(t){ return IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length; })
-        .map(function(t){ return '<option value="'+escHtml(t)+'">'+escHtml(longName(t))+' ('+fmt(IDX_BY_TYPE[t].length)+')</option>'; }).join("");
-      return opts?'<optgroup label="'+escHtml(g.label)+'">'+opts+'</optgroup>':"";
-    }).join("");
-  }
+  renderRandomTypeSelect();
   const rt=$("randomOfType");
   if(rt) rt.addEventListener("click",function(){
     const t=(sel||{}).value; const pool=IDX_BY_TYPE[t]||[];
@@ -2695,15 +2741,7 @@ function buildFilterUI(){
   document.getElementById("filterTotal").textContent=fmt(N);
   /* Grouped exactly like the random-example dropdown, so the same families read the same way
      wherever cell types are listed on this page. */
-  types.innerHTML=TYPE_GROUPS.map(function(g){
-    const inner=g.types.filter(function(t){ return IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length; })
-      .map(function(t){
-        return '<label style="font-size:12px;display:flex;align-items:center;gap:6px">'
-          +'<input type="checkbox" class="ftype" value="'+escHtml(t)+'" style="width:auto"> '
-          +escHtml(longName(t))+' <span class="nsub">'+fmt(IDX_BY_TYPE[t].length)+'</span></label>'; }).join("");
-    return inner?'<div style="margin-bottom:8px"><div class="nsub" style="text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'
-      +escHtml(g.label)+'</div>'+inner+'</div>':"";
-  }).join("");
+  renderTypeCheckboxes();
   const lay=document.getElementById("filterLayers");
   const counts={}; for(let i=0;i<N;i++){ const l=filterLayerOf(i); counts[l]=(counts[l]||0)+1; }
   lay.innerHTML=LAYER_ORDER.map(function(l){
