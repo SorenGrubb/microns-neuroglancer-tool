@@ -1,0 +1,1946 @@
+<!doctype html>
+<html lang="en"><head><script>/* Theme FOUC guard -- 2026-08-09, light-mode feature. Must run BEFORE the <style> block below is
+   parsed/painted, which is why it's the very first thing in <head>, ahead of even the analytics
+   tag: without this, a returning visitor who picked light mode would see one dark-mode frame
+   flash (the default :root palette) before the second script further down applies
+   [data-theme="light"]. Kept deliberately tiny and dependency-free (no access to anything else in
+   the page yet) -- see setTheme()/toggleTheme() later in the body for the full theme module this
+   pairs with, which both read/write the SAME "ujump_theme" localStorage key. */
+try{if(localStorage.getItem("ujump_theme")==="light")document.documentElement.setAttribute("data-theme","light");}catch(_fe){}
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>&lambda;Jump &mdash; Lee16, mouse V1 serial-section TEM</title>
+<style>
+/* ---------------------------------------------------------------------------------------------
+   THEME ARCHITECTURE (2026-08-09, light-mode feature).
+
+   Every color used anywhere in this file's OWN chrome (not Neuroglancer's/MICrONS's data colors
+   -- see the note below) should be one of the custom properties declared here, referenced via
+   var(--x) -- never a hardcoded hex/rgba literal. That's what lets a single attribute flip
+   ([data-theme="light"] on <html>, set by setTheme()/toggleTheme() below) re-skin the entire
+   page with zero duplicated CSS rules: the DARK block below is :root's unconditional default
+   (unchanged from before this feature -- every existing var name/value is preserved so nothing
+   that already depended on them breaks), and the LIGHT block is an override that only applies
+   when [data-theme="light"] is present, using the exact same variable NAMES with different
+   VALUES. No selector anywhere else in this file needs to know or care which theme is active.
+
+   New variables added alongside the original 11 (--ok/--danger/--gold/--inset/--shadow/--scrim):
+   these give a real CSS-variable home to colors that were previously hardcoded ad hoc in random
+   places (a literal #3fb950 success green, an unbacked #f85149 admin-restore red, an unbacked
+   #e8b923 "community/unverified" gold, a third hardcoded dark surface #0b0f14 used for inputs
+   distinct from --panel, and raw rgba(0,0,0,...) shadow/scrim values) -- see the hardcoded-color
+   fixes elsewhere in this stylesheet/script that now reference these instead.
+
+   OUT OF SCOPE, DELIBERATELY: the large cell-type/vasculature/organelle color palettes used
+   for chart series (PALETTE/LAYER_COLORS/CONN_PALETTE), Neuroglancer segmentColors, and the
+   excitatory/inhibitory/non-neuronal badge colors (--exc/--inh/--non themselves, though their
+   VALUES do change per theme below) are DATA-encoding colors with fixed scientific meaning, not
+   page chrome -- retinting them per-theme would make a cell type look like a different cell type
+   between light and dark mode, which is far worse than a chart merely looking slightly different.
+   Only the page's own text/background/border/status chrome is themed.
+
+   PLOTLY NOTE: Plotly cannot read CSS custom properties, so its chart layouts read --ink/--line
+   once via getComputedStyle() through liveThemeColors() (defined further down, a plain function
+   declaration so it's visible from every <script> tag in this file including initDashboardTab()'s
+   own separate scope -- see that function's own comment on why only function declarations, not
+   const bindings, cross that boundary). retintPlotlyCharts() (also below) re-applies live colors
+   to every already-rendered chart via Plotly.relayout() whenever the theme is toggled, so open
+   charts update in place without a full page reload. */
+:root{--bg:#0d1117;--panel:#161b22;--line:#2a313c;--ink:#e6edf3;--mut:#8b949e;--accent:#27e0b3;--accent-dim:#176b57;--on-accent:#06231c;--warn:#e3b341;--exc:#f0883e;--inh:#58a6ff;--non:#8957e5;--ok:#3fb950;--danger:#f85149;--gold:#e8b923;--inset:#0b0f14;--disabled:#21262d;--shadow:rgba(0,0,0,.3);--scrim:rgba(0,0,0,.45);--mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,monospace}
+/* LIGHT THEME -- chosen for readability on screen AND on paper: near-black text on white
+   (~16:1 contrast, well past WCAG AAA), every accent/status color independently checked to stay
+   readable at normal text size on white (all >=4.5:1), no pure-saturated neon hues (the dark
+   theme's --accent teal and --warn yellow in particular would be low-contrast if simply reused
+   on a white background, so light-mode equivalents are deliberately darker/desaturated
+   versions of the same hue family, not the same color faded). --shadow/--scrim are lighter too,
+   since a heavy black shadow that looks fine floating on a dark page reads as a printing error
+   or a grubby smudge on white. */
+:root[data-theme="light"]{--bg:#ffffff;--panel:#f6f8fa;--line:#d0d7de;--ink:#1f2328;--mut:#57606a;--accent:#0f766e;--accent-dim:#d7f3ee;--on-accent:#ffffff;--warn:#9a6700;--exc:#bc4c00;--inh:#0969da;--non:#8250df;--ok:#1a7f37;--danger:#cf222e;--gold:#9a6700;--inset:#ffffff;--disabled:#eaeef2;--shadow:rgba(140,149,159,.25);--scrim:rgba(140,149,159,.5)}
+/* Printing: force the light palette regardless of the on-screen theme (Søren may print while
+   working in dark mode) and strip decorations that waste toner / look wrong on paper without
+   adding a viewport media query -- this is the one deliberate exception to "no @media queries,
+   everything else uses flex-wrap" elsewhere in this file, since @media print concerns OUTPUT
+   MEDIUM, not responsive breakpoints, and there's no other way to react to "about to print". */
+@media print{
+  :root{--bg:#ffffff;--panel:#ffffff;--line:#c8ccd1;--ink:#000000;--mut:#3a3f45;--accent:#0f766e;--accent-dim:#eaf6f4;--on-accent:#ffffff;--warn:#7a5200;--exc:#8a3900;--inh:#07508f;--non:#6a3fb0;--ok:#136329;--danger:#a4001f;--gold:#7a5200;--inset:#ffffff;--disabled:#e5e5e5;--shadow:transparent;--scrim:transparent}
+  #themeToggleBtn,.tabbar,#undoToast,#submitToast{display:none!important}
+  body{padding:0}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5;padding:24px}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:20px;letter-spacing:.02em;margin:0 0 2px}.logo{font:800 36px/1 "Segoe UI",system-ui,-apple-system,sans-serif;letter-spacing:-.03em;margin:0 0 6px;display:inline-flex;align-items:baseline}.logo .mu{color:var(--accent);font-style:italic;transform:translateY(1px)}.logo .jm{color:var(--ink)}.logo::after{content:"\2197";font-size:18px;font-weight:700;color:var(--accent);margin-left:4px;transform:translateY(-8px)}
+.sub{color:var(--mut);font-size:13px;margin:0 0 20px}
+.tabbar{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 16px}
+.tabbtn{display:inline-block;font:inherit;font-size:12px;color:var(--mut);text-decoration:none;background:transparent;border:1px solid var(--line);border-radius:6px;padding:5px 11px;vertical-align:middle;cursor:pointer}
+.tabbtn:hover{color:var(--ink);border-color:var(--accent)}
+.tabbtn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+/* 2026-08-17 REWRITE (Søren: "I can't change the from dark to light color or log in to google...
+   I can't click the Filter and show or references or statistical dashboard unless i turn my phone
+   to landscape mode") -- #themeToggleBtn and #gameChip (the gamification account chip, see
+   gamifyStyle() far below) used to BOTH be position:fixed, pinned to the same top-right corner at
+   hardcoded top offsets (10px and 52px) chosen to "clear" each other's height. That only accounted
+   for #gameChip's SIGNED-IN height (~29px, a single pill) -- the SIGNED-OUT state (what a new user
+   on their phone actually sees, i.e. exactly when they're trying to click "sign in") is much taller
+   (chip text + the real Google Identity button rendered below it, ~80-90px total), which the 52px
+   offset never cleared. On a narrow phone in portrait, that overlap also fell across roughly the
+   same vertical band where the wrapped .tabbar buttons land (flex-wrap puts "Filter and
+   show"/"References"/"Statistics dashboard" on a second row that near-narrow screens push into
+   that same y-range), so all three reported symptoms were the SAME root cause. Landscape "fixed" it
+   only because the wider viewport let the tabbar fit on one row further from the collision.
+   Fix: stopped using position:fixed for both entirely -- #themeToggleBtn and #gameChip now live in
+   normal document flow inside .topbar/.topbar-right (see the HTML + gamifyInjectUI() below), which
+   wraps via flex like everything else in this file, so they can never overlap each other or the
+   tabbar again regardless of viewport width or which auth state is showing. */
+#themeToggleBtn{display:flex;align-items:center;gap:6px;font:inherit;font-size:12px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;cursor:pointer;box-shadow:0 2px 8px var(--shadow)}
+#themeToggleBtn:hover{border-color:var(--accent)}
+.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* 2026-08-17 (Søren: "Nothing happens when I click the dark/light button or the google login
+   button or any of the buttons in portrait mode [iPhone, Edge/WebKit]... If I shift to landscape
+   mode, I can click [most tab buttons] but still not the statistical dashboard button") -- moving
+   #themeToggleBtn/#gameChip out of position:fixed (see the comment above) fixed the VISUAL overlap
+   but not this: #gameChipSlot starts EMPTY and stays empty until gamifyInit() -> renderChip() fills
+   it in, which can take seconds on mobile (google.accounts.id.renderButton only becomes available
+   once Google's external gsi/client script finishes loading, retried up to 12x350ms=4.2s -- see
+   gamifyInit()). When it finally fills in (from 0px tall to ~30px signed-in, or ~80px signed-out
+   with the real Google button rendered below the "Sign in" text), every element below it on the
+   page shifts down -- a real, measurable layout shift, well AFTER the page's first paint. iOS
+   Safari/WebKit has a long-documented bug where touch targets can go stale relative to a late
+   shift like this (the page repaints in its new position, but touch hit-testing doesn't always
+   recompute until something forces a full reflow -- an orientation change is exactly such a
+   trigger, matching why rotating "fixed" everything above the fold but not elements whose own
+   position is STILL being resolved, like the wrapped-to-a-second-row Statistics dashboard tab).
+   Fix: reserve the chip's worst-case (signed-out) height from the very start via min-height, so
+   there's no late shift for iOS to desync touch targets against in the first place, regardless of
+   how long Google's script takes to load. Minor cosmetic cost: a little empty space below the pill
+   once signed in, traded for this being unconditionally correct rather than a guessed pixel value
+   tuned to one auth state. */
+#gameChipSlot{min-height:80px;display:flex;align-items:center}
+.tabpanel{display:none}
+.tabpanel.active{display:block}
+/* 2026-08 (Søren: opening the dashboard used to mean leaving ujump.html entirely -- a target=_blank
+   link to ujump_dashboard.html -- "not nice that you have to exit the url and lose the Google
+   login"). Now a 4th tab like the others, showing the SAME unmodified ujump_dashboard.html inline
+   via an iframe -- the page is never actually left, so there's nothing to lose. Kept as a separate
+   file (not inlined) specifically so this doesn't grow ujump.html itself; only a few lines of
+   wiring live here. Breaks out of .wrap's 760px column (full-bleed, standard vw/negative-margin
+   trick) since the dashboard's own multi-column Plotly grid wants real width -- squeezing it into
+   the narrow Jump/Filter column would work but cram every chart into one skinny stack. */
+/* 2026-08 follow-up: dropped the earlier full-bleed 100vw override for the dashboard tabpanel
+   (Søren: "I want the same width of the panels in the Dashboard as in the other tabs, also when
+   opening on a wide screen"). #dashPanel is now just a normal child of .wrap like every other
+   tabpanel, capped at the same 760px regardless of screen width. The dashboard's own .grid still
+   has max-width:1400px/auto-fit columns (harmless no-op inside a 760px parent -- auto-fit simply
+   settles on a single column, same as the rest of this narrow-column app) rather than being
+   rewritten, so nothing breaks if a wider container is ever wanted again later. */
+/* 2026-08 (Søren, after finding out ujump_dashboard.html is only ~55KB against ujump.html's own
+   multi-MB embedded-data footprint: "I think we should incorporate it fully into the µJump file")
+   -- superseded the iframe embed ([[ujump-dashboard-embed]]) with the dashboard's REAL markup/CSS/
+   JS pasted directly in. Scoped under #dashPanel (the tabpanel div itself) rather than trusting
+   cascade order, since several of the dashboard's own selector names collide EXACTLY with rules
+   ujump.html already has for its own unrelated UI (.card padding/margin differ; .logo/.tabbar/
+   .tabbtn are dropped outright below since that markup no longer exists at all here -- no more
+   duplicate-chrome problem to hide, there's simply only one). REPORT_ENDPOINT/LAYER_COLORS (the
+   dashboard script's own internal names) do NOT need renaming despite ALSO colliding by name with
+   ujump.html's own top-level `const`s of the same name -- the dashboard's entire script stays
+   wrapped in its own function scope (`initDashboardTab()`, see its own comment below), so its
+   internal REPORT_ENDPOINT/LAYER_COLORS shadow rather than collide with ujump.html's outer ones. */
+#dashPanel header{padding:0 0 10px;border-bottom:1px solid var(--line)}
+#dashPanel .subhead{color:var(--mut);font-size:13px;margin:0 0 16px;max-width:900px}
+#dashPanel .toolbar{display:flex;align-items:center;gap:12px;margin-top:2px;flex-wrap:wrap}
+#dashPanel button.refresh{background:var(--accent);color:var(--on-accent);border:none;border-radius:7px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer}
+#dashPanel button.refresh:hover{opacity:.9}
+#dashPanel button.refresh:disabled{background:var(--disabled);color:var(--mut);cursor:not-allowed}
+#dashPanel .status{font-size:12px;color:var(--mut)}
+#dashPanel .grid{max-width:1400px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(430px,1fr));gap:18px;padding:20px 24px 60px}
+#dashPanel .card{padding:14px 16px 6px;margin-bottom:0;min-width:0}
+#dashPanel .card.wide{grid-column:1/-1}
+#dashPanel .card h2{font-size:14px;margin:0 0 2px;font-weight:700;color:var(--ink)}
+#dashPanel .card .sub{font-size:11.5px;color:var(--mut);margin:0 0 8px;line-height:1.4}
+#dashPanel .plot{width:100%;height:360px}
+#dashPanel .plot.tall{height:430px}
+#dashPanel select.picker{font-size:12px;padding:3px 6px;border-radius:5px;border:1px solid var(--line);background:var(--inset);color:var(--ink);margin-left:6px}
+#dashPanel .placeholder{display:flex;align-items:center;justify-content:center;height:360px;color:var(--mut);font-size:13px;text-align:center;padding:0 30px;line-height:1.5}
+#dashPanel .footnote{font-size:10.5px;color:var(--mut);margin:4px 0 10px;line-height:1.4}
+#dashPanel a{color:var(--accent)}
+#dashPanel .topwrap{max-width:1400px;margin:0 auto;padding:8px 24px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
+label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-bottom:6px}
+.row{display:flex;gap:10px;flex-wrap:wrap}.coord{flex:1;min-width:90px}
+input[type=text],input[type=password],input[type=number],select,textarea{width:100%;background:var(--inset);border:1px solid var(--line);border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:15px;padding:9px 10px}
+textarea{min-height:64px;font-size:12px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.units{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.units button{background:var(--inset);border:1px solid var(--line);color:var(--mut);padding:6px 12px;border-radius:6px;font-family:var(--mono);font-size:13px;cursor:pointer}
+.units button.on{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+.toggles{display:flex;gap:16px;flex-wrap:wrap;margin-top:4px}
+.toggles label{display:flex;align-items:center;gap:7px;text-transform:none;letter-spacing:0;color:var(--ink);font-size:13px;cursor:pointer;margin:0}
+.hint{font-size:12px;color:var(--mut);margin:10px 0 0}
+.go{width:100%;margin-top:4px;background:var(--accent);color:var(--on-accent);border:none;padding:13px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;letter-spacing:.02em}
+.go:hover{filter:brightness(1.08)}
+.go.inline{width:44px;flex:0 0 44px;margin-top:0;padding:0;font-size:19px;line-height:1}
+.out{margin-top:14px;display:none}.out.show{display:block}
+.urlbox{font-family:var(--mono);font-size:11px;word-break:break-all;background:var(--inset);border:1px solid var(--line);border-radius:7px;padding:10px;max-height:120px;overflow:auto}
+.actions{display:flex;gap:10px;margin-top:10px}
+.actions a,.actions button{flex:1;text-align:center;text-decoration:none;border-radius:7px;padding:10px;font-size:14px;cursor:pointer;border:1px solid var(--line)}
+.copy{background:var(--inset);color:var(--ink)}
+details{margin-top:6px}summary{cursor:pointer;color:var(--mut);font-size:13px}details[open] summary{color:var(--ink);margin-bottom:10px}
+summary.card-toggle{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:0}
+details.card{padding-bottom:14px}details.card:not([open]){padding-bottom:18px}
+.err{color:var(--warn);font-size:12px;margin-top:8px;display:none}
+code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-size:12px}
+.nuc{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--inset);display:none}.nuc.show{display:block}.nuc.oob{border-color:var(--warn)}
+/* #cellPanelCard wraps err/nucpanel/idfpanel/out and lives OUTSIDE the tab panels (so it shows
+   under whichever tab is active -- Jump, Filter and show, or References -- instead of only being
+   reachable from the Jump tab). All four children default to display:none until a cell is
+   actually loaded, so without this the wrapping card would show as an empty padded box on first
+   load; :has() hides the card itself until either .nuc or .idf actually turns on. */
+#cellPanelCard{display:none}
+#cellPanelCard:has(.nuc.show),#cellPanelCard:has(.idf.show){display:block}
+.tag{display:inline-block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:3px 9px;border-radius:20px;font-weight:600}
+.tag.exc{background:rgba(240,136,62,.15);color:var(--exc);border:1px solid var(--exc)}
+.tag.inh{background:rgba(88,166,255,.15);color:var(--inh);border:1px solid var(--inh)}
+.tag.non{background:rgba(137,87,229,.15);color:var(--non);border:1px solid var(--non)}
+.tag.none{background:rgba(139,148,158,.12);color:var(--mut);border:1px solid var(--line)}
+.celltype{font-size:22px;font-weight:600;margin:8px 0 2px}.celltype small{font-size:14px;font-weight:400;color:var(--mut)}
+.celltype a{color:inherit;text-decoration:none;border-bottom:1px dashed var(--accent)}.celltype a:hover{border-bottom-style:solid}.celltype a .ext{font-size:14px;color:var(--accent);border-bottom:none}
+.meta{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:8px}
+.ids{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.idrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.idrow span.k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);min-width:74px}
+.idval{font-family:var(--mono);font-size:12px;background:var(--panel);border:1px solid var(--line);padding:3px 8px;border-radius:5px;word-break:break-all;cursor:pointer}
+.idval:hover{border-color:var(--accent)}
+.jump{background:var(--inset);border:1px solid var(--accent);color:var(--accent);border-radius:7px;padding:7px 11px;font-size:13px;cursor:pointer;margin-top:12px}
+.oobmsg{color:var(--warn);font-size:14px}
+.neigh{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+.neigh h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 6px}
+.nrow{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line)}.nrow:last-child{border-bottom:none}
+.nleft{display:flex;align-items:center;gap:9px;min-width:0}
+.dot{width:9px;height:9px;border-radius:50%;flex:none}.dot.exc{background:var(--exc)}.dot.inh{background:var(--inh)}.dot.non{background:var(--non)}.dot.none{background:var(--mut)}
+.ntype{font-weight:600;font-size:14px}.nsub{font-family:var(--mono);font-size:11px;color:var(--mut)}
+.njump{background:var(--inset);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;flex:none}.njump:hover{border-color:var(--accent);color:var(--accent)}
+.idcta{margin-top:14px;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--inset);display:flex;flex-direction:column;gap:10px}
+.idcta.warn{border-color:var(--warn)}
+.idcta-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.idcta-top span{font-size:13px;color:var(--ink)}
+.idcta.warn .idcta-top span{color:var(--warn);font-weight:600}
+.idcta-search{border-top:1px dashed var(--line);padding-top:10px}
+.idcta-search .leaf-search label{margin-bottom:4px}
+/* Classification history panel (one card per historical identity change, chronological). Reuses
+   .tag's pill shape for the source-type badge (own/community/verification tag colours already
+   established elsewhere in this file) rather than inventing new colours per source. */
+.chist-panel{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.chist-panel h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}
+.chist-row{border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin-bottom:8px}
+.chist-row:last-child{margin-bottom:0}
+.chist-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.chist-change{font-size:13px;font-weight:600}
+.chist-change .old{color:var(--mut);font-weight:400;text-decoration:line-through}
+.chist-src{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:20px;font-weight:600;white-space:nowrap}
+/* color-mix() (2026-08-09, light-mode fix) rather than a hardcoded rgba() alpha wrapper -- CSS
+   can't apply an alpha channel to a custom property's hex value any other way, and a fixed rgba
+   literal like the ones this replaced (rgba(240,136,62,.15) etc.) would silently stay the DARK
+   theme's tint forever even after switching to light mode, since it's not derived from var(--exc)
+   at all. color-mix(in srgb, var(--x) N%, transparent) always re-derives from the CURRENT theme's
+   color. Well-supported in every evergreen browser by 2026. */
+.chist-src.microns_original{background:color-mix(in srgb,var(--mut) 12%,transparent);color:var(--mut);border:1px solid var(--line)}
+.chist-src.community{background:color-mix(in srgb,var(--exc) 15%,transparent);color:var(--exc);border:1px solid var(--exc)}
+.chist-src.verification{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)}
+.chist-src.manual_revision{background:color-mix(in srgb,var(--inh) 15%,transparent);color:var(--inh);border:1px solid var(--inh)}
+.chist-src.undo{background:color-mix(in srgb,var(--exc) 8%,transparent);color:var(--mut);border:1px dashed var(--mut)}
+.chist-src.admin_restore{background:color-mix(in srgb,var(--danger) 12%,transparent);color:var(--danger);border:1px solid var(--danger)}
+.chist-meta{font-family:var(--mono);font-size:11px;color:var(--mut)}
+.chist-cert{font-family:var(--mono);font-size:11px;color:var(--ink);margin-top:3px}
+.chist-comment{font-size:12px;color:var(--ink);margin-top:5px;padding:6px 9px;background:var(--inset);border-radius:6px;font-style:italic}
+.chist-empty{font-size:12px;color:var(--mut);font-style:italic}
+.chist-type{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:20px;font-weight:600;white-space:nowrap;background:rgba(139,148,158,.12);color:var(--mut);border:1px solid var(--line)}
+.chist-status{font-family:var(--mono);font-size:11px;margin-top:3px}
+.chist-status.st-resolved{color:var(--ok,#3fb950)}
+.chist-status.st-unresolved{color:var(--exc)}
+.chist-status.st-recorded{color:var(--mut)}
+.chist-group{font-family:var(--mono);font-size:10px;color:var(--mut);margin-left:6px}
+/* Step-through review vote panel (Filter-and-show tab) -- deliberately compact (one line per
+   votable classification, at most 2 lines total) per "minimal clutter"; buttons are real
+   <button> elements sized generously enough for a touch tap target (unlike the smaller inline
+   ▲/▼ pills elsewhere in this file, e.g. .idvote/.ridvote at padding:0/1px 5-7px) since this is
+   the one vote surface meant to be used repeatedly, quickly, while reviewing many cells in a row
+   on any device. flex-wrap keeps it usable on narrow phone widths without a media query, same
+   convention as every other row in this file. */
+.stepvote-panel{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.stepvote-headline{font-size:13px;color:var(--ink);margin-bottom:8px}
+.stepvote-idcard{margin-bottom:10px}
+.stepvote-idcard .celltype{font-size:17px;margin:6px 0 2px}
+.stepvote-idcard .ids{margin-top:6px}
+.stepvote-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px}
+.stepvote-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.stepvote-row:last-child{margin-bottom:0}
+.stepvote-label{font-size:11px;color:var(--mut);white-space:nowrap}
+.stepvote-name{font-size:13px;font-weight:600;flex:1 1 auto;min-width:60px}
+.stepvote-net{min-width:22px;text-align:center;font-size:12px;color:var(--ink);font-family:var(--mono)}
+.stepvote{padding:5px 12px!important;font-size:14px!important;line-height:1}
+.idbtn{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent);border-radius:7px;padding:8px 13px;font-size:13px;cursor:pointer;white-space:nowrap}
+.idbtn:disabled{background:var(--disabled);color:var(--mut);border-color:var(--line);cursor:not-allowed}
+.idcta:not(.warn) .idbtn{background:var(--inset);color:var(--ink);border-color:var(--line)}
+.idf{margin-top:16px;border:1px solid var(--accent);border-radius:10px;padding:18px;background:var(--inset);display:none}.idf.show{display:block}
+.idf-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
+.idf-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
+.idf-crumbs{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:3px}
+.idf-close{background:none;border:none;color:var(--mut);font-size:20px;cursor:pointer;line-height:1}
+.idf-back{color:var(--accent);cursor:pointer;text-decoration:underline;font-size:12px;margin-bottom:8px;display:inline-block}
+.idf-q{font-size:15px;font-weight:600;margin-bottom:12px;line-height:1.4}
+.idf-opts{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.idf-opt{text-align:left;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:10px 12px;font-size:13px;cursor:pointer}
+.idf-opt:hover{border-color:var(--accent)}
+.idf-gal{border-top:1px solid var(--line);padding-top:12px}
+.idf-gal h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}
+.idf-cells{display:flex;flex-wrap:wrap;gap:14px}
+.idf-cell{width:120px}
+.idf-cell-name{font-size:12px;font-weight:600;margin-bottom:4px}
+.idf-thumbs{display:flex;gap:4px;flex-wrap:wrap}
+.idf-thumb{position:relative;width:56px;height:56px;border-radius:5px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--panel)}
+.idf-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.idf-thumb .mod{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#fff;font-size:8px;text-align:center;letter-spacing:.03em}
+.idf-thumb.nocoord{opacity:.5;cursor:default}
+.idf-empty{font-size:11px;color:var(--mut);font-style:italic}
+.idf-result{text-align:center;padding:6px 0 16px}
+.idf-result .celltype{margin:6px 0;font-size:22px;font-weight:600}
+.idf-flag{color:var(--warn);font-size:12px;margin-top:6px}
+.idf-actions{display:flex;gap:10px;margin-top:14px;justify-content:center}
+.idf-certainty{margin-top:14px}
+.cert-scale{display:flex;gap:8px;justify-content:center;margin-top:6px}
+.cert-opt{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--mono);font-size:14px;font-weight:600;cursor:pointer}
+.cert-opt:hover{border-color:var(--accent)}
+.cert-opt.sel{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.cert-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--mut);margin-top:4px;max-width:200px;margin-left:auto;margin-right:auto}
+.idf-submitnote{font-size:11px;color:var(--mut);margin-top:10px}
+.idbtn-submit{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+.idbtn-submit:hover{filter:brightness(1.08)}
+.idbtn-submit:disabled{background:var(--disabled);color:var(--mut);border-color:var(--line);font-weight:400;cursor:not-allowed;filter:none}
+.idbtn-submit:disabled:hover{filter:none}
+.cert-required{color:var(--warn);text-transform:none;letter-spacing:normal;font-weight:600}
+.hist-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
+.hist-chip{font-family:var(--mono);font-size:11px;background:var(--inset);border:1px solid var(--line);color:var(--mut);border-radius:6px;padding:4px 9px;cursor:pointer}
+.hist-chip:hover{border-color:var(--accent);color:var(--accent)}
+/* Navigation history (Back/Forward + Recently Viewed Cells) -- follows the same flex-wrap-based
+   responsiveness as every other row in this file (see .hist-row above) rather than a media query,
+   since nothing else in the app uses one either. */
+.navctrl{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.navctrl button{flex:none;padding:6px 12px;font-size:12px}
+.rv-panel{margin-top:10px}
+/* 2026-08-10 (Søren: "all the menus that are collapsable should have a little arrow to the left
+   of it, like 'Advanced: viewer + custom base state'") -- that one is a PLAIN <details>, so it
+   keeps the browser's own default disclosure triangle; every <summary> styled here previously lost
+   that native marker the moment display:flex was set on it (flex/grid display suppresses the
+   native ::marker in every engine that supports it). list-style:none + the -webkit-details-marker
+   rule below remove whatever's left of the native marker consistently across browsers, and this
+   ::before triangle replaces it -- same rotate-on-[open] behaviour as the native one, just under
+   our own styling control (colour, size) instead of each browser's own default. justify-content
+   changed from space-between to flex-start: with only a label as the summary's one real child,
+   space-between had no visible effect before, but it WOULD have shoved this new ::before arrow and
+   the label to opposite ends of the row instead of side by side -- flex-start plus the existing
+   gap:8px keeps them together, arrow-then-label, exactly like a native details marker. */
+.rv-panel summary{display:flex;align-items:center;justify-content:flex-start;gap:8px;cursor:pointer;list-style:none}
+.rv-panel summary::-webkit-details-marker{display:none}
+.rv-panel summary::before{content:"\25B6";display:inline-block;flex:none;font-size:10px;color:var(--mut);transition:transform .15s ease}
+.rv-panel[open]>summary::before{transform:rotate(90deg)}
+.rv-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:280px;overflow-y:auto}
+.rv-row{border:1px solid var(--line);border-radius:7px;padding:7px 10px;cursor:pointer}
+.rv-row:hover{border-color:var(--accent)}
+.rv-row.cur{border-color:var(--accent);background:var(--accent-dim)}
+.rv-main{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.rv-type{font-size:13px;font-weight:600}
+.rv-src{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);white-space:nowrap}
+.rv-sub{font-family:var(--mono);font-size:11px;color:var(--mut);margin-top:2px}
+.leaf-search{position:relative;margin-bottom:14px}
+.leaf-search-results{position:absolute;left:0;right:0;top:100%;margin-top:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;z-index:5;display:none;box-shadow:0 6px 16px var(--shadow)}
+.leaf-search-results.show{display:block}
+.leaf-search-item{padding:8px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line)}
+.leaf-search-item:last-child{border-bottom:none}
+.leaf-search-item:hover,.leaf-search-item.hi{background:var(--accent-dim);color:var(--accent)}
+.leaf-search-empty{padding:8px 12px;font-size:12px;color:var(--mut);font-style:italic}
+
+/* ===== λJump: blue accent =========================================================
+   Injected by build_ljump.py INSIDE this stylesheet, not as a second <style> block, so the
+   page keeps exactly one style element and any future edit to µJump's CSS flows through. */
+:root{--accent:#7aa2ff;--accent-dim:#1b2c52;--on-accent:#08122a}
+:root[data-theme="light"]{--accent:#1d4ed8;--accent-dim:#e6edfd;--on-accent:#ffffff}
+@media print{:root{--accent:#1d4ed8;--accent-dim:#eaf0fd;--on-accent:#ffffff}}
+</style>
+</head><body>
+<div class="wrap">
+
+<div class="topbar">
+<a href="#" id="logoHome" style="text-decoration:none;color:inherit;display:inline-block" title="Reload &lambda;Jump"><h1 class="logo"><span class="mu">&lambda;</span><span class="jm">Jump</span></h1></a>
+<div class="topbar-right">
+<button type="button" id="themeToggleBtn" title="Switch between dark and light mode" aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span> <span id="themeToggleLabel">Light</span></button>
+<div id="gameChipSlot"></div>
+</div>
+</div>
+<div class="tabbar" id="mainTabs" role="tablist">
+<button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
+<button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
+<button type="button" class="tabbtn" data-tab="references" role="tab" aria-selected="false">📚 References</button>
+<button type="button" class="tabbtn" data-tab="dashboard" role="tab" aria-selected="false" title="Charts built from this page's own data plus the community backend — the charting library loads only when you open this tab">📊 Statistics dashboard</button>
+</div>
+<script>document.getElementById("logoHome").href=location.pathname;</script>
+<script>
+/* ---------------------------------------------------------------------------------------------
+   Theme module -- 2026-08-09, light-mode feature. Plain FUNCTION DECLARATIONS throughout
+   (deliberately, not const arrow functions) so every one of these is visible from every other
+   <script> tag in the page, including initDashboardTab()'s own separate top-level scope further
+   down (see the "THEME ARCHITECTURE" comment above :root for why that boundary matters here) --
+   the dashboard/connectivity chart code below calls liveThemeColors() and retintPlotlyCharts()
+   directly by name, relying on that cross-tag visibility.
+
+   setTheme(mode)      -- applies "dark" or "light": sets/removes [data-theme] on <html>,
+                          persists to the SAME "ujump_theme" localStorage key the <head> FOUC
+                          guard reads, updates the toggle button's own label/icon, and retints
+                          any already-rendered Plotly charts in place.
+   toggleTheme()        -- flips between the two, called by the button's click handler.
+   currentTheme()        -- "light" or "dark", read from the live [data-theme] attribute (the
+                          single source of truth once the page has loaded -- NOT re-read from
+                          localStorage, so this stays correct even if a future caller changes
+                          the theme by some other path).
+   liveThemeColors()    -- {ink,line} read fresh from the live :root custom properties via
+                          getComputedStyle(); used to seed AXIS_FONT/BASE_LAYOUT (and their CONN_
+                          counterparts) with the CURRENT theme's colors at chart-creation time.
+   retintPlotlyCharts() -- walks every already-rendered Plotly div (Plotly.js tags each one
+                          "js-plotly-plot") and calls Plotly.relayout() to update its font/
+                          gridline colors in place -- this is what keeps OPEN charts in sync with
+                          a theme toggle without needing to touch or re-render any of the many
+                          individual chart-drawing functions elsewhere in the file (there are 20+
+                          Plotly.newPlot call sites; relayout-ing the live divs after the fact is
+                          far less invasive than changing every one of them). No-op, safely, if
+                          Plotly hasn't been loaded yet (nobody has opened the dashboard or
+                          connectivity panel this session) or no charts are on screen. */
+function liveThemeColors(){
+  var cs=getComputedStyle(document.documentElement);
+  return{ink:(cs.getPropertyValue("--ink")||"#e6edf3").trim(),line:(cs.getPropertyValue("--line")||"#2a313c").trim(),
+    panel:(cs.getPropertyValue("--panel")||"#161b22").trim()};
+}
+function retintPlotlyCharts(){
+  if(typeof Plotly==="undefined")return;
+  var c=liveThemeColors();
+  // hoverlabel.* covers Plotly's own tooltip box -- otherwise it stays whatever color it was
+  // created with (Plotly has no CSS-var awareness of its own), which is exactly the "tooltips"
+  // theming requirement for the dashboard/connectivity charts.
+  document.querySelectorAll(".js-plotly-plot").forEach(function(div){
+    try{Plotly.relayout(div,{"font.color":c.ink,"xaxis.gridcolor":c.line,"yaxis.gridcolor":c.line,
+      "hoverlabel.bgcolor":c.panel,"hoverlabel.font.color":c.ink,"hoverlabel.bordercolor":c.line});}catch(_rp){}
+  });
+}
+function currentTheme(){return document.documentElement.getAttribute("data-theme")==="light"?"light":"dark";}
+/* 2026-08-09 (Søren: "I meant that only the white theme will have a white background in
+   Neuroglancer and the dark theme keeps the dark background... so that it is consistent with the
+   light or dark theme") -- corrects the 2026-08-09 white-background feature, which originally set
+   BOTH Neuroglancer background keys to a hardcoded "#ffffff" unconditionally, regardless of
+   µJump's own theme (reasoning at the time: Neuroglancer opens in its own separate tab via
+   window.open, so it can't inherit this page's CSS -- true, but the fix should still key off
+   currentTheme() rather than hardcoding one color for every opened instance). "#000000" is
+   Neuroglancer's own default background (what every instance used before this feature existed),
+   not an invented dark value. Plain function declaration so it's callable from every script tag
+   that builds a Neuroglancer state, same cross-script-tag convention as currentTheme() itself. */
+function ngBgColor(){return currentTheme()==="light"?"#ffffff":"#000000";}
+function setTheme(mode){
+  var light=mode==="light";
+  if(light)document.documentElement.setAttribute("data-theme","light");
+  else document.documentElement.removeAttribute("data-theme");
+  try{localStorage.setItem("ujump_theme",light?"light":"dark");}catch(_st){}
+  var icon=document.getElementById("themeToggleIcon"),label=document.getElementById("themeToggleLabel"),
+      btn=document.getElementById("themeToggleBtn");
+  if(icon)icon.textContent=light?"☀️":"🌙";
+  if(label)label.textContent=light?"Light":"Dark";
+  if(btn)btn.setAttribute("aria-pressed",light?"true":"false");
+  retintPlotlyCharts();
+}
+function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
+(function(){
+  var btn=document.getElementById("themeToggleBtn");
+  if(btn)btn.addEventListener("click",toggleTheme);
+  // Sync the button's own label/icon to whatever the <head> FOUC guard already applied (it only
+  // sets the attribute, it doesn't know about the button since the button didn't exist yet).
+  setTheme(currentTheme());
+})();
+</script>
+
+<div class="tabpanel active" data-tabpanel="jump">
+<div class="card">
+<div class="units" id="units"><span style="font-size:12px;color:var(--mut)">Coordinates in voxels (<span id="unitres"></span>)</span></div>
+<label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; jump to it in the Lee16 volume and identify the nearest nucleus</span></label>
+<div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Find the nearest nucleus">&#8594;</button></div>
+<p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.
+  <button id="rand" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font:inherit">Show me a random nucleus</button></p>
+<p class="hint" style="margin-top:4px">Voxels here are <b>4 &times; 4 &times; 40&nbsp;nm &mdash; identical to
+&micro;Jump's minnie65</b>, so a coordinate means the same thing in both tools and nothing needs converting.</p>
+<p class="err" id="err"></p>
+</div>
+
+<div id="panel"></div>
+
+<div class="card">
+<label>About this dataset</label>
+<p class="hint" style="margin-top:0">Serial-section TEM of mouse <b>primary visual cortex</b> at
+4 &times; 4 &times; 40&nbsp;nm (Lee, Bonin, Reed, Graham, Hood, Glattfelder &amp; Reid,
+<a href="https://doi.org/10.1038/nature17192" target="_blank" rel="noopener">Nature 532, 370&ndash;374 (2016)</a>;
+released through <a href="https://neurodata.io/data/lee16/" target="_blank" rel="noopener">neurodata.io</a>
+under the <a href="https://opendatacommons.org/licenses/by/1-0/" target="_blank" rel="noopener">Open Data Commons Attribution Licence</a>).
+<span id="dscount"></span></p>
+
+<p class="hint"><b>What this volume has that no other tool here does: the leptomeninges.</b> A
+continuous sheet of flattened meningeal cells runs across the whole pial surface, with the
+subarachnoid space above it and a subpial vessel below, imaged at 4&nbsp;nm. &micro;Jump, &delta;Jump
+and &eta;Jump all start below the pia; &beta;Jump is hippocampus. The guided identification's
+pia / arachnoid branch exists for this dataset.</p>
+
+<p class="hint"><b>This dataset publishes no segmentation and no cell types.</b> There is no
+classifier to agree or disagree with, so here the community <i>is</i> the classifier &mdash; and
+there are no meshes, no 3D models, no PowerPoint export and no connectivity, because none of
+those can exist without a segmentation. What you get instead is the image, a nucleus table, and
+the decision tree.</p>
+
+<p class="hint"><b>Four things to know before you trust a number.</b>
+The public release is a <b>~33&nbsp;&micro;m slab</b> of a thicker imaged block &mdash; quote 33, never 150 &mdash;
+so about <b>27&nbsp;% of nuclei are cut by a face</b> and their volumes are underestimates (they are tagged).
+Nuclei come from automatic detection, so positions are imperfect &mdash; correct them from the panel.
+The detector is size-tuned near 7.5&nbsp;&micro;m and finds roughly <b>46&nbsp;% of the cells a direct
+count of mouse cortex predicts</b>
+(<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4972024/" target="_blank" rel="noopener">1.6&nbsp;&times;&nbsp;10<sup>5</sup>&nbsp;nuclei/mm&sup3;</a>),
+with the shortfall concentrated in <b>small glial nuclei</b> &mdash; so if you can see one it missed, add it.
+And rows tagged <b>dense nucleoplasm</b> are about <b>one in three not a nucleus at all</b>: in a pial
+vessel an erythrocyte is dense, oval, 6&ndash;8&nbsp;&micro;m across and as textured as nucleoplasm, and
+nothing the detector measures separates the two. Those are the rows most worth your attention.</p>
+
+<p class="hint"><b>Depth is measured, not fitted.</b> The pial surface is inside this volume and was
+traced directly, so every nucleus carries a real distance below it. Cells above the pia sit in the
+leptomeninges and carry a negative depth. The layer boundaries themselves are standard mouse V1
+values, not measured here.</p>
+</div>
+</div><!-- /jump tabpanel -->
+
+<div class="tabpanel" data-tabpanel="filter">
+<div class="card" id="filterCard">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Filter and show</div>
+<p class="hint" style="margin-top:6px">Every filter except community identity and organelles runs
+against the 488 nuclei embedded in this page &mdash; no network needed to preview or export.
+Identity and organelles read the community backend, since neither can live in a static page.</p>
+
+<div style="margin-top:14px">
+<label style="font-size:12px" title="Reads the Master cell list sheet -- the same current_identity a signed-in user's latest identification, discrepancy or confirmation last set. Fetched once per page load and cached.">Current community identity</label>
+<div id="fIdentityBox"></div>
+</div>
+
+<div style="margin-top:14px">
+<label style="font-size:12px" title="Cortical layer, from each nucleus's depth below the traced pial surface. Leptomeninges means above the pia.">Layer</label>
+<div id="fLayersBox"></div>
+</div>
+
+<div class="row" style="margin-top:12px;align-items:center;gap:8px">
+<label style="font-size:12px;flex:0 0 auto" title="Distance below the traced pial surface. Negative is above it, i.e. in the leptomeninges.">Depth below the pia (µm, negative = above)</label>
+<input type="text" id="fDepMin" placeholder="min" style="width:70px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:12px;color:var(--mut)">to</span>
+<input type="text" id="fDepMax" placeholder="max" style="width:70px;padding:4px 6px" inputmode="decimal">
+</div>
+
+<div style="margin-top:12px">
+<label style="font-size:12px" title="Which detector pass found the cell. NOT a cell type: 'dense' means electron-dense nucleoplasm, which is evidence towards endothelial, pericyte, microglial or meningeal — and is also what an erythrocyte looks like.">Detector pass</label>
+<select id="fPol" style="width:100%">
+<option value="">Not filtering by this</option>
+<option value="pale">Pale nucleoplasm — neurons, astrocytes, oligodendrocytes</option>
+<option value="dense">Dense nucleoplasm — perivascular and meningeal candidates (~1 in 3 is an erythrocyte)</option>
+</select>
+</div>
+
+<div class="row" style="margin-top:12px;align-items:center;gap:8px">
+<label style="font-size:12px;flex:0 0 auto">Equivalent diameter (µm)</label>
+<input type="text" id="fDiaMin" placeholder="min" style="width:70px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:12px;color:var(--mut)">to</span>
+<input type="text" id="fDiaMax" placeholder="max" style="width:70px;padding:4px 6px" inputmode="decimal">
+</div>
+
+<div class="row" style="margin-top:10px;align-items:center;gap:8px">
+<label style="font-size:12px;flex:0 0 auto">Nucleus volume (µm³)</label>
+<input type="text" id="fVolMin" placeholder="min" style="width:70px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:12px;color:var(--mut)">to</span>
+<input type="text" id="fVolMax" placeholder="max" style="width:70px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:11px;color:var(--mut)">(truncated cells are underestimates)</span>
+</div>
+
+<div style="margin-top:12px">
+<label style="font-size:12px" title="About 27% of nuclei are cut by the top or bottom of the ~33 µm slab; their volumes are underestimates.">Cut by a slab face</label>
+<select id="fTrunc" style="width:100%">
+<option value="">Not filtering by this</option>
+<option value="yes">Truncated — volume is an underestimate</option>
+<option value="no">Not truncated</option>
+</select>
+</div>
+
+<div style="margin-top:10px">
+<label style="font-size:12px" title="31 of the 822 sections are flagged as damaged — folded, torn or lost. 24 nuclei sit in or beside one.">In or beside a damaged section</label>
+<select id="fDamaged" style="width:100%">
+<option value="">Not filtering by this</option>
+<option value="yes">Yes — image may be unreliable here</option>
+<option value="no">No</option>
+</select>
+</div>
+
+<div style="margin-top:12px">
+<label style="font-size:12px" title="Structures the community has reported inside or around each nucleus. Matching is OR across every checked kind.">Organelles &amp; extracellular structures reported</label>
+<div id="fOrganellesBox"></div>
+</div>
+
+<div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
+<button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
+<button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
+</div>
+
+<div class="card" id="stepThroughCard" style="margin-top:14px;display:none">
+<label style="font-size:12px" title="Visits every matched nucleus exactly once, in a fixed order. Each step loads it into the Jump tab, same as clicking there directly. Progress is remembered in this browser for this exact set of matches.">Systematically step through matches</label>
+<p class="hint" id="stepCounter" style="margin-top:10px;font-weight:600;color:var(--ink)"></p>
+<div class="row" style="gap:8px;margin-top:6px">
+<button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
+<button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
+</div>
+<!-- Mount point for the REAL #panel, relocated here while stepping through matches
+     (core/stepthrough.js's "3. Full-panel relocation", configured via ljump_config.js's
+     UJ.cfg.stepthrough.nucPanelId="panel"). Not a separate, parallel identity display -- Søren,
+     on seeing bJump's version of that: "We should not make something parallel." -->
+<div id="stepNucMount"></div>
+<button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;font-size:12px;width:auto" title="Clear checked-progress for this exact set of matched nuclei">Reset progress</button>
+</div>
+
+<p class="hint" id="filterStatus" style="margin-top:10px"></p>
+</div>
+</div><!-- /filter tabpanel -->
+
+<div class="tabpanel" data-tabpanel="references">
+<div class="card">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">References</div>
+
+<p class="hint" style="margin-top:8px"><b>The dataset.</b> Lee, Bonin, Reed, Graham, Hood,
+Glattfelder &amp; Reid, &ldquo;Anatomy and function of an excitatory network in the visual
+cortex&rdquo; &mdash; <a class="ref" href="https://doi.org/10.1038/nature17192" target="_blank" rel="noopener">Nature 532, 370&ndash;374 (2016)</a>,
+<a class="ref" href="https://pubmed.ncbi.nlm.nih.gov/27018655/" target="_blank" rel="noopener">PMID&nbsp;27018655</a>.
+Public release at <a class="ref" href="https://neurodata.io/data/lee16/" target="_blank" rel="noopener">neurodata.io/data/lee16</a>,
+served from <code>s3://open-neurodata/lee/lee16/image</code> under the
+<a class="ref" href="https://opendatacommons.org/licenses/by/1-0/" target="_blank" rel="noopener">Open Data Commons Attribution Licence v1.0</a>
+&mdash; ODC-By, which is not the same instrument as CC-BY and carries its own attribution
+requirement. That release is <b>image only</b>: no segmentation, no meshes, no soma table, no cell
+types. Every nucleus in this tool was detected by &lambda;Jump's own notebook, not published by
+the authors.</p>
+
+<p class="hint" style="margin-top:14px"><b>The leptomeningeal branch.</b> The pia / arachnoid cell
+types in the guided tree come from
+<a class="ref" href="https://doi.org/10.1038/s41586-023-06740-y" target="_blank" rel="noopener">Pietil&auml; <i>et al.</i>, &ldquo;Molecular anatomy of adult mouse leptomeninges&rdquo;, Nature (2023)</a>.
+Worth reading before using them: the pial, pial-sheath, inner-arachnoid and reticular fibroblasts
+share one fibroblast ultrastructure and are separated mainly by <i>location</i>, not by any single
+feature visible in one section. Only the arachnoid barrier cell has a real single-section EM
+signature &mdash; continuous tight junctions. The tree says so at each step rather than implying a
+confidence the images cannot support. The dural border cell is excluded here entirely: the dura
+was never imaged in this volume.</p>
+
+<p class="hint" style="margin-top:14px"><b>Cell classification from ultrastructure.</b>
+<a class="ref" href="https://doi.org/10.1038/s41586-024-07765-7" target="_blank" rel="noopener">Elabbady <i>et al.</i>, &ldquo;Perisomatic ultrastructure efficiently classifies cells in mouse cortex,&rdquo; Nature 640, 478&ndash;486 (2025)</a>.</p>
+<p class="hint">Brain ultrastructure overview: <a class="ref" href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7930431/" target="_blank" rel="noopener">&ldquo;Brain Ultrastructure: Putting the Pieces Together,&rdquo; PMC7930431</a>.</p>
+<p class="hint">Neurovascular volume EM: <a class="ref" href="https://doi.org/10.3389/fcell.2022.849469" target="_blank" rel="noopener">&ldquo;Public Volume Electron Microscopy Data: An Essential Resource to Study the Brain Microvasculature,&rdquo; Frontiers in Cell and Developmental Biology 10, 849469 (2022)</a>.</p>
+<p class="hint">EM ultrastructure teaching atlas (organelle and immune-cell morphology &mdash; not a peer-reviewed source; use it to learn to recognise structures, not to cite a claim): <a class="ref" href="http://www.drjastrow.de/WAI/EM/EMAtlas.html" target="_blank" rel="noopener">Jastrow&rsquo;s EM Atlas</a>.</p>
+
+<p class="hint" style="margin-top:14px"><b>How many cells should be here.</b> The density this tool
+reports is about 46&nbsp;% of the 1.60&nbsp;&plusmn;&nbsp;0.43&nbsp;&times;&nbsp;10<sup>5</sup>
+nuclei per mm&sup3; counted directly across all cell types in mouse cortex
+(<a class="ref" href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4972024/" target="_blank" rel="noopener">&ldquo;Correlations of Neuronal and Microvascular Densities in Murine Cortex&rdquo;, PMC4972024</a>).
+The gap is not a mystery: the detector is size-tuned near 7.5&nbsp;&micro;m and glial nuclei run
+5&ndash;7, so this table under-counts glia. It is measured, documented and checked on every run
+rather than left as a silent bias.</p>
+
+<p class="hint" style="margin-top:14px"><b>Read these before quoting a number.</b> The slab is
+~33&nbsp;&micro;m thick, so ~27&nbsp;% of nuclei are cut by a face and their volumes are
+underestimates. 31 of the 822 sections are flagged as damaged and the 24 nuclei in or beside one
+are tagged. Detection is automatic and its dense-nucleoplasm pass runs at about 63&nbsp;% precision
+because erythrocytes are indistinguishable from dense nuclei on every feature it measures &mdash;
+so <b>do not quote a layer-1 or perivascular cell count from this tool</b> until the community has
+reviewed those rows. That review is what &lambda;Jump is for.</p>
+</div>
+</div><!-- /references tabpanel -->
+
+<div class="tabpanel" data-tabpanel="dashboard">
+<div class="card">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Statistics dashboard</div>
+<p class="hint" style="margin-top:6px">Charts built from the <span id="dashTotal"></span> nuclei embedded in this page, plus one bulk read of the community&rsquo;s current identifications (the same read the Filter tab&rsquo;s identity dropdown uses). The charting library only loads once this tab is opened.</p>
+<p class="hint" style="margin-top:6px">This dataset has no published cell types, so every chart is keyed on <b>current community identity</b> &mdash; a live consensus that can still change. The six most-identified names get their own bucket; anything else named folds into &ldquo;Other&rdquo;, and every nucleus nobody has classified yet is &ldquo;Unclassified&rdquo;.</p>
+</div>
+
+<div class="card"><label>Nuclei per community identity</label><div id="dIdentity" style="height:340px"></div></div>
+
+<div class="card"><label>Which detector pass found them</label>
+<p class="hint" style="margin-top:0">The dense pass runs at about 63&nbsp;% precision &mdash; roughly one dense row in three is an erythrocyte rather than a nucleus. A tall dense bar is where review is most worth doing, not a finding.</p>
+<div id="dPass" style="height:340px"></div></div>
+
+<div class="card"><label>Nucleus diameter, by community identity</label>
+<p class="hint" style="margin-top:0">Detection is size-tuned near 7.5&nbsp;&micro;m, so the small end of every distribution here is thinner than the tissue really is &mdash; see the References tab.</p>
+<div id="dDiameter" style="height:340px"></div></div>
+
+<div class="card"><label>Community identity, by cortical layer</label><div id="dIdentityLayer" style="height:400px"></div></div>
+
+<div class="card"><label>Nearest-neighbour identity composition</label>
+<p class="hint" style="margin-top:0">For each identity (rows), what its single nearest neighbouring nucleus turns out to be (columns), as a percentage of that row. All 488 nuclei are used &mdash; no sampling needed at this size.</p>
+<div id="dIdentityNeighbor" style="height:400px"></div></div>
+
+<div class="card"><label>Depth profile, by community identity</label>
+<p class="hint" style="margin-top:0">Each panel is one identity&rsquo;s own distribution as a percentage of that identity, so a rarely-used identity is still readable next to a common one. Depth is measured from the traced pial surface; negative is above it.</p>
+<div id="dIdentityDepthProfile"></div></div>
+
+</div><!-- /dashboard tabpanel -->
+
+<div class="card" style="margin-top:18px">
+<p class="hint" style="margin:0">Image data: Lee <i>et al.</i> (2016), released via
+<a href="https://neurodata.io/data/lee16/" target="_blank" rel="noopener">neurodata.io</a> under the
+<a href="https://opendatacommons.org/licenses/by/1-0/" target="_blank" rel="noopener">Open Data Commons Attribution Licence v1.0 (ODC-By)</a>.
+Nucleus detections, depths and layer assignments are &lambda;Jump&rsquo;s own and are not part of that release.</p>
+</div>
+
+</div><!-- /wrap -->
+
+<script>
+/* ── λJump configuration ────────────────────────────────────────────────────────────────
+   Everything per-dataset lives here; core/*.js is shared verbatim with µJump, ηJump, δJump
+   and βJump.
+
+   Lee et al. (2016), mouse primary visual cortex, serial-section TEM. The public release at
+   s3://open-neurodata/lee/lee16/ is IMAGE ONLY -- no segmentation, no meshes, no soma table,
+   no cell types. Everything this page can offer is built from the nucleus table λJump's own
+   Colab notebook produced, and everything it cannot offer is absent rather than stubbed. */
+window.UJ = window.UJ || {};
+UJ.cfg = {
+  id: "ljump",
+  label: "Lee16 — mouse V1 serial-section TEM",
+  /* 4/4/40 nm, IDENTICAL to minnie65. The one dataset in this family that needs no unit
+     conversion at all: a coordinate typed here means the same thing it means in µJump. */
+  res: [4, 4, 40]
+};
+var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
+UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
+UJ.toVox = function(p){ return [p[0]/UJ_RX, p[1]/UJ_RY, p[2]/UJ_RZ]; };
+
+/* NO UJ.cfg.mesh, and that is a statement rather than an omission.
+   ------------------------------------------------------------------------------------
+   Lee16 publishes no segmentation, so there are no segment IDs, no meshes, no root IDs and
+   no synapses. Every surface that depends on them -- the 3D viewer, mesh-computed volume,
+   GLB and PowerPoint export, Cell contacts, root-ID proposals, the Connectivity panel -- is
+   REMOVED from this page rather than left present and broken. core/mesh.js is deliberately
+   not loaded by build_ljump.py either; ljumpcheck.js asserts that it isn't, so a future
+   copy-paste from βJump cannot quietly reintroduce a mesh button that can never work.
+
+   If nucleus meshes are ever generated from the notebook's own label volumes and hosted
+   statically, this is where their config goes, and core/mesh.js comes back with it. */
+
+/* Guided identification.
+   ------------------------------------------------------------------------------------
+   startNode "q1", the cortical-location question, and for once that question is exactly
+   right: this volume runs from the leptomeninges down through layer 4, and "Leptomeninges"
+   is one of q1's own options leading to the pia/arachnoid branch. That branch is the reason
+   this dataset is worth building a tool around -- see the References tab.
+
+   ljump_logic.js overrides q1 itself to drop Layer 5, Layer 6 and White matter, none of
+   which exist in a 435 µm block. Dropping them from the QUESTION is not enough on its own,
+   which is what excludeLeaves below is for. */
+UJ.cfg.tree = {
+  panelId: "idbox", startNode: "q1", modal: false, suggestionSource: null,
+  /* core/tree.js's "already know it? jump straight there" search box (searchLeaves()) is a
+     SEPARATE entry point that bypasses the tree path entirely and searches ALL of
+     core/ontology.js's shared LEAF_NAMES by substring. Typing "layer" there would surface
+     every L5/L6 subtype verbatim -- meaningless in a volume that stops in layer 4, and a
+     route to attaching a layer-6 identity to a layer-2/3 nucleus.
+
+     dural_border_cell is excluded for a different and equally concrete reason: the dura is
+     not in this volume. The public release is a ~33 µm slab whose top face cuts through the
+     subarachnoid space; the dura mater was never imaged. Offering the leaf would invite an
+     identity nobody could possibly verify here. */
+  excludeLeaves: ["exc_l5_it", "exc_l5_et", "exc_l5_np", "exc_l6_it", "exc_l6_ct",
+                  "dural_border_cell"]
+};
+/* suggestionSource:null removes core/tree.js's "no <X> suggestion on file" crumb. µJump's
+   default is "MICrONS"; printing that here would be a false statement about the dataset --
+   Lee16 has no classifier to have an opinion. */
+
+/* Own localStorage keys, so µJump and λJump opened in the same browser never share (and
+   corrupt) each other's remembered tab or step-through progress. */
+UJ.cfg.tabs = { lsKey: "ljump_active_tab", urlParam: "tab" };
+UJ.cfg.stepthrough = { lsKey: "ljump_stepthrough_v1", nucPanelId: "panel" };
+
+/* Same Apps Script deployment as every other page -> one OAuth consent, one sign-in, one
+   points total and one level that follows the user between tools. ds:"ljump" routes writes
+   to the λJump spreadsheet once its id is pasted into Datasets.gs and the script REDEPLOYED
+   (Deploy -> Manage deployments -> edit -> New version). Until then the page loads and reads
+   fine and any write returns a readable "spreadsheet has not been created yet" message --
+   check <endpoint>?whoami=1 to see what is actually deployed rather than what the editor
+   shows. */
+UJ.cfg.backend = {
+  endpoint: "https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec",
+  clientId: "240227117082-gmiv0s37qdqngo3t3ph0lmthg4t4t47p.apps.googleusercontent.com",
+  ownerEmail: "",
+  ds: "ljump"
+};
+
+/* The viewer.
+   ------------------------------------------------------------------------------------
+   ONE image layer, no segmentation. Verified 2026-08-21 loading in ngl.microns-explorer.org
+   with no CORS error, no token and no login -- which is why that viewer is used here rather
+   than neuroglancer-demo.appspot.com: the s3:// source resolves without credentials through
+   the MICrONS deployment's own proxy configuration, and this is the same viewer µJump and
+   δJump already send people to. */
+UJ.cfg.viewer = {
+  base: "https://ngl.microns-explorer.org/",
+  em:   "precomputed://s3://open-neurodata/lee/lee16/image"
+};
+
+/* Dataset provenance, rendered into the About and References panels and into every export.
+   ODC-By, NOT CC-BY -- the Open Data Commons Attribution Licence. It carries an attribution
+   requirement of its own and is a different instrument from Creative Commons; do not
+   paraphrase it as "CC-BY" anywhere in this tool. */
+UJ.cfg.dataset = {
+  name: "Lee16",
+  citation: "Lee, Bonin, Reed, Graham, Hood, Glattfelder & Reid (2016), " +
+            "“Anatomy and function of an excitatory network in the visual cortex”, " +
+            "Nature 532, 370–374",
+  doi: "https://doi.org/10.1038/nature17192",
+  portal: "https://neurodata.io/data/lee16/",
+  licence: "ODC-By v1.0",
+  licenceUrl: "https://opendatacommons.org/licenses/by/1-0/",
+  /* The served volume is 163,840 x 163,840 x 822 voxels = 655 x 655 x 32.88 µm, of which only
+     ~454 x 447 µm is tissue; the rest is black padding. The imaged block was thicker than the
+     33 µm released here. NEVER quote 150 µm for this dataset -- Søren's explicit call
+     2026-08-21, and the reason the note is carried in the data embed as well as here. */
+  slabUm: 32.88,
+  note: "The public release is a ~33 µm slab of a thicker imaged block. " +
+        "Quote 33 µm, never 150."
+};
+
+document.addEventListener("DOMContentLoaded", function(){
+  var e = document.getElementById("unitres");
+  if (e) e.innerHTML = UJ_RX + "·" + UJ_RY + "·" + UJ_RZ + " nm";
+});
+
+</script>
+
+<script src="core/gamify.js"></script>
+<script src="core/ontology.js"></script>
+<script src="core/panel.js"></script>
+<script src="core/tree.js"></script>
+<script src="core/report.js"></script>
+<script src="core/stepthrough.js"></script>
+<script>
+/* Tab-bar switching -- see core/stepthrough.js's header comment. Called here (not right after
+   the tab bar markup near the top of <body>) because UJ.cfg.tabs (in CONFIG, above) and
+   core/stepthrough.js (the tag right above this one) have both already loaded by the time this
+   tag runs, in document order. */
+UJ.stepthrough.wireTabs();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<script type="application/json" id="ljumpdata">{"dataset": "lee16", "source": "s3://open-neurodata/lee/lee16/image", "licence": "ODC-By v1.0", "note": "~33 um public release of the Lee et al. 2016 volume; the imaged block was thicker. Do not quote 150 um.", "res_nm": [4, 4, 40], "size_vox": [163840, 163840, 822], "tissue_box": {"x0": 30720, "x1": 144128, "y0": 19200, "y1": 131072, "z0": 0, "z1": 822}, "N": 488, "layers": ["leptomeninges", "layer 1", "layer 2/3", "layer 4"], "ID": "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", "X": "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", "Y": "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", "Z": "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", "V": "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", "DIA": "uAIAAPUCAAAOAwAALAMAAPACAAAmAwAAJwMAACgDAAA/AwAA/AIAADIDAAB0AwAAMwMAAEMDAABmAwAARgMAAPgCAABEAwAAswIAADADAABtAgAAzgIAABADAAByAwAA9gIAAIwDAAAZAwAADAMAAPsCAACZAgAAiwIAAEEDAAC4AgAANAIAANECAADzAgAAoAIAAKkCAACOAgAArgIAACEDAAD+AgAAVwIAACcCAADAAgAAuAIAAEkCAADKAgAAYAMAAJMCAABVAwAASAMAAOsCAAAOAgAAjQIAAKQCAACtAgAAggIAAL8CAAB9AwAAIwMAAIICAAC0AgAAYgMAAHMDAAAZAgAAJQIAAEoDAAC5AgAAYgIAAK4CAADzAgAApQIAAJkCAABpAwAAAAMAAFcDAADsAgAA7wIAAMQDAADtAgAA4AMAABICAAA9AwAAbQMAAAsDAACmAwAAywIAAFwDAAC+AwAAfAMAAHoDAAB7AgAAZAMAAKECAABxAgAA1gIAAPkCAABFAwAA+QIAAJoDAAB5AwAAkgMAAL0DAADNAgAAkwIAAL0CAABJAwAAnAMAAHEDAAABAgAA9wIAAPQDAAA0AwAAlAMAAHYCAAAmAgAAggMAAMsDAAAoAgAASAMAAEMDAADjAgAAoAIAAD4DAAD7AgAASgMAAJsDAAC6AwAAdwMAAFUDAABTAgAA1wMAADgDAACvAwAA8wIAAAcEAAA9AwAAVgIAAGYDAABwAwAABQMAAJYDAAB/AwAAKAIAAKwDAACCAwAAYQMAAOYDAAByAwAAbgMAAKADAADDAwAA+gIAAKYCAAC5AwAA2wIAAOYCAADfAgAAlwMAAMsCAAC3AwAA6gMAAMYDAAAQAwAAlgMAAIADAAB7AgAAzgMAAM0DAABmAwAAwwMAAEUDAAClAgAALQMAAHADAACDAgAA3gMAAM0CAACaAgAAhQMAAP4CAAA6AwAAmQMAAJ8DAACyAwAAnwMAAMwDAACSAgAARgMAAG4CAACcAwAAjAMAAKoDAADIAgAAeAIAAKICAACGAgAAzQMAACwDAADeAwAAtgMAAD0CAACUAwAAbAMAANIDAABcAwAA7gMAAFkDAACBAwAAYwMAAGQDAABeAwAArQIAAJkCAAA1AgAAdAIAAGoCAABvAwAAzgMAAG4CAACNAwAAqAMAAK4DAACjAwAAUQIAAIEDAABuAwAAtQMAAKkCAADRAgAAugMAAKsDAAC0AwAAowMAAKkDAAAwAwAAsgIAAIwDAAB9AgAAtwIAAFwDAACXAwAAsQMAAOcDAAB2AwAAqgMAAFwCAACUAwAAtgMAAKwCAAB5AgAAZQMAAMQDAABtAwAAewIAAJcCAABDAwAAFAMAAN0DAACiAgAApAMAAMgDAAC7AgAAoQMAAMsCAADgAwAAOwMAABkDAACGAwAArQMAAMEDAAAiAwAAjQMAAHUCAACpAwAAxwMAAGwDAACzAgAApAIAAJgDAAB4AwAA1gMAALsDAABeAwAAYAMAAKUCAADaAwAA0AIAAOMCAACnAwAAvgMAAOgCAAB8AwAAygIAAHUDAAB/AwAARgMAAIwDAADyAwAA7AMAAIoDAABJAwAA5gIAAMUDAACcAwAAkAMAAKwDAAAUAwAApQMAACsCAADAAwAAPQIAAM8DAABEAwAAMwMAANwCAAB+AwAACAMAAFUDAACqAwAAvgMAAK8DAACCAwAAaQMAAHUCAAAQAwAAsQMAACYDAACeAwAALQIAACwCAABCAwAAbAMAAMcDAADJAwAArwMAALADAAB3AwAA+wIAAOcCAACqAwAAWwMAALkDAABKAwAA3wMAALQDAADrAwAAYgMAAC4DAADgAwAAkwMAAC4DAACkAgAA3QIAAOYDAACqAgAArQMAAIMDAAD3AwAAWwMAALwDAACwAwAAvgMAAAsDAACbAgAAUgMAAMADAADRAwAAUAMAAOUDAACsAwAAugMAALoDAADDAwAA1gMAAA0DAADqAgAA2QIAAI0DAABlAwAAKQMAALwDAACKAgAAaAMAAN8CAAB0AwAA7gIAALIDAACiAwAASwMAAKUDAAAlAgAAiAMAAP8CAADXAgAAtwIAANoCAACOAwAAjwMAAE4DAADnAwAAUAMAAMwCAADkAgAAZQMAAO4CAADoAgAA1QIAAEwDAACoAwAApAMAAOgCAAAKAwAAnQMAAMECAABhAwAAlAMAACEDAAD7AgAAagMAAPkCAADeAgAAiAIAALIDAABOAgAA8wMAAIoDAABlAwAAvAMAAAsDAACqAwAAFAMAAJcDAACRAwAAqwMAAI4CAACaAwAAqQMAAFcDAAAeAwAA3wIAAK8CAAB1AwAAeQMAABADAACDAwAAIAMAALwCAABqAwAANQMAANYCAAB4AwAAggIAAEkDAADKAgAAnwMAAAADAACbAwAApwMAAG4DAAAgAwAAnQMAADkDAACFAwAAYAMAAOMCAABTAgAAewMAAAwDAACLAwAAUgMAAAgDAACaAwAArQMAAFcDAAC0AwAAQgMAACMDAAAfAwAAMgMAAHIDAABjAwAAewMAABYDAABUAwAAUQMAAE0DAAA=", "DEP": "XgAAAG0AAAAlAAAAVAAAAIgAAABTAAAAnP///1oAAABlAAAAwv///0AAAABWAAAAVgAAAJYAAAA9AAAAagAAADAAAABwAAAASQAAAFMAAABjAAAA+QAAANYAAADJAAAAOgEAAG8BAACLAQAAOAEAAHcBAACTAQAAkAEAAKIBAADCAQAA4QEAAM4BAACyAQAACwIAAK0BAADOAQAA9gEAAAUCAAAYAgAAHQIAAGgCAABfAgAAiQIAABwDAACGAgAAhQIAAHICAACJAgAAyQIAAIQCAADXAgAAngIAAMECAAADAwAA1gIAALYCAABkAwAAqwMAAKUDAABTAwAAowMAAP4DAAC6AwAAgAMAANwDAAA1BAAA9wMAAH4EAACYBAAASgQAAJYEAACxBAAAwwQAAEUFAABsBQAA6AQAACwFAABrBQAAFgUAAOkEAADgBQAAcgUAAJUFAABqBgAA8QUAABkFAAAZBgAAngUAAM0FAACsBQAApwUAAAgGAAAEBgAARAYAABMGAABxBgAAGQYAAJ4FAAASBgAA+AUAAJYGAAAoBgAATwYAAA4GAAByBgAAcgYAAKwGAAAUBgAAPwYAAIwGAADoBQAATwYAAFIGAACYBgAAhgYAAO0GAACpBgAAmQYAAIwGAAC6BgAAmQYAAEgGAAB4BwAAoAYAAD4GAADSBgAAWQYAAMIGAADRBgAAQgcAAGQHAAAOBwAACQcAALkGAABrBwAA4gYAACsHAAAPBwAAggYAAKIGAAAaBwAAswYAABIHAADXBgAA2QYAAA0HAACpBgAABQcAADMHAAA0BwAADQcAAPIGAAADBwAABAcAAEQHAABSBwAAugYAAF8HAABxBwAAqAcAAFoGAABGBwAAKgcAAN8HAABlBwAAGAcAAAQHAABBBwAATwcAAGQHAACZBwAALQcAAKsHAAAcBwAA1wcAAEIHAAAfBwAA2QcAAHUHAACuBwAAAAgAAK8HAADkBwAACggAALkHAAArBwAAEAgAANQHAADjBwAAwAcAAKAHAABSBwAAXgcAAGkHAACeBwAA3AcAAKsHAADOBwAA2QcAAA4IAACXBwAA8QcAAJAHAAAKCAAAvwcAAJYIAADDBwAA4gcAABAIAAAXCAAAEAgAAKIHAAB6BwAAuwcAAIcHAAATCAAAcggAAAgIAABwCAAAZggAAPYIAAA4CAAAwgcAAH0IAAADCAAATQgAAMkHAACCCAAAdAgAAI4IAABCCAAAlggAABAJAADICAAAEwgAAOYIAABrCAAAJwgAALcIAADhCAAAqQgAABoJAACdCAAA8wgAAP4HAAClCAAAgQgAAEwIAABDCQAAwwgAAJUIAABECQAAMAgAAF4IAADPCAAAvwgAAE0JAAAfCQAAFwkAANEIAAA/CQAAcwkAAIoIAABpCQAAQgkAAOoIAACZCQAAPQkAAN0IAAAaCQAARwkAAMoIAABdCQAANwkAAEkJAADaCAAAlgkAAKUJAADMCQAAVQkAAFYJAADpCQAAWwkAAAAJAAAfCQAASAkAAIwJAACXCQAAZQkAALAJAABgCQAAHAkAAHAJAAArCgAAEQoAAI0JAADcCQAAvwkAAP4JAAC4CQAAgwkAAOEJAAD+CQAARwoAABUKAADLCQAAwwkAACMKAAAcCgAAiwkAAFsKAAB/CgAAJgoAAJQKAABYCgAA6QkAAEkKAABLCgAAJAoAAGQKAAAxCgAA/wkAACAKAAA1CgAATQoAAEQKAAD8CgAAdAoAAEoKAAB9CgAAsQoAALkKAADRCgAA/gkAANMKAADpCgAAggsAAKsKAAD2CgAAAQsAANkKAABZCwAACwoAACoLAAD+CgAAvwoAACcLAAC/CwAAqwsAAEILAAA8CwAAagsAAFYLAABlCwAAYQsAACYLAABlCwAAPwsAAGcLAACNCwAAIQwAANQLAABlCwAAqgsAAK4LAABXDAAAwgsAAMQLAABIDAAAXQwAABgMAADdCwAA9gsAAPALAAAcDAAAtgsAAJ4LAAAzDAAAPQwAAIEMAADfDAAAFwwAAE0MAAD1CwAAVwwAAGMMAABnDAAADQwAAHwMAADVDAAAawwAAIgMAABxDAAAqgwAAEUMAADWDAAA9wwAAKUMAACuDAAAFg0AAM0MAAAADQAApQwAAKkMAADzDAAApQwAAOoMAAAbDQAAMg0AAOQMAADGDAAArQwAAL4MAAAhDQAAdA0AAKcNAABLDQAAJQ0AAK8NAABBDQAAeg0AAD0NAAAWDQAAqA0AAC4NAABsDQAAeA0AADINAAC/DQAA1w0AAK4NAADADQAAhA0AACENAACeDQAAuw0AAIgNAABvDQAAmQ0AAI4NAAAUDgAAGA4AAOYNAADsDQAApg0AAGgNAAD6DQAAqg0AAN4NAACTDgAAug0AAFsOAAAgDgAA5Q0AAJsOAABwDgAAXw4AAMYOAACADgAAjA4AAKcOAACADgAA3g4AAIMOAABfDgAAlA4AALMOAADfDgAAzA4AAMIOAADsDgAAzA4AADgPAACZDwAAow8AACEPAABfDwAABRAAAFwPAADtDwAA7w8AALsPAAAPEAAACBAAAKYQAAA=", "L": "AQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAAAAAAEAAAABAAAAAAAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAIAAAABAAAAAQAAAAEAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAgAAAAIAAAACAAAAAwAAAAIAAAACAAAAAgAAAAIAAAADAAAAAgAAAAIAAAADAAAAAwAAAAIAAAACAAAAAgAAAAIAAAADAAAAAgAAAAIAAAADAAAAAwAAAAMAAAADAAAAAgAAAAMAAAACAAAAAwAAAAMAAAADAAAAAgAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAADAAAAAwAAAAMAAAA=", "P": "AQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAAAAAABAAAAAQAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAABAAAAAQAAAAAAAAABAAAAAAAAAAEAAAABAAAAAAAAAAEAAAABAAAAAQAAAAAAAAAAAAAAAQAAAAEAAAABAAAAAQAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAQAAAAEAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAABAAAAAAAAAAAAAAABAAAAAQAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAQAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAA=", "TR": "AQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAAAAAABAAAAAAAAAAEAAAABAAAAAAAAAAAAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAABAAAAAAAAAAAAAAABAAAAAAAAAAAAAAABAAAAAQAAAAAAAAABAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAEAAAABAAAAAQAAAAEAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAABAAAAAQAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAABAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAABAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "DM": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}</script>
+
+<script>
+/* ── λJump page logic ───────────────────────────────────────────────────────────────────
+   Derived from bjump_logic.js, which is itself µJump's shape. Everything shared lives in
+   core/*.js and is loaded verbatim; this file is only what is true of Lee16 and of nothing
+   else.
+
+   WHAT IS DELIBERATELY ABSENT, and why the absence is the design rather than a gap:
+   Lee16's public release is IMAGE ONLY. No segmentation, so no segment ids, no meshes, no
+   root ids, no synapses, no mesh-computed volume, no GLB or PowerPoint export, no Cell
+   contacts. bJump has all of those and roughly two thirds of its logic file is them. None of
+   it is copied here, core/mesh.js is not loaded by build_ljump.py, and ljumpcheck.js asserts
+   that no mesh/root-id/synapse identifier survives into the built page -- so a future
+   copy-paste from βJump cannot quietly reintroduce a button that can never work.
+
+   WHAT LEE16 HAS THAT NOTHING ELSE IN THE FAMILY DOES: the leptomeninges, imaged cleanly at
+   4 nm across the whole pial surface. The layer band, the depth ruler and the guided tree's
+   pia/arachnoid branch all exist for that. */
+
+/* ── decode the embedded table ───────────────────────────────────────────────────────────
+   Same packed-typed-array shape as µJump's nucdata, ηJump's h01data and βJump's bjumpdata.
+   All arrays are FIXED-POINT i32 (see make_embed.py / the notebook's own embed cell for the
+   scales), which base64s to exactly 4/3 bytes per value and decodes with one typed-array
+   view -- a JSON float list would roughly triple a block that ships on every page load. */
+const D = JSON.parse(document.getElementById("ljumpdata").textContent);
+function b64(s){const b=atob(s);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
+function i32(k){ return new Int32Array(b64(D[k]).buffer); }
+
+const N    = D.N;
+const BID  = i32("ID");                       // nucleus_id, 1..N in sort order
+const BX   = i32("X"), BY = i32("Y"), BZ = i32("Z");   // mip-0 voxels, 4/4/40 nm
+const BVOL = Float32Array.from(i32("V"),  function(v){ return v/100; });   // µm³
+const BDIA = Float32Array.from(i32("DIA"),function(v){ return v/100; });   // µm
+/* Depth below the TRACED pia, signed: negative means above it, i.e. in the leptomeninges.
+   Not a fitted plane and not a tilt correction -- the pial surface is IN this volume and was
+   traced directly, which is the one thing this dataset makes easy that minnie65 does not. */
+const BDEP = Float32Array.from(i32("DEP"),function(v){ return v/10; });    // µm
+const BLAY = i32("L");                        // index into D.layers, -1 = unknown
+const BPOL = i32("P");                        // 1 = found by the DARK pass
+const BTR  = i32("TR");                       // cut by a z face of the ~33 µm slab
+const BDM  = i32("DM");                       // in or beside a damaged section
+
+const LAYERS = D.layers || ["leptomeninges","layer 1","layer 2/3","layer 4"];
+function layerName(i){ return (BLAY[i]>=0 && LAYERS[BLAY[i]]) || "unknown"; }
+/* Tag colour classes come from µJump's own stylesheet (build_ljump.py copies it whole).
+   .non is the neutral/structural one, .none the greyed-out one -- leptomeninges gets the
+   accent-ish .non because it is the thing worth noticing here, not an absence. */
+function layerTag(i){
+  const nm=layerName(i);
+  return {label:nm.charAt(0).toUpperCase()+nm.slice(1),
+          cls:(nm==="leptomeninges")?"non":(nm==="unknown"?"none":"non")};
+}
+
+/* ── ontology overrides ──────────────────────────────────────────────────────────────────
+   core/ontology.js is shared verbatim. Its q1 asks for a cortical layer and offers Layer 5,
+   Layer 6 and White matter -- none of which exist in a 435 µm block that stops in layer 4.
+   TREE is a const binding but a mutable object, so the one node is replaced here rather than
+   forking the module; every other node (leptomeninges, vascular relationship, blood cells,
+   mural cells, glia) transfers unchanged and is exactly right for this volume.
+
+   LEAF SLUGS ARE UNTOUCHED, so a classification made here is directly comparable with one
+   made in µJump. Only the CONTEXT question changes. The leaves that must not be reachable at
+   all are handled separately, by UJ.cfg.tree.excludeLeaves in ljump_config.js -- the tree
+   path and the "jump straight there" leaf search are two different entry points and closing
+   one does not close the other. */
+(function(){
+  const T = UJ.ontology.TREE;
+  T.q1 = {q:"Where in the volume is this cell? (context only — sets priors, doesn't force a "
+           +"branch). The panel above gives this nucleus's own depth below the traced pial "
+           +"surface, so you do not have to judge it by eye.",
+    opts:[
+      {label:"Leptomeninges — above the pia: subarachnoid space, arachnoid, pial surface itself",
+       next:"lepto"},
+      {label:"Layer 1 — 0–100 µm below the pia; neuropil-rich and cell-poor", next:"q2"},
+      {label:"Layers 2/3 — 100–310 µm below the pia", next:"q2"},
+      {label:"Layer 4 — deeper than 310 µm; the bottom of this volume", next:"q2"},
+      {label:"Not sure — skip", next:"q2"}]};
+})();
+
+/* ── geometry ───────────────────────────────────────────────────────────────────────── */
+function nearest(vx,vy,vz){
+  let b=-1,bd=Infinity;
+  for(let i=0;i<N;i++){
+    const dx=(vx-BX[i])*UJ_RX, dy=(vy-BY[i])*UJ_RY, dz=(vz-BZ[i])*UJ_RZ;
+    const d=dx*dx+dy*dy+dz*dz;
+    if(d<bd){bd=d;b=i;}
+  }
+  return {i:b, dist:Math.sqrt(bd)};
+}
+function kNearest(vx,vy,vz,k,excl){
+  const best=[];
+  for(let i=0;i<N;i++){
+    if(i===excl)continue;
+    const dx=(vx-BX[i])*UJ_RX, dy=(vy-BY[i])*UJ_RY, dz=(vz-BZ[i])*UJ_RZ;
+    const d=dx*dx+dy*dy+dz*dz;
+    if(best.length<k){best.push({i,d});best.sort((a,b)=>a.d-b.d);}
+    else if(d<best[best.length-1].d){best[best.length-1]={i,d};best.sort((a,b)=>a.d-b.d);}
+  }
+  return best.map(o=>({i:o.i,dist:Math.sqrt(o.d)}));
+}
+
+/* ── Neuroglancer state ──────────────────────────────────────────────────────────────────
+   ONE image layer. There is no segmentation to select a segment in, so unlike µJump/βJump
+   this builder takes no segment argument at all -- a signature that cannot express a
+   selection nobody can make. */
+function buildState(pos){
+  const V=UJ.cfg.viewer;
+  /* nm -> m by DIVISION, not *1e-9: 4*1e-9 is not exactly representable and dividing keeps
+     the generated URL character-identical to the dataset's own published states. */
+  return {dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
+    position:pos, crossSectionScale:20, projectionScale:20000,
+    layers:[{type:"image",source:V.em,tab:"source",name:"lee16"}],
+    selectedLayer:{visible:true,layer:"lee16"},
+    /* "xy" and not µJump's "xy-3d": a 3D panel with no segmentation to render is an empty
+       black quadrant taking a quarter of the screen. */
+    layout:"xy"};
+}
+function viewerUrl(pos){
+  return UJ.cfg.viewer.base + "#!" + encodeURIComponent(JSON.stringify(buildState(pos)));
+}
+
+/* ── rendering helpers ─────────────────────────────────────────────────────────────────
+   EXACTLY ONE escHtml in this file. µJump carries two -- a full one and a weaker 3-character
+   one -- and because both are top-level in the same script scope the weak one wins for the
+   whole page and lets quotes through into HTML attributes. See the escHtml-shadow note. */
+function escHtml(s){
+  return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function fmt(n){ return Number(n).toLocaleString("en-GB"); }
+function copyCode(txt){
+  return '<code style="cursor:pointer" title="click to copy" onclick="navigator.clipboard&&navigator.clipboard.writeText(this.textContent)">'+escHtml(txt)+'</code>';
+}
+
+/* ── "How deep is this?" ─────────────────────────────────────────────────────────────────
+   βJump has a mouse-brain locator and a block map. The equivalent question here is depth,
+   and this volume can answer it exactly rather than schematically: the pia is IN the image
+   and was traced, so a cell's depth is a measurement. The ruler is drawn to scale from the
+   real layer bounds, with the leptomeninges band ABOVE the pia line at y=0.
+
+   Deliberately not a picture of a cortical column with cell cartoons in it: this shows where
+   the cell is, not what the layer usually contains, and inventing typical contents would be
+   the tool asserting something it has not measured. */
+const LJ_RULER = {top:-30, bottom:450, h:170, w:120};
+function renderDepthRuler(i){
+  const R=LJ_RULER, span=R.bottom-R.top;
+  const y=function(um){ return R.h*(um-R.top)/span; };
+  const bands=[["leptomeninges",R.top,0],["layer 1",0,100],["layer 2/3",100,310],["layer 4",310,R.bottom]];
+  let s='<svg viewBox="0 0 '+R.w+' '+(R.h+14)+'" width="100%" style="max-width:180px" '
+      + 'role="img" aria-label="Depth of this nucleus below the pial surface">';
+  bands.forEach(function(b,k){
+    const y0=y(b[1]), y1=y(b[2]);
+    s+='<rect x="26" y="'+y0.toFixed(1)+'" width="60" height="'+(y1-y0).toFixed(1)+'" '
+      +'fill="var(--panel)" stroke="var(--line)" stroke-width="0.7"/>';
+    s+='<text x="90" y="'+((y0+y1)/2+3).toFixed(1)+'" font-size="7" fill="var(--mut)">'+escHtml(b[0])+'</text>';
+  });
+  /* The pia itself, drawn as the accent line it is -- the boundary this whole dataset is
+     interesting for. */
+  s+='<line x1="20" y1="'+y(0).toFixed(1)+'" x2="86" y2="'+y(0).toFixed(1)
+    +'" stroke="var(--accent)" stroke-width="1.6"/>';
+  s+='<text x="0" y="'+(y(0)-2).toFixed(1)+'" font-size="7" fill="var(--accent)">pia</text>';
+  /* The slab is only ~33 µm THICK (z); depth runs in y. Nothing to draw for that here -- the
+     truncated tag on the panel carries it. */
+  const d=BDEP[i], yy=Math.max(0,Math.min(R.h,y(d)));
+  s+='<circle cx="56" cy="'+yy.toFixed(1)+'" r="4" fill="var(--accent)"/>';
+  s+='<text x="0" y="'+(yy+3).toFixed(1)+'" font-size="7" fill="var(--ink)" font-weight="600">'
+    +(d<0?"+":"")+Math.abs(d).toFixed(0)+'</text>';
+  s+='</svg>';
+  return s;
+}
+
+/* ── core/panel.js host contract ─────────────────────────────────────────────────────────
+   core/panel.js reaches the host page through a handful of globals; these are λJump's side.
+   The OPTIONAL ones it typeof-guards -- restoreClassification, initGSI, saveReporterFromInput,
+   SEARCH_HISTORY, renderSearchHistory -- are deliberately not defined, exactly as in βJump.
+
+   CUR_ROOT is "" for every cell and always will be: a root id is a segmentation id and this
+   dataset has no segmentation. It is kept in the contract rather than removed because
+   core/panel.js and core/report.js both read it by name. */
+let CUR_NUCID="", CUR_ROOT="";
+/* ID_PATH / ID_NODE / ID_CTX are declared by core/tree.js. Declaring them again here would
+   throw "already been declared" and silently kill this entire script block -- the single most
+   dangerous failure mode of splitting one page into modules. */
+let REPORTER_EMAIL="";
+function coordSpan(x,y,z){
+  return '<span class="idval" title="click to copy" data-c="'+x+','+y+','+z+'">'+x+', '+y+', '+z+'</span>';
+}
+let CUR_IDX=null;
+/* The cell NAME is the Neuroglancer link, as in βJump: when the community names a cell, the
+   name it gets keeps opening the viewer. */
+function celltypeLink(pos,innerHtml){
+  const i=CUR_IDX;
+  if(i==null) return innerHtml;
+  const u=viewerUrl([BX[i],BY[i],BZ[i]]);
+  return '<a href="'+escHtml(u)+'" target="_blank" rel="noopener" title="Open this nucleus in Neuroglancer" '
+       + 'style="color:var(--accent);text-decoration:none">'+innerHtml
+       + ' <span style="font-size:.7em;opacity:.75">&#8599;</span></a>';
+}
+function neuroglancerLinkForPos(pos){ return viewerUrl(pos); }
+
+let COMMUNITY_NAME={};
+function cellLabel(i){
+  if(i===CUR_IDX && window.CUR_CELLTYPE_DISPLAY) return window.CUR_CELLTYPE_DISPLAY;
+  return COMMUNITY_NAME[BID[i]] || ("Nucleus "+BID[i]);
+}
+
+/* ── the cell panel ─────────────────────────────────────────────────────────────────── */
+function showCell(i, distNm){
+  CUR_IDX=i;
+  const pos=[BX[i],BY[i],BZ[i]], nb=kNearest(pos[0],pos[1],pos[2],3,i);
+  const lt=layerTag(i);
+  CUR_NUCID=String(BID[i]); CUR_ROOT="";
+  /* Cleared here so a name from the PREVIOUS cell can never leak into this one in the window
+     before its community fetch resolves. CUR_MICRONS_NAME stays null for the whole session:
+     Lee16 has no classifier to name a prediction from, so core/panel.js's vote widget only
+     ever shows the "Community" row, never "Original". */
+  window.CUR_CELLTYPE_DISPLAY=null; window.CUR_POS=pos.slice();
+  window.CUR_MICRONS_NAME=null; window.CUR_COMMUNITY_TOP_NAME=null;
+  ID_CTX={nucId:CUR_NUCID,root:"",pos:pos.slice()};
+
+  let h='<div class="card">';
+  h+='<div class="celltype" id="ctHeadline" data-unclassified="1" data-microns-name="">'
+    + celltypeLink(pos,'Nucleus '+BID[i])
+    + ((typeof favStarHtml==="function")?favStarHtml(String(BID[i]),"",pos[0],pos[1],pos[2]):"")
+    + ' <small>no classifier for this dataset</small></div>';
+
+  h+='<div style="margin-top:6px">'
+    +'<span class="tag '+lt.cls+'">'+escHtml(lt.label)+'</span>'
+    /* Its own tag rather than the layer one: core/panel.js overwrites #ctTag's text wholesale
+       the moment a community identification wins, and sharing it would silently delete the
+       anatomical label. */
+    +' <span class="tag none" id="ctTag" title="No cell type has been agreed for this nucleus yet">unclassified</span>';
+  /* WHICH DETECTOR PASS FOUND IT. Shown because it is honest information a classifier needs,
+     and worded so it cannot be read as a cell type: "dark" means electron-dense nucleoplasm,
+     which is evidence towards endothelial / pericyte / microglial / meningeal and nothing
+     more. Dark-pass precision is about 63 % -- see the About card -- so a user looking at a
+     dark row should know that before they name it. */
+  h+= BPOL[i]
+    ? ' <span class="tag none" title="Found by the electron-DENSE pass. That is evidence towards endothelial, pericyte, microglial or meningeal — and it is also what a red blood cell looks like. About 1 in 3 dark rows is not a nucleus at all.">dense nucleoplasm</span>'
+    : ' <span class="tag none" title="Found by the pale pass — nucleoplasm brighter than the surrounding cytoplasm. Neurons, astrocytes and oligodendrocytes look like this.">pale nucleoplasm</span>';
+  if(BTR[i]) h+=' <span class="tag none" title="Cut by the top or bottom face of the ~33 µm slab — its volume is an underestimate">truncated</span>';
+  if(BDM[i]) h+=' <span class="tag none" title="Sits in or beside a section flagged as damaged (folded, torn or lost). The image here may be unreliable.">damaged section</span>';
+  h+='</div>';
+
+  /* The agree?/disagree pills, directly under the headline exactly where µJump puts them. */
+  h+='<div id="idVotePanel" style="margin:5px 0 2px"></div>';
+
+  h+='<p class="hint" style="margin-top:10px">Nucleus '+BDIA[i].toFixed(1)+' &micro;m across, '
+    +BVOL[i].toFixed(0)+' &micro;m&sup3;'
+    +(BTR[i]?' <b>(underestimate &mdash; truncated)</b>':'')
+    +' &middot; '+(BDEP[i]<0?Math.abs(BDEP[i]).toFixed(0)+' &micro;m ABOVE the pia'
+                            :BDEP[i].toFixed(0)+' &micro;m below the pia')
+    +(distNm!=null?' &middot; '+(distNm/1000).toFixed(2)+' &micro;m from your query':'')
+    +'</p>';
+
+  h+='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:flex-start">'
+    +'<div style="flex:0 0 auto">'+renderDepthRuler(i)+'</div>'
+    +'<p class="hint" style="flex:1 1 200px;margin-top:0">Depth is measured from the <b>traced '
+    +'pial surface</b>, which is inside this volume &mdash; not from a fitted plane. The layer '
+    +'boundaries themselves are standard mouse V1 values, not measured here, so treat a cell '
+    +'near a boundary as near a boundary.</p></div>';
+
+  h+='<div class="meta">nucleus '+copyCode(BID[i])
+    +' &middot; voxel '+copyCode(pos.join(", "))+'</div>';
+
+  /* The whole point of the tool. There is no machine prediction, so this panel is the only
+     place a cell type ever comes from. */
+  h+='<label style="margin-top:18px;display:block">Community identifications</label>';
+  h+='<div class="meta" id="commReports"></div>';
+  h+='<div id="classHistoryPanel" style="margin:10px 0 0"></div>';
+
+  h+='<label style="margin-top:18px;display:block">What is this cell?</label>';
+  h+='<div class="idcta warn"><div class="idcta-top">'
+    +'<span>Nothing in this dataset is pre-classified &mdash; there is no machine prediction '
+    +'here to agree or disagree with.</span></div>'
+    /* No leaf-search box here: core/tree.js renders its own at the top of every step INSIDE
+       #idbox, which on µJump sits in a modal far from the cell panel but here would land two
+       lines below a duplicate. */
+    +'<div id="idbox"></div></div>';
+
+  /* The four ways an automatic detection can be wrong. Same set as βJump: an automatic
+     detector oversplits and false-positives on any dataset, so none of this was worth
+     reinventing -- "Move" posts nucleus_position_fix, the other two are core/report.js's own
+     shared forms. */
+  h+='<label style="margin-top:16px;display:block">Is this detection wrong?</label>';
+  h+='<p class="hint" style="margin-top:0">Detection is automatic and imperfect. Correct the '
+    +'position, say it is really several nuclei, or flag it as no nucleus at all &mdash; the '
+    +'community consensus decides. Dense-nucleoplasm rows are the ones most worth checking: '
+    +'about one in three is a red blood cell rather than a nucleus.</p>';
+  h+='<div class="row"><div class="coord" style="flex:2"><input type="text" id="fixcoord" '
+    +'placeholder="corrected x, y, z (voxels)"></div>'
+    +'<button class="idbtn" id="fixmove" style="flex:1">Move it here</button></div>';
+  h+='<div class="row" style="margin-top:6px">'
+    +'<button class="idbtn" id="fixmerged" style="flex:1">Actually several nuclei&hellip;</button>'
+    +'<button class="idbtn" id="fixsplit" style="flex:1">Not a nucleus&hellip;</button></div>';
+  h+='<p class="hint" id="fixmsg"></p><div id="fixstatus"></div>';
+
+  /* The 4th way: a real nucleus the detector missed entirely, so there is no detection to
+     correct. Deliberately NOT keyed to the cell on screen. This matters more here than
+     anywhere else in the family -- λJump's detector is size-tuned at 7.5 µm and finds only
+     about 46 % of the cells a direct count predicts, with the shortfall concentrated in small
+     glial nuclei. See the About card. */
+  h+='<label style="margin-top:16px;display:block">Know of a nucleus the detector missed?</label>';
+  h+='<p class="hint" style="margin-top:0">Paste the coordinate of a real nucleus that has no '
+    +'detection at all &mdash; it does not need to be near the cell above. Small glial nuclei '
+    +'are the ones this detector misses most.</p>';
+  h+='<div class="row"><div class="coord" style="flex:2"><input type="text" id="newnuccoord" '
+    +'placeholder="missed nucleus x, y, z (voxels)"></div>'
+    +'<button class="idbtn" id="fixnew" style="flex:1">Add a missed nucleus</button></div>';
+  h+='<div class="row" style="margin-top:6px"><input type="text" id="newnuccomment" '
+    +'placeholder="comment (optional) — what it looks like" style="flex:1"></div>';
+  h+='<p class="hint" id="fixnewmsg"></p>';
+
+  h+='<button class="jump" id="jumphere">Jump to this nucleus &#8599;</button>';
+
+  h+='<div class="neigh"><h4>3 nearest neighbouring nuclei</h4>';
+  nb.forEach(function(c){
+    /* .dot is always "none": its colour encodes cell CLASS in µJump and this dataset has no
+       classes to encode. Colouring it by layer instead would look like a classification. */
+    h+='<div class="nrow"><div class="nleft"><span class="dot none"></span><div>'
+      +'<div class="ntype njump" data-i="'+c.i+'" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" '
+      +'title="Jump to this nucleus">'+escHtml(cellLabel(c.i))
+      +' <span class="nsub">'+escHtml(layerName(c.i))+'</span></div>'
+      +'<div class="nsub">'+(c.dist/1000).toFixed(2)+' &micro;m &middot; nuc '+BID[c.i]
+      +' &middot; '+BDIA[c.i].toFixed(1)+' &micro;m'
+      +' &middot; voxel ('+coordSpan(BX[c.i],BY[c.i],BZ[c.i])+')</div>'
+      +'</div></div></div>';
+  });
+  h+='</div></div>';
+
+  const panelEl=document.getElementById("panel");
+  panelEl.innerHTML=h;
+  panelEl.querySelectorAll(".idval").forEach(function(el){
+    el.addEventListener("click",function(){
+      if(navigator.clipboard) navigator.clipboard.writeText(el.dataset.c);
+      const o=el.textContent; el.textContent="copied"; setTimeout(function(){el.textContent=o;},900);
+    });
+  });
+  panelEl.querySelectorAll(".njump").forEach(function(el){
+    el.addEventListener("click",function(){ jumpToIndex(Number(el.dataset.i)); });
+  });
+  const jh=panelEl.querySelector("#jumphere");
+  /* Re-centres in place rather than opening a tab: the point of the button is "go to THIS
+     nucleus's own coordinate", which is most useful when the coordinate that led here was a
+     bit off. Mirrors µJump's own .jump button. */
+  if(jh) jh.addEventListener("click",function(){
+    const xEl=document.getElementById("x"), yEl=document.getElementById("y"),
+          zEl=document.getElementById("z"), goEl=document.getElementById("go");
+    if(xEl&&yEl&&zEl&&goEl){ xEl.value=pos[0]; yEl.value=pos[1]; zEl.value=pos[2]; goEl.click(); }
+  });
+  /* core/panel.js's organelle rows carry .jumpview buttons; its document-level delegation for
+     them lives in µJump's main script, so wire them here. Delegated on the panel rather than
+     bound per button because #commReports is filled asynchronously. */
+  panelEl.addEventListener("click",function(ev){
+    const b=ev.target.closest && ev.target.closest(".jumpview");
+    if(!b) return;
+    const u=neuroglancerLinkForPos([Number(b.dataset.x),Number(b.dataset.y),Number(b.dataset.z)]);
+    if(u) window.open(u,"_blank","noopener");
+  });
+  wireCorrection(i);
+  startGuided(i);
+  loadCommunity(i);
+}
+function jumpToIndex(i){ showCell(i,null); window.scrollTo({top:0,behavior:"smooth"}); }
+
+/* ── community panel ──────────────────────────────────────────────────────────────────── */
+let FIXES_RESP=null, FIXES_FETCH=null, FIXES_BY_NUCID=null;
+function fetchLjumpFixes(){
+  if(FIXES_RESP) return Promise.resolve(FIXES_RESP);
+  if(FIXES_FETCH) return FIXES_FETCH;
+  FIXES_FETCH=fetch(REPORT_ENDPOINT+"?bjumpFixes=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){ FIXES_RESP=d||{}; return FIXES_RESP; })
+    .catch(function(){ FIXES_RESP={}; return FIXES_RESP; })
+    .then(function(d){ FIXES_FETCH=null; return d; });
+  return FIXES_FETCH;
+}
+/* The endpoint is spelled bjumpFixes because that is what BJumpPosition.gs named it; it is
+   ds-routed like everything else, so it reads λJump's own sheet. Renaming a deployed endpoint
+   to match a second caller's name would break the first caller for no gain. */
+function ljumpFixesByNucId(){
+  if(FIXES_BY_NUCID) return FIXES_BY_NUCID;
+  if(!FIXES_RESP) return null;
+  const map={};
+  (FIXES_RESP.fixes||[]).forEach(function(f){
+    const nid=String(f.nucleusId);
+    if(!map[nid]||f.votes>map[nid].votes) map[nid]=f;
+  });
+  FIXES_BY_NUCID=map;
+  return map;
+}
+function ljumpCorrectedPositionOf(i){
+  const map=ljumpFixesByNucId();
+  return (map&&map[String(BID[i])])||null;
+}
+function loadCommunity(i){
+  const nid=String(BID[i]), pos=[BX[i],BY[i],BZ[i]];
+  if(typeof loadCommunityReports==="function") loadCommunityReports(nid,pos);
+  else { const box=document.getElementById("commReports");
+         if(box) box.innerHTML='<p class="hint">core/panel.js did not load — the community panel is unavailable.</p>'; }
+  if(typeof loadClassificationHistory==="function") loadClassificationHistory(nid);
+
+  const fixBox=document.getElementById("fixstatus");
+  const showFixes=function(d){
+    if(CUR_IDX!==i || !fixBox) return;
+    const mine=((d&&d.fixes)||[]).filter(function(f){
+      return String(f.from)===[BX[i],BY[i],BZ[i]].join(",");
+    });
+    if(mine.length){
+      fixBox.innerHTML='<p class="hint"><b>Community correction agreed:</b> this nucleus should be at '
+        +escHtml(mine[0].to)+' ('+mine[0].votes+' independent votes). This is reflected in the '
+        +'&ldquo;Master cell list&rdquo; sheet and the Filter-and-show Excel export — the table '
+        +'embedded in THIS page still holds the original position until the next rebuild.</p>';
+    } else {
+      fixBox.innerHTML='<p class="hint">A correction only moves a nucleus once <b>'+((d&&d.minVotes)||2)
+        +' different people</b> propose a similar position, so yours may be recorded and not shown '
+        +'here yet.</p>';
+    }
+  };
+  fetchLjumpFixes().then(showFixes).catch(function(){});
+}
+
+/* ── the result screen ───────────────────────────────────────────────────────────────────
+   The tree engine itself is core/tree.js, shared verbatim. renderResult() is the one
+   genuinely per-tool part: µJump's asks "do you agree with MICrONS?" and files a confirmation
+   or a discrepancy; this dataset has no prediction to agree with, so there is exactly one
+   outcome -- a plain new_identification. core/tree.js calls this global by name. */
+function renderResult(slug){
+  const box=document.getElementById("idbox"); if(!box) return;
+  const O=UJ.ontology, LN=O.LEAF_NAMES;
+  const nm = slug ? (LN[slug]||slug) : "";
+  let h="";
+  /* "back one step" only when the tree actually has a step to go back to -- popping an empty
+     ID_PATH lands on TREE[undefined] and throws. */
+  if(ID_PATH.length) h+='<span class="idf-back" id="idfback">&larr; back one step</span>';
+  h+='<div class="celltype" style="margin-top:6px">'+escHtml(nm)+'</div>';
+
+  const cw=O.CONFUSED_WITH[slug];
+  if(cw){
+    h+='<p class="hint" style="margin-top:0"><b>Often confused with '+escHtml(cw.withName)+'.</b> '
+      +escHtml(cw.note)
+      +(cw.ref?' <a href="'+escHtml(cw.ref)+'" target="_blank" rel="noopener">'
+              +escHtml(cw.refLabel||"reference")+'</a>':'')+'</p>';
+  }
+  h+=organelleFlagHtml();
+
+  h+='<div class="idf-certainty"><label style="display:block;font-size:11px;text-transform:uppercase;'
+    +'letter-spacing:.05em;color:var(--mut);margin-top:12px">How certain are you of this '
+    +'identification? <span class="cert-required">(required to submit)</span></label>'
+    +'<div class="cert-scale" id="certScale">'
+    +[1,2,3,4,5].map(function(n){return '<button type="button" class="cert-opt" data-val="'+n+'">'+n+'</button>';}).join("")
+    +'</div><div class="cert-labels"><span>Not sure</span><span>Certain</span></div></div>';
+  h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;'
+    +'color:var(--mut);margin-top:12px">Comments (optional)</label>'
+    +'<textarea id="idfComment" placeholder="e.g. ambiguous ultrastructure, could also be X..."></textarea>';
+  h+='<div class="row" style="margin-top:10px"><button class="idbtn" id="idsubmit" style="flex:1">Submit this identification</button>'
+    +'<button class="idbtn" id="idrestart" style="flex:0 0 auto">Start over</button></div>';
+  h+='<p class="hint" id="idmsg"></p>';
+  box.innerHTML=h;
+
+  const back=document.getElementById("idfback");
+  if(back) back.addEventListener("click",goBack);
+  const restart=document.getElementById("idrestart");
+  if(restart) restart.addEventListener("click",function(){ startGuided(CUR_IDX); });
+  const cs=document.getElementById("certScale");
+  if(cs) [].forEach.call(cs.children,function(b){
+    b.addEventListener("click",function(){
+      [].forEach.call(cs.children,function(o){o.classList.toggle("sel",o===b);});
+    });
+  });
+  const sb=document.getElementById("idsubmit");
+  if(sb) sb.addEventListener("click",function(){ submitIdentification(slug); });
+  wireOrganelleFlag(slug);
+}
+
+function startGuided(i){
+  openIdentify({nucId:String(BID[i]), root:"", pos:[BX[i],BY[i],BZ[i]]});
+}
+
+/* Posts Code.gs's EXISTING "new_identification" type and column layout rather than inventing a
+   λJump schema -- which buys per-user dedup, the Master cell list upsert, the points table and
+   the dashboard for free. Always new_identification and never confirmation/discrepancy: those
+   two mean "agrees / disagrees with the machine prediction" and there is no prediction here.
+
+   `coord` carries the VOXEL, which is what makes a row survive a re-detection: nucleus ids are
+   assigned 1..N in sort order, so changing any detection setting renumbers all of them. This
+   detector has already been refitted eight times; assume it will be again. */
+function submitIdentification(slug){
+  const i=CUR_IDX, msg=document.getElementById("idmsg");
+  if(!GOOGLE_VERIFIED){ msg.textContent="Sign in first — identifications are attributed."; return; }
+  const certainty=getCertainty();
+  if(!certainty){ msg.textContent="Pick a certainty from 1 to 5 first."; return; }
+  const nm=UJ.ontology.canonSubmitName(UJ.ontology.LEAF_NAMES[slug]||slug);
+  const cmtEl=document.getElementById("idfComment");
+  msg.textContent="sending…";
+  postReport({
+    type:"new_identification",
+    nucleusId:BID[i],
+    rootId:"",                             // no segmentation in this dataset
+    coord:[BX[i],BY[i],BZ[i]].join(","),
+    identified:nm,
+    path:UJ.tree.pathText(),
+    comment:(cmtEl&&cmtEl.value||"").trim(),
+    certainty:certainty,
+    timestamp:new Date().toISOString()
+  }, nm).then(function(d){
+    msg.textContent=(d&&d.ok)?("Recorded: "+nm+". Thank you."):"Could not record that.";
+    if(d&&d.ok) loadCommunity(i);
+  }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
+}
+
+/* ── position correction ─────────────────────────────────────────────────────────────── */
+function wireCorrection(i){
+  const msg=document.getElementById("fixmsg");
+  function send(payload,label){
+    if(!GOOGLE_VERIFIED){ msg.textContent="Sign in first — corrections are attributed."; return; }
+    payload.nucleusId=BID[i];
+    payload.rootId="";
+    payload.coord=[BX[i],BY[i],BZ[i]].join(",");   // the anchor that survives a re-detection
+    payload.timestamp=new Date().toISOString();
+    msg.textContent="sending…";
+    postReport(payload,label).then(function(d){
+      msg.textContent=(d&&d.ok)?"Thank you — recorded.":"Could not record that.";
+    }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
+  }
+  const mv=document.getElementById("fixmove");
+  if(mv) mv.addEventListener("click",function(){
+    const raw=(document.getElementById("fixcoord").value||"").trim().split(/[\s,;]+/).filter(Boolean);
+    if(raw.length<3){ msg.textContent="Paste three numbers: x, y, z in voxels."; return; }
+    send({type:"nucleus_position_fix",newCoord:raw.slice(0,3).join(",")},"position correction");
+  });
+  /* Both hand off to core/report.js -- renderMergedReport / renderNotNucleusReport, the names
+     that module actually exports. They render into #idbox and call the return function when the
+     user backs out, so the tree comes back where they left it, and they post merged_split and
+     not_a_nucleus, two types Code.gs has had all along.
+
+     A one-click "not a nucleus" is deliberately not offered. Flagging a detection as a false
+     positive is a claim other people have to weigh, and the form asks for the reason that makes
+     it weighable. That matters more here than in any other tool in the family: about a third of
+     this dataset's dense-pass rows are erythrocytes, so "not a nucleus" will be clicked often,
+     and a bare vote with no evidence would be worthless at that volume. */
+  const back=function(){ startGuided(i); };
+  const scrollToIdbox=function(){
+    const box=document.getElementById("idbox");
+    if(box&&box.scrollIntoView) box.scrollIntoView({behavior:"smooth",block:"nearest"});
+  };
+  const mg=document.getElementById("fixmerged");
+  if(mg) mg.addEventListener("click",function(){
+    if(typeof renderMergedReport!=="function"){ msg.textContent="core/report.js did not load."; return; }
+    renderMergedReport(back); scrollToIdbox();
+  });
+  const rj=document.getElementById("fixsplit");
+  if(rj) rj.addEventListener("click",function(){
+    if(typeof renderNotNucleusReport!=="function"){ msg.textContent="core/report.js did not load."; return; }
+    renderNotNucleusReport(back); scrollToIdbox();
+  });
+
+  /* "Add a missed nucleus" -- deliberately NOT routed through send() above, which always stamps
+     the CURRENT cell's nucleusId/coord onto the payload. That is right for Move/Merged/Split
+     (all corrections to THIS detection) and wrong here: a missed nucleus by definition has no
+     detection of its own to key against. Posts Code.gs's existing "new_cell_no_nucleus" type
+     directly, coord-only plus an optional comment -- the "unclassified, location only" row
+     shape it already supports. */
+  const an=document.getElementById("fixnew");
+  if(an) an.addEventListener("click",function(){
+    const nmsg=document.getElementById("fixnewmsg");
+    if(!GOOGLE_VERIFIED){ nmsg.textContent="Sign in first — reports are attributed."; return; }
+    const coordEl=document.getElementById("newnuccoord");
+    const raw=(coordEl.value||"").trim().split(/[\s,;]+/).filter(Boolean);
+    if(raw.length<3){ nmsg.textContent="Paste three numbers: x, y, z in voxels."; return; }
+    const commentEl=document.getElementById("newnuccomment");
+    nmsg.textContent="sending…";
+    postReport({
+      type:"new_cell_no_nucleus",
+      coord:raw.slice(0,3).join(","),
+      comment:(commentEl&&commentEl.value||"").trim(),
+      timestamp:new Date().toISOString()
+    },"missed nucleus").then(function(d){
+      nmsg.textContent=(d&&d.ok)?"Thank you — recorded.":"Could not record that.";
+      if(d&&d.ok){ coordEl.value=""; if(commentEl)commentEl.value=""; }
+    }).catch(function(e){ nmsg.textContent="failed: "+netErr(e); });
+  });
+}
+
+/* ── the Jump tab ────────────────────────────────────────────────────────────────────── */
+function toVoxels(x,y,z){ return [x,y,z]; }
+document.getElementById("x").addEventListener("paste",function(ev){
+  const t=(ev.clipboardData||window.clipboardData).getData("text")||"";
+  const p=t.trim().split(/[\s,;]+/).filter(Boolean);
+  if(p.length>=3){
+    ev.preventDefault();
+    document.getElementById("x").value=p[0];
+    document.getElementById("y").value=p[1];
+    document.getElementById("z").value=p[2];
+  }
+});
+function fail(m){const e=document.getElementById("err");e.textContent=m;e.style.display=m?"block":"none";}
+function doJump(){
+  fail("");
+  const raw=["x","y","z"].map(id=>parseFloat(document.getElementById(id).value));
+  if(raw.some(v=>!isFinite(v)))return fail("Enter all three coordinates.");
+  const v=toVoxels(raw[0],raw[1],raw[2]).map(Math.round);
+  const r=nearest(v[0],v[1],v[2]);
+  if(r.i<0)return fail("No nucleus found.");
+  if(r.dist>30000) fail("Nearest nucleus is "+(r.dist/1000).toFixed(1)+" µm away — that coordinate may be outside the tissue, which fills only about 454 × 447 µm of the 655 µm frame.");
+  showCell(r.i,r.dist);
+}
+document.getElementById("go").addEventListener("click",doJump);
+["x","y","z"].forEach(function(id){
+  document.getElementById(id).addEventListener("keydown",function(e){ if(e.key==="Enter") doJump(); });
+});
+document.getElementById("rand").addEventListener("click",function(){
+  fail(""); jumpToIndex(Math.floor(Math.random()*N));
+});
+
+(function(){
+  const el=document.getElementById("dscount");
+  if(!el) return;
+  let dark=0; for(let i=0;i<N;i++) if(BPOL[i]) dark++;
+  el.textContent = fmt(N)+" nuclei are loaded in this page; "+fmt(dark)
+    +" of them were found by the electron-dense pass, which is the one to review critically.";
+})();
+
+/* ── sign-in plumbing core/gamify.js expects ─────────────────────────────────────────── */
+const REPORT_ENDPOINT = UJ.cfg.backend.endpoint;
+const GOOGLE_CLIENT_ID = UJ.cfg.backend.clientId;
+const OWNER_EMAIL = UJ.cfg.backend.ownerEmail;
+let GOOGLE_VERIFIED=false, GOOGLE_CREDENTIAL=null, REPORTER_NAME="";
+function handleGoogleCred(resp){
+  try{
+    const p=JSON.parse(atob(String(resp.credential).split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
+    REPORTER_NAME=p.name||""; GOOGLE_CREDENTIAL=resp.credential; GOOGLE_VERIFIED=true;
+    if(typeof gamifyOnSignIn==="function") gamifyOnSignIn();
+  }catch(e){ GOOGLE_VERIFIED=false; }
+}
+function netErr(e){ return (e&&e.message)?e.message:"network error"; }
+/* Every write carries ds so the backend routes it to the λJump spreadsheet. */
+function postReport(payload,okMsg){
+  payload.credential=GOOGLE_CREDENTIAL; payload.ds=UJ.cfg.backend.ds;
+  return fetch(REPORT_ENDPOINT,{method:"POST",body:JSON.stringify(payload)})
+    .then(r=>r.json())
+    .then(function(d){ if(typeof showSubmitToast==="function") showSubmitToast(!!(d&&d.ok),okMsg||""); return d; });
+}
+if(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID.indexOf("REPLACE")!==0){ gamifyInit(12); }
+
+/* ── Filter and show ─────────────────────────────────────────────────────────────────────
+   Every dimension except community identity and organelles runs entirely against the 488
+   nuclei already embedded in this page -- no network needed to preview or export. The
+   dimensions are what this dataset actually has: cortical layer, depth below the traced pia,
+   diameter, volume, which detector pass found the cell, truncation and damaged sections.
+
+   Step-through mechanics (persistence, Prev/Next/Reset, resume-on-same-match-set) are
+   core/stepthrough.js, shared with µJump. Host contract this file provides: rowPos(row) and
+   jumpToVoxel(x,y,z), both below. */
+function rowPos(row){ return [BX[row.i], BY[row.i], BZ[row.i]]; }
+function jumpToVoxel(x,y,z){
+  const r=nearest(x,y,z);
+  if(r.i>=0) showCell(r.i,r.dist);
+}
+
+let IDENTITY_BY_NID=null, IDENTITY_FETCH=null;
+function fetchLjumpIdentities(){
+  if(IDENTITY_BY_NID) return Promise.resolve(IDENTITY_BY_NID);
+  if(IDENTITY_FETCH) return IDENTITY_FETCH;
+  IDENTITY_FETCH=fetch(REPORT_ENDPOINT+"?bjumpIdentities=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      const map={};
+      if(d&&d.ok&&Array.isArray(d.identities)){
+        d.identities.forEach(function(rec){ map[rec.nucleusId]=rec; });
+      }
+      IDENTITY_BY_NID=map;
+      return map;
+    })
+    .catch(function(){ IDENTITY_BY_NID={}; return IDENTITY_BY_NID; })
+    .then(function(map){ IDENTITY_FETCH=null; return map; });
+  return IDENTITY_FETCH;
+}
+const LJUMP_UNCLASSIFIED_SENTINEL="__unclassified__";
+function ljumpIdentityOf(i){
+  const rec=IDENTITY_BY_NID&&IDENTITY_BY_NID[BID[i]];
+  return rec&&rec.current?String(rec.current).trim():"";
+}
+
+let ORGANELLES_BY_NID=null, ORGANELLES_FETCH=null;
+function fetchLjumpOrganelles(){
+  if(ORGANELLES_BY_NID) return Promise.resolve(ORGANELLES_BY_NID);
+  if(ORGANELLES_FETCH) return ORGANELLES_FETCH;
+  ORGANELLES_FETCH=fetch(REPORT_ENDPOINT+"?allOrganelles=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      const map={};
+      const rows=(d&&(d.organelles||d.rows))||[];
+      rows.forEach(function(rec){
+        const nid=rec.nucleusId||rec.nucleus_id;
+        if(nid==null) return;
+        const k=rec.kind||rec.organelle||"";
+        if(!k) return;
+        (map[nid]=map[nid]||[]).push(String(k));
+      });
+      ORGANELLES_BY_NID=map;
+      return map;
+    })
+    .catch(function(){ ORGANELLES_BY_NID={}; return ORGANELLES_BY_NID; })
+    .then(function(map){ ORGANELLES_FETCH=null; return map; });
+  return ORGANELLES_FETCH;
+}
+function ljumpOrganelleKindsOf(i){
+  const a=ORGANELLES_BY_NID&&ORGANELLES_BY_NID[BID[i]];
+  return a?a.slice():[];
+}
+
+function layerFilterHtml(){
+  return '<div style="border:1px solid var(--line);border-radius:6px;padding:8px">'
+    + LAYERS.map(function(nm,k){
+        let n=0; for(let i=0;i<N;i++) if(BLAY[i]===k) n++;
+        return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0'
+             + (n===0?';color:var(--mut)':'')+'">'
+             + '<input type="checkbox" class="flayer" value="'+k+'"> '+escHtml(nm)+' ('+n+')</label>';
+      }).join("")
+    + '</div>';
+}
+
+function runFilterLjump(){
+  /* [] means "not filtering by this" -- every nucleus passes. Any number checked means OR,
+     the natural reading of a checkbox list and the same semantics the organelle list uses. */
+  const layerSel=Array.from(document.querySelectorAll(".flayer:checked")).map(function(cb){return Number(cb.value);});
+  const polSel=document.getElementById("fPol").value;
+  const truncSel=document.getElementById("fTrunc").value;
+  const dmgSel=document.getElementById("fDamaged").value;
+  const depMin=parseFloat(document.getElementById("fDepMin").value);
+  const depMax=parseFloat(document.getElementById("fDepMax").value);
+  const diaMin=parseFloat(document.getElementById("fDiaMin").value);
+  const diaMax=parseFloat(document.getElementById("fDiaMax").value);
+  const volMin=parseFloat(document.getElementById("fVolMin").value);
+  const volMax=parseFloat(document.getElementById("fVolMax").value);
+  const identEl=document.getElementById("fIdentity");
+  const identSel=identEl?identEl.value:"";
+  const organelleSel=Array.from(document.querySelectorAll(".forganelle:checked")).map(function(cb){return cb.value;});
+
+  const matches=[];
+  for(let i=0;i<N;i++){
+    if(layerSel.length && layerSel.indexOf(BLAY[i])<0) continue;
+    /* "dense", matching the <select>'s own option value in build_ljump.py. This read "dark"
+       until ljumpcheck.js caught it: the filter silently matched nothing and returned all 488
+       rows, which looks exactly like "not filtering by this" and would never have been noticed
+       by eye. The array is named BPOL and the CSV column says "polarity", so three different
+       words were in play for one concept -- the page and the export now both say "pass". */
+    if(polSel==="dense" && !BPOL[i]) continue;
+    if(polSel==="pale"  &&  BPOL[i]) continue;
+    if(truncSel==="yes" && !BTR[i]) continue;
+    if(truncSel==="no"  && BTR[i]) continue;
+    if(dmgSel==="yes" && !BDM[i]) continue;
+    if(dmgSel==="no"  && BDM[i]) continue;
+    if(isFinite(depMin)&&BDEP[i]<depMin) continue;
+    if(isFinite(depMax)&&BDEP[i]>depMax) continue;
+    if(isFinite(diaMin)&&BDIA[i]<diaMin) continue;
+    if(isFinite(diaMax)&&BDIA[i]>diaMax) continue;
+    if(isFinite(volMin)&&BVOL[i]<volMin) continue;
+    if(isFinite(volMax)&&BVOL[i]>volMax) continue;
+    if(identSel){
+      const cur=ljumpIdentityOf(i);
+      if(identSel===LJUMP_UNCLASSIFIED_SENTINEL){ if(cur)continue; }
+      else if(cur!==identSel){ continue; }
+    }
+    if(organelleSel.length){
+      const have=ljumpOrganelleKindsOf(i);
+      if(!organelleSel.some(function(k){return have.indexOf(k)>=0;})) continue;
+    }
+    matches.push({row:{i:i}});
+  }
+  return matches;
+}
+
+function buildColumnsLjump(){
+  return [
+    {header:"nucleus_id",get:function(m){return BID[m.row.i];}},
+    {header:"voxel_x",get:function(m){return BX[m.row.i];}},
+    {header:"voxel_y",get:function(m){return BY[m.row.i];}},
+    {header:"voxel_z",get:function(m){return BZ[m.row.i];}},
+    {header:"nucleus_volume_um3",get:function(m){return BVOL[m.row.i].toFixed(2);}},
+    {header:"eq_diameter_um",get:function(m){return BDIA[m.row.i].toFixed(2);}},
+    {header:"depth_below_pia_um",get:function(m){return BDEP[m.row.i].toFixed(1);}},
+    {header:"layer",get:function(m){return layerName(m.row.i);}},
+    /* Named detector_pass, NOT "polarity" and never anything that reads like a cell type.
+       The column says what the detector did, and the About card says what that is worth. */
+    {header:"detector_pass",get:function(m){return BPOL[m.row.i]?"dense":"pale";}},
+    {header:"truncated_z",get:function(m){return BTR[m.row.i]?"yes":"no";}},
+    {header:"near_damaged_section",get:function(m){return BDM[m.row.i]?"yes":"no";}},
+    {header:"current_community_identity",get:function(m){return ljumpIdentityOf(m.row.i)||"unclassified";}},
+    /* An EXCEPTION column, blank for the nuclei nobody has flagged -- not a second copy of
+       voxel_x/y/z. The original coordinate is never overwritten, because that coordinate is
+       the anchor tying a correction back to its nucleus. */
+    {header:"corrected_voxel",get:function(m){const f=ljumpCorrectedPositionOf(m.row.i); return f?f.to:"";}},
+    {header:"correction_votes",get:function(m){const f=ljumpCorrectedPositionOf(m.row.i); return f?f.votes:"";}},
+    {header:"organelle_kinds_reported",get:function(m){
+      return ljumpOrganelleKindsOf(m.row.i).map(function(k){
+        const info=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined")&&ORGANELLE_KIND_BY_VALUE[k];
+        return info?info.short:k;
+      }).sort().join("; ");     // semicolon, not comma: Søren's Excel uses comma as the
+    }}                          // decimal separator and a comma-joined list misreads there
+  ];
+}
+
+(function(){
+  const runBtn=document.getElementById("filterRun");
+  const dlBtn=document.getElementById("filterDownload");
+  const statusEl=document.getElementById("filterStatus");
+  const layersBox=document.getElementById("fLayersBox");
+  const identBox=document.getElementById("fIdentityBox");
+  const organellesBox=document.getElementById("fOrganellesBox");
+  if(!runBtn||!dlBtn||!layersBox) return;   // filter tab markup not present on this build
+  layersBox.innerHTML=layerFilterHtml();
+  let lastMatches=null;
+  function invalidatePreview(){
+    lastMatches=null;
+    dlBtn.disabled=true;
+    dlBtn.title="Click \"Preview matches\" first";
+    statusEl.textContent="";
+    UJ.stepthrough.initStepThrough(null);
+  }
+  function runPreview(){
+    lastMatches=runFilterLjump();
+    const n=lastMatches.length;
+    statusEl.textContent=n===0?"No matching nuclei — adjust filters.":
+      n.toLocaleString()+" matching "+(n===1?"nucleus":"nuclei")+" found.";
+    dlBtn.disabled=n===0;
+    dlBtn.title=n===0?"No matches to download":"";
+    UJ.stepthrough.initStepThrough(lastMatches);
+  }
+  runBtn.addEventListener("click",runPreview);
+  dlBtn.addEventListener("click",function(){
+    if(!lastMatches||!lastMatches.length||typeof XLSX==="undefined")return;
+    const cols=buildColumnsLjump();
+    const data=[cols.map(function(c){return c.header;})];
+    for(const m of lastMatches)data.push(cols.map(function(c){return c.get(m);}));
+    const ws=XLSX.utils.aoa_to_sheet(data);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Nuclei");
+    XLSX.writeFile(wb,"ljump_filtered_nuclei.xlsx");
+  });
+  document.querySelectorAll("#filterCard input, #filterCard select").forEach(function(el){
+    el.addEventListener("change",function(){
+      if(el===runBtn||el===dlBtn)return;
+      invalidatePreview();
+    });
+  });
+  layersBox.querySelectorAll(".flayer").forEach(function(cb){cb.addEventListener("change",invalidatePreview);});
+
+  /* Eager, not lazy on first Preview: at 488 rows the read is cheap and a dropdown a user can
+     open before it has options is worse than a short "loading" message. Named and exposed on
+     window so ljumpcheck.js can rebuild it after swapping in a mocked fetch -- the eager call
+     fires once against whatever fetch existed at THAT moment, and resetting the cache alone
+     cannot reach back into an already-in-flight .then() chain. */
+  function buildIdentityDropdown(){
+    if(!identBox)return;
+    identBox.innerHTML='<p class="hint" style="margin-top:0">Loading current community identities from the Master cell list&hellip;</p>';
+    fetchLjumpIdentities().then(function(){
+      const counts={}; let unclassified=0;
+      for(let i=0;i<N;i++){
+        const cur=ljumpIdentityOf(i);
+        if(!cur){ unclassified++; continue; }
+        counts[cur]=(counts[cur]||0)+1;
+      }
+      const named=Object.keys(counts).sort(function(a,b){return a.localeCompare(b);});
+      let h='<select id="fIdentity" style="width:100%">';
+      h+='<option value="">Not filtering by this</option>';
+      h+='<option value="'+LJUMP_UNCLASSIFIED_SENTINEL+'">Unclassified ('+unclassified+')</option>';
+      named.forEach(function(name){
+        h+='<option value="'+escHtml(name)+'">'+escHtml(name)+' ('+counts[name]+')</option>';
+      });
+      h+='</select>';
+      identBox.innerHTML=h;
+      const identEl=document.getElementById("fIdentity");
+      if(identEl) identEl.addEventListener("change",invalidatePreview);
+    }).catch(function(){
+      identBox.innerHTML='<p class="hint" style="margin-top:0;color:var(--warn)">Could not load community identities right now &mdash; the other filters still work. Reload to retry.</p>';
+    });
+  }
+  buildIdentityDropdown();
+  window.__ljumpBuildIdentityDropdown=buildIdentityDropdown;
+
+  function buildOrganelleFilterBox(){
+    if(!organellesBox)return;
+    if(typeof ORGANELLE_GROUPS==="undefined"){ organellesBox.innerHTML=""; return; }
+    organellesBox.innerHTML='<p class="hint" style="margin-top:0">Loading community organelle reports&hellip;</p>';
+    fetchLjumpOrganelles().then(function(){
+      const counts={};
+      for(let i=0;i<N;i++){
+        ljumpOrganelleKindsOf(i).forEach(function(k){counts[k]=(counts[k]||0)+1;});
+      }
+      let h='<div style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding:8px">';
+      ORGANELLE_GROUPS.forEach(function(g){
+        h+='<div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:8px">'+escHtml(g.label)+'</div>';
+        g.kinds.forEach(function(k){
+          const n=counts[k.value]||0;
+          h+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0'+(n===0?';color:var(--mut)':'')+'">'
+            +'<input type="checkbox" class="forganelle" value="'+escHtml(k.value)+'"> '+escHtml(k.label)+' ('+n+')</label>';
+        });
+      });
+      h+='</div>';
+      organellesBox.innerHTML=h;
+      organellesBox.querySelectorAll(".forganelle").forEach(function(cb){cb.addEventListener("change",invalidatePreview);});
+    }).catch(function(){
+      organellesBox.innerHTML='<p class="hint" style="margin-top:0;color:var(--warn)">Could not load community organelle reports right now &mdash; the other filters still work. Reload to retry.</p>';
+    });
+  }
+  buildOrganelleFilterBox();
+  window.__ljumpBuildOrganelleFilterBox=buildOrganelleFilterBox;
+
+  /* Warm the fixes cache eagerly: by the time a user has picked filters and clicked Download,
+     488 rows' worth of fetch has almost always resolved, so corrected_voxel/correction_votes
+     read from a populated cache rather than racing it. Download is deliberately NOT gated on
+     it -- a still-loading cache means those two columns come back blank for one export, which
+     is an honest degrade rather than a wrong answer. */
+  fetchLjumpFixes().catch(function(){});
+})();
+
+/* ============================================================================================
+   Statistics dashboard
+   ============================================================================================
+   Every chart is keyed on CURRENT COMMUNITY IDENTITY, as in βJump: this dataset publishes no
+   cell types, so there is nothing else to key on. What replaces βJump's marker charts is the
+   thing Lee16 actually measures well -- DEPTH, from a traced pial surface rather than a fitted
+   plane -- plus the detector-pass composition, which is the honest way to show how much of the
+   table is still unreviewed.
+
+   Tab wiring: core/stepthrough.js's wireTabs() special-cases a tab named "dashboard", calling
+   ensureConnPlotly() then initDashboardTab(), both typeof-guarded so every other tab keeps
+   working even if this whole block were absent. */
+let _ljumpPlotlyLoadPromise=null;
+function ensureConnPlotly(){
+  if(window.Plotly)return Promise.resolve();
+  if(_ljumpPlotlyLoadPromise)return _ljumpPlotlyLoadPromise;
+  _ljumpPlotlyLoadPromise=new Promise(function(res,rej){
+    const s=document.createElement("script");
+    s.src="https://cdn.plot.ly/plotly-2.32.0.min.js";
+    s.onload=function(){res();}; s.onerror=function(){rej(new Error("Plotly failed to load"));};
+    document.head.appendChild(s);
+  });
+  return _ljumpPlotlyLoadPromise;
+}
+function ljumpDashOneColor(){ return currentTheme()==="light" ? "#1d4ed8" : "#7aa2ff"; }
+/* Sequential blue ramp for the heatmaps: one hue, monotonic lightness, light->dark on the
+   light surface and dark->light on the dark one -- "near zero" has to recede toward whichever
+   surface colour is actually behind it. Same validated family the other tools use. */
+function ljumpDashSeqRamp(){
+  return currentTheme()==="light"
+    ? [[0,"#eef4fc"],[0.17,"#cde2fb"],[0.33,"#9ec5f4"],[0.5,"#6da7ec"],[0.67,"#3987e5"],[0.83,"#1c5cab"],[1,"#0d366b"]]
+    : [[0,"#0d2440"],[0.17,"#123258"],[0.33,"#184f95"],[0.5,"#1c5cab"],[0.67,"#2a78d6"],[0.83,"#5598e7"],[1,"#9ec5f4"]];
+}
+const LJUMP_DASH_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d","autoScale2d"]};
+/* Object.assign is shallow -- merge one level into xaxis/yaxis so a caller overriding just a
+   title does not silently drop gridcolor. */
+function ljumpDashLayout(extra){
+  const c=liveThemeColors();
+  const base={
+    margin:{l:64,r:14,t:10,b:80},
+    font:{family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:c.ink},
+    paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
+    showlegend:false,
+    hoverlabel:{bgcolor:c.panel,bordercolor:c.line,font:{color:c.ink}},
+    xaxis:{automargin:true,gridcolor:c.line,zeroline:false,tickangle:-30},
+    yaxis:{automargin:true,gridcolor:c.line,zeroline:false}
+  };
+  const out=Object.assign({},base,extra||{});
+  ["xaxis","yaxis"].forEach(function(k){ if(extra&&extra[k]) out[k]=Object.assign({},base[k],extra[k]); });
+  return out;
+}
+function ljumpDashPlot(id,traces,extra){
+  const el=document.getElementById(id); if(!el)return;
+  Plotly.react(el,traces,ljumpDashLayout(extra),LJUMP_DASH_CFG);
+}
+
+const LJUMP_DASH_TOP_IDENTITIES=6;   // an unbounded set of free-text community identities
+    // cannot each get a categorical slot; anything past this by count folds into "Other"
+let LDASH=null;
+function ljumpDashAggregate(){
+  const counts={};
+  for(let i=0;i<N;i++){ const cur=ljumpIdentityOf(i); counts[cur]=(counts[cur]||0)+1; }
+  const named=Object.keys(counts).filter(function(k){return k;}).sort(function(a,b){return counts[b]-counts[a];});
+  const top=named.slice(0,LJUMP_DASH_TOP_IDENTITIES);
+  const otherCount=named.slice(LJUMP_DASH_TOP_IDENTITIES).reduce(function(s,k){return s+counts[k];},0);
+  const unclassifiedCount=counts[""]||0;
+  const order=top.slice();
+  if(otherCount) order.push("Other");
+  if(unclassifiedCount) order.push("Unclassified");
+  function identityBucket(i){
+    const cur=ljumpIdentityOf(i);
+    if(!cur) return "Unclassified";
+    return top.indexOf(cur)>=0 ? cur : "Other";
+  }
+  const perBucket={};
+  order.forEach(function(b){ perBucket[b]=b==="Unclassified"?unclassifiedCount:(b==="Other"?otherCount:counts[b]); });
+  const byDepth={}, byDia={}, byPass={};
+  order.forEach(function(b){ byDepth[b]=[]; byDia[b]=[]; byPass[b]={pale:0,dense:0}; });
+  for(let i=0;i<N;i++){
+    const b=identityBucket(i);
+    byDepth[b].push(BDEP[i]);
+    byDia[b].push(BDIA[i]);
+    byPass[b][BPOL[i]?"dense":"pale"]++;
+  }
+  LDASH={counts:counts,order:order,identityBucket:identityBucket,perBucket:perBucket,
+         byDepth:byDepth,byDia:byDia,byPass:byPass};
+}
+function ljumpDashLayerMatrix(){
+  const order=LDASH.order;
+  const z=order.map(function(){return new Array(LAYERS.length).fill(0);});
+  for(let i=0;i<N;i++){
+    if(BLAY[i]<0) continue;
+    z[order.indexOf(LDASH.identityBucket(i))][BLAY[i]]++;
+  }
+  return z;
+}
+function ljumpDashNeighborMatrix(){
+  const order=LDASH.order, idx={}; order.forEach(function(b,k){idx[b]=k;});
+  const mat=order.map(function(){return order.map(function(){return 0;});});
+  for(let i=0;i<N;i++){
+    const nb=kNearest(BX[i],BY[i],BZ[i],1,i);
+    if(!nb.length)continue;
+    mat[idx[LDASH.identityBucket(i)]][idx[LDASH.identityBucket(nb[0].i)]]++;
+  }
+  return mat.map(function(row){
+    const s=row.reduce(function(x,y){return x+y;},0);
+    return s?row.map(function(v){return 100*v/s;}):row;
+  });
+}
+function ljumpDashDraw(){
+  const one=ljumpDashOneColor(), order=LDASH.order;
+
+  // 1. nuclei per community identity
+  ljumpDashPlot("dIdentity",[{type:"bar",x:order,y:order.map(function(b){return LDASH.perBucket[b];}),
+    marker:{color:one},hovertemplate:"%{x}<br>%{y} nuclei<extra></extra>"}],
+    {yaxis:{title:{text:"nuclei"}}});
+
+  // 2. how much of the table each detector pass supplies, per identity. Two series, so this is
+  //    the one chart with a legend -- and it is the chart that shows reviewers where the
+  //    unreliable rows are.
+  ljumpDashPlot("dPass",[
+    {type:"bar",name:"pale",x:order,y:order.map(function(b){return LDASH.byPass[b].pale;}),
+     marker:{color:one},hovertemplate:"%{x}<br>%{y} pale<extra></extra>"},
+    {type:"bar",name:"dense",x:order,y:order.map(function(b){return LDASH.byPass[b].dense;}),
+     marker:{color:currentTheme()==="light"?"#93b5f0":"#37548c"},
+     hovertemplate:"%{x}<br>%{y} dense<extra></extra>"}],
+    {barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.12},yaxis:{title:{text:"nuclei"}}});
+
+  // 3. nucleus diameter by identity -- a box plot, because the interesting claim is about the
+  //    distribution, not a mean
+  const diaRows=order.filter(function(b){return LDASH.byDia[b].length;});
+  ljumpDashPlot("dDiameter",diaRows.map(function(b){return {type:"box",name:b,y:LDASH.byDia[b],
+    marker:{color:one},line:{width:1.5},boxpoints:false,
+    hovertemplate:"%{x}<br>median %{median:.1f} µm<extra></extra>"};}),
+    {yaxis:{title:{text:"equivalent diameter (µm)"}}});
+
+  // 4. identity x layer -- magnitude across two categories, so a heatmap
+  ljumpDashPlot("dIdentityLayer",[{type:"heatmap",x:LAYERS,y:order,z:ljumpDashLayerMatrix(),
+    colorscale:ljumpDashSeqRamp(),hovertemplate:"%{y}<br>%{x}<br>%{z} nuclei<extra></extra>",
+    colorbar:{title:{text:"nuclei"},thickness:10,outlinewidth:0}}],
+    {margin:{l:150,r:14,t:10,b:70},xaxis:{tickangle:0,gridcolor:"rgba(0,0,0,0)"},yaxis:{gridcolor:"rgba(0,0,0,0)"}});
+
+  // 5. nearest-neighbour identity composition, row-normalised so a rare identity stays readable
+  ljumpDashPlot("dIdentityNeighbor",[{type:"heatmap",x:order,y:order,z:ljumpDashNeighborMatrix(),zmin:0,
+    colorscale:ljumpDashSeqRamp(),hovertemplate:"%{y} → nearest is %{x}<br>%{z:.1f}% of them<extra></extra>",
+    colorbar:{title:{text:"% of row"},thickness:10,outlinewidth:0}}],
+    {margin:{l:150,r:14,t:10,b:110},xaxis:{gridcolor:"rgba(0,0,0,0)"},yaxis:{gridcolor:"rgba(0,0,0,0)"}});
+
+  // 6. depth profile per identity -- small multiples. As many identities as there are cannot be
+  //    as many lines on one axis (no ten-hue set survives a colour-vision check), so each gets
+  //    its own faceted panel.
+  const cols=3, rows2=Math.ceil(order.length/cols), traces=[], ann=[];
+  const lo=-30, hi=450, bins2=24, w2=(hi-lo)/bins2;
+  order.forEach(function(b,k){
+    const hcount=new Array(bins2).fill(0);
+    LDASH.byDepth[b].forEach(function(d){ const bi=Math.floor((d-lo)/w2); if(bi>=0&&bi<bins2)hcount[bi]++; });
+    const tot=LDASH.byDepth[b].length||1;
+    const ax=k?String(k+1):"";
+    traces.push({type:"scatter",mode:"lines",x:hcount.map(function(_,bi){return lo+(bi+0.5)*w2;}),
+      y:hcount.map(function(v){return 100*v/tot;}),
+      line:{color:one,width:2},fill:"tozeroy",fillcolor:one+"33",xaxis:"x"+ax,yaxis:"y"+ax,
+      hovertemplate:b+"<br>%{x:.0f} µm below pia<br>%{y:.1f}%<extra></extra>"});
+    ann.push({text:b+" ("+LDASH.perBucket[b]+")",xref:"x"+ax+" domain",yref:"y"+ax+" domain",
+      x:0.5,y:1.08,showarrow:false,font:{size:10}});
+  });
+  const gl={grid:{rows:rows2,columns:cols,pattern:"independent",roworder:"top to bottom",xgap:0.14,ygap:0.32},
+    annotations:ann,margin:{l:50,r:14,t:22,b:40},height:170*rows2};
+  for(let k=0;k<order.length;k++){
+    const ax=k?String(k+1):"";
+    gl["xaxis"+ax]={showgrid:false,zeroline:false,title:k>=order.length-cols?{text:"µm below the pia",font:{size:10}}:undefined};
+    gl["yaxis"+ax]={gridcolor:"rgba(0,0,0,0)",zeroline:false,title:k%cols===0?{text:"% of that identity",font:{size:10}}:undefined};
+  }
+  ljumpDashPlot("dIdentityDepthProfile",traces,gl);
+}
+let __ljumpDashInited=false;
+function initDashboardTab(){
+  if(__ljumpDashInited)return; __ljumpDashInited=true;
+  const totalEl=document.getElementById("dashTotal"); if(totalEl)totalEl.textContent=fmt(N);
+  fetchLjumpIdentities().then(function(){
+    ljumpDashAggregate();
+    ljumpDashDraw();
+  });
+}
+
+</script>
+</body></html>

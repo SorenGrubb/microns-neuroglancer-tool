@@ -125,6 +125,27 @@
     .feature.delta .cta{background:#b388ff;color:#1a0b2e}
   }
 
+  /* ── the λJump card is blue ────────────────────────────────────────────────────────────
+     Søren, 2026-08-21: "I think the color theme of lJump should be blue." The same two blues
+     λJump itself uses (#1d4ed8 light, #7aa2ff dark), so card and tool read as one thing.
+     Hue is the thing keeping five cards apart, not position: teal ~180°, this ~225°, purple
+     ~265°, rose ~345°, amber ~25°. Blue and purple are the closest pair, which is why they are
+     not adjacent in the list — µJump, δJump, λJump, ηJump, βJump puts teal between them.
+     Measured the same way as the blocks above, with the same WCAG formula, AFTER writing the
+     colours down rather than before: kicker/logo 6.70:1 on the light card and 6.72:1 on the
+     dark one; CTA text 6.70:1 light and 7.47:1 dark. All well past AA (4.5:1), and every one
+     of them better than µJump's own teal on white, which is 3.09:1.
+     The first version of this comment claimed 7.98 and 8.44 — numbers written down before
+     anything was computed. They were wrong, and being wrong in the safe direction is luck,
+     not method. */
+  .feature.lambda{--teal:#1d4ed8;--teal-soft:#e6edfd}
+  .feature.lambda .cta{background:#1d4ed8;color:#ffffff}
+  @media (prefers-color-scheme:dark){
+    .feature.lambda{--teal:#7aa2ff;--teal-soft:#121d38}
+    /* dark text on the light blue fill, not white — same reason as above */
+    .feature.lambda .cta{background:#7aa2ff;color:#08122a}
+  }
+
 </style>
 </head>
 <body>
@@ -196,6 +217,34 @@
       <span class="chip">3D mesh, PowerPoint &amp; Excel</span>
     </div>
     <span class="cta">Open &delta;Jump &rarr;</span>
+  </a>
+
+  <a class="feature lambda" href="/ljump.html">
+    <div class="kicker">Interactive tool</div>
+    <div class="logo"><span class="mu">&lambda;</span><span class="jm">Jump</span></div>
+    <p class="desc">
+      Mouse visual cortex at <em>4&nbsp;&times;&nbsp;4&nbsp;&times;&nbsp;40&nbsp;nm &mdash; the same
+      voxel as &micro;Jump</em>, from the 2016 Lee <em>et al.</em> serial-section TEM volume. It is
+      the smallest dataset here and the only one that images the <em>leptomeninges</em>: a
+      continuous sheet of pial and arachnoid cells across the whole brain surface, with the
+      subarachnoid space above it. The guided tree&rsquo;s pia/arachnoid branch exists for this
+      volume. There is no published segmentation and no cell types at all, so there are no meshes
+      and nothing is pre-classified &mdash; 488 nuclei were detected here, every one of them
+      unnamed, and depth is measured from the traced pial surface rather than fitted.
+    </p>
+    <div class="chips">
+      <span class="chip">Mouse visual cortex</span>
+      <span class="chip">Leptomeninges imaged</span>
+      <span class="chip">488 nuclei</span>
+      <span class="chip">0 classified</span>
+      <span class="chip">Same 4&middot;4&middot;40&nbsp;nm voxel as &micro;Jump</span>
+      <span class="chip">Guided decision tree</span>
+      <span class="chip">Community voting</span>
+      <span class="chip">Depth traced, not fitted</span>
+      <span class="chip">Excel export</span>
+      <span class="chip">No segmentation &mdash; no 3D meshes</span>
+    </div>
+    <span class="cta">Open &lambda;Jump &rarr;</span>
   </a>
 
   <a class="feature eta" href="/hjump.html">
