@@ -2,6 +2,9 @@
    Dataset-agnostic: the only per-dataset values (bucket URLs, sharding parameters, model->nm
    transform) now live in UJ.cfg.mesh, set by the page before this file loads. H01/hJump reuses
    this file unchanged and only supplies a different UJ.cfg.mesh.
+   A page with no segmentation at all can instead set UJ.cfg.mesh.fetchGeometry and skip the
+   neuroglancer format entirely -- lJump hosts its own per-nucleus .glb files. See the block
+   comment at the top of fetchMesh().
    Loaded as a classic <script src>, so it must appear BEFORE the main tool script; it publishes
    UJ.mesh, and the main script keeps its old name via `const MeshDL = UJ.mesh;`.
    Public surface: downloadRoot, downloadRootPptx, computeVolume, clearMeshNotFoundCache,
@@ -380,6 +383,41 @@ UJ.mesh=(()=>{
      other and with Neuroglancer/Blender imports of MICrONS data -- same default as
      mesh_download_prototype.html's LOD table. */
   async function fetchMesh(rootIdStr,onProgress,forceRecheck,forceCoarsestLod){
+    /* ---- geometry source override (2026-08-24, added for lJump) ------------------------------
+       Everything below this line reads neuroglancer's precomputed multi-LOD Draco format, keyed
+       on a segmentation root ID. Lee16 has no segmentation, so lJump has no root IDs and nothing
+       below can ever run for it -- but it DOES have geometry: its own notebook marches a mesh per
+       nucleus and hosts them as plain .glb files beside the page.
+
+       CFG.fetchGeometry lets a page supply that geometry directly. It is ADDITIVE: a page that
+       does not set it reaches the identical code path it always did, byte for byte, so uJump,
+       dJump, hJump and bJump are unaffected. Everything DOWNSTREAM of here -- fetchCombinedMesh's
+       merge and per-id failure handling, the Y-flip, buildGLB, the scale bar, the PowerPoint
+       turntable, the volume integral -- is format-agnostic and works unchanged on whatever this
+       returns.
+
+       The contract is fetchMesh's own return contract, and it is not negotiable:
+         positions  Float32Array, xyz triples, ABSOLUTE dataset coordinates in MICROMETRES
+         indices    Uint32Array, triangles
+       Absolute, not centred on the object: fetchCombinedMesh concatenates several meshes into one
+       buffer and relies on them already being in their true positions relative to each other (see
+       the comment above it). A source that helpfully re-centres each mesh on its own centroid
+       would stack them on top of one another, and nothing would report an error -- so the shape
+       and the units are checked here rather than trusted. */
+    if(typeof CFG.fetchGeometry==="function"){
+      const g=await CFG.fetchGeometry(String(rootIdStr),onProgress);
+      if(!g||!(g.positions instanceof Float32Array)||!(g.indices instanceof Uint32Array))
+        throw new Error("UJ.cfg.mesh.fetchGeometry must resolve to "
+          +"{positions:Float32Array, indices:Uint32Array} in absolute micrometres");
+      if(!g.positions.length||g.positions.length%3||!g.indices.length||g.indices.length%3)
+        throw new Error("fetchGeometry returned "+g.positions.length+" position floats and "
+          +g.indices.length+" indices; both must be non-empty multiples of 3");
+      onProgress&&onProgress(1,"ready");
+      return {positions:g.positions,indices:g.indices,
+              lod:g.lod===undefined?null:g.lod,
+              numLods:g.numLods===undefined?null:g.numLods,
+              bytes:g.bytes||g.positions.byteLength+g.indices.byteLength};
+    }
     const rootId=BigInt(rootIdStr);
     onProgress&&onProgress(0,"reading manifest…");
     await loadInfo();
@@ -545,10 +583,18 @@ UJ.mesh=(()=>{
     /* When there's no main root ID (community-only combine), fall back to the first combined ID
        so the filename is still a real, traceable segmentation ID rather than a blank/underscore. */
     const idForName=rootIdStr||rootIds[0];
-    const tag=fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod;
-    const glb=buildGLB(positions,indices,"microns_"+idForName+tag);
+    /* CFG.filePrefix (2026-08-24): "microns_" is the right prefix for a MICrONS root ID and the
+       wrong one for anything else -- lJump's ids are its own nucleus numbers in a Lee16 volume
+       that has nothing to do with MICrONS. Defaults to the old literal, so every existing page's
+       filenames are byte-for-byte unchanged.
+       lod is null whenever the geometry did not come from a multi-resolution source, which is
+       true for every fetchGeometry page; "_lod"+null renders as the string "_lodnull", which is
+       what the first version of this shipped. */
+    const pfx=CFG.filePrefix||"microns_";
+    const tag=fragmentCount>1?"_combined"+fragmentCount:(lod==null?"":"_lod"+lod);
+    const glb=buildGLB(positions,indices,pfx+idForName+tag);
     onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+idForName+tag+"_um.glb";
+    const filename=pfx+idForName+tag+"_um.glb";
     const url=URL.createObjectURL(new Blob([glb],{type:"model/gltf-binary"}));
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
@@ -814,7 +860,7 @@ UJ.mesh=(()=>{
     const cx=(minX+maxX)/2,cy=(minY+maxY)/2,cz=(minZ+maxZ)/2;
     const n=Math.round(PPTX_FILL_BOOST*1000000/longest),d=1000000;
     const pre=[Math.round(-cx*n*36),Math.round(-cy*n*36),Math.round(-cz*n*36)];
-    const glb=buildGLB(positions,indices,"microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:""));
+    const glb=buildGLB(positions,indices,(CFG.filePrefix||"microns_")+idForName+(fragmentCount>1?"_combined"+fragmentCount:""));
     const zip=await JSZip.loadAsync(PPTXSK_B64,{base64:true});
     zip.file("ppt/media/model3d1.glb",glb);
     const pngB64=renderThumbnailPNG(positions,minX,maxX,minY,maxY);
@@ -834,7 +880,7 @@ UJ.mesh=(()=>{
     zip.file("ppt/slides/slide2.xml",slideXml);
     const blob=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation"});
     onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:"")+"_turntable.pptx";
+    const filename=(CFG.filePrefix||"microns_")+idForName+(fragmentCount>1?"_combined"+fragmentCount:"")+"_turntable.pptx";
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();

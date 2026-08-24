@@ -723,17 +723,116 @@ var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
 UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
 UJ.toVox = function(p){ return [p[0]/UJ_RX, p[1]/UJ_RY, p[2]/UJ_RZ]; };
 
-/* NO UJ.cfg.mesh, and that is a statement rather than an omission.
-   ------------------------------------------------------------------------------------
-   Lee16 publishes no segmentation, so there are no segment IDs, no meshes, no root IDs and
-   no synapses. Every surface that depends on them -- the 3D viewer, mesh-computed volume,
-   GLB and PowerPoint export, Cell contacts, root-ID proposals, the Connectivity panel -- is
-   REMOVED from this page rather than left present and broken. core/mesh.js is deliberately
-   not loaded by build_ljump.py either; ljumpcheck.js asserts that it isn't, so a future
-   copy-paste from βJump cannot quietly reintroduce a mesh button that can never work.
+/* ── λJump: its own geometry source ──────────────────────────────────────────────────────────
+   Lee16 has no segmentation, so there are no root IDs and core/mesh.js's neuroglancer
+   sharded-Draco pipeline can never run here. What lJump has instead is 487 nucleus meshes its
+   own notebook marched out of the detector's own masks (step 9), hosted as plain .glb files in
+   ljump_meshes/ beside this page.
 
-   If nucleus meshes are ever generated from the notebook's own label volumes and hosted
-   statically, this is where their config goes, and core/mesh.js comes back with it. */
+   UJ.cfg.mesh.fetchGeometry is core/mesh.js's additive hook for exactly this: supply
+   {positions, indices} and every surface downstream -- the Y-flip, buildGLB, the scale bar, the
+   PowerPoint turntable -- works unchanged. See the block comment at the top of fetchMesh(). */
+UJ.cfg.mesh = {
+  /* Downloaded files are named from this, not from core/mesh.js's default "microns_" -- these
+     are Lee16 nuclei and nothing about them is MICrONS. */
+  filePrefix: "lee16_nucleus_",
+  dir: "ljump_meshes/",
+  manifestUrl: "ljump_meshes/manifest.json",
+
+  /* Which nuclei have one. 487 of 488 do; the one that does not could not be re-extracted at
+     mesh resolution, and saying so is better than a button that 404s. Fetched once, lazily --
+     a user who never opens the 3D controls never pays for it. */
+  _man: null,
+  manifest: function(){
+    if(!this._man) this._man = fetch(this.manifestUrl)
+      .then(function(r){ if(!r.ok) throw new Error("manifest "+r.status); return r.json(); })
+      .catch(function(e){ UJ.cfg.mesh._man = null; throw e; });
+    return this._man;
+  },
+
+  /* GLB -> {positions, indices}. Written against the glTF 2.0 binary container rather than
+     against the exact bytes write_glb() happens to emit, so a mesh re-exported through Blender
+     or any other tool still loads: accessor/bufferView byteOffsets are honoured and all three
+     legal index component types are accepted. */
+  parseGlb: function(buf){
+    var dv = new DataView(buf), u8 = new Uint8Array(buf);
+    if(dv.getUint32(0, true) !== 0x46546C67) throw new Error("not a GLB (bad magic)");
+    if(dv.getUint32(8, true) !== buf.byteLength)
+      throw new Error("GLB length field disagrees with the file: header says "
+        + dv.getUint32(8, true) + ", file is " + buf.byteLength);
+    /* Chunks: [uint32 length][uint32 type][length bytes]. The spec requires length to already
+       be a multiple of 4 (the writer pads the JSON chunk with spaces and the BIN chunk with
+       NULs), but tolerate an unpadded length rather than walking off into the middle of the
+       next header. */
+    var p = 12, json = null, bin = null;
+    while(p + 8 <= buf.byteLength){
+      var len = dv.getUint32(p, true), type = dv.getUint32(p + 4, true);
+      if(p + 8 + len > buf.byteLength) throw new Error("GLB chunk runs past the end of the file");
+      var body = buf.slice(p + 8, p + 8 + len);
+      if(type === 0x4E4F534A) json = JSON.parse(new TextDecoder().decode(body));
+      else if(type === 0x004E4942) bin = body;
+      p += 8 + len;
+      if(len % 4) p += 4 - (len % 4);
+    }
+    if(!json || !bin) throw new Error("GLB is missing its JSON or BIN chunk");
+    var prim = json.meshes[0].primitives[0];
+    function read(accIdx){
+      var a = json.accessors[accIdx], bv = json.bufferViews[a.bufferView];
+      var off = (bv.byteOffset || 0) + (a.byteOffset || 0);
+      var n = a.count * ({SCALAR:1, VEC2:2, VEC3:3, VEC4:4}[a.type]);
+      switch(a.componentType){
+        case 5126: return new Float32Array(bin.slice(off, off + n * 4));
+        case 5125: return new Uint32Array(bin.slice(off, off + n * 4));
+        case 5123: return new Uint16Array(bin.slice(off, off + n * 2));
+        case 5121: return new Uint8Array(bin.slice(off, off + n));
+        default: throw new Error("unsupported componentType " + a.componentType);
+      }
+    }
+    var pos = read(prim.attributes.POSITION);
+    var idxRaw = read(prim.indices);
+    return { positions: pos instanceof Float32Array ? pos : new Float32Array(pos),
+             indices: idxRaw instanceof Uint32Array ? idxRaw : new Uint32Array(idxRaw) };
+  },
+
+  /* core/mesh.js documents its contract as ABSOLUTE dataset coordinates in micrometres, because
+     fetchCombinedMesh concatenates meshes and relies on them already being in their true
+     positions. Step 9 writes each .glb re-centred on its own centroid -- good for a standalone
+     file, wrong for that contract -- so the nucleus's own centre goes back on here. A mesh left
+     at the origin would look right on screen and be silently wrong the day anything combines
+     two of them. */
+  fetchGeometry: function(id, onProgress){
+    var CFG = UJ.cfg.mesh;
+    onProgress && onProgress(0.05, "fetching mesh…");
+    return fetch(CFG.dir + encodeURIComponent(id) + ".glb").then(function(r){
+      if(r.status === 404) throw new Error("No mesh for nucleus " + id
+        + " — it could not be re-extracted at mesh resolution.");
+      if(!r.ok) throw new Error("mesh fetch failed (" + r.status + ")");
+      return r.arrayBuffer();
+    }).then(function(buf){
+      onProgress && onProgress(0.7, "decoding…");
+      var g = CFG.parseGlb(buf);
+      var c = UJ.ljumpCentreUm && UJ.ljumpCentreUm(id);
+      if(!c) throw new Error("no recorded position for nucleus " + id);
+      var q = g.positions;
+      for(var k = 0; k < q.length; k += 3){
+        q[k] += c[0]; q[k+1] += c[1]; q[k+2] += c[2];
+      }
+      return { positions: q, indices: g.indices, bytes: buf.byteLength };
+    });
+  }
+};
+
+/* WHAT IS STILL ABSENT, and still deliberately so. Having geometry does NOT give Lee16 a
+   segmentation. There are still no segment IDs, no cell meshes, no synapses -- so root-ID
+   proposals, Cell contacts, the Connectivity panel and everything keyed on a segmentation stay
+   REMOVED from this page rather than present and broken, and ljumpcheck.js still asserts that
+   none of their identifiers reaches the built page.
+
+   There is also no "Compute volume" button, which is a subtler call: the machinery for one now
+   exists and works. It is left out because the mesh IS the nucleus, re-extracted from the same
+   mask on the same grid as the volume already shown, and its integral reproduces that number to
+   0.001% -- so the button would look like a second opinion and be an echo. See the comment
+   beside the buttons in ljump_logic.js. */
 
 /* Guided identification.
    ------------------------------------------------------------------------------------
@@ -824,6 +923,7 @@ document.addEventListener("DOMContentLoaded", function(){
 
 </script>
 
+<script src="core/mesh.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/ontology.js"></script>
 <script src="core/panel.js"></script>
@@ -1153,6 +1253,28 @@ function showCell(i, distNm){
     +'placeholder="comment (optional) — what it looks like" style="flex:1"></div>';
   h+='<p class="hint" id="fixnewmsg"></p>';
 
+  /* ── the nucleus in 3D ─────────────────────────────────────────────────────────────────
+     Step 9 of λJump's own notebook marched a mesh out of each nucleus's detector mask and they
+     are hosted in ljump_meshes/ beside this page. 487 of 488 nuclei have one.
+
+     There is NO "Compute volume" button here, and its absence is deliberate. µJump and βJump
+     have one because their mesh is the whole CELL and their table's volume is the NUCLEUS --
+     two different quantities, so the button tells you something new. Here the mesh IS the
+     nucleus, re-extracted from the same mask on the same voxel grid that produced the volume
+     already printed above. Measured across all 487: the mesh's own closed-surface integral
+     reproduces the number in the manifest to 0.001%. A button offering it again would read as
+     independent confirmation of a figure it cannot confirm. */
+  h+='<label style="margin-top:16px;display:block">This nucleus in 3D</label>';
+  h+='<p class="hint" style="margin-top:0">Nuclear shape carries real identification evidence '
+    +'&mdash; lobulation, invagination, the flattened profile of an endothelial or meningeal '
+    +'nucleus. These meshes come from the detector\u2019s own masks at '
+    +'256&nbsp;&times;&nbsp;256&nbsp;&times;&nbsp;240&nbsp;nm, so they describe the nucleus '
+    +'envelope, not its contents.</p>';
+  h+='<div class="row" style="margin-top:8px">'
+    +'<button class="idbtn" id="meshbtn" style="flex:1;min-width:150px">&#8681; 3D model</button>'
+    +'<button class="idbtn" id="pptxbtn" style="flex:1;min-width:150px">&#8681; PowerPoint</button></div>';
+  h+='<p class="hint" id="meshmsg"></p>';
+
   h+='<button class="jump" id="jumphere">Jump to this nucleus &#8599;</button>';
 
   h+='<div class="neigh"><h4>3 nearest neighbouring nuclei</h4>';
@@ -1199,10 +1321,64 @@ function showCell(i, distNm){
     const u=neuroglancerLinkForPos([Number(b.dataset.x),Number(b.dataset.y),Number(b.dataset.z)]);
     if(u) window.open(u,"_blank","noopener");
   });
+  wireMesh(i);
   wireCorrection(i);
   startGuided(i);
   loadCommunity(i);
 }
+
+/* ── mesh buttons ──────────────────────────────────────────────────────────────────────────
+   core/mesh.js is keyed on a segmentation root ID everywhere else in this family. Lee16 has no
+   segmentation, so here the "root ID" IS the nucleus id and UJ.cfg.mesh.fetchGeometry (in
+   ljump_config.js) turns it into geometry by fetching ljump_meshes/<id>.glb. Everything
+   downstream of that -- the Y-flip, the GLB rebuild, the scale bar, the PowerPoint turntable --
+   is the shared code every other tool uses.
+
+   The one nucleus with no mesh disables the buttons and says why, rather than letting the fetch
+   404 at a user who cannot act on it. The manifest is fetched once, lazily, on the first cell
+   opened; until it resolves the buttons stay enabled and a click would report the 404 itself,
+   which is the right way round -- a slow manifest must not hide a mesh that exists. */
+function wireMesh(i){
+  const mb=document.getElementById("meshbtn"), pb=document.getElementById("pptxbtn"),
+        msg=document.getElementById("meshmsg");
+  if(!mb||!pb||!msg) return;
+  const id=String(BID[i]);
+  UJ.cfg.mesh.manifest().then(function(man){
+    const rec=man&&man.meshes&&man.meshes[id];
+    if(rec&&rec.ok) return;
+    mb.disabled=true; pb.disabled=true;
+    msg.textContent="No mesh for this nucleus \u2014 it could not be re-extracted at mesh "
+      +"resolution. 487 of the 488 nuclei have one.";
+  }).catch(function(){ /* manifest unreachable: leave the buttons alone, see above */ });
+
+  function prog(f,t){ msg.textContent=(t||"")+(f>0&&f<1?" "+Math.round(100*f)+"%":""); }
+  function run(btn,fn){
+    btn.disabled=true; prog(0,"starting\u2026");
+    Promise.resolve().then(fn)
+      .then(function(){ msg.textContent="done."; })
+      .catch(function(err){ msg.textContent="failed: "+((err&&err.message)||err); })
+      .then(function(){ btn.disabled=false; });
+  }
+  mb.addEventListener("click",function(){
+    run(mb,function(){ return UJ.mesh.downloadRoot(id,prog); });
+  });
+  pb.addEventListener("click",function(){
+    const coord=[BX[i],BY[i],BZ[i]].join(", ");
+    run(pb,function(){ return UJ.mesh.downloadRootPptx(id,cellLabel(i),coord,prog); });
+  });
+}
+
+/* core/mesh.js documents its geometry contract as ABSOLUTE dataset coordinates in micrometres.
+   Step 9 writes each .glb re-centred on its own centroid, so fetchGeometry puts the nucleus back
+   where it belongs -- and this is the lookup it uses. Defined on UJ rather than passed in
+   because ljump_config.js runs BEFORE this file and must not capture an array that does not
+   exist yet; resolving the id at call time makes the load order irrelevant. */
+UJ.ljumpCentreUm=function(id){
+  const k=Number(id);
+  for(let j=0;j<N;j++) if(BID[j]===k)
+    return [BX[j]*UJ.cfg.res[0]/1000, BY[j]*UJ.cfg.res[1]/1000, BZ[j]*UJ.cfg.res[2]/1000];
+  return null;
+};
 function jumpToIndex(i){ showCell(i,null); window.scrollTo({top:0,behavior:"smooth"}); }
 
 /* ── community panel ──────────────────────────────────────────────────────────────────── */
