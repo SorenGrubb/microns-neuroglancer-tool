@@ -804,8 +804,25 @@ UJ.cfg.mesh = {
     var CFG = UJ.cfg.mesh;
     onProgress && onProgress(0.05, "fetching mesh…");
     return fetch(CFG.dir + encodeURIComponent(id) + ".glb").then(function(r){
-      if(r.status === 404) throw new Error("No mesh for nucleus " + id
-        + " — it could not be re-extracted at mesh resolution.");
+      /* A 404 has TWO completely different causes and the first version of this reported only
+         one of them, which sent a real deployment problem out as a false statement about the
+         data. 487 of 488 nuclei have a mesh; exactly one (66) does not. So a 404 on any OTHER
+         nucleus does not mean "this nucleus has no mesh", it means the directory is not on the
+         server -- and saying otherwise sends someone looking at the detector when the fix is a
+         git push. The manifest is the only thing that can tell the two apart, so ask it before
+         claiming anything. */
+      if(r.status === 404) return CFG.manifest().then(function(man){
+        var rec = man && man.meshes && man.meshes[String(id)];
+        if(rec && !rec.ok) throw new Error("No mesh for nucleus " + id
+          + " \u2014 it could not be re-extracted at mesh resolution. It is the only one of "
+          + "the 488 that could not.");
+        throw new Error("ljump_meshes/" + id + ".glb is missing from the server, though the "
+          + "manifest lists it. The mesh directory has not been deployed \u2014 unzip "
+          + "ljump_meshes.zip beside ljump.html and push it.");
+      }, function(){
+        throw new Error("ljump_meshes/ is not reachable on this server. The mesh directory has "
+          + "not been deployed \u2014 unzip ljump_meshes.zip beside ljump.html and push it.");
+      });
       if(!r.ok) throw new Error("mesh fetch failed (" + r.status + ")");
       return r.arrayBuffer();
     }).then(function(buf){
@@ -1349,7 +1366,16 @@ function wireMesh(i){
     mb.disabled=true; pb.disabled=true;
     msg.textContent="No mesh for this nucleus \u2014 it could not be re-extracted at mesh "
       +"resolution. 487 of the 488 nuclei have one.";
-  }).catch(function(){ /* manifest unreachable: leave the buttons alone, see above */ });
+  }).catch(function(){
+    /* Manifest unreachable means ljump_meshes/ is not deployed at all, so BOTH buttons are dead.
+       The first version left them enabled here, reasoning that a slow manifest must not hide a
+       mesh that exists -- but that optimised for the wrong failure: a pending fetch never
+       reaches this handler, only a failed one does. Leaving them live on a deployment with no
+       meshes just moves the error to the click. */
+    mb.disabled=true; pb.disabled=true;
+    msg.textContent="The mesh directory is not available on this server, so the 3D exports are "
+      +"disabled.";
+  });
 
   function prog(f,t){ msg.textContent=(t||"")+(f>0&&f<1?" "+Math.round(100*f)+"%":""); }
   function run(btn,fn){
