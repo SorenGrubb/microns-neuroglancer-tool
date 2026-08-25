@@ -527,8 +527,16 @@ against the 488 nuclei embedded in this page &mdash; no network needed to previe
 Identity and organelles read the community backend, since neither can live in a static page.</p>
 
 <div style="margin-top:14px">
-<label style="font-size:12px" title="Reads the Master cell list sheet -- the same current_identity a signed-in user's latest identification, discrepancy or confirmation last set. Fetched once per page load and cached.">Current community identity</label>
+<label style="font-size:12px" title="Reads the Master cell list sheet -- the same current_identity a signed-in user's latest identification, discrepancy or confirmation last set. Fetched once per page load and cached until you press Refresh.">Current community identity</label>
 <div id="fIdentityBox"></div>
+<!-- The identity read is cached for the life of the page, so an identification submitted in
+     another tab (or by somebody else while this one sat open) is invisible until a reload.
+     µJump's dashboard has had a "Refresh live data" button since it went live for exactly this
+     reason; λJump shipped without one. -->
+<div class="row" style="margin-top:8px;align-items:center">
+<button class="idbtn" id="fReloadLive" style="flex:0 0 auto">&#8635; Refresh live data</button>
+<span class="hint" id="fReloadMsg" style="margin:0"></span>
+</div>
 </div>
 
 <div style="margin-top:14px">
@@ -669,6 +677,10 @@ reviewed those rows. That review is what &lambda;Jump is for.</p>
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Statistics dashboard</div>
 <p class="hint" style="margin-top:6px">Charts built from the <span id="dashTotal"></span> nuclei embedded in this page, plus one bulk read of the community&rsquo;s current identifications (the same read the Filter tab&rsquo;s identity dropdown uses). The charting library only loads once this tab is opened.</p>
 <p class="hint" style="margin-top:6px">This dataset has no published cell types, so every chart is keyed on <b>current community identity</b> &mdash; a live consensus that can still change. The six most-identified names get their own bucket; anything else named folds into &ldquo;Other&rdquo;, and every nucleus nobody has classified yet is &ldquo;Unclassified&rdquo;.</p>
+<div class="row" style="margin-top:10px;align-items:center">
+<button class="idbtn" id="dReloadLive" style="flex:0 0 auto">&#8635; Refresh live data</button>
+<span class="hint" id="dReloadMsg" style="margin:0"></span>
+</div>
 </div>
 
 <div class="card"><label>Nuclei per community identity</label><div id="dIdentity" style="height:340px"></div></div>
@@ -1068,7 +1080,13 @@ function buildState(pos){
   /* nm -> m by DIVISION, not *1e-9: 4*1e-9 is not exactly representable and dividing keeps
      the generated URL character-identical to the dataset's own published states. */
   return {dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
-    position:pos, crossSectionScale:20, projectionScale:20000,
+    /* crossSectionScale 3.0, not the 20 this shipped with. 20 opened the viewer so far out that
+       the scale bar read ~7.5 µm -- a whole nucleus is 8 µm, so the cell you were sent to look at
+       was a smudge and its ultrastructure was invisible, which is the one thing this tool exists
+       to show. 3.0 is not a guess: it is the value µJump uses in all seven of its own states, and
+       minnie65 and Lee16 have IDENTICAL 4/4/40 nm voxels, so the same number means the same
+       physical zoom in both. Scale bar lands near 1 µm. */
+    position:pos, crossSectionScale:3.0, projectionScale:20000,
     layers:[{type:"image",source:V.em,tab:"source",name:"lee16"}],
     selectedLayer:{visible:true,layer:"lee16"},
     /* "xy" and not µJump's "xy-3d": a 3D panel with no segmentation to render is an empty
@@ -2143,6 +2161,51 @@ function initDashboardTab(){
     ljumpDashDraw();
   });
 }
+
+/* ── refresh live data ─────────────────────────────────────────────────────────────────────
+   Every community read on this page is fetched once and then cached in a module-level variable
+   for the life of the page: identities, organelles and position fixes. That is right for a page
+   somebody opens, uses and closes, and wrong for the way this tool is actually used -- a tab left
+   open while identifications are submitted from another window, or by somebody else. µJump's
+   dashboard has had a "Refresh live data" button from the start; λJump shipped without one, so
+   the only way to see a new identification was a full reload.
+
+   Clears ALL THREE caches, not just identities. Clearing one and leaving the others would produce
+   a page whose identity dropdown is current and whose correction badges are minutes stale, which
+   is harder to reason about than either being uniformly fresh or uniformly cached. */
+function ljumpReloadLive(msgId){
+  const msg=msgId&&document.getElementById(msgId);
+  if(msg) msg.textContent="reloading…";
+  IDENTITY_BY_NID=null; IDENTITY_FETCH=null;
+  ORGANELLES_BY_NID=null; ORGANELLES_FETCH=null;
+  FIXES_RESP=null; FIXES_FETCH=null; FIXES_BY_NUCID=null;
+  return fetchLjumpIdentities().then(function(map){
+    const named=Object.keys(map).filter(function(k){
+      const r=map[k]; return r&&String(r.current||r.community||"").trim()!==""; }).length;
+    /* Rebuild whatever is on screen. The dashboard only exists once its tab has been opened, and
+       the filter's identity dropdown only once the filter tab has -- so both are guarded rather
+       than assumed. */
+    /* __ljumpBuildIdentityDropdown, not an invented name: the dropdown builder is a closure
+       inside the filter-tab IIFE and is deliberately exposed on window (see its comment there)
+       precisely so it can be re-run after the cache is dropped. */
+    if(typeof window.__ljumpBuildIdentityDropdown==="function") window.__ljumpBuildIdentityDropdown();
+    if(__ljumpDashInited){ ljumpDashAggregate(); ljumpDashDraw(); }
+    if(CUR_IDX!==null && typeof loadCommunity==="function") loadCommunity(CUR_IDX);
+    if(msg) msg.textContent=named
+      ? (named+" of "+N+" nuclei now carry a community identity.")
+      : ("no nucleus carries a community identity yet \u2014 if you have submitted one, the "
+         +"spreadsheet's \u201cMaster cell list\u201d tab may not be seeded.");
+    return map;
+  }).catch(function(e){
+    if(msg) msg.textContent="reload failed: "+((e&&e.message)||e);
+  });
+}
+document.addEventListener("DOMContentLoaded",function(){
+  const f=document.getElementById("fReloadLive");
+  if(f) f.addEventListener("click",function(){ ljumpReloadLive("fReloadMsg"); });
+  const d=document.getElementById("dReloadLive");
+  if(d) d.addEventListener("click",function(){ ljumpReloadLive("dReloadMsg"); });
+});
 
 </script>
 </body></html>
