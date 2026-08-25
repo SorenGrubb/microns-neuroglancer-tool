@@ -9289,64 +9289,64 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     return "Unverified — no classification on file";
   }
 
-  /* organelleLocationsForRow/organelleLocationsText -- the Excel-export counterpart to
-     buildFilterViewerState's organelle "points" layers (the includeOrgPoints/addPt() logic further
-     down in this file). Deliberately reads the SAME sources, in the SAME order, so a kind that's
-     drawn as a point in the "Open all matches" 3D view is exactly the kind that shows up in this
-     export column, for the exact same matched rows: own-verified centriole/cilium (ownOverride(),
-     N-space; ST_HASCENT/ST_HASCIL, ST-space), community-reported points (window.ORG_MAP, keyed by
-     nucleus ID -- populated by fetchAllOrganelles(), see the dlBtn handler below), and Søren's
-     embedded historical microglia-plug/astrocyte-hole snapshot (plugsForNucIdx/holesForNucIdx).
-     ORG_POINT_LABELS (defined further down, alongside ORG_POINT_COLORS) is referenced here even
-     though it's declared later in this same <script> block -- fine, since both functions only ever
-     run later, on a button click, by which point the whole block has finished executing top to
-     bottom and ORG_POINT_LABELS is already populated (same "declared below, called from above"
-     pattern already used elsewhere in this file). Cilium's two ends and a hole's two endpoints are
-     each pushed as their own point (not paired into an arrow/line) -- matching the "points" layer's
-     own addPt() calls, which do the same for consistency between what's drawn and what's exported. */
-  function organelleLocationsForRow(row,kinds){
-    if(!kinds||!kinds.length)return[];
+  /* organelleInstancesForRow -- the Excel-export counterpart to buildFilterViewerState's organelle
+     "points" layers (the includeOrgPoints/addPt() logic further down in this file). Deliberately
+     reads the SAME sources, in the SAME order, so a kind that's drawn as a point in the "Open all
+     matches" 3D view is exactly the kind that shows up in this export, for the exact same matched
+     rows: own-verified centriole/cilium (ownOverride(), N-space; ST_HASCENT/ST_HASCIL, ST-space),
+     community-reported points (window.ORG_MAP, keyed by nucleus ID -- populated by
+     fetchAllOrganelles(), see the dlBtn handler below), and Søren's embedded historical
+     microglia-plug/astrocyte-hole snapshot (plugsForNucIdx/holesForNucIdx).
+
+     Returns {kindSlug: [[ptA] | [ptA,ptB], ...]} -- one array entry per separate ANNOTATION
+     INSTANCE of that kind on this row (e.g. a cell with both an own-verified cilium and a
+     community-reported one has 2 "cilium" instances), each holding that instance's 1 or 2 raw
+     voxel points in a fixed, meaningful order: centriole/generic single-point kinds -> [point];
+     cilium -> [base,tip]; astrocyte hole (nucleoplasmic_reticulum_2) -> [endpoint1,endpoint2];
+     generic community reports carrying both pointA and pointB -> [A,B].
+
+     2026-08-25 (Søren: "make that columns with the coordinates in them instead... if there are two
+     annotations, like primary cilium base and tip, one column has the base another the tip... so
+     that the coordinate can easily be copied") -- buildColumns() below turns this per-row instance
+     map into one column PER (kind, instance#, base-or-tip-or-whichever role), each cell holding a
+     single "x, y, z" string (comma/space-separated, matching this tool's own "paste x, y, z into
+     the coordinate field" convention -- see the #x input's paste-split handler -- so a cell's
+     content can be copied straight into the Jump tab). A single joined text column (the previous
+     design) kept multiple coordinates in one cell, which wasn't copy-paste-friendly; this trades
+     that for a wider, but directly-usable, column per point. */
+  function organelleInstancesForRow(row,kinds){
+    const out={};
+    if(!kinds||!kinds.length)return out;
     const has=k=>kinds.indexOf(k)>=0;
-    const out=[]; // {kind,label,pt:[x,y,z]}
-    function add(kind,pt){if(pt)out.push({kind:kind,label:ORG_POINT_LABELS[kind]||kind,pt:pt});}
+    function inst(kind,pts){(out[kind]=out[kind]||[]).push(pts);}
     if(row.space==="N"){
       const i=row.i,own=ownOverride(i);
-      if(own&&has("centriole")&&own.centriole)add("centriole",own.centriole);
-      if(own&&has("cilium")&&own.cilium){add("cilium",own.cilium[0]);add("cilium",own.cilium[1]);}
+      if(own&&has("centriole")&&own.centriole)inst("centriole",[own.centriole]);
+      if(own&&has("cilium")&&own.cilium)inst("cilium",[own.cilium[0],own.cilium[1]]);
       const reps=(window.ORG_MAP||{})[String(NID[i])];
       if(reps)for(const o of reps){
         if(!has(o.kind))continue;
-        if(o.a)add(o.kind,o.a);
-        if(o.b)add(o.kind,o.b);
+        const pts=[];if(o.a)pts.push(o.a);if(o.b)pts.push(o.b);
+        if(pts.length)inst(o.kind,pts);
       }
       if(has("microglia_plug")){
         const plugs=plugsForNucIdx(i);
-        if(plugs)for(const p of plugs)add("microglia_plug",p);
+        if(plugs)for(const p of plugs)inst("microglia_plug",[p]);
       }
       if(has("nucleoplasmic_reticulum_2")){
         const holes=holesForNucIdx(i);
-        if(holes)for(const h of holes){add("nucleoplasmic_reticulum_2",h[0]);add("nucleoplasmic_reticulum_2",h[1]);}
+        if(holes)for(const h of holes)inst("nucleoplasmic_reticulum_2",[h[0],h[1]]);
       }
     } else if(row.space==="ST"){
       const i=row.i;
-      if(has("centriole")&&ST_HASCENT[i])add("centriole",[ST_CENTX[i],ST_CENTY[i],ST_CENTZ[i]]);
-      if(has("cilium")&&ST_HASCIL[i]){add("cilium",[ST_CILSX[i],ST_CILSY[i],ST_CILSZ[i]]);add("cilium",[ST_CILEX[i],ST_CILEY[i],ST_CILEZ[i]]);}
+      if(has("centriole")&&ST_HASCENT[i])inst("centriole",[[ST_CENTX[i],ST_CENTY[i],ST_CENTZ[i]]]);
+      if(has("cilium")&&ST_HASCIL[i])inst("cilium",[[ST_CILSX[i],ST_CILSY[i],ST_CILSZ[i]],[ST_CILEX[i],ST_CILEY[i],ST_CILEZ[i]]]);
     }
     return out;
   }
-  // Flattens organelleLocationsForRow()'s point list into one cell's worth of text -- one segment
-  // per kind ("Label: (x, y, z), (x, y, z)"), segments joined by "; " -- same "join multiple
-  // findings into one text column" convention as the "Community report details" column above.
-  function organelleLocationsText(row,kinds){
-    const pts=organelleLocationsForRow(row,kinds);
-    if(!pts.length)return "";
-    const byKind={},order=[];
-    pts.forEach(p=>{
-      if(!byKind[p.label]){byKind[p.label]=[];order.push(p.label);}
-      byKind[p.label].push("("+p.pt[0]+", "+p.pt[1]+", "+p.pt[2]+")");
-    });
-    return order.map(label=>label+": "+byKind[label].join(", ")).join("; ");
-  }
+  // "x, y, z" (comma+space) -- matches the paste-split regex (/[\s,]+/) used by every coordinate
+  // input in this file, so a copied cell pastes straight in without reformatting.
+  function orgPtText(p){return p?(p[0]+", "+p[1]+", "+p[2]):"";}
 
   /* buildColumns(result,orgKinds) -- the column set for the main "Download as Excel" bulk
      Filter-and-show export (microns_filtered_cells.xlsx, written by the dlBtn handler below). NOT
@@ -9377,16 +9377,20 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          (verificationStatusLabel()).
      followed by Allen m-type, Vessel type, Distance to nearest vessel, Cortical layer, Primary
      cilium/Centriole annotated?, then the conditional community-report/glia-limitans/white-matter/
-     V1-column/region-box columns, the conditional Organelle locations column (below), and the
-     three Nearest-neighbour blocks, exactly as before. No existing header was renamed, removed, or
-     repositioned by this change.
+     V1-column/region-box columns, the conditional per-organelle-point columns (below -- a variable
+     number, not a single fixed column), and the three Nearest-neighbour blocks, exactly as before.
+     No existing header was renamed, removed, or repositioned by this change.
 
      orgKinds (2026-08-25, Søren: "when [organelle points are] selected, I would also like to have
-     the organelle locations in the downloadable Excel file") -- the same list of checked ".forgpt"
-     kind slugs the "Open all matches" 3D view reads (see the viewAllBtn handler and
-     buildFilterViewerState's includeOrgPoints), passed in by the dlBtn handler below. When empty
-     (nothing checked in the Organelles and extracellular structures filter), no organelle column
-     is added at all -- same "only show it if it's relevant" convention as the glActive/wmActive/
+     the organelle locations in the downloadable Excel file"; revised same day: "make that columns
+     with the coordinates in them instead... one column has the base another the tip... so that the
+     coordinate can easily be copied") -- the same list of checked ".forgpt" kind slugs the "Open
+     all matches" 3D view reads (see the viewAllBtn handler and buildFilterViewerState's
+     includeOrgPoints), passed in by the dlBtn handler below. Each checked kind gets its own
+     column(s) -- see organelleInstancesForRow()/orgPtText() above and the column-building block
+     below for the full one-column-per-point-role reasoning. When empty (nothing checked in the
+     Organelles and extracellular structures filter), no organelle columns are added at all -- same
+     "only show it if it's relevant" convention as the glActive/wmActive/
      v1ColActive/regionActive columns just above. */
   function buildColumns(result,orgKinds){
     orgKinds=orgKinds||[];
@@ -9502,7 +9506,40 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(result.wmActive)cols.push({header:"Distance to white matter border (µm)",get:m=>m.wmDist!=null?m.wmDist.toFixed(1):""});
     if(result.v1ColActive)cols.push({header:"V1 column bucket",get:m=>m.v1Bucket==="neuron"?"Neuronal":m.v1Bucket==="nonvascular"?"Non-vascular, non-neuronal":m.v1Bucket==="vascular"?"Vascular (pericyte)":""});
     if(result.regionActive)cols.push({header:"Region box",get:m=>m.regionBoxLabel||""});
-    if(orgKinds.length)cols.push({header:"Organelle locations (voxel X, Y, Z)",get:m=>organelleLocationsText(m.row,orgKinds)});
+    /* Organelle location columns -- one column per (kind, instance#, role), each a single
+       paste-ready "x, y, z" string (see orgPtText()/organelleInstancesForRow() above for the full
+       reasoning). Pass 1 below computes, per checked kind, the most instances any ONE row in this
+       export actually has (maxInst) and whether any instance of that kind carries a 2nd point
+       (twoPt) -- every row then gets the SAME column set, just blank past however many instances
+       IT has. m._orgInst is cached on the match object here so each column's get() below (called
+       once per column PER ROW by the dlBtn handler's cols.map(c=>c.get(m)) loop) is a plain lookup,
+       not a recomputation. A kind nobody in the export actually has (maxInst 0) gets no columns at
+       all, rather than an always-blank one. */
+    if(orgKinds.length){
+      const maxInst={},twoPt={};
+      for(const m of result.matches){
+        const insts=m._orgInst=organelleInstancesForRow(m.row,orgKinds);
+        for(const k in insts){
+          if(insts[k].length>(maxInst[k]||0))maxInst[k]=insts[k].length;
+          for(const pts of insts[k])if(pts.length>1)twoPt[k]=true;
+        }
+      }
+      orgKinds.forEach(function(kind){
+        const n=maxInst[kind]||0;
+        if(!n)return;
+        const roles=kind==="cilium"?["Base","Tip"]:kind==="nucleoplasmic_reticulum_2"?["Endpoint 1","Endpoint 2"]:(twoPt[kind]?["Point A","Point B"]:[""]);
+        const label=ORG_POINT_LABELS[kind]||kind;
+        for(let inst=0;inst<n;inst++){
+          roles.forEach(function(role,ri){
+            const header=label+(n>1?" #"+(inst+1):"")+(role?" — "+role:"")+" (voxel X, Y, Z)";
+            cols.push({header:header,get:m=>{
+              const arr=m._orgInst&&m._orgInst[kind];
+              return orgPtText(arr&&arr[inst]&&arr[inst][ri]);
+            }});
+          });
+        }
+      });
+    }
     for(let k=0;k<3;k++){
       const n=k+1;
       cols.push({header:"Nearest neighbour "+n+" — identity",get:m=>{const nb=m.neighbors&&m.neighbors[k];return nb?neighborLabel(nb):"";}});
@@ -10322,7 +10359,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     // Only fetched when at least one organelle kind is actually checked, same "don't pay for it
     // unless it's used" gating as viewAllBtn's centVecOn||cilVecOn||orgPointKinds.length condition.
     // Independent of REPORT_ENDPOINT here (unlike the two fetches above) since
-    // organelleLocationsForRow() also reads own-verified/embedded plug+hole data that needs no
+    // organelleInstancesForRow() also reads own-verified/embedded plug+hole data that needs no
     // backend at all -- fetchAllOrganelles() itself already no-ops to {} when REPORT_ENDPOINT
     // isn't configured, so this is safe either way.
     if(orgKinds.length){
