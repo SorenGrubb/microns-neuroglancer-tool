@@ -37,6 +37,17 @@
  .top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
  .callout{border-left:3px solid var(--accent);padding:9px 12px;background:var(--bg);
    border-radius:0 8px 8px 0;margin:12px 0}
+ summary{cursor:pointer;list-style:none;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+ summary::-webkit-details-marker{display:none}
+ summary::before{content:"▸";color:var(--mut);font-size:11px}
+ details[open]>summary::before{content:"▾"}
+ summary .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);
+   font-weight:600}
+ summary:hover .lbl{color:var(--accent)}
+ .tick{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--mut);
+   cursor:pointer;white-space:nowrap;text-transform:none;letter-spacing:normal;font-weight:400;
+   margin:0}
+ .tick input{width:auto;margin:0;cursor:pointer;accent-color:var(--accent)}
  a{color:var(--accent)}
 </style></head><body>
 
@@ -64,9 +75,20 @@
   the map being drawn.</p>
 </div>
 
-<div class="card" id="explore-card">
-  <label>Explore &mdash; where is there a nucleus?</label>
-  <div id="boxinfo" class="hint"></div>
+<div class="card" id="map-card">
+  <label>Map of this volume</label>
+  <div id="volmap"><p class="hint" style="margin:0">Loading&hellip;</p></div>
+</div>
+
+<div class="card" id="identify-card">
+  <label>Identify &mdash; what kind of cell is that?</label>
+  <div id="identify"><p class="hint" style="margin:0">Loading&hellip;</p></div>
+</div>
+
+<details class="card" id="explore-card" open>
+  <summary><span class="lbl">Explore &mdash; where is there a nucleus?</span>
+    <span class="hint" id="boxsummary"></span></summary>
+  <div id="boxinfo" class="hint" style="margin-top:12px"></div>
   <div class="row" style="margin-top:12px">
     <button class="primary" id="open">Open this box in Neuroglancer &#8599;</button>
     <button id="skip">Offer me a different box</button>
@@ -87,17 +109,7 @@
     <button class="bad" id="empty">Nothing here &mdash; next box</button>
   </div>
   <p class="hint" id="msg" style="margin-bottom:0"></p>
-</div>
-
-<div class="card" id="map-card">
-  <label>Map of this volume</label>
-  <div id="volmap"><p class="hint" style="margin:0">Loading&hellip;</p></div>
-</div>
-
-<div class="card" id="identify-card">
-  <label>Identify &mdash; what kind of cell is that?</label>
-  <div id="identify"><p class="hint" style="margin:0">Loading&hellip;</p></div>
-</div>
+</details>
 
 <div class="card">
   <label>Every nucleus found here</label>
@@ -882,25 +894,46 @@ UJ.app = (function(){
     m.style.color = good === true ? "var(--ok)" : good === false ? "var(--warn)" : "var(--mut)";
   }
 
+  /* Whether the offered box is outlined on the map. Off by default -- when you are working
+     through the identify list, a dashed rectangle marking somewhere else is one more thing on a
+     picture that is already carrying five colours -- and kept for the rest of the sitting once
+     ticked, so it does not have to be re-ticked for every box. It is a display preference held
+     in a variable, not in browser storage, so it resets on reload; nothing else on this page
+     remembers anything locally and one exception for a checkbox is not worth the precedent. */
+  var SHOWBOX = false;
+
   function pickBox(){
     CUR = W.nextBox(DS, STATE.visited);
     var host = el("boxinfo"); if (!host) return;
+    var brief = el("boxsummary");
     if (!CUR){
       host.innerHTML = "<b style='color:var(--ok)'>Every box in this dataset has been looked at.</b> "
         + "That is a completion state no other tool in this family has.";
+      if (brief) brief.textContent = "all 18 boxes done";
       ["open","found","empty","skip"].forEach(function(i){ if (el(i)) el(i).disabled = true; });
+      renderMap();
       return;
     }
     ["open","found","empty","skip"].forEach(function(i){ if (el(i)) el(i).disabled = false; });
     var c = CUR.box.centre, sz = CUR.box.sizeUm.map(function(v){ return v.toFixed(1); }).join(" × ");
     var edge = CUR.box.sizeUm.some(function(v){ return v < UJ.cfg.explore.boxUm - 0.01; });
-    host.innerHTML = "box <code>" + CUR.box.key + "</code> at <code>"
-      + c.map(Math.round).join(", ") + "</code> nm &middot; <b>" + sz + " &micro;m</b>"
-      + (edge ? " (an edge box, so smaller)" : "")
+    host.innerHTML = "<span class='row' style='gap:12px'><span>box <code>" + CUR.box.key
+      + "</code> at <code>" + c.map(Math.round).join(", ") + "</code> nm &middot; <b>" + sz
+      + " &micro;m</b>" + (edge ? " (an edge box, so smaller)" : "") + "</span>"
+      + "<label class='tick' for='showbox'><input type='checkbox' id='showbox'"
+      + (SHOWBOX ? " checked" : "") + "> show on the map</label></span>"
       + "<br>" + (CUR.nearestVisitedUm === Infinity
           ? "nothing looked at yet, so every box is equally promising"
           : "nearest already-visited box is <b>" + CUR.nearestVisitedUm.toFixed(1) + " &micro;m</b> away")
       + " &middot; " + CUR.remaining + " of " + CUR.total + " left";
+    /* The folded card still has to say something useful, or folding it means losing track of
+       where you are rather than tidying the page. */
+    if (brief) brief.textContent = "box " + CUR.box.key + " · " + CUR.remaining
+      + " of " + CUR.total + " left";
+    if (el("showbox")) el("showbox").addEventListener("change", function(){
+      SHOWBOX = !!this.checked; renderMap();
+    });
+    renderMap();
   }
 
   /* ── the identify panel ────────────────────────────────────────────────────────────────────
@@ -1198,7 +1231,7 @@ UJ.app = (function(){
           + "<title>" + c.visited + " of " + c.total + " boxes behind this square searched</title>"
           + "</rect>");
       });
-      if (CUR){
+      if (CUR && SHOWBOX){
         var a = W.mapProject(p, CUR.box.lo), b = W.mapProject(p, CUR.box.hi);
         parts.push("<rect x='" + a[0].toFixed(1) + "' y='" + a[1].toFixed(1) + "' width='"
           + (b[0]-a[0]).toFixed(1) + "' height='" + (b[1]-a[1]).toFixed(1)
@@ -1239,8 +1272,9 @@ UJ.app = (function(){
       + "<p class='hint' style='margin:6px 0 0'>"
       + L.extUm.map(function(v){ return v.toFixed(1); }).join(" &times; ") + " &micro;m &middot; "
       + "all three panels share one scale, so the shape is the real one. Shading is the fraction "
-      + "of boxes behind each square that has been searched; the dashed box is the one you are "
-      + "being offered. Click a nucleus to walk to it.</p>";
+      + "of boxes behind each square that has been searched. "
+      + (CUR && SHOWBOX ? "The dashed box is the one you are being offered. " : "")
+      + "Click a nucleus to walk to it.</p>";
 
     host.querySelectorAll("[data-pick]").forEach(function(c){
       c.addEventListener("click", function(){ jumpTo(c.dataset.pick); });
