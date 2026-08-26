@@ -89,13 +89,18 @@
   <p class="hint" id="msg" style="margin-bottom:0"></p>
 </div>
 
+<div class="card" id="map-card">
+  <label>Map of this volume</label>
+  <div id="volmap"><p class="hint" style="margin:0">Loading&hellip;</p></div>
+</div>
+
 <div class="card" id="identify-card">
   <label>Identify &mdash; what kind of cell is that?</label>
   <div id="identify"><p class="hint" style="margin:0">Loading&hellip;</p></div>
 </div>
 
 <div class="card">
-  <label>The map &mdash; every nucleus found here</label>
+  <label>Every nucleus found here</label>
   <div id="found-list"><p class="hint" style="margin:0">None yet.</p></div>
 </div>
 
@@ -114,6 +119,11 @@
   searching the same tissue is wasted effort. <b>Identify</b> hands everyone the same nucleus in
   the same order, because two people naming the same nucleus is the entire point &mdash; one
   opinion is a guess until somebody independent agrees with it.</p>
+  <p class="hint">Identify also lets you pick a set and walk it in order &mdash; every nucleus
+  somebody called a lamellar cell, say &mdash; forwards and backwards, which is what you want when
+  you are checking a decision rather than making one. A nucleus whose top two labels are tied is
+  filed under neither: the crowd has not picked a winner, and a menu is no place to pick one for
+  them. Ties get their own list.</p>
   <p class="hint">That word <i>independent</i> is why Identify hides the existing votes until you
   have answered. A tally shown beforehand turns an opinion into a confirmation, and a consensus
   built out of confirmations measures how convincing the first answer was rather than what the
@@ -551,6 +561,133 @@ UJ.wjump = (function(){
              leader: t.length ? t[0].label : "" };
   }
 
+  /* ── a map of the volume ───────────────────────────────────────────────────────────────────
+     Three orthographic projections -- x–y, x–z, y–z -- at ONE shared scale, so a distance in one
+     panel is the same distance in the others. Separate per-panel scaling would fit the card
+     better and quietly lie about shape: these volumes are not cubes (Meissner is 37 x 46 x 58 µm)
+     and a viewer who cannot see that will misjudge where the unexplored ground is, which is the
+     one thing the map exists to show.
+
+     Layout is computed here, in nanometre-space arithmetic, rather than in the SVG: it is the
+     part that can be wrong in a way nobody notices -- a dot half a panel out still looks like a
+     dot -- so it is the part that gets tested. */
+  var MAP_GAP = 14;
+  function mapLayout(dsId, wPx, hPx){
+    var ext = extentNm(dsId); if (!ext) return null;
+    var ex = ext[0]/1000, ey = ext[1]/1000, ez = ext[2]/1000;
+    var scale = Math.min((wPx - 2*MAP_GAP) / (ex + ex + ey), hPx / Math.max(ey, ez));
+    var panels = [
+      { plane:"x–y", ax:0, ay:1, wUm:ex, hUm:ey },
+      { plane:"x–z", ax:0, ay:2, wUm:ex, hUm:ez },
+      { plane:"y–z", ax:1, ay:2, wUm:ey, hUm:ez }
+    ];
+    var ox = 0;
+    panels.forEach(function(p){
+      p.scale = scale; p.x = ox; p.y = 0;
+      p.w = p.wUm * scale; p.h = p.hUm * scale;
+      ox += p.w + MAP_GAP;
+    });
+    return { panels:panels, scale:scale, width: ox - MAP_GAP,
+             height: Math.max(ey, ez) * scale, extUm:[ex, ey, ez] };
+  }
+  /* Nanometres in, panel pixels out. The +p.x is why this is a function and not two multiplies at
+     each call site: forgetting the panel offset puts every dot in the first panel. */
+  function mapProject(panel, posNm){
+    return [panel.x + (posNm[panel.ax]/1000) * panel.scale,
+            panel.y + (posNm[panel.ay]/1000) * panel.scale];
+  }
+
+  /* How thoroughly each column of the grid has been searched, per projection.
+     A projection stacks boxes on top of each other -- Meissner's 18 boxes are only 6 rectangles
+     seen from x–y -- so shading "visited" as a binary would either over-plot to solid on the
+     first visit or hide fifteen unsearched boxes behind one searched one. The fraction is the
+     honest quantity: "two of the three boxes behind this square have been looked at". */
+  function mapCoverage(dsId, visitedKeys, ax, ay){
+    var g = grid(dsId); if (!g) return [];
+    var vis = {}; (visitedKeys || []).forEach(function(k){ vis[k] = 1; });
+    var idx = ["ix", "iy", "iz"], acc = {}, out = [];
+    g.cells.forEach(function(c){
+      var k = c[idx[ax]] + "," + c[idx[ay]];
+      if (!acc[k]){
+        acc[k] = { a:c[idx[ax]], b:c[idx[ay]], total:0, visited:0,
+                   lo:[c.lo[ax], c.lo[ay]], hi:[c.hi[ax], c.hi[ay]] };
+        out.push(acc[k]);
+      }
+      acc[k].total++; if (vis[c.key]) acc[k].visited++;
+    });
+    out.forEach(function(o){ o.fraction = o.total ? o.visited / o.total : 0; });
+    return out;
+  }
+
+  /* ── walking a chosen set, rather than being handed the next thing ─────────────────────────
+     identifyQueue() decides what most needs attention. This is the other mode: pick a set and go
+     through it in order, forwards and backwards, at your own pace -- which is what you want when
+     you are checking a decision rather than making one ("show me everything somebody called a
+     lamellar cell").
+
+     The list is FROZEN when the walk starts. Rebuilding it after every answer would mean the
+     nucleus you just named leaves the list and the index quietly points at a different one, so
+     "next" would skip and "back" would not return you where you were. */
+  /* The label a nucleus can honestly be FILED under, which is not the same as `identity`.
+     `identity` is whichever label the tally happened to put first, and on a 2-2 tie that is an
+     artefact of iteration order, not a decision anybody made. Filing a tie under one of the two
+     would pick a winner on the crowd's behalf inside a menu -- the same dishonesty the tally
+     display exists to avoid -- and filing a retracted object under a cell type would count it as
+     one. Both stay reachable: ties through "tied", retractions through "retracted". */
+  function settledLabel(n){
+    if (!n || identifyNeed(n) < 0) return "";
+    var t = n.tally || [];
+    if (!t.length) return "";
+    if (t.length > 1 && t[0].n === t[1].n) return "";
+    return t[0].label;
+  }
+
+  function walkIds(nuclei, mode){
+    var ns = (nuclei || []).slice().sort(function(a, b){
+      return String(a.id) < String(b.id) ? -1 : 1; });
+    if (mode === "needs")   return identifyQueue(ns, {}).map(function(n){ return n.id; });
+    if (mode === "unnamed") return ns.filter(function(n){ return !n.identity; })
+                                     .map(function(n){ return n.id; });
+    if (mode === "rejected") return ns.filter(function(n){ return identifyNeed(n) < 0; })
+                                      .map(function(n){ return n.id; });
+    if (mode === "contested") return ns.filter(function(n){ return identifyNeed(n) === 2; })
+                                       .map(function(n){ return n.id; });
+    if (String(mode).indexOf("type:") === 0){
+      var t = String(mode).slice(5).toLowerCase();
+      return ns.filter(function(n){ return settledLabel(n).toLowerCase() === t; })
+               .map(function(n){ return n.id; });
+    }
+    return ns.map(function(n){ return n.id; });      // "all"
+  }
+
+  /* The choices offered, with counts, built from what is actually in the dataset. Every cell type
+     anybody has named appears; no list is hardcoded, because there is no list to hardcode. */
+  function walkModes(nuclei){
+    var ns = nuclei || [];
+    var out = [
+      { mode:"needs",     label:"needs a look",  n: identifyQueue(ns, {}).length },
+      { mode:"unnamed",   label:"not yet named", n: ns.filter(function(n){ return !n.identity; }).length },
+      { mode:"contested", label:"tied",          n: ns.filter(function(n){ return identifyNeed(n) === 2; }).length }
+    ];
+    var byLabel = {};
+    ns.forEach(function(n){
+      var lab = settledLabel(n); if (!lab) return;
+      var k = lab.toLowerCase();
+      if (!byLabel[k]) byLabel[k] = { mode:"type:" + lab, label:lab, n:0 };
+      byLabel[k].n++;
+    });
+    Object.keys(byLabel).sort().forEach(function(k){ out.push(byLabel[k]); });
+    var rej = ns.filter(function(n){ return identifyNeed(n) < 0; }).length;
+    if (rej) out.push({ mode:"rejected", label:"retracted", n:rej });
+    out.push({ mode:"all", label:"everything", n: ns.length });
+    return out.filter(function(o){ return o.n > 0 || o.mode === "needs"; });
+  }
+
+  /* Choosing "lamellar cell" from that list TELLS you what the crowd said about every nucleus in
+     it. The panel's hidden-tally rule cannot survive that and should not pretend to: an answer
+     given inside a type walk is anchored by construction, and must be recorded as such. */
+  function walkIsAnchored(mode){ return String(mode).indexOf("type:") === 0; }
+
   function buildState(dsId, posNm, known, cell){
     var d = byId(dsId); if (!usable(d)) return null;
     var root = "zarr://s3://" + UJ.cfg.dataset.bucket + "/" + d.id + "/" + d.id + ".zarr/";
@@ -590,6 +727,9 @@ UJ.wjump = (function(){
            annotationLayers:annotationLayers, searchBoxLayer:searchBoxLayer,
            markLayer:markLayer, parseFinds:parseFinds, MARK_LAYER:MARK_LAYER,
            identifyNeed:identifyNeed, identifyQueue:identifyQueue, tallySummary:tallySummary,
+           mapLayout:mapLayout, mapProject:mapProject, mapCoverage:mapCoverage,
+           walkIds:walkIds, walkModes:walkModes, walkIsAnchored:walkIsAnchored,
+           settledLabel:settledLabel,
            buildState:buildState, viewerUrl:viewerUrl };
 })();
 </script>
@@ -622,12 +762,13 @@ UJ.app = (function(){
   var CUR = null;                      // the box being offered
   var BUSY = false;
 
-  /* Identify-panel state. All three are session-local on purpose and none of it is persisted:
+  /* Identify-panel state. All of it is session-local on purpose and none of it is persisted:
      SKIPPED is "not right now" rather than a fact about the nucleus, and REVEALED must start
      false again for the next nucleus or the anchoring guard means nothing. */
   var SKIPPED = {};                    // nucleus ids passed over in this sitting
   var CURID   = null;                  // the nucleus being asked about
   var REVEALED = false;                // has this user been shown the existing votes?
+  var WALK = { mode:"needs", ids:[], i:0 };   // the frozen list being stepped through
 
   function esc(s){ return String(s == null ? "" : s)
     .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
@@ -774,34 +915,83 @@ UJ.app = (function(){
 
      2. "I can't tell" is a first-class answer, separate from "not a nucleus". Without it people
         guess, and a guess is indistinguishable from an opinion once it is a row in a sheet. */
-  function pickNucleus(keepId){
-    var q = W.identifyQueue(STATE.nuclei, SKIPPED), was = CURID;
-    if (keepId && byId(keepId)) CURID = keepId;
-    else if (!CURID || !q.filter(function(n){ return n.id === CURID; }).length) CURID = q.length ? q[0].id : null;
-    /* Reset the reveal when the NUCLEUS changes, not on every render. The first version reset it
-       here unconditionally, which meant pressing "show what others said" set the flag and then
-       immediately cleared it during the re-render it triggered -- the tally appeared for one frame
-       and the vote was recorded as unanchored. A guard that quietly fails open is worse than none,
-       because the column would have looked like evidence. */
-    if (CURID !== was) REVEALED = false;
-    return q;
+  /* ── the walk ──────────────────────────────────────────────────────────────────────────────
+     Two ways through the nuclei, and the user picks:
+
+       needs a look     ordered by what most needs attention -- the queue
+       <a cell type>    every nucleus somebody called that, in a fixed order
+       not yet named / retracted / everything
+
+     The list is frozen when the mode is chosen and stepped with next/back, rather than rebuilt
+     after every answer. Rebuilding would drop the nucleus you just named out from under the
+     index: "next" would skip one and "back" would not return you where you were. */
+  function startWalk(mode, keepPos){
+    var at = keepPos ? WALK.ids[WALK.i] : null;
+    WALK.mode = mode;
+    WALK.ids = W.walkIds(STATE.nuclei, mode);
+    WALK.i = 0;
+    if (at){ var j = WALK.ids.indexOf(at); if (j >= 0) WALK.i = j; }
+    setCur(WALK.ids[WALK.i] || null);
   }
+  function setCur(id){
+    if (id === CURID) return;
+    /* Reset the reveal when the NUCLEUS changes, and only then. The first version reset it on
+       every render, so pressing "show what others said" set the flag and then immediately cleared
+       it during the re-render it triggered -- the tally appeared for one frame and the vote was
+       recorded as unanchored. A guard that quietly fails open is worse than none, because the
+       column would have looked like evidence. */
+    CURID = id; REVEALED = false;
+  }
+  function step(d){
+    if (!WALK.ids.length) return;
+    WALK.i = Math.min(WALK.ids.length - 1, Math.max(0, WALK.i + d));
+    setCur(WALK.ids[WALK.i]);
+    renderIdentify(); renderMap();
+  }
+  function jumpTo(id){
+    var j = WALK.ids.indexOf(id);
+    if (j < 0){ startWalk("all", false); j = Math.max(0, WALK.ids.indexOf(id)); }
+    WALK.i = j; setCur(id);
+    renderIdentify(); renderMap();
+  }
+  /* New nuclei arriving, or a dataset change, invalidate a frozen list. Rebuilt keeping the
+     current position where it still exists, so a submit does not throw away where you were. */
+  function refreshWalk(){ startWalk(WALK.mode, true); }
 
   function renderIdentify(){
     var host = el("identify"); if (!host) return;
-    var q = pickNucleus(null);
-    var n = CURID ? byId(CURID) : null;
 
     if (!STATE.nuclei.length){
       host.innerHTML = "<p class='hint' style='margin:0'>No nuclei have been found in this dataset "
         + "yet. Find one above and it will appear here to be named.</p>";
       return;
     }
+    if (!WALK.ids.length || !byId(WALK.ids[WALK.i])) refreshWalk();
+
+    var modes = W.walkModes(STATE.nuclei);
+    var picker = "<div class='row' style='justify-content:space-between;margin-bottom:14px'>"
+      + "<div style='flex:1 1 260px'><label for='walk'>Walk through</label>"
+      + "<select id='walk'>" + modes.map(function(m){
+          return "<option value=\"" + esc(m.mode) + "\""
+            + (m.mode === WALK.mode ? " selected" : "") + ">"
+            + esc(m.label) + " (" + m.n + ")</option>"; }).join("") + "</select></div>"
+      + "<div class='row' style='flex:0 0 auto'>"
+      +   "<button id='walk-prev'" + (WALK.i <= 0 ? " disabled" : "") + ">&larr; back</button>"
+      +   "<span class='hint' id='walk-pos'>" + (WALK.ids.length ? (WALK.i + 1) : 0)
+      +     " of " + WALK.ids.length + "</span>"
+      +   "<button id='walk-next'" + (WALK.i >= WALK.ids.length - 1 ? " disabled" : "")
+      +     ">next &rarr;</button>"
+      + "</div></div>";
+
+    var n = CURID ? byId(CURID) : null;
     if (!n){
-      host.innerHTML = "<p class='hint' style='margin:0'><b style='color:var(--ok)'>Nothing here "
-        + "needs a second opinion right now.</b> Every nucleus found so far has at least two people "
-        + "agreeing on it, or you have passed over the rest in this sitting. You can still question "
-        + "any of them from the map below.</p>";
+      host.innerHTML = picker + "<p class='hint' style='margin:0'>"
+        + (WALK.mode === "needs"
+           ? "<b style='color:var(--ok)'>Nothing needs a second opinion right now.</b> Every "
+             + "nucleus found so far has at least two people agreeing on it. Switch the list above "
+             + "to walk through a cell type and check the ones that are settled."
+           : "Nothing in this list.") + "</p>";
+      wirePicker();
       return;
     }
 
@@ -809,15 +999,18 @@ UJ.app = (function(){
     var need = W.identifyNeed(n);
     var why = { 3:"nobody has named this one",
                 2:"the votes on this one are tied",
-                1:"only one person has named this one" }[need] || "flagged for another look";
+                1:"only one person has named this one",
+                0:"settled &mdash; " + esc(s.leader) + ", " + s.total + " votes",
+               "-1":"retracted by " + s.rejects + " people" }[need] || "";
+    var anchored = W.walkIsAnchored(WALK.mode);
     var opts = names().map(function(x){ return "<option value=\"" + esc(x) + "\">"; }).join("");
     var pos = n.pos.map(Math.round).join(", ");
 
-    host.innerHTML =
-        "<datalist id='cellnames'>" + opts + "</datalist>"
+    host.innerHTML = picker
+      + "<datalist id='cellnames'>" + opts + "</datalist>"
       + "<div class='row' style='justify-content:space-between'>"
       +   "<div>nucleus <code>" + esc(String(n.id)) + "</code> at <code>" + pos + "</code> nm"
-      +   "<br><span class='hint'>" + why + " &middot; " + q.length + " waiting</span></div>"
+      +   "<br><span class='hint'>" + why + "</span></div>"
       +   "<button class='primary' id='id-open'>Open this nucleus &#8599;</button>"
       + "</div>"
 
@@ -844,7 +1037,12 @@ UJ.app = (function(){
       + "<p class='hint' id='id-msg' style='margin:10px 0 0'></p>"
 
       + "<div style='margin-top:12px'>"
-      +   (REVEALED
+      +   (anchored
+          ? "<div class='callout' style='margin:0'>" + tallyHtml(s, n)
+            + "<br><span class='hint'>You chose this list by cell type, so you already know what "
+            + "was said here &mdash; hiding it would be theatre. Answers given in a type walk are "
+            + "recorded as anchored.</span></div>"
+          : REVEALED
           ? "<div class='callout' style='margin:0'>" + tallyHtml(s, n) + "</div>"
           : "<button id='id-reveal' style='font-size:13px;padding:5px 10px'>"
             + "Show what others said</button> <span class='hint'>&mdash; "
@@ -853,6 +1051,7 @@ UJ.app = (function(){
             + "Looking first will anchor you, so this is recorded alongside your answer.</span>")
       + "</div>";
 
+    wirePicker();
     if (el("id-open")) el("id-open").addEventListener("click", function(){
       window.open(W.viewerUrl(DS, n.pos, STATE.nuclei), "_blank", "noopener");
     });
@@ -865,6 +1064,14 @@ UJ.app = (function(){
     });
     if (el("id-skip")) el("id-skip").addEventListener("click", function(){ skipNucleus(); });
     if (el("id-not"))  el("id-not").addEventListener("click",  function(){ rejectNucleus(); });
+  }
+
+  function wirePicker(){
+    if (el("walk")) el("walk").addEventListener("change", function(){
+      startWalk(el("walk").value, false); renderIdentify(); renderMap();
+    });
+    if (el("walk-prev")) el("walk-prev").addEventListener("click", function(){ step(-1); });
+    if (el("walk-next")) el("walk-next").addEventListener("click", function(){ step(1); });
   }
 
   function tallyHtml(s, n){
@@ -883,16 +1090,24 @@ UJ.app = (function(){
             + "or confirms the disagreement.</span>" : "");
   }
 
+  /* Move on after answering. The list stays as it was -- you can walk back to what you just did,
+     which is the point of a walk rather than a queue -- but the answered nucleus does not come
+     round again in this sitting when the queue rebuilds. */
+  function advance(key){
+    SKIPPED[key] = 1;
+    if (WALK.i < WALK.ids.length - 1){ WALK.i++; setCur(WALK.ids[WALK.i]); }
+    else setCur(null);
+  }
+
   function skipNucleus(){
     if (!CURID) return;
     var key = CURID;
-    SKIPPED[key] = 1;
     /* Recorded as well as skipped: a nucleus five people could not name is a finding, and without
        a record the queue would offer the same impossible one to the same person on every visit.
-       Fire-and-forget -- if it fails, the session-local skip still works, and blocking the queue
+       Fire-and-forget -- if it fails, the session-local skip still works, and blocking the walk
        on a bookkeeping write would be the wrong trade. */
     if (STORE.canWrite()) STORE.reject(key, "unsure", false).catch(function(){});
-    CURID = null; REVEALED = false;
+    advance(key);
     renderIdentify(); renderMap();
   }
 
@@ -903,8 +1118,8 @@ UJ.app = (function(){
     STORE.reject(key, "not_a_nucleus", false)
       .then(function(){ return STORE.live ? STORE.load() : null; })
       .then(function(){
-        SKIPPED[key] = 1; CURID = null; REVEALED = false;
-        renderIdentify(); renderMap(); render();
+        advance(key);
+        render();
         say("id-msg", "Recorded as <b>not a nucleus</b>. That is a vote, not a delete &mdash; it "
           + "takes two of those and more of them than names before the map drops it.", true);
       })
@@ -915,7 +1130,11 @@ UJ.app = (function(){
     if (!CURID || !requireWrite("id-msg")) return;
     var inp = el("id-name"), v = inp ? inp.value.trim() : "";
     if (!v){ say("id-msg", "Type what you think it is, or press &ldquo;I can&rsquo;t tell&rdquo;.", false); return; }
-    var key = CURID, cert = el("id-cert") ? Number(el("id-cert").value) : 3, saw = REVEALED;
+    /* Anchored either because they pressed reveal, or because the very act of choosing a cell-type
+       walk told them what the crowd said. The second is the easy one to forget, and forgetting it
+       would fill the column with "no" for the answers most likely to be confirmations. */
+    var key = CURID, cert = el("id-cert") ? Number(el("id-cert").value) : 3,
+        saw = REVEALED || W.walkIsAnchored(WALK.mode);
     inp.disabled = true;
     ["id-save","id-skip","id-not"].forEach(function(i){ if (el(i)) el(i).disabled = true; });
     say("id-msg", "saving…");
@@ -923,9 +1142,8 @@ UJ.app = (function(){
       .then(function(){ return STORE.live ? STORE.load() : null; })
       .then(function(){
         var n2 = byId(key), s2 = n2 ? W.tallySummary(n2) : null;
-        SKIPPED[key] = 1;                 // answered: do not re-offer it in this sitting
-        CURID = null; REVEALED = false;
-        renderIdentify(); renderMap(); render();
+        advance(key);
+        render();
         /* The reveal AFTER answering is free -- the vote is already cast, so seeing the others
            cannot bend it, and it is the only moment where being told is actually teaching. */
         say("id-msg", "Saved: &ldquo;" + esc(v) + "&rdquo;."
@@ -938,14 +1156,105 @@ UJ.app = (function(){
       });
   }
 
-  /* ── the map ───────────────────────────────────────────────────────────────────────────────
+  /* ── the map of the volume ─────────────────────────────────────────────────────────────────
+     Three orthographic projections at one shared scale. What it shows, in order of why it exists:
+
+       - the shape of the volume, honestly. These are not cubes, and the aspect ratio is the first
+         thing that tells you where there is ground left.
+       - how much of each column has been searched, as a shade. A projection stacks boxes, so a
+         binary "visited" would either go solid on the first visit or hide fifteen unsearched
+         boxes behind one searched one. The fraction is the honest quantity.
+       - every nucleus, coloured the same way as the list, and clickable.
+       - the box you are being offered, and the nucleus you are being asked about.
+
+     Drawn as SVG with a viewBox rather than at a fixed pixel size, so it scales with the card
+     and stays sharp; the geometry is computed in wjump_logic.js where it can be tested. */
+  /* A tie gets its own colour rather than sharing amber with "one vote". They are different
+     states -- one is thin evidence, the other is people actively disagreeing -- and a map that
+     paints them the same cannot show you where the argument is. */
+  var STATUS_COLOUR = { unnamed:"#ef4444", single:"#f59e0b", contested:"#a855f7",
+                        agreed:"#22c55e", retracted:"#6b7280" };
+  function renderMap(){
+    var host = el("volmap"); if (!host) return;
+    var L = W.mapLayout(DS, 880, 250);
+    if (!L){ host.innerHTML = "<p class='hint' style='margin:0'>No measured resolution for this "
+      + "dataset, so there is no map to draw.</p>"; return; }
+
+    var parts = [], PAD = 16, H = L.height + 34;
+    parts.push("<svg viewBox='0 0 " + Math.ceil(L.width) + " " + Math.ceil(H)
+      + "' style='width:100%;height:auto;display:block' role='img' "
+      + "aria-label='orthographic map of this volume'>");
+
+    L.panels.forEach(function(p){
+      parts.push("<rect x='" + p.x.toFixed(1) + "' y='" + p.y.toFixed(1) + "' width='"
+        + p.w.toFixed(1) + "' height='" + p.h.toFixed(1)
+        + "' fill='var(--bg)' stroke='var(--line)'/>");
+      W.mapCoverage(DS, STATE.visited, p.ax, p.ay).forEach(function(c){
+        var x = c.lo[0]/1000 * p.scale + p.x, y = c.lo[1]/1000 * p.scale + p.y;
+        var w = (c.hi[0]-c.lo[0])/1000 * p.scale, h = (c.hi[1]-c.lo[1])/1000 * p.scale;
+        parts.push("<rect x='" + x.toFixed(1) + "' y='" + y.toFixed(1) + "' width='" + w.toFixed(1)
+          + "' height='" + h.toFixed(1) + "' fill='var(--accent)' fill-opacity='"
+          + (c.fraction * 0.34).toFixed(3) + "' stroke='var(--line)' stroke-width='0.5'>"
+          + "<title>" + c.visited + " of " + c.total + " boxes behind this square searched</title>"
+          + "</rect>");
+      });
+      if (CUR){
+        var a = W.mapProject(p, CUR.box.lo), b = W.mapProject(p, CUR.box.hi);
+        parts.push("<rect x='" + a[0].toFixed(1) + "' y='" + a[1].toFixed(1) + "' width='"
+          + (b[0]-a[0]).toFixed(1) + "' height='" + (b[1]-a[1]).toFixed(1)
+          + "' fill='none' stroke='var(--accent)' stroke-width='1.6' stroke-dasharray='4 3'>"
+          + "<title>the box you are being offered</title></rect>");
+      }
+      STATE.nuclei.forEach(function(n){
+        var q = W.mapProject(p, n.pos), st = W.tallySummary(n).status;
+        var cur = n.id === CURID;
+        parts.push("<circle data-pick='" + esc(n.id) + "' cx='" + q[0].toFixed(1) + "' cy='"
+          + q[1].toFixed(1) + "' r='" + (cur ? 5 : 3) + "' fill='" + STATUS_COLOUR[st]
+          + "' stroke='" + (cur ? "var(--ink)" : "none") + "' stroke-width='1.8' "
+          + "style='cursor:pointer'><title>" + esc(String(n.id)) + " — "
+          + esc(W.tallySummary(n).leader || "not yet named") + "</title></circle>");
+      });
+      parts.push("<text x='" + (p.x + p.w/2).toFixed(1) + "' y='" + (L.height + 13).toFixed(1)
+        + "' text-anchor='middle' fill='var(--mut)' font-size='11'>" + p.plane + "</text>");
+    });
+
+    /* One scale bar, because the panels share a scale. A per-panel bar would suggest they do not. */
+    var barUm = 10, barPx = barUm * L.scale;
+    parts.push("<line x1='0' y1='" + (H - 6).toFixed(1) + "' x2='" + barPx.toFixed(1)
+      + "' y2='" + (H - 6).toFixed(1) + "' stroke='var(--mut)' stroke-width='2'/>");
+    parts.push("<text x='" + (barPx + 6).toFixed(1) + "' y='" + (H - 2).toFixed(1)
+      + "' fill='var(--mut)' font-size='11'>" + barUm + " µm</text>");
+    parts.push("</svg>");
+
+    /* The dots use the same colour code as the list below, which is worth saying rather than
+       leaving to be inferred: a red dot on a map reads as an alarm, and here it only means
+       "nobody has named this yet". */
+    var legend = [["unnamed","not yet named"], ["single","one vote"], ["contested","tied"],
+                  ["agreed","2+ agree"], ["retracted","retracted"]].map(function(k){
+      return "<span style='white-space:nowrap'><span class='dot' style='background:"
+        + STATUS_COLOUR[k[0]] + "'></span>" + k[1] + "</span>"; }).join(" &nbsp; ");
+
+    host.innerHTML = parts.join("")
+      + "<p class='hint' style='margin:8px 0 0'>" + legend + "</p>"
+      + "<p class='hint' style='margin:6px 0 0'>"
+      + L.extUm.map(function(v){ return v.toFixed(1); }).join(" &times; ") + " &micro;m &middot; "
+      + "all three panels share one scale, so the shape is the real one. Shading is the fraction "
+      + "of boxes behind each square that has been searched; the dashed box is the one you are "
+      + "being offered. Click a nucleus to walk to it.</p>";
+
+    host.querySelectorAll("[data-pick]").forEach(function(c){
+      c.addEventListener("click", function(){ jumpTo(c.dataset.pick); });
+    });
+  }
+
+  /* ── the list ──────────────────────────────────────────────────────────────────────────────
      Every nucleus, read-only. Read-only because naming happens in the panel above, where the
      votes are hidden until you have answered; an editable field sitting next to the current
      winning label would route around that on the first row. "Question this" is the way back in:
-     it puts a settled nucleus at the front of the queue, so a wrong consensus can still be
-     argued with, just not casually overwritten. */
+     it walks to that nucleus, so a wrong consensus can still be argued with, just not casually
+     overwritten. */
   var FILTER = "all";
-  function renderMap(){
+  function renderList(){
     var host = el("found-list"); if (!host) return;
     if (!STATE.nuclei.length){
       host.innerHTML = "<p class='hint' style='margin:0'>None yet. Explore a box to find the first.</p>";
@@ -973,8 +1282,7 @@ UJ.app = (function(){
       + "<th></th></tr>"
       + rows.map(function(n){
           var s = W.tallySummary(n);
-          var col = { unnamed:"var(--bad)", single:"var(--warn)", contested:"var(--warn)",
-                      agreed:"var(--ok)", retracted:"var(--mut)" }[s.status] || "var(--mut)";
+          var col = STATUS_COLOUR[s.status] || "var(--mut)";
           var text = !s.labels.length
             ? "<span class='hint'>not named yet</span>"
             : s.labels.map(function(t){ return esc(t.label) + " &times;" + t.n; }).join(" &middot; ");
@@ -996,7 +1304,7 @@ UJ.app = (function(){
       + "volumes, only what the community agrees on.</p>";
 
     host.querySelectorAll("[data-filter]").forEach(function(b){
-      b.addEventListener("click", function(){ FILTER = b.dataset.filter; renderMap(); });
+      b.addEventListener("click", function(){ FILTER = b.dataset.filter; renderList(); });
     });
     host.querySelectorAll("[data-view]").forEach(function(b){
       b.addEventListener("click", function(){
@@ -1025,6 +1333,7 @@ UJ.app = (function(){
     if (el("pbar")) el("pbar").style.width = p.pctVisited + "%";
     renderIdentify();
     renderMap();
+    renderList();
   }
 
   /* ── actions ─────────────────────────────────────────────────────────────────────────────── */
@@ -1076,7 +1385,7 @@ UJ.app = (function(){
         if (merged) parts.push(merged + " already known");
         if (r.outside) parts.push(r.outside + " outside this box (kept &mdash; a nucleus is a nucleus)");
         msg(parts.join(" &middot; ") + ". " + (added ? "Name them in <b>Identify</b> below." : ""), added > 0);
-        box.value = ""; BUSY = false; setBusy(false); pickBox(); render();
+        box.value = ""; BUSY = false; setBusy(false); refreshWalk(); pickBox(); render();
       })
       .catch(function(e){ BUSY = false; setBusy(false); msg("save failed: " + e.message, false); });
   }
@@ -1107,7 +1416,7 @@ UJ.app = (function(){
     DS = id;
     /* A skip is "not this one, right now" -- it is about the sitting, not about the nucleus, and
        carrying it across a dataset switch would silently hide nuclei in the new one. */
-    SKIPPED = {}; CURID = null; REVEALED = false;
+    SKIPPED = {}; CURID = null; REVEALED = false; WALK = { mode:"needs", ids:[], i:0 };
     var d = W.byId(id);
     if (el("dslabel")) el("dslabel").textContent = d.tissue + " — " + d.species;
     if (el("dstier")) el("dstier").innerHTML = {
@@ -1139,7 +1448,7 @@ UJ.app = (function(){
   }
 
   return { init:init, selectDataset:selectDataset, render:render, pickBox:pickBox,
-           renderIdentify:renderIdentify, renderMap:renderMap,
+           renderIdentify:renderIdentify, renderMap:renderMap, renderList:renderList,
            state: function(){ return STATE; }, cur: function(){ return CUR; },
            curNucleus: function(){ return CURID; }, revealed: function(){ return REVEALED; },
            store: function(){ return STORE; }, setCredential: function(c, who){
