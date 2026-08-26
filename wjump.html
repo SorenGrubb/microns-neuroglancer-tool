@@ -64,8 +64,8 @@
   the map being drawn.</p>
 </div>
 
-<div class="card">
-  <label>Your box</label>
+<div class="card" id="explore-card">
+  <label>Explore &mdash; where is there a nucleus?</label>
   <div id="boxinfo" class="hint"></div>
   <div class="row" style="margin-top:12px">
     <button class="primary" id="open">Open this box in Neuroglancer &#8599;</button>
@@ -89,8 +89,13 @@
   <p class="hint" id="msg" style="margin-bottom:0"></p>
 </div>
 
+<div class="card" id="identify-card">
+  <label>Identify &mdash; what kind of cell is that?</label>
+  <div id="identify"><p class="hint" style="margin:0">Loading&hellip;</p></div>
+</div>
+
 <div class="card">
-  <label>Nuclei found</label>
+  <label>The map &mdash; every nucleus found here</label>
   <div id="found-list"><p class="hint" style="margin:0">None yet.</p></div>
 </div>
 
@@ -104,6 +109,16 @@
   it. You are being sent to the box furthest from any box <i>already visited</i>, which is why
   reporting an empty one matters as much as finding a nucleus: an unreported empty box is one the
   sampler will hand out again.</p>
+  <p class="hint">There are two jobs here and they have opposite rules. <b>Explore</b> hands out
+  boxes at random from among the ones furthest from anywhere already visited, because two people
+  searching the same tissue is wasted effort. <b>Identify</b> hands everyone the same nucleus in
+  the same order, because two people naming the same nucleus is the entire point &mdash; one
+  opinion is a guess until somebody independent agrees with it.</p>
+  <p class="hint">That word <i>independent</i> is why Identify hides the existing votes until you
+  have answered. A tally shown beforehand turns an opinion into a confirmation, and a consensus
+  built out of confirmations measures how convincing the first answer was rather than what the
+  tissue is. You can still look &mdash; it is one click &mdash; and the click is recorded next to
+  your answer so the effect of looking can be measured rather than assumed away.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
   different matter: 114 crops carry expert voxel labels, and a scored organelle trainer built on
@@ -486,6 +501,56 @@ UJ.wjump = (function(){
     return { ok:true, points:pts, outside:outside };
   }
 
+  /* ── which nucleus to ask about next ──────────────────────────────────────────────────────
+     Deterministic, which is the OPPOSITE of nextBox() and deliberately so. The box sampler
+     randomises among the top K because two users sent to search the same 20 µm of tissue is
+     duplicated work. Here duplicated work is the entire point: a second independent opinion on
+     the same nucleus is what turns one person's guess into a tally. So everybody is offered the
+     same order, and the nuclei that most need a second look get one soonest.
+
+     The need levels, highest first:
+       3  nobody has named it            — zero information
+       2  the top two labels are tied    — a tie is not a consensus, however many votes it has
+       1  exactly one vote               — one opinion, and the thing this tool exists to improve
+       0  two or more agreeing, no tie   — settled enough to leave alone (excluded)
+      -1  more retractions than names    — the community has said it is not a nucleus (excluded)
+
+     A settled nucleus is excluded from the QUEUE, not from the map: it is still in the table and
+     still openable, so anyone who thinks the crowd got one wrong can still say so. */
+  function identifyNeed(n){
+    if (!n) return -1;
+    var t = n.tally || [], tot = n.totalVotes || 0, rej = n.rejects || 0;
+    if (rej >= 2 && rej > tot) return -1;
+    if (!n.identity) return 3;
+    if (t.length > 1 && t[0].n === t[1].n) return 2;
+    if (tot <= 1) return 1;
+    return 0;
+  }
+  function identifyQueue(nuclei, skip){
+    skip = skip || {};
+    return (nuclei || []).map(function(n){ return { n:n, need: identifyNeed(n) }; })
+      .filter(function(x){ return x.need > 0 && !skip[x.n.id]; })
+      .sort(function(a, b){
+        if (a.need !== b.need) return b.need - a.need;
+        return String(a.n.id) < String(b.n.id) ? -1 : 1;   // stable, so the queue does not shuffle
+      })
+      .map(function(x){ return x.n; });
+  }
+
+  /* What is actually known about one nucleus, as data rather than as a sentence. Kept here and
+     kept structured because the page must be able to render "2 said lamellar cell, 1 said Schwann
+     cell" rather than the bare winning label: on a dataset where nothing is verified, a single
+     label reads like a fact, and it is not one. */
+  function tallySummary(n){
+    var t = (n && n.tally) || [], tot = (n && n.totalVotes) || 0, rej = (n && n.rejects) || 0;
+    var status = !t.length ? "unnamed"
+               : (t.length > 1 && t[0].n === t[1].n) ? "contested"
+               : (t[0].n >= 2 ? "agreed" : "single");
+    if (rej >= 2 && rej > tot) status = "retracted";
+    return { labels: t, total: tot, rejects: rej, status: status,
+             leader: t.length ? t[0].label : "" };
+  }
+
   function buildState(dsId, posNm, known, cell){
     var d = byId(dsId); if (!usable(d)) return null;
     var root = "zarr://s3://" + UJ.cfg.dataset.bucket + "/" + d.id + "/" + d.id + ".zarr/";
@@ -524,6 +589,7 @@ UJ.wjump = (function(){
            nextBox:nextBox, progress:progress, mergeFind:mergeFind,
            annotationLayers:annotationLayers, searchBoxLayer:searchBoxLayer,
            markLayer:markLayer, parseFinds:parseFinds, MARK_LAYER:MARK_LAYER,
+           identifyNeed:identifyNeed, identifyQueue:identifyQueue, tallySummary:tallySummary,
            buildState:buildState, viewerUrl:viewerUrl };
 })();
 </script>
@@ -537,6 +603,14 @@ UJ.wjump = (function(){
    being evidence about it the first time either is edited. The only difference between the two
    modes is which STORE is installed below; every pixel and every rule is shared.
 
+   Two loops, deliberately separate:
+
+     EXPLORE    where is there a nucleus?     one box at a time, randomised among the farthest
+     IDENTIFY   what kind of cell is that?    one nucleus at a time, in a fixed shared order
+
+   They are separate because they are different jobs with opposite sampling rules, and because
+   most people will want to do one or the other rather than alternate.
+
    Depends on wjump_config.js and wjump_logic.js being loaded first. */
 window.UJ = window.UJ || {};
 UJ.app = (function(){
@@ -548,16 +622,28 @@ UJ.app = (function(){
   var CUR = null;                      // the box being offered
   var BUSY = false;
 
+  /* Identify-panel state. All three are session-local on purpose and none of it is persisted:
+     SKIPPED is "not right now" rather than a fact about the nucleus, and REVEALED must start
+     false again for the next nucleus or the anchoring guard means nothing. */
+  var SKIPPED = {};                    // nucleus ids passed over in this sitting
+  var CURID   = null;                  // the nucleus being asked about
+  var REVEALED = false;                // has this user been shown the existing votes?
+
   function esc(s){ return String(s == null ? "" : s)
     .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
   function el(id){ return document.getElementById(id); }
   function enabled(){ return UJ.cfg.datasets.filter(function(d){ return W.usable(d); }); }
+  function byId(id){
+    for (var i = 0; i < STATE.nuclei.length; i++)
+      if (STATE.nuclei[i].id === id) return STATE.nuclei[i];
+    return null;
+  }
 
   /* ── stores ───────────────────────────────────────────────────────────────────────────────
-     Same four methods either way. load() is the only one a signed-out user may call: reading the
-     map is public, adding to it is not. */
+     Same methods either way. load() is the only one a signed-out user may call: reading the map
+     is public, adding to it is not. */
   var MemStore = {
-    live: false, _next: 1,
+    live: false, _next: 1, _person: 0,
     canWrite: function(){ return true; },
     load: function(){ return Promise.resolve(STATE); },
     visit: function(boxKey){ if (STATE.visited.indexOf(boxKey) < 0) STATE.visited.push(boxKey);
@@ -566,11 +652,31 @@ UJ.app = (function(){
       var m = W.mergeFind(STATE.nuclei, pos);
       if (m.merged) return Promise.resolve({ ok:true, merged:true, nucleusKey:m.into });
       var key = DS + ":" + (this._next++);
-      STATE.nuclei.push({ id:key, pos:pos, identity:"", votes:0, box:boxKey });
+      STATE.nuclei.push({ id:key, pos:pos, identity:"", votes:0, box:boxKey,
+                          tally:[], totalVotes:0, rejects:0, unsure:0 });
       return Promise.resolve({ ok:true, merged:false, nucleusKey:key });
     },
+    /* The harness counts every saved answer as coming from a DIFFERENT person. That is not how
+       the live page behaves -- there one person has one vote per nucleus, replaced if they change
+       their mind -- and the harness card says so on screen. It is done this way because the thing
+       worth trying by hand is how a tally builds and how the reveal reads, and with one voter the
+       tally can never exceed one and the panel cannot be exercised at all. */
     name: function(key, identity){
-      STATE.nuclei.forEach(function(n){ if (n.id === key){ n.identity = identity; n.votes = 1; } });
+      var n = byId(key); if (!n) return Promise.resolve({ ok:false });
+      var norm = identity.trim().toLowerCase();
+      var hit = null;
+      (n.tally = n.tally || []).forEach(function(t){ if (t.label.toLowerCase() === norm) hit = t; });
+      if (hit) hit.n++; else n.tally.push({ label: identity.trim(), n: 1 });
+      n.tally.sort(function(a, b){ return b.n - a.n; });
+      n.totalVotes = n.tally.reduce(function(s, t){ return s + t.n; }, 0);
+      n.identity = n.tally[0].label; n.votes = n.tally[0].n;
+      this._person++;
+      return Promise.resolve({ ok:true });
+    },
+    reject: function(key, kind, undo){
+      var n = byId(key); if (!n) return Promise.resolve({ ok:false });
+      var f = kind === "unsure" ? "unsure" : "rejects";
+      n[f] = Math.max(0, (n[f] || 0) + (undo ? -1 : 1));
       return Promise.resolve({ ok:true });
     }
   };
@@ -606,8 +712,13 @@ UJ.app = (function(){
       return this._post({ type:"wjump_nucleus_found", dataset:DS, boxKey:boxKey,
                           x_nm:pos[0], y_nm:pos[1], z_nm:pos[2] });
     },
-    name: function(key, identity){
-      return this._post({ type:"wjump_nucleus_name", dataset:DS, nucleusKey:key, identity:identity });
+    name: function(key, identity, certainty, sawTally){
+      return this._post({ type:"wjump_nucleus_name", dataset:DS, nucleusKey:key,
+                          identity:identity, certainty:certainty, sawTally: !!sawTally });
+    },
+    reject: function(key, kind, undo){
+      return this._post({ type:"wjump_nucleus_reject", dataset:DS, nucleusKey:key,
+                          kind:kind, undo: !!undo });
     }
   };
 
@@ -616,12 +727,16 @@ UJ.app = (function(){
   /* ── rendering ───────────────────────────────────────────────────────────────────────────── */
   function names(){
     var seen = {};
-    STATE.nuclei.forEach(function(n){ if (n.identity) seen[n.identity] = 1; });
+    STATE.nuclei.forEach(function(n){
+      (n.tally || []).forEach(function(t){ if (t.label) seen[t.label] = 1; });
+      if (n.identity) seen[n.identity] = 1;
+    });
     return Object.keys(seen).sort();
   }
 
-  function msg(t, good){
-    var m = el("msg"); if (!m) return;
+  function msg(t, good){ say("msg", t, good); }
+  function say(id, t, good){
+    var m = el(id); if (!m) return;
     m.innerHTML = t;
     m.style.color = good === true ? "var(--ok)" : good === false ? "var(--warn)" : "var(--mut)";
   }
@@ -647,66 +762,276 @@ UJ.app = (function(){
       + " &middot; " + CUR.remaining + " of " + CUR.total + " left";
   }
 
-  function render(){
-    var p = W.progress(DS, STATE.visited, STATE.nuclei);
-    var named = STATE.nuclei.filter(function(n){ return n.identity; }).length;
-    if (el("stats")) el("stats").innerHTML =
-        "<div><span>boxes explored</span><b class='stat'>" + p.visited + " / " + p.total + "</b></div>"
-      + "<div><span>nuclei found</span><b class='stat'>" + p.found + "</b></div>"
-      + "<div><span>named</span><b class='stat'>" + named + "</b></div>"
-      + "<div><span>agreed by 2+</span><b class='stat'>" + p.identified + "</b></div>";
-    if (el("pbar")) el("pbar").style.width = p.pctVisited + "%";
+  /* ── the identify panel ────────────────────────────────────────────────────────────────────
+     One nucleus, asked about properly. The two decisions worth stating:
 
+     1. The existing votes are HIDDEN until the user has answered, or until they choose to look.
+        A tally shown before a vote turns an independent opinion into a confirmation, and a
+        consensus assembled out of confirmations measures how persuasive the first answer was
+        rather than what the tissue is. The reveal is one click for anyone who wants to learn
+        rather than contribute, and the click is recorded (sawTally) so the cost of it can be
+        measured later instead of assumed to be zero.
+
+     2. "I can't tell" is a first-class answer, separate from "not a nucleus". Without it people
+        guess, and a guess is indistinguishable from an opinion once it is a row in a sheet. */
+  function pickNucleus(keepId){
+    var q = W.identifyQueue(STATE.nuclei, SKIPPED), was = CURID;
+    if (keepId && byId(keepId)) CURID = keepId;
+    else if (!CURID || !q.filter(function(n){ return n.id === CURID; }).length) CURID = q.length ? q[0].id : null;
+    /* Reset the reveal when the NUCLEUS changes, not on every render. The first version reset it
+       here unconditionally, which meant pressing "show what others said" set the flag and then
+       immediately cleared it during the re-render it triggered -- the tally appeared for one frame
+       and the vote was recorded as unanchored. A guard that quietly fails open is worse than none,
+       because the column would have looked like evidence. */
+    if (CURID !== was) REVEALED = false;
+    return q;
+  }
+
+  function renderIdentify(){
+    var host = el("identify"); if (!host) return;
+    var q = pickNucleus(null);
+    var n = CURID ? byId(CURID) : null;
+
+    if (!STATE.nuclei.length){
+      host.innerHTML = "<p class='hint' style='margin:0'>No nuclei have been found in this dataset "
+        + "yet. Find one above and it will appear here to be named.</p>";
+      return;
+    }
+    if (!n){
+      host.innerHTML = "<p class='hint' style='margin:0'><b style='color:var(--ok)'>Nothing here "
+        + "needs a second opinion right now.</b> Every nucleus found so far has at least two people "
+        + "agreeing on it, or you have passed over the rest in this sitting. You can still question "
+        + "any of them from the map below.</p>";
+      return;
+    }
+
+    var s = W.tallySummary(n);
+    var need = W.identifyNeed(n);
+    var why = { 3:"nobody has named this one",
+                2:"the votes on this one are tied",
+                1:"only one person has named this one" }[need] || "flagged for another look";
+    var opts = names().map(function(x){ return "<option value=\"" + esc(x) + "\">"; }).join("");
+    var pos = n.pos.map(Math.round).join(", ");
+
+    host.innerHTML =
+        "<datalist id='cellnames'>" + opts + "</datalist>"
+      + "<div class='row' style='justify-content:space-between'>"
+      +   "<div>nucleus <code>" + esc(String(n.id)) + "</code> at <code>" + pos + "</code> nm"
+      +   "<br><span class='hint'>" + why + " &middot; " + q.length + " waiting</span></div>"
+      +   "<button class='primary' id='id-open'>Open this nucleus &#8599;</button>"
+      + "</div>"
+
+      + "<div style='margin-top:14px'>"
+      +   "<label for='id-name'>What kind of cell is this?</label>"
+      +   "<input type='text' id='id-name' list='cellnames' autocomplete='off' "
+      +          "placeholder='free text &mdash; e.g. lamellar cell, hepatocyte, podocyte'"
+      +          (STORE.canWrite() ? "" : " disabled") + ">"
+      + "</div>"
+
+      + "<div class='row' style='margin-top:10px;align-items:flex-end'>"
+      +   "<div style='flex:0 0 auto'><label for='id-cert'>How sure are you?</label>"
+      +     "<select id='id-cert' style='width:auto'>"
+      +       "<option value='1'>1 &mdash; a guess</option>"
+      +       "<option value='2'>2 &mdash; leaning</option>"
+      +       "<option value='3' selected>3 &mdash; fairly sure</option>"
+      +       "<option value='4'>4 &mdash; confident</option>"
+      +       "<option value='5'>5 &mdash; certain</option>"
+      +     "</select></div>"
+      +   "<button class='primary' id='id-save'>Save my answer</button>"
+      +   "<button id='id-skip'>I can&rsquo;t tell</button>"
+      +   "<button class='bad' id='id-not'>Not a nucleus</button>"
+      + "</div>"
+      + "<p class='hint' id='id-msg' style='margin:10px 0 0'></p>"
+
+      + "<div style='margin-top:12px'>"
+      +   (REVEALED
+          ? "<div class='callout' style='margin:0'>" + tallyHtml(s, n) + "</div>"
+          : "<button id='id-reveal' style='font-size:13px;padding:5px 10px'>"
+            + "Show what others said</button> <span class='hint'>&mdash; "
+            + (s.total ? s.total + " " + (s.total === 1 ? "person has" : "people have") + " answered this one. "
+                       : "nobody has answered this one yet. ")
+            + "Looking first will anchor you, so this is recorded alongside your answer.</span>")
+      + "</div>";
+
+    if (el("id-open")) el("id-open").addEventListener("click", function(){
+      window.open(W.viewerUrl(DS, n.pos, STATE.nuclei), "_blank", "noopener");
+    });
+    if (el("id-reveal")) el("id-reveal").addEventListener("click", function(){
+      REVEALED = true; renderIdentify();
+    });
+    if (el("id-save")) el("id-save").addEventListener("click", saveName);
+    if (el("id-name")) el("id-name").addEventListener("keydown", function(e){
+      if (e.key === "Enter") saveName();
+    });
+    if (el("id-skip")) el("id-skip").addEventListener("click", function(){ skipNucleus(); });
+    if (el("id-not"))  el("id-not").addEventListener("click",  function(){ rejectNucleus(); });
+  }
+
+  function tallyHtml(s, n){
+    if (!s.labels.length && !s.rejects && !s.unsure)
+      return "<b>Nobody has answered this one yet.</b> Yours is the first opinion on it.";
+    var bits = s.labels.map(function(t){
+      return "<b>" + t.n + "</b> said &ldquo;" + esc(t.label) + "&rdquo;"; });
+    var extra = [];
+    if (n && n.unsure)  extra.push(n.unsure + " could not tell");
+    if (s.rejects)      extra.push("<b style='color:var(--bad)'>" + s.rejects
+                                   + " said it is not a nucleus</b>");
+    return (bits.length ? bits.join(" &middot; ") : "No names yet")
+      + (extra.length ? " &middot; " + extra.join(" &middot; ") : "")
+      + (s.status === "contested"
+          ? "<br><span class='hint'>Tied, so this is not settled &mdash; your answer breaks it "
+            + "or confirms the disagreement.</span>" : "");
+  }
+
+  function skipNucleus(){
+    if (!CURID) return;
+    var key = CURID;
+    SKIPPED[key] = 1;
+    /* Recorded as well as skipped: a nucleus five people could not name is a finding, and without
+       a record the queue would offer the same impossible one to the same person on every visit.
+       Fire-and-forget -- if it fails, the session-local skip still works, and blocking the queue
+       on a bookkeeping write would be the wrong trade. */
+    if (STORE.canWrite()) STORE.reject(key, "unsure", false).catch(function(){});
+    CURID = null; REVEALED = false;
+    renderIdentify(); renderMap();
+  }
+
+  function rejectNucleus(){
+    if (!CURID || !requireWrite("id-msg")) return;
+    var key = CURID;
+    say("id-msg", "recording…");
+    STORE.reject(key, "not_a_nucleus", false)
+      .then(function(){ return STORE.live ? STORE.load() : null; })
+      .then(function(){
+        SKIPPED[key] = 1; CURID = null; REVEALED = false;
+        renderIdentify(); renderMap(); render();
+        say("id-msg", "Recorded as <b>not a nucleus</b>. That is a vote, not a delete &mdash; it "
+          + "takes two of those and more of them than names before the map drops it.", true);
+      })
+      .catch(function(e){ say("id-msg", "could not record that: " + e.message, false); });
+  }
+
+  function saveName(){
+    if (!CURID || !requireWrite("id-msg")) return;
+    var inp = el("id-name"), v = inp ? inp.value.trim() : "";
+    if (!v){ say("id-msg", "Type what you think it is, or press &ldquo;I can&rsquo;t tell&rdquo;.", false); return; }
+    var key = CURID, cert = el("id-cert") ? Number(el("id-cert").value) : 3, saw = REVEALED;
+    inp.disabled = true;
+    ["id-save","id-skip","id-not"].forEach(function(i){ if (el(i)) el(i).disabled = true; });
+    say("id-msg", "saving…");
+    STORE.name(key, v, cert, saw)
+      .then(function(){ return STORE.live ? STORE.load() : null; })
+      .then(function(){
+        var n2 = byId(key), s2 = n2 ? W.tallySummary(n2) : null;
+        SKIPPED[key] = 1;                 // answered: do not re-offer it in this sitting
+        CURID = null; REVEALED = false;
+        renderIdentify(); renderMap(); render();
+        /* The reveal AFTER answering is free -- the vote is already cast, so seeing the others
+           cannot bend it, and it is the only moment where being told is actually teaching. */
+        say("id-msg", "Saved: &ldquo;" + esc(v) + "&rdquo;."
+          + (s2 ? " Counting yours, " + tallyHtml(s2, n2) : ""), true);
+      })
+      .catch(function(e){
+        if (inp) inp.disabled = false;
+        ["id-save","id-skip","id-not"].forEach(function(i){ if (el(i)) el(i).disabled = false; });
+        say("id-msg", "could not save that: " + e.message, false);
+      });
+  }
+
+  /* ── the map ───────────────────────────────────────────────────────────────────────────────
+     Every nucleus, read-only. Read-only because naming happens in the panel above, where the
+     votes are hidden until you have answered; an editable field sitting next to the current
+     winning label would route around that on the first row. "Question this" is the way back in:
+     it puts a settled nucleus at the front of the queue, so a wrong consensus can still be
+     argued with, just not casually overwritten. */
+  var FILTER = "all";
+  function renderMap(){
     var host = el("found-list"); if (!host) return;
     if (!STATE.nuclei.length){
       host.innerHTML = "<p class='hint' style='margin:0'>None yet. Explore a box to find the first.</p>";
       return;
     }
-    var opts = names().map(function(n){ return "<option value=\"" + esc(n) + "\">"; }).join("");
-    host.innerHTML = "<datalist id='cellnames'>" + opts + "</datalist>"
-      + "<table><tr><th></th><th>position (nm)</th><th>cell type &mdash; free text</th>"
-      + "<th>votes</th><th></th></tr>"
-      + STATE.nuclei.map(function(n){
-          var col = !n.identity ? "var(--bad)" : (n.votes >= 2 ? "var(--ok)" : "var(--warn)");
+    var counts = { all: STATE.nuclei.length, need: 0, agreed: 0, retracted: 0 };
+    STATE.nuclei.forEach(function(n){
+      var need = W.identifyNeed(n);
+      if (need > 0) counts.need++; else if (need === 0) counts.agreed++; else counts.retracted++;
+    });
+    var rows = STATE.nuclei.filter(function(n){
+      var need = W.identifyNeed(n);
+      return FILTER === "all" || (FILTER === "need" && need > 0)
+          || (FILTER === "agreed" && need === 0) || (FILTER === "retracted" && need < 0);
+    });
+
+    var tabs = [["all","everything"],["need","needs a look"],["agreed","agreed"],
+                ["retracted","retracted"]].map(function(f){
+      return "<button data-filter='" + f[0] + "'" + (FILTER === f[0] ? " class='primary'" : "")
+        + " style='font-size:12.5px;padding:5px 10px'>" + f[1] + " (" + counts[f[0]] + ")</button>";
+    }).join(" ");
+
+    host.innerHTML = "<div class='row' style='margin-bottom:10px'>" + tabs + "</div>"
+      + (rows.length ? ("<table><tr><th></th><th>position (nm)</th><th>what people said</th>"
+      + "<th></th></tr>"
+      + rows.map(function(n){
+          var s = W.tallySummary(n);
+          var col = { unnamed:"var(--bad)", single:"var(--warn)", contested:"var(--warn)",
+                      agreed:"var(--ok)", retracted:"var(--mut)" }[s.status] || "var(--mut)";
+          var text = !s.labels.length
+            ? "<span class='hint'>not named yet</span>"
+            : s.labels.map(function(t){ return esc(t.label) + " &times;" + t.n; }).join(" &middot; ");
+          if (n.unsure)  text += " <span class='hint'>&middot; " + n.unsure + " unsure</span>";
+          if (n.rejects) text += " <span style='color:var(--bad)'>&middot; " + n.rejects
+                              + " say not a nucleus</span>";
           return "<tr><td><span class='dot' style='background:" + col + "'></span>"
             + esc(String(n.id).split(":").pop()) + "</td>"
             + "<td><code>" + n.pos.map(Math.round).join(", ") + "</code></td>"
-            + "<td><input type='text' list='cellnames' data-key='" + esc(n.id) + "' class='nm' "
-            + "value=\"" + esc(n.identity) + "\" placeholder='e.g. lamellar cell'"
-            + (STORE.canWrite() ? "" : " disabled") + "></td>"
-            + "<td>" + (n.votes || 0) + "</td>"
-            + "<td><button data-view='" + esc(n.id) + "'>view</button></td></tr>";
-        }).join("") + "</table>"
+            + "<td>" + text + "</td>"
+            + "<td style='white-space:nowrap'><button data-view='" + esc(n.id) + "'>view</button> "
+            + "<button data-ask='" + esc(n.id) + "'>question this</button></td></tr>";
+        }).join("") + "</table>")
+        : "<p class='hint' style='margin:0'>Nothing in this category.</p>")
       + "<p class='hint'>Free text on purpose: these tissues have no published cell-type list, so "
-      + "an enumerated menu would be a guess wearing the clothes of an ontology. The box suggests "
-      + "names already used here, which converges the vocabulary without constraining it. "
+      + "an enumerated menu would be a guess wearing the clothes of an ontology. The box above "
+      + "suggests names already used here, which converges the vocabulary without constraining it. "
       + "<b>Nothing here is scored</b> &mdash; there is no ground truth for cell identity in these "
       + "volumes, only what the community agrees on.</p>";
 
-    host.querySelectorAll(".nm").forEach(function(inp){
-      inp.addEventListener("change", function(){
-        var v = inp.value.trim(); if (!v) return;
-        inp.disabled = true;
-        STORE.name(inp.dataset.key, v).then(function(){
-          var n = STATE.nuclei.filter(function(x){ return x.id === inp.dataset.key; })[0];
-          if (n && !STORE.live){ n.identity = v; n.votes = 1; }
-          return STORE.live ? STORE.load() : null;
-        }).then(function(){ render(); })
-          .catch(function(e){ msg("could not save that name: " + e.message, false); inp.disabled = false; });
-      });
+    host.querySelectorAll("[data-filter]").forEach(function(b){
+      b.addEventListener("click", function(){ FILTER = b.dataset.filter; renderMap(); });
     });
     host.querySelectorAll("[data-view]").forEach(function(b){
       b.addEventListener("click", function(){
-        var n = STATE.nuclei.filter(function(x){ return x.id === b.dataset.view; })[0];
+        var n = byId(b.dataset.view);
         if (n) window.open(W.viewerUrl(DS, n.pos, STATE.nuclei), "_blank", "noopener");
+      });
+    });
+    host.querySelectorAll("[data-ask]").forEach(function(b){
+      b.addEventListener("click", function(){
+        delete SKIPPED[b.dataset.ask];
+        CURID = b.dataset.ask; REVEALED = false;
+        renderIdentify();
+        var c = el("identify-card"); if (c && c.scrollIntoView) c.scrollIntoView({ behavior:"smooth" });
       });
     });
   }
 
+  function render(){
+    var p = W.progress(DS, STATE.visited, STATE.nuclei);
+    var needs = STATE.nuclei.filter(function(n){ return W.identifyNeed(n) > 0; }).length;
+    if (el("stats")) el("stats").innerHTML =
+        "<div><span>boxes explored</span><b class='stat'>" + p.visited + " / " + p.total + "</b></div>"
+      + "<div><span>nuclei found</span><b class='stat'>" + p.found + "</b></div>"
+      + "<div><span>need a name</span><b class='stat'>" + needs + "</b></div>"
+      + "<div><span>agreed by 2+</span><b class='stat'>" + p.identified + "</b></div>";
+    if (el("pbar")) el("pbar").style.width = p.pctVisited + "%";
+    renderIdentify();
+    renderMap();
+  }
+
   /* ── actions ─────────────────────────────────────────────────────────────────────────────── */
-  function requireWrite(){
+  function requireWrite(where){
     if (STORE.canWrite()) return true;
-    msg("Sign in with Google first &mdash; contributions are attributed, so the map can be trusted.", false);
+    say(where || "msg",
+      "Sign in with Google first &mdash; contributions are attributed, so the map can be trusted.", false);
     return false;
   }
 
@@ -720,16 +1045,26 @@ UJ.app = (function(){
         + "or press &ldquo;Nothing here&rdquo; if there really are none.", false);
       return;
     }
-    BUSY = true; msg("saving " + r.points.length + " marker(s)…");
+    BUSY = true;
+    /* Each find is a round trip to Apps Script, roughly a second. Eight markers is eight seconds
+       of a page that said "saving 8 marker(s)…" once and then sat there -- which reads as a
+       hang, because from the outside it is indistinguishable from one. Søren hit exactly this.
+       The saving cannot be parallelised (see below), so the honest fix is to say where it is up
+       to and to make the buttons visibly unavailable while it works. */
+    setBusy(true);
+    msg("saving marker 1 of " + r.points.length + "…");
     /* Sequential, not Promise.all: two finds a few micrometres apart in the same paste must be
        deduped against each OTHER, and the server can only do that if it has already written the
        first when it sees the second. Parallel submission would race and create duplicates -- the
        exact thing dedup exists to prevent. */
-    var added = 0, merged = 0;
+    var added = 0, merged = 0, done = 0, n = r.points.length;
     var chain = r.points.reduce(function(pr, p){
       return pr.then(function(){
         return STORE.find(p, CUR.box.key).then(function(res){
           if (res && res.merged) merged++; else added++;
+          done++;
+          if (done < n) msg("saving marker " + (done + 1) + " of " + n + "…");
+          else msg("recording the visit…");
         });
       });
     }, Promise.resolve());
@@ -740,29 +1075,39 @@ UJ.app = (function(){
         if (added)  parts.push("<b>" + added + " new nucle" + (added === 1 ? "us" : "i") + "</b> recorded");
         if (merged) parts.push(merged + " already known");
         if (r.outside) parts.push(r.outside + " outside this box (kept &mdash; a nucleus is a nucleus)");
-        msg(parts.join(" &middot; ") + ". Name them below.", added > 0);
-        box.value = ""; BUSY = false; pickBox(); render();
+        msg(parts.join(" &middot; ") + ". " + (added ? "Name them in <b>Identify</b> below." : ""), added > 0);
+        box.value = ""; BUSY = false; setBusy(false); pickBox(); render();
       })
-      .catch(function(e){ BUSY = false; msg("save failed: " + e.message, false); });
+      .catch(function(e){ BUSY = false; setBusy(false); msg("save failed: " + e.message, false); });
   }
 
   function submitEmpty(){
     if (!CUR || BUSY || !requireWrite()) return;
-    BUSY = true;
+    BUSY = true; setBusy(true); msg("recording…");
     var key = CUR.box.key;
     STORE.visit(key, "empty", 0)
       .then(function(){ return STORE.load(); })
       .then(function(){
         msg("Box " + key + " recorded as empty. It will not be offered again &mdash; and that "
           + "record is what stops the sampler serving the same void twice.", true);
-        BUSY = false; pickBox(); render();
+        BUSY = false; setBusy(false); pickBox(); render();
       })
-      .catch(function(e){ BUSY = false; msg("save failed: " + e.message, false); });
+      .catch(function(e){ BUSY = false; setBusy(false); msg("save failed: " + e.message, false); });
+  }
+
+  /* Buttons that still look pressable during a ten-second save invite a second click, which for
+     a sequential chain means two overlapping chains and duplicate rows. */
+  function setBusy(on){
+    ["found","empty","skip","open"].forEach(function(i){ if (el(i)) el(i).disabled = !!on; });
+    if (el("explore-card")) el("explore-card").style.opacity = on ? "0.6" : "";
   }
 
   /* ── boot ────────────────────────────────────────────────────────────────────────────────── */
   function selectDataset(id){
     DS = id;
+    /* A skip is "not this one, right now" -- it is about the sitting, not about the nucleus, and
+       carrying it across a dataset switch would silently hide nuclei in the new one. */
+    SKIPPED = {}; CURID = null; REVEALED = false;
     var d = W.byId(id);
     if (el("dslabel")) el("dslabel").textContent = d.tissue + " — " + d.species;
     if (el("dstier")) el("dstier").innerHTML = {
@@ -794,7 +1139,9 @@ UJ.app = (function(){
   }
 
   return { init:init, selectDataset:selectDataset, render:render, pickBox:pickBox,
+           renderIdentify:renderIdentify, renderMap:renderMap,
            state: function(){ return STATE; }, cur: function(){ return CUR; },
+           curNucleus: function(){ return CURID; }, revealed: function(){ return REVEALED; },
            store: function(){ return STORE; }, setCredential: function(c, who){
              ApiStore.credential = c; ApiStore.who = who || ""; render();
            } };
