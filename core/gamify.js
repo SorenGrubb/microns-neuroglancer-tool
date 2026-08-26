@@ -72,22 +72,58 @@ function gamifyInjectUI(){
    minutes ago would not appear and the chip would look stuck. Instead take the OTHER datasets
    from the nightly snapshot and this dataset LIVE from myStats -- correct immediately after a
    submission, and still correct across pages. */
+/* perDataset arrives as an ARRAY of {ds,label,points,...}. It used to arrive as an OBJECT keyed
+   by ds, because Datasets.gs built one shape and this file consumed another -- two files each
+   correct alone, never run together. `{}.forEach` is not a function, so this threw, renderChip()
+   died mid-call, and the chip sat on "loading…" for ever. That is what "the points never finish
+   loading" was: not slow, broken.
+
+   perList() accepts both shapes, so the page is correct whichever side of the backend deploy it
+   is on -- this family has been bitten twice by a page that assumed a redeploy had happened. */
+function perList(t){
+  var p=t&&t.perDataset;
+  if(!p) return [];
+  /* Falsy entries dropped here, not guarded at each use site: a null does not throw in the loop
+     that sums points, it throws in the tooltip that maps over labels. One filter is the fix. */
+  if(Object.prototype.toString.call(p)==="[object Array]") return p.filter(function(e){return !!e;});
+  var out=[]; for(var k in p){ if(p.hasOwnProperty(k)&&p[k]){ var e=p[k]; if(e.ds==null) e.ds=k; out.push(e); } }
+  return out;
+}
 function combinedPoints(){
   var live=(MYSTATS&&MYSTATS.points)||0, t=window.__PROFILE_TOTALS;
   if(!t||t.combinedPoints==null) return {points:live,combined:false,per:null};
-  var ds=(UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds)||"", mine=0;
-  (t.perDataset||[]).forEach(function(p){ if(p.ds===ds) mine=p.points||0; });
-  return {points:Math.max(live,(t.combinedPoints-mine)+live),combined:true,per:t.perDataset||[]};
+  var ds="";
+  try{ ds=(UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds)||""; }catch(_c){}
+  var per=perList(t), mine=0;
+  /* Subtract THIS tool's snapshot figure and add its live one: the current page is right the
+     instant you submit, the others come from the rebuild. Without a `ds` on each entry this
+     subtraction never matched and the current tool was counted twice. */
+  per.forEach(function(p){ if(p&&p.ds===ds) mine=p.points||0; });
+  return {points:Math.max(live,(t.combinedPoints-mine)+live),combined:true,per:per};
 }
-function renderChip(){
+/* Nothing in here may throw. A chip stuck on "loading…" is indistinguishable from a backend that
+   never answered, and that is exactly how the perDataset shape mismatch presented for weeks --
+   as a performance problem. If the combined figure cannot be computed, show this page's own
+   points rather than nothing. */
+function renderChip(){ try{ renderChipInner(); }catch(err){ try{ renderChipFallback(err); }catch(_f){} } }
+function renderChipFallback(err){
+  var c=document.getElementById("gameChip");if(!c)return;
+  if(!(GOOGLE_VERIFIED&&MYSTATS)) return;
+  c.innerHTML='<div class="chipbtn" id="chipOpen" title="Showing this page\u2019s points only \u2014 '
+    +'the combined total could not be read ('+escHtml(String(err&&err.message||err))+')."><span>'
+    +escHtml(MYSTATS.handle||"you")+'</span><span class="lvl">'+escHtml(MYSTATS.level||"")
+    +'</span><span class="pts">'+((MYSTATS.points)||0)+' pts</span></div>';
+  var o=document.getElementById("chipOpen");if(o)o.addEventListener("click",openDashboard);
+}
+function renderChipInner(){
   var c=document.getElementById("gameChip");if(!c)return;
   if(GOOGLE_VERIFIED&&MYSTATS){
     var cp=combinedPoints();
     var tip=cp.combined
       ? ("Points across every dataset: "
          +cp.per.map(function(p){return (p.label||p.ds)+" "+(p.points||0);}).join(" · ")
-         +". This page's own "+((MYSTATS.points)||0)+" update immediately; the others come from the nightly rebuild.")
-      : "Points on this dataset. The combined cross-dataset total appears once the nightly rebuild has run.";
+         +". This page's own "+((MYSTATS.points)||0)+" update immediately; the others come from the 4-hourly rebuild.")
+      : "Points on this dataset only. The combined cross-tool total appears once rebuildProfileTotals() has run — see installProfileTotalsTrigger() in Datasets.gs.";
     c.innerHTML='<div class="chipbtn" id="chipOpen" title="'+escHtml(tip)+'"><span>'+escHtml(MYSTATS.handle||"you")+'</span>'
       +'<span class="lvl">'+escHtml(MYSTATS.level||"")+'</span><span class="pts">'+cp.points+' pts</span>'+((MYSTATS.downvoted>0)?'<span style="color:#e3b341" title="You have '+MYSTATS.downvoted+' down-voted report(s) to review">⚠ '+MYSTATS.downvoted+'</span>':'')+'</div>';
     var o=document.getElementById("chipOpen");if(o)o.addEventListener("click",openDashboard);
@@ -124,7 +160,7 @@ function loadProfileTotals(cb){
 }
 function profileTotalsHtml(t){
   if(!t) return "";
-  var per=(t.perDataset||[]).map(function(p){
+  var per=perList(t).map(function(p){
     return '<span style="display:inline-block;min-width:150px">'+escHtml(p.label||p.ds)+' <b>'+(p.points||0)+'</b></span>';
   }).join("");
   var when=t.updated?new Date(t.updated):null;
@@ -132,7 +168,7 @@ function profileTotalsHtml(t){
     +'<div style="font-size:13px"><b>'+(t.combinedPoints||0)+'</b> points in total</div>'
     +'<div style="font-size:12px;color:var(--mut,#8b949e);margin-top:4px">'+per+'</div>'
     +'<div style="font-size:11px;color:var(--mut,#8b949e);margin-top:4px">Combined total as of '
-    +escHtml(when&&!isNaN(when.getTime())?when.toLocaleString("en-GB"):"the last nightly rebuild")
+    +escHtml(when&&!isNaN(when.getTime())?when.toLocaleString("en-GB"):"the last rebuild")
     +' &mdash; this page&rsquo;s own numbers above update immediately.</div>';
 }
 function loadMyStats(cb){gamifyGet("myStats",function(d){if(d&&!d.error){MYSTATS=d;}renderChip();if(cb)cb(d);});}
@@ -291,5 +327,6 @@ UJ.gamify = {
   loadMyStats: loadMyStats, loadFavourites: loadFavourites, refreshFavStars: refreshFavStars,
   renderChip: renderChip, openDashboard: openDashboard, closeDashboard: closeDashboard,
   downloadMyWork: downloadMyWork, favStarHtml: favStarHtml,
-  loadProfileTotals: loadProfileTotals, profileTotalsHtml: profileTotalsHtml
+  loadProfileTotals: loadProfileTotals, profileTotalsHtml: profileTotalsHtml,
+  combinedPoints: combinedPoints, perList: perList
 };

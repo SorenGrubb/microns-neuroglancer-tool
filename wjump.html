@@ -53,17 +53,38 @@
  .idname:hover{text-decoration:underline}
  .chip{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;font-weight:650;
    border:1px solid;border-radius:999px;padding:2px 8px;white-space:nowrap}
+ /* The family logo, character for character the same as λJump's -- same font stack, same
+    italic accent glyph, same trailing arrow. A tool that looks like a different project is a
+    tool people do not realise is theirs. */
+ .logo{font:800 36px/1 "Segoe UI",system-ui,-apple-system,sans-serif;letter-spacing:-.03em;
+   margin:0 0 6px;display:inline-flex;align-items:baseline}
+ .logo .mu{color:var(--accent);font-style:italic;transform:translateY(1px)}
+ .logo .jm{color:var(--ink)}
+ .logo::after{content:"↗";font-size:18px;font-weight:700;color:var(--accent);
+   margin-left:4px;transform:translateY(-8px)}
+ .ptchip{display:inline-flex;align-items:center;gap:8px;background:var(--bg);
+   border:1px solid var(--accent);border-radius:20px;padding:6px 13px;font-size:13px}
+ .ptchip .lvl{font-weight:650;color:var(--accent)}
+ .ptchip .pts{color:var(--mut)}
+ .idhead{margin:0 0 12px;padding-bottom:12px;border-bottom:1px solid var(--line)}
 </style></head><body>
 
 <div class="wrap">
 <div class="top">
-  <div><h1>&omega;Jump &mdash; find the cells</h1>
-  <p class="sub">Janelia OpenOrganelle FIB-SEM &middot; <span id="dslabel"></span></p></div>
+  <div>
+    <a href="#" id="logoHome" style="text-decoration:none;color:inherit;display:inline-block"
+       title="Reload &omega;Jump"><h1 class="logo"><span class="mu">&omega;</span><span
+       class="jm">Jump</span></h1></a>
+    <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
+    <span id="dslabel"></span></p>
+  </div>
   <div style="text-align:right">
-    <div id="gsiButton"></div>
+    <div id="pointsChip"></div>
+    <div id="gsiButton" style="margin-top:6px"></div>
     <p class="hint" id="whoami" style="margin:6px 0 0">not signed in</p>
   </div>
 </div>
+<script>document.getElementById("logoHome").href=location.pathname;</script>
 
 <div class="card">
   <label>Dataset</label>
@@ -1212,7 +1233,17 @@ UJ.app = (function(){
     if (!WALK.ids.length || !byId(WALK.ids[WALK.i])) refreshWalk();
 
     var modes = W.walkModes(STATE.nuclei);
-    var picker = "<div class='row' style='justify-content:space-between;margin-bottom:14px'>"
+    /* THE HEADLINE, above everything, per Søren: "shows the cell identity without having to open
+       it up". This is a real change of policy and worth being straight about: the panel used to
+       hide the existing votes until you had answered, so that a vote was an independent opinion
+       rather than a confirmation of somebody else's. With the name on screen from the moment the
+       nucleus loads, that property is gone -- there is no way to show the identity and not anchor.
+       So the guard is not quietly kept and defeated: it is retired, and `sawTally` is now recorded
+       as true whenever a label was on screen, which is every named nucleus. Answers on an UNNAMED
+       nucleus are still genuinely independent and still record `no`, which is the part of the
+       column that stays meaningful. */
+    var picker = "<div class='idhead' id='id-headline'>" + headlineHtml(byId(CURID)) + "</div>"
+      + "<div class='row' style='justify-content:space-between;margin-bottom:14px'>"
       + "<div style='flex:1 1 260px'><label for='walk'>Walk through</label>"
       + "<select id='walk'>" + modes.map(function(m){
           return "<option value=\"" + esc(m.mode) + "\""
@@ -1284,23 +1315,27 @@ UJ.app = (function(){
       +   "<button id='id-skip'>I can&rsquo;t tell</button>"
       +   "<button class='bad' id='id-not'>Not a nucleus</button>"
       + "</div>"
+      /* The one-click vote. µJump has a confirm button on a community identification, and it is
+         the difference between a tally that grows and one that does not: most people looking at a
+         cell somebody has already named agree, and asking them to retype the name is enough
+         friction that they close the tab instead. "Agree" casts a vote for the leading label
+         verbatim -- the SAME row a typed answer writes, so it is one vote from one person and
+         replaces theirs if they change their mind. "Disagree" does not vote against anything; it
+         puts the cursor in the box, because the useful form of disagreement is a different name. */
+      + (s.labels.length
+        ? "<div class='row' style='margin-top:10px;align-items:center'>"
+          + "<span class='hint'>Or just:</span>"
+          + "<button id='id-agree'>&#10003; Agree &mdash; &ldquo;" + esc(s.leader) + "&rdquo;</button>"
+          + "<button id='id-disagree'>It is something else</button>"
+          + "</div>"
+        : "")
       + "<p class='hint' id='id-msg' style='margin:10px 0 0'></p>"
       + "<div id='id-saved'></div>"
 
-      + "<div style='margin-top:12px'>"
-      +   (anchored
-          ? "<div class='callout' style='margin:0'>" + identityBlockHtml(n)
-            + "<div class='hint' style='margin-top:6px'>You chose this list by cell type, so you already know what "
-            + "was said here &mdash; hiding it would be theatre. Answers given in a type walk are "
-            + "recorded as anchored.</div></div>"
-          : REVEALED
-          ? "<div class='callout' style='margin:0'>" + identityBlockHtml(n) + "</div>"
-          : "<button id='id-reveal' style='font-size:13px;padding:5px 10px'>"
-            + "Show what others said</button> <span class='hint'>&mdash; "
-            + (s.total ? s.total + " " + (s.total === 1 ? "person has" : "people have") + " answered this one. "
-                       : "nobody has answered this one yet. ")
-            + "Looking first will anchor you, so this is recorded alongside your answer.</span>")
-      + "</div>"
+      + (s.labels.length ? "" :
+          "<p class='hint' style='margin:10px 0 0'>Nobody has named this one, so yours is the "
+          + "first opinion on it &mdash; and the only kind of answer here that nothing can have "
+          + "anchored.</p>")
 
       /* µJump's pattern exactly: a collapsed toggle hanging off the identification, not a
          separate screen. Organelles are logged AGAINST a cell there, and the same is true here --
@@ -1319,12 +1354,18 @@ UJ.app = (function(){
          Ctrl+click organelles on and paste back into the section below. */
       window.open(W.viewerUrl(DS, n.pos, STATE.nuclei, null, { mark:true }), "_blank", "noopener");
     });
-    if (el("id-reveal")) el("id-reveal").addEventListener("click", function(){
-      REVEALED = true; renderIdentify();
-    });
     if (el("id-save")) el("id-save").addEventListener("click", saveName);
     if (el("id-name")) el("id-name").addEventListener("keydown", function(e){
       if (e.key === "Enter") saveName();
+    });
+    if (el("id-agree")) el("id-agree").addEventListener("click", function(){
+      var inp = el("id-name"); if (inp) inp.value = s.leader;
+      saveName();
+    });
+    if (el("id-disagree")) el("id-disagree").addEventListener("click", function(){
+      var inp = el("id-name"); if (inp){ inp.value = ""; inp.focus(); }
+      say("id-msg", "Type what you think it is instead &mdash; a different name is more use than "
+        + "a vote against one.", false);
     });
     if (el("id-skip")) el("id-skip").addEventListener("click", function(){ skipNucleus(); });
     if (el("id-not"))  el("id-not").addEventListener("click",  function(){ rejectNucleus(); });
@@ -1583,6 +1624,27 @@ UJ.app = (function(){
 
      Attribution is by NAME only. wjumpState never reads reporterEmail, because that endpoint is
      public: anything it returns is returned to everyone. A missing name reads "someone". */
+
+  /* The headline. Named: µJump's shape -- the name is a link that opens the cell, with a status
+     chip, the breakdown, who proposed it and who logged organelles. Unnamed: "Nucleus 7", because
+     a blank space where a name goes reads as a page that failed to load, and the number is the
+     thing that identifies it until somebody names it. */
+  function headlineHtml(n){
+    if (!n) return "";
+    var num = String(n.id).split(":").pop();
+    var url = W.viewerUrl(DS, n.pos, STATE.nuclei, null, { mark:true });
+    var s = W.tallySummary(n);
+    if (!s.labels.length){
+      return "<div class='row' style='gap:8px;align-items:baseline'>"
+        + "<a href='" + esc(url) + "' target='_blank' rel='noopener' class='idname'>Nucleus "
+        + esc(num) + " &#8599;</a>"
+        + "<span class='chip' style='border-color:var(--bad);color:var(--bad)'>not yet named</span>"
+        + "</div><div class='hint' style='margin-top:4px'>at <code>"
+        + n.pos.map(Math.round).join(", ") + "</code> nm</div>";
+    }
+    return identityBlockHtml(n);
+  }
+
   function identityBlockHtml(n, opts){
     if (!n) return "";
     opts = opts || {};
@@ -1685,11 +1747,12 @@ UJ.app = (function(){
     if (!CURID || !requireWrite("id-msg")) return;
     var inp = el("id-name"), v = inp ? inp.value.trim() : "";
     if (!v){ say("id-msg", "Type what you think it is, or press &ldquo;I can&rsquo;t tell&rdquo;.", false); return; }
-    /* Anchored either because they pressed reveal, or because the very act of choosing a cell-type
-       walk told them what the crowd said. The second is the easy one to forget, and forgetting it
-       would fill the column with "no" for the answers most likely to be confirmations. */
+    /* sawTally now means "a label was on screen when this was answered", which is true of every
+       nucleus that already has one -- the headline shows it. It stays honest and stays useful for
+       the case that matters: an answer on an UNNAMED nucleus had nothing to be anchored by, and
+       those are the votes that start a consensus rather than confirm one. */
     var key = CURID, cert = el("id-cert") ? Number(el("id-cert").value) : 3,
-        saw = REVEALED || W.walkIsAnchored(WALK.mode),
+        saw = !!(byId(CURID) && byId(CURID).identity),
         note = el("id-comment") ? el("id-comment").value.trim() : "";
     inp.disabled = true;
     ["id-save","id-skip","id-not"].forEach(function(i){ if (el(i)) el(i).disabled = true; });
@@ -1704,7 +1767,7 @@ UJ.app = (function(){
            cannot bend it, and it is the only moment where being told is actually teaching. */
         /* The read-back AFTER answering is free -- the vote is already cast, so seeing the
            others cannot bend it, and it is the only moment where being told is teaching. */
-        say("id-msg", "Saved: &ldquo;" + esc(v) + "&rdquo;. Counting yours:", true);
+        say("id-msg", "Saved: &ldquo;" + esc(v) + "&rdquo;.", true);
         if (el("id-saved") && n2) el("id-saved").innerHTML =
           "<div class='callout' style='margin:10px 0 0'>" + identityBlockHtml(n2) + "</div>";
       })
@@ -2035,6 +2098,77 @@ UJ.app = (function(){
     if (el("explore-card")) el("explore-card").style.opacity = on ? "0.6" : "";
   }
 
+
+  /* ── points ────────────────────────────────────────────────────────────────────────────────
+     Two calls, and the split matters:
+
+       ?myStats=       this dataset, live, correct the instant you submit
+       ?profileTotals= every dataset, from the "Profile totals" sheet the 4-hourly job rebuilds
+
+     The chip shows the OTHER tools from the snapshot plus THIS one live, which is the only
+     arrangement that is both continuous across the family and immediately right after a
+     submission. Same rule as core/gamify.js's combinedPoints() -- and that rule was broken for
+     weeks because Datasets.gs returned perDataset as an object while gamify.js called .forEach on
+     it. The chip threw and sat on "loading…", which reads as a slow backend rather than a bug.
+     So: this accepts either shape, and NOTHING in here may throw. */
+  var MYSTATS = null, TOTALS = null;
+
+  function perList(t){
+    var p = t && t.perDataset;
+    if (!p) return [];
+    /* Falsy entries are dropped here rather than guarded at each use site. A null in the list
+       does not throw in the loop that sums points -- that one checks -- it throws in the tooltip
+       that maps over labels, three lines away and only when the tooltip is built. One filter is
+       the whole fix. */
+    if (Object.prototype.toString.call(p) === "[object Array]")
+      return p.filter(function(e){ return !!e; });
+    var out = [];
+    for (var k in p) if (p.hasOwnProperty(k) && p[k]){ var e = p[k]; if (e.ds == null) e.ds = k; out.push(e); }
+    return out;
+  }
+  function combinedPoints(){
+    var live = (MYSTATS && MYSTATS.points) || 0;
+    if (!TOTALS || TOTALS.combinedPoints == null) return { points: live, combined: false, per: [] };
+    var ds = UJ.cfg.backend.ds, mine = 0, per = perList(TOTALS);
+    per.forEach(function(p){ if (p && p.ds === ds) mine = p.points || 0; });
+    return { points: Math.max(live, (TOTALS.combinedPoints - mine) + live), combined: true, per: per };
+  }
+  function renderPoints(){
+    var c = el("pointsChip"); if (!c) return;
+    if (!LIVE || !STORE.canWrite()){ c.innerHTML = ""; return; }
+    if (!MYSTATS){ c.innerHTML = "<div class='ptchip'><span class='pts'>points loading…</span></div>"; return; }
+    var cp;
+    try { cp = combinedPoints(); } catch (e){ cp = { points:(MYSTATS.points||0), combined:false, per:[] }; }
+    var tip = cp.combined
+      ? "Across every Jump tool: " + cp.per.map(function(p){
+          return (p.label || p.ds) + " " + (p.points || 0); }).join(" · ")
+        + ". This tool's own " + (MYSTATS.points || 0) + " update the moment you submit; the "
+        + "others come from the 4-hourly rebuild."
+      : "Points in ωJump only. The combined cross-tool total appears once rebuildProfileTotals() "
+        + "has run in Apps Script — see installProfileTotalsTrigger() in Datasets.gs.";
+    c.innerHTML = "<div class='ptchip' title='" + esc(tip) + "'>"
+      + "<span>" + esc(MYSTATS.handle || "you") + "</span>"
+      + (MYSTATS.level ? "<span class='lvl'>" + esc(MYSTATS.level) + "</span>" : "")
+      + "<span class='pts'>" + cp.points + " pts</span>"
+      + (cp.combined ? "" : "<span class='chip' style='border-color:var(--warn);color:var(--warn)'>"
+                          + "this tool only</span>")
+      + "</div>";
+  }
+  function loadPoints(){
+    if (!LIVE || !ApiStore.credential) return;
+    var base = UJ.cfg.backend.endpoint, ds = encodeURIComponent(UJ.cfg.backend.ds),
+        tok = encodeURIComponent(ApiStore.credential);
+    /* Both fired at once and each rendered as it lands: the combined total is a cheap single
+       sheet read, myStats is a full recompute, and making the fast one wait for the slow one is
+       how a page ends up looking like it never loads. */
+    fetch(base + "?myStats=" + tok + "&ds=" + ds).then(function(r){ return r.json(); })
+      .then(function(d){ if (d && !d.error) MYSTATS = d; renderPoints(); })
+      .catch(function(){ renderPoints(); });
+    fetch(base + "?profileTotals=" + tok + "&ds=" + ds).then(function(r){ return r.json(); })
+      .then(function(d){ if (d && d.ok) TOTALS = d; renderPoints(); })
+      .catch(function(){ renderPoints(); });
+  }
+
   /* ── boot ────────────────────────────────────────────────────────────────────────────────── */
   function selectDataset(id){
     DS = id;
@@ -2077,11 +2211,14 @@ UJ.app = (function(){
 
   return { init:init, selectDataset:selectDataset, render:render, pickBox:pickBox,
            renderIdentify:renderIdentify, renderMap:renderMap, renderList:renderList,
-           renderOrganBody:renderOrganBody,
+           renderOrganBody:renderOrganBody, renderPoints:renderPoints,
+           points: function(){ return combinedPoints(); },
+           setStats: function(m, t){ MYSTATS = m; TOTALS = t; renderPoints(); },
            state: function(){ return STATE; }, cur: function(){ return CUR; },
            curNucleus: function(){ return CURID; }, revealed: function(){ return REVEALED; },
            store: function(){ return STORE; }, setCredential: function(c, who){
              ApiStore.credential = c; ApiStore.who = who || ""; render();
+             renderPoints(); loadPoints();
            } };
 })();
 </script>
