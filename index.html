@@ -138,6 +138,15 @@
      The first version of this comment claimed 7.98 and 8.44 — numbers written down before
      anything was computed. They were wrong, and being wrong in the safe direction is luck,
      not method. */
+  /* ωJump. Gold: the one hue family the other five leave empty (µ teal, η burnt orange, β
+     crimson, δ violet, λ blue). Measured, not eyeballed -- #854d0e on white is 6.85:1 and
+     #fbbf24 on #1a1e24 is 10.02:1, both in the same band as the rest of the row. */
+  .feature.omega{--teal:#854d0e;--teal-soft:#fdf3e0}
+  .feature.omega .cta{background:#854d0e;color:#ffffff}
+  @media (prefers-color-scheme:dark){
+    .feature.omega{--teal:#fbbf24;--teal-soft:#2b2107}
+    .feature.omega .cta{background:#fbbf24;color:#2a1f04}
+  }
   .feature.lambda{--teal:#1d4ed8;--teal-soft:#e6edfd}
   .feature.lambda .cta{background:#1d4ed8;color:#ffffff}
   @media (prefers-color-scheme:dark){
@@ -295,6 +304,32 @@
       <span class="chip">3D mesh, PowerPoint &amp; Excel</span>
     </div>
     <span class="cta">Open &beta;Jump &rarr;</span>
+  </a>
+
+  <a class="feature omega" href="/wjump.html">
+    <div class="kicker">Interactive tool</div>
+    <div class="logo"><span class="mu">&omega;</span><span class="jm">Jump</span></div>
+    <p class="desc">
+      Not cortex, and not a classifier. Fifteen Janelia OpenOrganelle FIB-SEM volumes &mdash;
+      heart, liver, kidney, skin, pancreas, thymus, a hair follicle, two mechanoreceptor
+      corpuscles &mdash; at <em>4&ndash;8&nbsp;nm isotropic</em>, the finest ultrastructure in this
+      family by a wide margin. None of them publishes a soma list or a single cell type, and no
+      detector is being written for them: <em>the nuclei do not exist as data until somebody finds
+      them</em>. You are sent to the 20&nbsp;&micro;m box furthest from anywhere already looked at,
+      you mark what you see, and reporting an empty box counts for as much as a find. Cell names
+      are free text, because a fixed menu for fourteen tissues would be a guess wearing the
+      clothes of an ontology.
+    </p>
+    <div class="chips">
+      <span class="chip">14 mouse tissues + zebrafish</span>
+      <span class="chip">4&ndash;8&nbsp;nm isotropic</span>
+      <span class="chip">No nucleus table &mdash; you build it</span>
+      <span class="chip">Free-text cell names</span>
+      <span class="chip">Coverage you can finish</span>
+      <span class="chip">Community mapping</span>
+      <span class="chip">CC-BY-4.0</span>
+    </div>
+    <span class="cta">Open &omega;Jump &rarr;</span>
   </a>
 
   <!-- Stated once here rather than repeated on three of the four cards, so the descriptions

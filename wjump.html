@@ -1,0 +1,832 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ωJump — find the cells</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+ :root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ee;--mut:#9aa4b2;--line:#262c35;--accent:#7aa2ff;
+       --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444}
+ @media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mut:#5b6472;
+       --line:#e3e6ea;--accent:#1d4ed8}}
+ *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);
+   font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+ .wrap{max-width:960px;margin:0 auto;padding:24px 18px 70px}
+ h1{font-size:21px;margin:0} .sub{color:var(--mut);font-size:13px;margin:4px 0 18px}
+ .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
+ label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);
+   font-weight:600;display:block;margin-bottom:6px}
+ button{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;
+   padding:9px 14px;font-size:14px;cursor:pointer} button:hover{border-color:var(--accent)}
+ button:disabled{opacity:.45;cursor:not-allowed}
+ button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+ button.bad{border-color:#5b2b2b} .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+ input[type=text],select{background:var(--bg);border:1px solid var(--line);color:var(--ink);
+   border-radius:8px;padding:9px 11px;font-size:14px;width:100%}
+ .bar{height:9px;background:var(--bg);border-radius:5px;overflow:hidden;border:1px solid var(--line)}
+ .bar>i{display:block;height:100%;background:var(--accent);transition:width .3s}
+ .hint{color:var(--mut);font-size:13px}
+ code{background:var(--bg);padding:1px 5px;border-radius:4px;font-size:12.5px}
+ kbd{background:var(--bg);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;
+   padding:1px 6px;font-size:12px;font-family:inherit}
+ table{width:100%;border-collapse:collapse;font-size:13.5px}
+ td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+ th{color:var(--mut);font-weight:600}
+ .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px}
+ .stat{font-size:25px;font-weight:650}
+ .stats{display:flex;gap:26px;flex-wrap:wrap}
+ .stats div>span{display:block;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em}
+ .top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+ .callout{border-left:3px solid var(--accent);padding:9px 12px;background:var(--bg);
+   border-radius:0 8px 8px 0;margin:12px 0}
+ a{color:var(--accent)}
+</style></head><body>
+
+<div class="wrap">
+<div class="top">
+  <div><h1>&omega;Jump &mdash; find the cells</h1>
+  <p class="sub">Janelia OpenOrganelle FIB-SEM &middot; <span id="dslabel"></span></p></div>
+  <div style="text-align:right">
+    <div id="gsiButton"></div>
+    <p class="hint" id="whoami" style="margin:6px 0 0">not signed in</p>
+  </div>
+</div>
+
+<div class="card">
+  <label>Dataset</label>
+  <select id="dataset"></select>
+  <p class="hint" id="dstier" style="margin:8px 0 0"></p>
+</div>
+
+<div class="card">
+  <label>Progress</label>
+  <div class="stats" id="stats"></div>
+  <div class="bar" style="margin-top:12px"><i id="pbar" style="width:0%"></i></div>
+  <p class="hint" style="margin-bottom:0">These volumes have no published list of cells. This is
+  the map being drawn.</p>
+</div>
+
+<div class="card">
+  <label>Your box</label>
+  <div id="boxinfo" class="hint"></div>
+  <div class="row" style="margin-top:12px">
+    <button class="primary" id="open">Open this box in Neuroglancer &#8599;</button>
+    <button id="skip">Offer me a different box</button>
+  </div>
+
+  <div class="callout">
+    <b>Ctrl</b>+click each nucleus you can see.<br>
+    <span class="hint">A plain click does nothing &mdash; Neuroglancer places annotations on
+    <kbd>Ctrl</kbd>+click, and there is no setting that changes it. The point tool is already
+    selected for you, so <kbd>Ctrl</kbd>+click is all it takes. The <b>blue box</b> is the region
+    you are being asked about; the yellow one is the whole dataset. Then copy the address bar and
+    paste it below.</span>
+  </div>
+
+  <div class="row"><input type="text" id="pasted" placeholder="paste the Neuroglancer link back here"></div>
+  <div class="row" style="margin-top:9px">
+    <button class="primary" id="found">Submit what I clicked</button>
+    <button class="bad" id="empty">Nothing here &mdash; next box</button>
+  </div>
+  <p class="hint" id="msg" style="margin-bottom:0"></p>
+</div>
+
+<div class="card">
+  <label>Nuclei found</label>
+  <div id="found-list"><p class="hint" style="margin:0">None yet.</p></div>
+</div>
+
+
+
+<div class="card">
+  <label>About this tool</label>
+  <p class="hint" style="margin-top:0">Every other tool in this family classifies a nucleus table
+  somebody else built. The OpenOrganelle volumes publish no soma list and no cell types, and no
+  detector is being written for them &mdash; so the table does not exist until the community makes
+  it. You are being sent to the box furthest from any box <i>already visited</i>, which is why
+  reporting an empty one matters as much as finding a nucleus: an unreported empty box is one the
+  sampler will hand out again.</p>
+  <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
+  identity in these volumes &mdash; only what the community converges on. Organelles are a
+  different matter: 114 crops carry expert voxel labels, and a scored organelle trainer built on
+  those is the natural companion to this, not part of it.</p>
+  <p class="hint">Data: <a href="https://openorganelle.janelia.org/" target="_blank" rel="noopener">OpenOrganelle</a>,
+  Janelia COSEM / CellMap, <code>s3://janelia-cosem-datasets</code>, <b>CC-BY-4.0</b>.
+  Xu, Pang, Shtengel, M&uuml;ller <i>et al.</i> and the COSEM Project Team,
+  <a href="https://doi.org/10.1038/s41586-021-03992-4" target="_blank" rel="noopener">
+  &ldquo;An open-access volume electron microscopy atlas of whole cells and tissues&rdquo;,
+  Nature 599, 147&ndash;151 (2021)</a>. Nucleus positions and cell names are &omega;Jump's own and
+  are not part of that release.</p>
+</div>
+</div>
+
+<script>window.WJUMP_LIVE = true;</script>
+<script>/* ── ωJump configuration ────────────────────────────────────────────────────────────────────
+   Janelia OpenOrganelle / COSEM FIB-SEM. Fifteen datasets across fourteen tissues, and the
+   roster is expected to GROW -- Søren, 2026-08-25: "in the future I hope to add more smaller
+   datasets from different tissues". So the dataset list is DATA, read by the page and by the
+   build script; adding a tissue is a row here plus a rebuild, never a change to the logic.
+
+   WHAT MAKES THIS TOOL DIFFERENT FROM THE OTHER FIVE. There is no nucleus table. None of these
+   volumes has a published soma list or any cell-type label, and no detector is being built --
+   λJump's was fitted at 7.5 µm against cortical nuclei and still found only ~46% of them; liver,
+   kidney, skin and corpuscle nuclei differ from cortex and from each other, with no pia and no
+   layer prior. The community finds the nuclei instead, one box at a time. See
+   claude/wjump-discovery-design.md. */
+window.UJ = window.UJ || {};
+UJ.cfg = { id: "wjump", label: "OpenOrganelle — Janelia FIB-SEM" };
+
+/* Every source is public S3, no account, no token. CC-BY-4.0 -- attribution required, and a
+   DIFFERENT instrument from λJump's ODC-By. Do not paraphrase either as the other. */
+UJ.cfg.dataset = {
+  name: "OpenOrganelle (COSEM / CellMap)",
+  licence: "CC-BY-4.0",
+  licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
+  portal: "https://openorganelle.janelia.org/",
+  bucket: "janelia-cosem-datasets",
+  citation: "Xu, Pang, Shtengel, Müller, Ritter, Hoffman, Takemura, Lu, Pasolli, Iyer, Chung, " +
+            "Bennett, Weigel, Freeman, van Engelenburg, Walther, Ellisman, Klumpe, " +
+            "Schuh & Hess, plus the COSEM Project Team, " +
+            "“An open-access volume electron microscopy atlas of whole cells and tissues”, " +
+            "Nature 599, 147–151 (2021)",
+  doi: "https://doi.org/10.1038/s41586-021-03992-4"
+};
+
+/* The viewer. neuroglancer-demo reads zarr:// straight off the public bucket -- the same viewer
+   OpenOrganelle's own per-dataset links use, so a coordinate typed here means the same thing it
+   means on their site.
+   POSITION IS IN NANOMETRES, not voxels. Verified against jrc_mus-heart-1's own published state,
+   whose dimensions are [1e-9,"m"] per axis and whose position [68480,73760,64288] lands mid-
+   volume for a 163×152×136 µm block. That is the opposite convention from every other tool in
+   this family, where position is in voxels -- get it wrong and every jump lands at the origin. */
+UJ.cfg.viewer = { base: "https://neuroglancer-demo.appspot.com/" };
+
+/* ── the registry ──────────────────────────────────────────────────────────────────────────
+   shape is (z, y, x) IN VOXELS exactly as the OME-Zarr reports it; res_nm is isotropic. Both
+   were read live from each dataset's own s0 array on 2026-08-26, not copied from the portal.
+   extentNm() below does the (z,y,x) -> (x,y,z) flip once, in one place, because doing it at
+   each use site is how axis bugs happen.
+
+   tier:  "gt"    human ground-truth crops exist -> can calibrate a user's organelle skill
+          "inf"   model predictions only -> can ask "do you agree?", must never score
+          "em"    image only
+   Discovery works on ALL of them; tier only governs calibration.
+
+   enabled:false keeps a dataset in the registry -- visible, documented, countable -- without
+   putting it in front of users yet. The first release is Meissner alone: 18 boxes, finishable. */
+UJ.cfg.datasets = [
+  { id:"jrc_mus-meissner-corpuscle-1", tissue:"Meissner corpuscle", species:"mouse",
+    shape:[9600,7680,6144],    res_nm:6, tier:"inf", enabled:true,
+    /* Ab_RA_TrkB is an antibody channel registered to the EM -- independent molecular evidence
+       of the kind βJump's Hoechst/CD11b give, and the only dataset here that has one besides the
+       Pacinian. For a corpuscle, where the question IS which afferent and which lamellar cell,
+       that is a real identification aid. Layer type unverified: shown as an image because an
+       antibody channel is an intensity volume, but if it turns out to be a mask this needs
+       changing to "segmentation". */
+    extraLayers:[{ name:"Ab_RA_TrkB", type:"image",
+                   path:"recon-1/labels/inference/Ab_RA_TrkB" }] },
+  { id:"jrc_mus-choroid-plexus-3", tissue:"choroid plexus", species:"mouse",
+    shape:[7560,7500,7500],    res_nm:8, tier:"em",  enabled:false },
+  { id:"jrc_mus-guard-hair-follicle", tissue:"guard hair follicle", species:"mouse",
+    shape:[12992,16000,14720], res_nm:6, tier:"inf", enabled:false },
+  { id:"jrc_mus-liver", tissue:"liver", species:"mouse",
+    shape:[8932,12728,12747],  res_nm:8, tier:"gt",  enabled:false },
+  { id:"jrc_mus-kidney", tissue:"kidney", species:"mouse",
+    shape:[22199,7976,12287],  res_nm:8, tier:"gt",  enabled:false },
+  { id:"jrc_mus-pacinian-corpuscle", tissue:"Pacinian corpuscle", species:"mouse",
+    shape:[48576,10496,9728],  res_nm:6, tier:"inf", enabled:false,
+    extraLayers:[{ name:"Ab_RA", type:"image", path:"recon-1/labels/inference/Ab_RA" }] },
+  { id:"jrc_mus-kidney-2", tissue:"kidney", species:"mouse",
+    shape:[13817,12683,12874], res_nm:8, tier:"inf", enabled:false },
+  { id:"jrc_mus-pancreas-4", tissue:"pancreas", species:"mouse",
+    shape:[14381,14130,18284], res_nm:8, tier:"inf", enabled:false },
+  { id:"jrc_mus-thymus-1", tissue:"thymus", species:"mouse",
+    shape:[14502,14542,18400], res_nm:8, tier:"inf", enabled:false },
+  { id:"jrc_mus-skin-1", tissue:"skin", species:"mouse",
+    shape:[19700,14277,17300], res_nm:8, tier:"inf", enabled:false },
+  { id:"jrc_mus-heart-1", tissue:"heart", species:"mouse",
+    shape:[16984,18961,20404], res_nm:8, tier:"gt",  enabled:false },
+  { id:"jrc_zf-cardiac-1", tissue:"heart", species:"zebrafish",
+    shape:[40152,19814,20629], res_nm:8, tier:"gt",  enabled:false },
+  { id:"jrc_mus-liver-zon-1", tissue:"liver (zonation)", species:"mouse",
+    shape:[49645,21451,23601], res_nm:8, tier:"gt",  enabled:false },
+  { id:"jrc_mus-liver-zon-2", tissue:"liver (zonation)", species:"mouse",
+    shape:[53336,19466,26250], res_nm:8, tier:"gt",  enabled:false },
+  /* Zarr v3 (zarr.json, not .zgroup) and its scale did not read through the v2 metadata path.
+     res_nm is therefore UNKNOWN and this dataset stays out of the registry's usable set until it
+     is measured -- a guessed resolution would put every box in the wrong place. */
+  { id:"jrc_mus-skel-muscle-1", tissue:"skeletal muscle", species:"mouse",
+    shape:[2545,7608,12651],   res_nm:null, tier:"em", enabled:false, note:"Zarr v3, scale unread" }
+];
+
+/* ── exploration ──────────────────────────────────────────────────────────────────────────── */
+UJ.cfg.explore = {
+  /* 20 µm: a field a user can actually judge in one look, and it makes the whole roster 7,250
+     boxes -- finishable. 15 µm would be 1,210 boxes for heart-1 alone. */
+  boxUm: 20,
+  /* Serve the K farthest boxes and pick randomly among them. Deterministic farthest-point hands
+     two simultaneous users the same box; K removes the collision without any locking. */
+  topK: 20,
+  /* Two finds closer than this are the same nucleus. Below one nucleus diameter in every tissue
+     here, so it cannot fuse genuine neighbours. Same rule as λJump's merge-on-proximity. */
+  dedupUm: 5,
+  /* Distance is measured to VISITED boxes, not to found nuclei. A place with no nucleus near it
+     would otherwise stay forever the place furthest from a known nucleus, and the largest
+     nucleus-free regions in these tissues are structures -- tubule lumina, vessels, sarcomere-
+     packed myocyte interiors -- so the naive rule points hardest at exactly the places with
+     nothing to find. See §2 of the design note. */
+  distanceTo: "visited"
+};
+
+UJ.cfg.tabs = { lsKey: "wjump_active_tab", urlParam: "tab" };
+UJ.cfg.backend = {
+  endpoint: "https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec",
+  clientId: "240227117082-gmiv0s37qdqngo3t3ph0lmthg4t4t47p.apps.googleusercontent.com",
+  ownerEmail: "", ds: "wjump"
+};
+</script>
+<script>/* ── ωJump logic ───────────────────────────────────────────────────────────────────────────
+   The novel part of this tool, and the only part with real design risk: deciding WHERE to send
+   the next user. Everything here is deliberately DOM-free and pure so it can be tested directly
+   rather than through a browser -- see wjumpcheck.js. */
+window.UJ = window.UJ || {};
+UJ.wjump = (function(){
+  "use strict";
+  var EX = UJ.cfg.explore;
+
+  function byId(id){
+    for (var i = 0; i < UJ.cfg.datasets.length; i++)
+      if (UJ.cfg.datasets[i].id === id) return UJ.cfg.datasets[i];
+    return null;
+  }
+  function usable(d){ return d && d.enabled && d.res_nm; }
+
+  /* (z,y,x) voxels -> (x,y,z) nanometres. THE ONE PLACE the axis flip happens.
+     OME-Zarr reports axes z,y,x; neuroglancer states are x,y,z. Doing this conversion at each
+     use site is how an axis bug gets in and then looks like "the jumps are slightly off". */
+  function extentNm(d){
+    /* Accepts an id OR a dataset object. The first caller written against this passed an id and
+       got a silent null, which then read as "this dataset has no resolution" -- a wrong answer
+       that looks like a real one. Taking both is cheaper than the class of bug it removes. */
+    if (typeof d === "string") d = byId(d);
+    if (!d || !d.res_nm) return null;
+    return [d.shape[2] * d.res_nm, d.shape[1] * d.res_nm, d.shape[0] * d.res_nm];
+  }
+
+  /* The exploration grid: a lattice of boxUm cubes tiling the volume.
+
+     Boxes at the far face are TRUNCATED, not shifted. The first version shifted their centres
+     inward to keep every box a full 20 µm, which sounds tidier and is worse: on the Meissner
+     corpuscle's 46.1 µm y axis it made the third box overlap the second by 14 µm, so a user
+     would have been sent to re-search ground already covered, and the region a box "owns" would
+     not have been the region drawn around it. Truncating gives exact, non-overlapping coverage
+     and lets the drawn box be the honest boundary of the assignment. The cost is that edge boxes
+     are smaller -- Meissner's thinnest is 6.1 µm -- which is worth saying on screen. */
+  function grid(dsId){
+    var d = byId(dsId); if (!usable(d)) return null;
+    var ext = extentNm(d), b = EX.boxUm * 1000;
+    var n = [Math.max(1, Math.ceil(ext[0]/b)), Math.max(1, Math.ceil(ext[1]/b)),
+             Math.max(1, Math.ceil(ext[2]/b))];
+    var cells = [];
+    for (var k = 0; k < n[2]; k++)
+      for (var j = 0; j < n[1]; j++)
+        for (var i = 0; i < n[0]; i++){
+          var lo = [i*b, j*b, k*b];
+          var hi = [Math.min((i+1)*b, ext[0]), Math.min((j+1)*b, ext[1]), Math.min((k+1)*b, ext[2])];
+          cells.push({ ix:i, iy:j, iz:k, key: i+","+j+","+k, lo:lo, hi:hi,
+            centre: [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2],
+            sizeUm: [(hi[0]-lo[0])/1000, (hi[1]-lo[1])/1000, (hi[2]-lo[2])/1000] });
+        }
+    return { dataset:d.id, n:n, boxNm:b, extentNm:ext, cells:cells, total:cells.length };
+  }
+
+  function d2(a, b){
+    var x = a[0]-b[0], y = a[1]-b[1], z = a[2]-b[2];
+    return x*x + y*y + z*z;
+  }
+
+  /* Rank the unvisited boxes by distance to the nearest VISITED box, farthest first.
+
+     `visited` is the set of box keys somebody has already looked at -- INCLUDING the ones they
+     reported empty. That inclusion is the whole design. Rank by distance to found NUCLEI instead
+     and an empty region stays forever the farthest point from a nucleus, so the sampler serves
+     the same void again and again; and because the biggest nucleus-free regions in these tissues
+     are structures rather than unexplored ground, it would point hardest at exactly the places
+     with nothing in them.
+
+     With nothing visited yet every box is equally good and the caller gets them in a stable
+     order to shuffle; that is correct, not a degenerate case. */
+  function rankUnvisited(g, visitedKeys){
+    if (!g) return [];
+    var vis = {}, visCentres = [];
+    (visitedKeys || []).forEach(function(k){ vis[k] = 1; });
+    g.cells.forEach(function(c){ if (vis[c.key]) visCentres.push(c.centre); });
+    var out = g.cells.filter(function(c){ return !vis[c.key]; }).map(function(c){
+      var best = Infinity;
+      for (var i = 0; i < visCentres.length; i++){
+        var q = d2(c.centre, visCentres[i]);
+        if (q < best) best = q;
+      }
+      return { cell:c, nearestVisitedUm: best === Infinity ? Infinity : Math.sqrt(best)/1000 };
+    });
+    out.sort(function(a, b){
+      if (a.nearestVisitedUm !== b.nearestVisitedUm)
+        return b.nearestVisitedUm - a.nearestVisitedUm;      // farthest first
+      return a.cell.key < b.cell.key ? -1 : 1;               // stable, so tests are deterministic
+    });
+    return out;
+  }
+
+  /* Pick one box to serve. Randomly among the top K farthest so two people online at once are
+     not handed the same box; rnd is injectable so the check suite is deterministic. */
+  function nextBox(dsId, visitedKeys, rnd){
+    var g = grid(dsId); if (!g) return null;
+    var ranked = rankUnvisited(g, visitedKeys);
+    if (!ranked.length) return null;                          // dataset complete
+    var k = Math.min(EX.topK, ranked.length);
+    var pick = ranked[Math.floor((rnd || Math.random)() * k)];
+    return { box: pick.cell, nearestVisitedUm: pick.nearestVisitedUm,
+             remaining: ranked.length, total: g.total };
+  }
+
+  function progress(dsId, visitedKeys, finds){
+    var g = grid(dsId); if (!g) return null;
+    var v = (visitedKeys || []).length;
+    var f = finds || [];
+    return { dataset:dsId, total:g.total, visited:v, remaining:g.total - v,
+             pctVisited: g.total ? Math.round(1000*v/g.total)/10 : 0,
+             found: f.length,
+             identified: f.filter(function(x){ return x.identity && x.votes >= 2; }).length,
+             complete: v >= g.total };
+  }
+
+  /* Merge a proposed find into the known set. Returns {merged:true, into:<id>} when it is within
+     dedupUm of one already recorded -- two users finding the same nucleus is expected, not an
+     error. Same rule λJump uses, and the radius is below one nucleus diameter in every tissue
+     here so it cannot weld two real neighbours into one. */
+  function mergeFind(known, posNm){
+    var r = EX.dedupUm * 1000, best = null, bestD = Infinity;
+    for (var i = 0; i < (known || []).length; i++){
+      var q = Math.sqrt(d2(known[i].pos, posNm));
+      if (q < bestD){ bestD = q; best = known[i]; }
+    }
+    if (best && bestD <= r) return { merged:true, into:best.id, distanceUm: bestD/1000 };
+    return { merged:false, distanceUm: bestD === Infinity ? null : bestD/1000 };
+  }
+
+  /* ── the viewer ───────────────────────────────────────────────────────────────────────────
+     Three annotation layers rather than one with per-annotation colour: neuroglancer's default
+     per-layer colouring takes ONE colour per layer, and the per-annotation route needs an
+     annotationProperties block plus a custom shader. Three layers is the boring version that
+     works, and it also lets a user switch a category off.
+     Inline annotations live in the URL. Fine for hundreds; at a few thousand this needs a hosted
+     precomputed annotation source instead. */
+  function annotationLayers(known){
+    var buckets = { identified:[], provisional:[], unidentified:[] };
+    (known || []).forEach(function(n){
+      var b = !n.identity ? "unidentified" : (n.votes >= 2 ? "identified" : "provisional");
+      buckets[b].push({ type:"point", point:n.pos, id:String(n.id) });
+    });
+    var spec = [
+      ["identified",   "identified (2+ agree)", "#22c55e"],
+      ["provisional",  "one vote or disputed",  "#f59e0b"],
+      ["unidentified", "found, not yet named",  "#ef4444"]
+    ];
+    /* The CANONICAL source form, not the "local://annotations" shorthand. Both are accepted --
+       verified 2026-08-26 by loading a generated URL in neuroglancer-demo, which took the
+       shorthand and rewrote it to exactly this, transform included. Emitting what neuroglancer
+       itself writes means the state we generate and the state a user copies back out of the
+       viewer are the same string, so a round-trip through the viewer is a no-op. Relying on a
+       shorthand another version might stop expanding is a needless bet. */
+    var dims = { x:[1e-9,"m"], y:[1e-9,"m"], z:[1e-9,"m"] };
+    return spec.filter(function(s){ return buckets[s[0]].length; }).map(function(s){
+      return { type:"annotation", name:s[1],
+               source:{ url:"local://annotations", transform:{ outputDimensions: dims } },
+               tab:"source", annotationColor:s[2], annotations:buckets[s[0]] };
+    });
+  }
+
+  /* crossSectionScale is nm-per-screen-pixel, and the number that means "sensibly zoomed" is
+     NOT transferable from the other tools in this family. There it is VOXELS per pixel, because
+     their state dimensions are the dataset's voxel size (4 nm for µJump/λJump), so
+     crossSectionScale 3 renders 12 nm per pixel. Here dimensions are 1 nm, so the same 3 renders
+     3 nm per pixel -- a field of view about 1.5 µm wide.
+
+     Copying 3.0 across is exactly what happened, and it was caught by loading the URL: the
+     viewer came up with a 300 nm scale bar, asking the user "is there a nucleus in this 20 µm
+     box?" while showing them roughly one mitochondrion. A nucleus is 5-10 µm; at that zoom you
+     could sit inside one and not know.
+
+     So derive it from the box instead of hardcoding a number: aim for the box to fill most of a
+     panel. 20 µm over a ~1000 px panel is 20 nm/px, which puts a whole 20 µm box on screen with
+     margin in each of the four panels. If boxUm ever changes this follows it. */
+  var PANEL_PX = 1000;
+  function crossSectionScaleFor(){
+    return Math.round(EX.boxUm * 1000 / PANEL_PX);
+  }
+
+  /* The region the user is actually being asked about. Without this the only box on screen is
+     neuroglancer's own dataset-bounds outline, which is the whole volume -- so "is there a
+     nucleus in this box?" has no visible box, and the honest answer to the question as posed is
+     "which box?". An axis-aligned bounding-box annotation draws its intersection in every
+     cross-section, so the region reads correctly in all three planes and in 3D. */
+  function searchBoxLayer(cell){
+    if (!cell) return null;
+    var dims = { x:[1e-9,"m"], y:[1e-9,"m"], z:[1e-9,"m"] };
+    return { type:"annotation", name:"search box",
+             source:{ url:"local://annotations", transform:{ outputDimensions: dims } },
+             tab:"source", annotationColor:"#7aa2ff",
+             annotations:[{ type:"axis_aligned_bounding_box", id:"searchbox",
+                            pointA: cell.lo, pointB: cell.hi }] };
+  }
+
+  /* ── clicking a nucleus instead of transcribing its coordinate ────────────────────────────
+     The state handed out carries an EMPTY annotation layer that is already selected and already
+     has the point tool armed ("tool":"annotatePoint"), so a click in the viewer drops a point
+     without the user choosing a layer or a tool first. They click every nucleus they can see,
+     copy the URL, and paste it back; parseFinds() below pulls the coordinates out.
+
+     This replaces reading three numbers off the top bar and retyping them. Same information,
+     but the coordinate is produced by pointing at the thing rather than by copying digits, which
+     removes the transcription error entirely and lets several nuclei be marked in one visit. */
+  var MARK_LAYER = "new finds — click here";
+  function markLayer(){
+    var dims = { x:[1e-9,"m"], y:[1e-9,"m"], z:[1e-9,"m"] };
+    return { type:"annotation", name:MARK_LAYER,
+             source:{ url:"local://annotations", transform:{ outputDimensions: dims } },
+             tab:"annotations", tool:"annotatePoint", annotationColor:"#ffffff", annotations:[] };
+  }
+
+  /* Pull the clicked points back out of a pasted neuroglancer URL (or a raw state string).
+     Tolerant on input because this is the one place a human pastes something: full URL, bare
+     fragment, or the JSON itself all work, encoded or not. Returns {ok, points, outside, error}
+     -- `outside` counts points that landed beyond the box they were sent to, which is legitimate
+     (a nucleus spotted while panning is still a real nucleus) and worth reporting rather than
+     silently keeping or silently dropping. */
+  function parseFinds(text, cell){
+    if (!text || !String(text).trim()) return { ok:false, error:"nothing pasted" };
+    var t = String(text).trim(), i = t.indexOf("#!");
+    if (i >= 0) t = t.slice(i + 2);
+    if (t.charAt(0) !== "{"){
+      try { t = decodeURIComponent(t); } catch (e){ return { ok:false, error:"could not decode that URL" }; }
+    }
+    var st;
+    try { st = JSON.parse(t); }
+    catch (e){ return { ok:false, error:"that does not look like a Neuroglancer link" }; }
+    if (!st.layers || !st.layers.length) return { ok:false, error:"no layers in that link" };
+    var L = null;
+    for (var k = 0; k < st.layers.length; k++)
+      if (st.layers[k].name === MARK_LAYER) L = st.layers[k];
+    if (!L) return { ok:false, error:"that link has no \u201c" + MARK_LAYER + "\u201d layer \u2014 "
+                     + "it may be from before this box was opened" };
+    var pts = (L.annotations || []).filter(function(a){ return a && a.point && a.point.length === 3; })
+                                   .map(function(a){ return a.point.map(Number); });
+    var outside = 0;
+    if (cell) pts.forEach(function(p){
+      for (var d = 0; d < 3; d++) if (p[d] < cell.lo[d] || p[d] > cell.hi[d]){ outside++; return; }
+    });
+    return { ok:true, points:pts, outside:outside };
+  }
+
+  function buildState(dsId, posNm, known, cell){
+    var d = byId(dsId); if (!usable(d)) return null;
+    var root = "zarr://s3://" + UJ.cfg.dataset.bucket + "/" + d.id + "/" + d.id + ".zarr/";
+    var layers = [{ type:"image", name:"em", tab:"source",
+                    source: root + "recon-1/em/fibsem-uint8" }];
+    (d.extraLayers || []).forEach(function(L){
+      layers.push({ type:L.type, name:L.name, source: root + L.path, visible:false });
+    });
+    var sb = searchBoxLayer(cell); if (sb) layers.push(sb);
+    annotationLayers(known).forEach(function(a){ layers.push(a); });
+    /* Only when a box is being searched. Revisiting a nucleus already found is not a moment to
+       be dropping new points, and an armed point tool there would just collect accidents. */
+    if (cell) layers.push(markLayer());
+    return {
+      /* nanometres per unit, NOT voxels -- see the note in wjump_config.js */
+      dimensions: { x:[1e-9,"m"], y:[1e-9,"m"], z:[1e-9,"m"] },
+      position: posNm,
+      crossSectionScale: crossSectionScaleFor(),
+      /* nanometres too: 30 µm reads the whole of a 37-58 µm volume like the Meissner corpuscle. */
+      projectionScale: 30000,
+      layers: layers,
+      /* Select the click layer when there is one, so the armed point tool is live the moment the
+         viewer opens -- otherwise the user has to find the layer and pick the tool themselves,
+         which is most of what this was meant to remove. */
+      selectedLayer: cell ? { visible:true, layer:MARK_LAYER } : { visible:false, layer:"em" },
+      layout: "4panel"
+    };
+  }
+  function viewerUrl(dsId, posNm, known, cell){
+    var st = buildState(dsId, posNm, known, cell);
+    return st ? UJ.cfg.viewer.base + "#!" + encodeURIComponent(JSON.stringify(st)) : null;
+  }
+
+  return { byId:byId, usable:usable, extentNm:extentNm, grid:grid, rankUnvisited:rankUnvisited,
+           crossSectionScaleFor:crossSectionScaleFor,
+           nextBox:nextBox, progress:progress, mergeFind:mergeFind,
+           annotationLayers:annotationLayers, searchBoxLayer:searchBoxLayer,
+           markLayer:markLayer, parseFinds:parseFinds, MARK_LAYER:MARK_LAYER,
+           buildState:buildState, viewerUrl:viewerUrl };
+})();
+</script>
+<script>/* ── ωJump application ─────────────────────────────────────────────────────────────────────
+   The UI and the loop, written ONCE and run in two modes:
+
+     WJUMP_LIVE = false   the harness. State in memory, exported as JSON, opens from file://
+     WJUMP_LIVE = true    the real page. Google sign-in, reads and writes the ωJump spreadsheet
+
+   One file rather than two because a prototype that is a separate copy of the real thing stops
+   being evidence about it the first time either is edited. The only difference between the two
+   modes is which STORE is installed below; every pixel and every rule is shared.
+
+   Depends on wjump_config.js and wjump_logic.js being loaded first. */
+window.UJ = window.UJ || {};
+UJ.app = (function(){
+  "use strict";
+  var W = UJ.wjump;
+  var LIVE = !!window.WJUMP_LIVE;
+  var DS = null;                       // current dataset id
+  var STATE = { visited: [], nuclei: [] };
+  var CUR = null;                      // the box being offered
+  var BUSY = false;
+
+  function esc(s){ return String(s == null ? "" : s)
+    .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+  function el(id){ return document.getElementById(id); }
+  function enabled(){ return UJ.cfg.datasets.filter(function(d){ return W.usable(d); }); }
+
+  /* ── stores ───────────────────────────────────────────────────────────────────────────────
+     Same four methods either way. load() is the only one a signed-out user may call: reading the
+     map is public, adding to it is not. */
+  var MemStore = {
+    live: false, _next: 1,
+    canWrite: function(){ return true; },
+    load: function(){ return Promise.resolve(STATE); },
+    visit: function(boxKey){ if (STATE.visited.indexOf(boxKey) < 0) STATE.visited.push(boxKey);
+                             return Promise.resolve({ ok:true }); },
+    find: function(pos, boxKey){
+      var m = W.mergeFind(STATE.nuclei, pos);
+      if (m.merged) return Promise.resolve({ ok:true, merged:true, nucleusKey:m.into });
+      var key = DS + ":" + (this._next++);
+      STATE.nuclei.push({ id:key, pos:pos, identity:"", votes:0, box:boxKey });
+      return Promise.resolve({ ok:true, merged:false, nucleusKey:key });
+    },
+    name: function(key, identity){
+      STATE.nuclei.forEach(function(n){ if (n.id === key){ n.identity = identity; n.votes = 1; } });
+      return Promise.resolve({ ok:true });
+    }
+  };
+
+  var ApiStore = {
+    live: true, credential: null, who: "",
+    canWrite: function(){ return !!this.credential; },
+    _post: function(payload){
+      /* No Content-Type header, deliberately: that keeps the request "simple" so the browser
+         does not send a CORS preflight, which Apps Script would answer with a redirect and fail.
+         Same trick every other tool in this family uses -- see postReport() in ljump_logic.js. */
+      payload.ds = UJ.cfg.backend.ds;
+      payload.credential = this.credential;
+      payload.timestamp = new Date().toISOString();
+      return fetch(UJ.cfg.backend.endpoint, { method:"POST", body: JSON.stringify(payload) })
+        .then(function(r){ return r.json(); });
+    },
+    load: function(){
+      var u = UJ.cfg.backend.endpoint + "?wjumpState=1&ds=" + encodeURIComponent(UJ.cfg.backend.ds)
+            + "&dataset=" + encodeURIComponent(DS);
+      return fetch(u).then(function(r){ return r.json(); }).then(function(d){
+        if (!d || !d.ok) throw new Error((d && d.error) || "could not read the map");
+        STATE = { visited: d.visited || [], nuclei: d.nuclei || [],
+                  contradicted: d.contradictedEmptyBoxes || [] };
+        return STATE;
+      });
+    },
+    visit: function(boxKey, outcome, n){
+      return this._post({ type:"wjump_box_visit", dataset:DS, boxKey:boxKey,
+                          outcome:outcome, foundCount:n||0 });
+    },
+    find: function(pos, boxKey){
+      return this._post({ type:"wjump_nucleus_found", dataset:DS, boxKey:boxKey,
+                          x_nm:pos[0], y_nm:pos[1], z_nm:pos[2] });
+    },
+    name: function(key, identity){
+      return this._post({ type:"wjump_nucleus_name", dataset:DS, nucleusKey:key, identity:identity });
+    }
+  };
+
+  var STORE = LIVE ? ApiStore : MemStore;
+
+  /* ── rendering ───────────────────────────────────────────────────────────────────────────── */
+  function names(){
+    var seen = {};
+    STATE.nuclei.forEach(function(n){ if (n.identity) seen[n.identity] = 1; });
+    return Object.keys(seen).sort();
+  }
+
+  function msg(t, good){
+    var m = el("msg"); if (!m) return;
+    m.innerHTML = t;
+    m.style.color = good === true ? "var(--ok)" : good === false ? "var(--warn)" : "var(--mut)";
+  }
+
+  function pickBox(){
+    CUR = W.nextBox(DS, STATE.visited);
+    var host = el("boxinfo"); if (!host) return;
+    if (!CUR){
+      host.innerHTML = "<b style='color:var(--ok)'>Every box in this dataset has been looked at.</b> "
+        + "That is a completion state no other tool in this family has.";
+      ["open","found","empty","skip"].forEach(function(i){ if (el(i)) el(i).disabled = true; });
+      return;
+    }
+    ["open","found","empty","skip"].forEach(function(i){ if (el(i)) el(i).disabled = false; });
+    var c = CUR.box.centre, sz = CUR.box.sizeUm.map(function(v){ return v.toFixed(1); }).join(" × ");
+    var edge = CUR.box.sizeUm.some(function(v){ return v < UJ.cfg.explore.boxUm - 0.01; });
+    host.innerHTML = "box <code>" + CUR.box.key + "</code> at <code>"
+      + c.map(Math.round).join(", ") + "</code> nm &middot; <b>" + sz + " &micro;m</b>"
+      + (edge ? " (an edge box, so smaller)" : "")
+      + "<br>" + (CUR.nearestVisitedUm === Infinity
+          ? "nothing looked at yet, so every box is equally promising"
+          : "nearest already-visited box is <b>" + CUR.nearestVisitedUm.toFixed(1) + " &micro;m</b> away")
+      + " &middot; " + CUR.remaining + " of " + CUR.total + " left";
+  }
+
+  function render(){
+    var p = W.progress(DS, STATE.visited, STATE.nuclei);
+    var named = STATE.nuclei.filter(function(n){ return n.identity; }).length;
+    if (el("stats")) el("stats").innerHTML =
+        "<div><span>boxes explored</span><b class='stat'>" + p.visited + " / " + p.total + "</b></div>"
+      + "<div><span>nuclei found</span><b class='stat'>" + p.found + "</b></div>"
+      + "<div><span>named</span><b class='stat'>" + named + "</b></div>"
+      + "<div><span>agreed by 2+</span><b class='stat'>" + p.identified + "</b></div>";
+    if (el("pbar")) el("pbar").style.width = p.pctVisited + "%";
+
+    var host = el("found-list"); if (!host) return;
+    if (!STATE.nuclei.length){
+      host.innerHTML = "<p class='hint' style='margin:0'>None yet. Explore a box to find the first.</p>";
+      return;
+    }
+    var opts = names().map(function(n){ return "<option value=\"" + esc(n) + "\">"; }).join("");
+    host.innerHTML = "<datalist id='cellnames'>" + opts + "</datalist>"
+      + "<table><tr><th></th><th>position (nm)</th><th>cell type &mdash; free text</th>"
+      + "<th>votes</th><th></th></tr>"
+      + STATE.nuclei.map(function(n){
+          var col = !n.identity ? "var(--bad)" : (n.votes >= 2 ? "var(--ok)" : "var(--warn)");
+          return "<tr><td><span class='dot' style='background:" + col + "'></span>"
+            + esc(String(n.id).split(":").pop()) + "</td>"
+            + "<td><code>" + n.pos.map(Math.round).join(", ") + "</code></td>"
+            + "<td><input type='text' list='cellnames' data-key='" + esc(n.id) + "' class='nm' "
+            + "value=\"" + esc(n.identity) + "\" placeholder='e.g. lamellar cell'"
+            + (STORE.canWrite() ? "" : " disabled") + "></td>"
+            + "<td>" + (n.votes || 0) + "</td>"
+            + "<td><button data-view='" + esc(n.id) + "'>view</button></td></tr>";
+        }).join("") + "</table>"
+      + "<p class='hint'>Free text on purpose: these tissues have no published cell-type list, so "
+      + "an enumerated menu would be a guess wearing the clothes of an ontology. The box suggests "
+      + "names already used here, which converges the vocabulary without constraining it. "
+      + "<b>Nothing here is scored</b> &mdash; there is no ground truth for cell identity in these "
+      + "volumes, only what the community agrees on.</p>";
+
+    host.querySelectorAll(".nm").forEach(function(inp){
+      inp.addEventListener("change", function(){
+        var v = inp.value.trim(); if (!v) return;
+        inp.disabled = true;
+        STORE.name(inp.dataset.key, v).then(function(){
+          var n = STATE.nuclei.filter(function(x){ return x.id === inp.dataset.key; })[0];
+          if (n && !STORE.live){ n.identity = v; n.votes = 1; }
+          return STORE.live ? STORE.load() : null;
+        }).then(function(){ render(); })
+          .catch(function(e){ msg("could not save that name: " + e.message, false); inp.disabled = false; });
+      });
+    });
+    host.querySelectorAll("[data-view]").forEach(function(b){
+      b.addEventListener("click", function(){
+        var n = STATE.nuclei.filter(function(x){ return x.id === b.dataset.view; })[0];
+        if (n) window.open(W.viewerUrl(DS, n.pos, STATE.nuclei), "_blank", "noopener");
+      });
+    });
+  }
+
+  /* ── actions ─────────────────────────────────────────────────────────────────────────────── */
+  function requireWrite(){
+    if (STORE.canWrite()) return true;
+    msg("Sign in with Google first &mdash; contributions are attributed, so the map can be trusted.", false);
+    return false;
+  }
+
+  function submitClicked(){
+    if (!CUR || BUSY || !requireWrite()) return;
+    var box = el("pasted");
+    var r = W.parseFinds(box.value, CUR.box);
+    if (!r.ok){ msg(r.error, false); return; }
+    if (!r.points.length){
+      msg("That link has no markers on it. <b>Ctrl</b>+click the nuclei in the viewer first &mdash; "
+        + "or press &ldquo;Nothing here&rdquo; if there really are none.", false);
+      return;
+    }
+    BUSY = true; msg("saving " + r.points.length + " marker(s)…");
+    /* Sequential, not Promise.all: two finds a few micrometres apart in the same paste must be
+       deduped against each OTHER, and the server can only do that if it has already written the
+       first when it sees the second. Parallel submission would race and create duplicates -- the
+       exact thing dedup exists to prevent. */
+    var added = 0, merged = 0;
+    var chain = r.points.reduce(function(pr, p){
+      return pr.then(function(){
+        return STORE.find(p, CUR.box.key).then(function(res){
+          if (res && res.merged) merged++; else added++;
+        });
+      });
+    }, Promise.resolve());
+    chain.then(function(){ return STORE.visit(CUR.box.key, "found", added); })
+      .then(function(){ return STORE.load(); })
+      .then(function(){
+        var parts = [];
+        if (added)  parts.push("<b>" + added + " new nucle" + (added === 1 ? "us" : "i") + "</b> recorded");
+        if (merged) parts.push(merged + " already known");
+        if (r.outside) parts.push(r.outside + " outside this box (kept &mdash; a nucleus is a nucleus)");
+        msg(parts.join(" &middot; ") + ". Name them below.", added > 0);
+        box.value = ""; BUSY = false; pickBox(); render();
+      })
+      .catch(function(e){ BUSY = false; msg("save failed: " + e.message, false); });
+  }
+
+  function submitEmpty(){
+    if (!CUR || BUSY || !requireWrite()) return;
+    BUSY = true;
+    var key = CUR.box.key;
+    STORE.visit(key, "empty", 0)
+      .then(function(){ return STORE.load(); })
+      .then(function(){
+        msg("Box " + key + " recorded as empty. It will not be offered again &mdash; and that "
+          + "record is what stops the sampler serving the same void twice.", true);
+        BUSY = false; pickBox(); render();
+      })
+      .catch(function(e){ BUSY = false; msg("save failed: " + e.message, false); });
+  }
+
+  /* ── boot ────────────────────────────────────────────────────────────────────────────────── */
+  function selectDataset(id){
+    DS = id;
+    var d = W.byId(id);
+    if (el("dslabel")) el("dslabel").textContent = d.tissue + " — " + d.species;
+    if (el("dstier")) el("dstier").innerHTML = {
+      gt:  "expert organelle ground truth exists for this dataset",
+      inf: "machine organelle predictions only — no ground truth here",
+      em:  "image only — no labels of any kind"
+    }[d.tier] || "";
+    return STORE.load().then(function(){ pickBox(); render(); })
+      .catch(function(e){ msg("could not load the map: " + e.message, false); pickBox(); render(); });
+  }
+
+  function init(){
+    var sel = el("dataset");
+    if (sel){
+      sel.innerHTML = enabled().map(function(d){
+        return "<option value='" + esc(d.id) + "'>" + esc(d.tissue) + " — " + esc(d.id) + "</option>";
+      }).join("");
+      sel.addEventListener("change", function(){ selectDataset(sel.value); });
+    }
+    if (el("open")) el("open").addEventListener("click", function(){
+      if (CUR) window.open(W.viewerUrl(DS, CUR.box.centre, STATE.nuclei, CUR.box), "_blank", "noopener");
+    });
+    if (el("skip")) el("skip").addEventListener("click", function(){ pickBox(); msg(""); });
+    if (el("found")) el("found").addEventListener("click", submitClicked);
+    if (el("empty")) el("empty").addEventListener("click", submitEmpty);
+    var first = enabled()[0];
+    if (!first){ msg("No dataset in the registry has a measured resolution yet.", false); return; }
+    selectDataset(first.id);
+  }
+
+  return { init:init, selectDataset:selectDataset, render:render, pickBox:pickBox,
+           state: function(){ return STATE; }, cur: function(){ return CUR; },
+           store: function(){ return STORE; }, setCredential: function(c, who){
+             ApiStore.credential = c; ApiStore.who = who || ""; render();
+           } };
+})();
+</script>
+<script>
+UJ.app.init();
+
+/* Google Identity Services. Reading the map is public; adding to it is not, so the write buttons
+   stay live-looking but refuse politely until a credential exists -- a disabled button with no
+   explanation is worse than a button that tells you why. */
+function wjumpGsi(retries){
+  if (!(window.google && google.accounts && google.accounts.id)){
+    if (retries > 0) return setTimeout(function(){ wjumpGsi(retries - 1); }, 300);
+    document.getElementById("whoami").textContent = "Google sign-in did not load";
+    return;
+  }
+  google.accounts.id.initialize({
+    client_id: UJ.cfg.backend.clientId,
+    callback: function(resp){
+      var who = "";
+      try { who = JSON.parse(atob(resp.credential.split(".")[1])).email || ""; } catch(e){}
+      UJ.app.setCredential(resp.credential, who);
+      document.getElementById("whoami").innerHTML = "signed in as <b>" + who.replace(/</g,"&lt;") + "</b>";
+      var b = document.getElementById("gsiButton"); if (b) b.style.display = "none";
+    },
+    auto_select: true
+  });
+  google.accounts.id.renderButton(document.getElementById("gsiButton"),
+    { theme:"outline", size:"medium", type:"standard" });
+  try { google.accounts.id.prompt(); } catch(e){}
+}
+wjumpGsi(12);
+
+</script></body></html>
