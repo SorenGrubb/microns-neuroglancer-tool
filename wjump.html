@@ -180,6 +180,10 @@
   built out of confirmations measures how convincing the first answer was rather than what the
   tissue is. You can still look &mdash; it is one click &mdash; and the click is recorded next to
   your answer so the effect of looking can be measured rather than assumed away.</p>
+  <p class="hint">Fourteen tissues are open, listed smallest first with the number of 20 &micro;m
+  boxes each one takes &mdash; 18 for the Meissner corpuscle, 1,936 for a liver zonation block,
+  7,250 across the roster. The map above sizes itself to whichever volume you pick and keeps one
+  scale across its three panels, so a distance in one is the same distance in the others.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
   different matter: 114 crops carry expert voxel labels, and a scored organelle trainer built on
@@ -246,7 +250,7 @@ UJ.cfg.viewer = { base: "https://neuroglancer-demo.appspot.com/" };
           "em"    image only
    Discovery works on ALL of them; tier only governs calibration.
 
-   enabled:false keeps a dataset in the registry -- visible, documented, countable -- without
+   enabled:true keeps a dataset in the registry -- visible, documented, countable -- without
    putting it in front of users yet. The first release is Meissner alone: 18 boxes, finishable. */
 UJ.cfg.datasets = [
   { id:"jrc_mus-meissner-corpuscle-1", tissue:"Meissner corpuscle", species:"mouse",
@@ -260,32 +264,32 @@ UJ.cfg.datasets = [
     extraLayers:[{ name:"Ab_RA_TrkB", type:"image",
                    path:"recon-1/labels/inference/Ab_RA_TrkB" }] },
   { id:"jrc_mus-choroid-plexus-3", tissue:"choroid plexus", species:"mouse",
-    shape:[7560,7500,7500],    res_nm:8, tier:"em",  enabled:false },
+    shape:[7560,7500,7500],    res_nm:8, tier:"em",  enabled:true },
   { id:"jrc_mus-guard-hair-follicle", tissue:"guard hair follicle", species:"mouse",
-    shape:[12992,16000,14720], res_nm:6, tier:"inf", enabled:false },
+    shape:[12992,16000,14720], res_nm:6, tier:"inf", enabled:true },
   { id:"jrc_mus-liver", tissue:"liver", species:"mouse",
-    shape:[8932,12728,12747],  res_nm:8, tier:"gt",  enabled:false },
+    shape:[8932,12728,12747],  res_nm:8, tier:"gt",  enabled:true },
   { id:"jrc_mus-kidney", tissue:"kidney", species:"mouse",
-    shape:[22199,7976,12287],  res_nm:8, tier:"gt",  enabled:false },
+    shape:[22199,7976,12287],  res_nm:8, tier:"gt",  enabled:true },
   { id:"jrc_mus-pacinian-corpuscle", tissue:"Pacinian corpuscle", species:"mouse",
-    shape:[48576,10496,9728],  res_nm:6, tier:"inf", enabled:false,
+    shape:[48576,10496,9728],  res_nm:6, tier:"inf", enabled:true,
     extraLayers:[{ name:"Ab_RA", type:"image", path:"recon-1/labels/inference/Ab_RA" }] },
   { id:"jrc_mus-kidney-2", tissue:"kidney", species:"mouse",
-    shape:[13817,12683,12874], res_nm:8, tier:"inf", enabled:false },
+    shape:[13817,12683,12874], res_nm:8, tier:"inf", enabled:true },
   { id:"jrc_mus-pancreas-4", tissue:"pancreas", species:"mouse",
-    shape:[14381,14130,18284], res_nm:8, tier:"inf", enabled:false },
+    shape:[14381,14130,18284], res_nm:8, tier:"inf", enabled:true },
   { id:"jrc_mus-thymus-1", tissue:"thymus", species:"mouse",
-    shape:[14502,14542,18400], res_nm:8, tier:"inf", enabled:false },
+    shape:[14502,14542,18400], res_nm:8, tier:"inf", enabled:true },
   { id:"jrc_mus-skin-1", tissue:"skin", species:"mouse",
-    shape:[19700,14277,17300], res_nm:8, tier:"inf", enabled:false },
+    shape:[19700,14277,17300], res_nm:8, tier:"inf", enabled:true },
   { id:"jrc_mus-heart-1", tissue:"heart", species:"mouse",
-    shape:[16984,18961,20404], res_nm:8, tier:"gt",  enabled:false },
+    shape:[16984,18961,20404], res_nm:8, tier:"gt",  enabled:true },
   { id:"jrc_zf-cardiac-1", tissue:"heart", species:"zebrafish",
-    shape:[40152,19814,20629], res_nm:8, tier:"gt",  enabled:false },
+    shape:[40152,19814,20629], res_nm:8, tier:"gt",  enabled:true },
   { id:"jrc_mus-liver-zon-1", tissue:"liver (zonation)", species:"mouse",
-    shape:[49645,21451,23601], res_nm:8, tier:"gt",  enabled:false },
+    shape:[49645,21451,23601], res_nm:8, tier:"gt",  enabled:true },
   { id:"jrc_mus-liver-zon-2", tissue:"liver (zonation)", species:"mouse",
-    shape:[53336,19466,26250], res_nm:8, tier:"gt",  enabled:false },
+    shape:[53336,19466,26250], res_nm:8, tier:"gt",  enabled:true },
   /* Zarr v3 (zarr.json, not .zgroup) and its scale did not read through the v2 metadata path.
      res_nm is therefore UNKNOWN and this dataset stays out of the registry's usable set until it
      is measured -- a guessed resolution would put every box in the wrong place. */
@@ -478,11 +482,20 @@ UJ.wjump = (function(){
      not have been the region drawn around it. Truncating gives exact, non-overlapping coverage
      and lets the drawn box be the honest boundary of the assignment. The cost is that edge boxes
      are smaller -- Meissner's thinnest is 6.1 µm -- which is worth saying on screen. */
-  function grid(dsId){
+  /* How many boxes a dataset is, WITHOUT building them. The picker asks this of all fourteen
+     datasets on every render; grid() allocates a cell object each, and liver-zon-2 alone is
+     1,936 of them. Counting is arithmetic. */
+  function gridDims(dsId){
     var d = byId(dsId); if (!usable(d)) return null;
     var ext = extentNm(d), b = EX.boxUm * 1000;
     var n = [Math.max(1, Math.ceil(ext[0]/b)), Math.max(1, Math.ceil(ext[1]/b)),
              Math.max(1, Math.ceil(ext[2]/b))];
+    return { n:n, total: n[0]*n[1]*n[2], extentNm: ext, boxNm: b };
+  }
+
+  function grid(dsId){
+    var g0 = gridDims(dsId); if (!g0) return null;
+    var d = byId(dsId), ext = g0.extentNm, b = g0.boxNm, n = g0.n;
     var cells = [];
     for (var k = 0; k < n[2]; k++)
       for (var j = 0; j < n[1]; j++)
@@ -577,16 +590,33 @@ UJ.wjump = (function(){
      works, and it also lets a user switch a category off.
      Inline annotations live in the URL. Fine for hundreds; at a few thousand this needs a hosted
      precomputed annotation source instead. */
-  function annotationLayers(known){
+  /* Inline annotations live in the URL, and a URL has a practical ceiling around 64 kB. One
+     nucleus is roughly 90 bytes of JSON once encoded, so a few hundred is comfortable and a few
+     thousand is a link that silently truncates or refuses to open. That was a documented
+     "someday" while one 18-box dataset was open; with 7,250 boxes across fourteen tissues it is
+     a matter of time. Keep the ones NEAREST to where the viewer is being sent -- those are the
+     only ones on screen anyway -- and say in the layer name that it is a subset, because a map
+     that quietly omits points is worse than one that admits it. The real fix when a dataset gets
+     busy is a hosted precomputed annotation source, regenerated per build. */
+  var ANNOT_MAX = 400;
+  function nearestFew(known, posNm, cap){
+    var list = (known || []).slice();
+    if (!posNm || list.length <= cap) return { list:list, capped:false };
+    list.sort(function(a, b){ return d2(a.pos, posNm) - d2(b.pos, posNm); });
+    return { list: list.slice(0, cap), capped: true, of: (known || []).length };
+  }
+
+  function annotationLayers(known, capped){
     var buckets = { identified:[], provisional:[], unidentified:[] };
     (known || []).forEach(function(n){
       var b = !n.identity ? "unidentified" : (n.votes >= 2 ? "identified" : "provisional");
       buckets[b].push({ type:"point", point:n.pos, id:String(n.id) });
     });
+    var near = capped ? " (nearest " + capped + ")" : "";
     var spec = [
-      ["identified",   "identified (2+ agree)", "#22c55e"],
-      ["provisional",  "one vote or disputed",  "#f59e0b"],
-      ["unidentified", "found, not yet named",  "#ef4444"]
+      ["identified",   "identified (2+ agree)" + near, "#22c55e"],
+      ["provisional",  "one vote or disputed" + near,  "#f59e0b"],
+      ["unidentified", "found, not yet named" + near,  "#ef4444"]
     ];
     /* The CANONICAL source form, not the "local://annotations" shorthand. Both are accepted --
        verified 2026-08-26 by loading a generated URL in neuroglancer-demo, which took the
@@ -797,23 +827,51 @@ UJ.wjump = (function(){
      part that can be wrong in a way nobody notices -- a dot half a panel out still looks like a
      dot -- so it is the part that gets tested. */
   var MAP_GAP = 14;
-  function mapLayout(dsId, wPx, hPx){
+
+  /* THE HEIGHT FOLLOWS THE VOLUME. The first version fixed it at 250 px, which was fine while
+     Meissner was the only dataset open. The roster runs from a 60 µm cube (choroid plexus, 1.0:1)
+     to 58 x 63 x 291 µm (the Pacinian corpuscle, 5.0:1), and with one shared scale a fixed height
+     makes the elongated ones collapse: the Pacinian came out at 0.86 px/µm in a strip 154 px wide
+     inside an 880 px card -- 17% of the space, every panel unreadable, and the tool looking broken
+     on the dataset with the most interesting anatomy in it.
+
+     So the card grows with the aspect ratio instead, clamped at both ends. The shared scale stays
+     -- it is the property that makes the three panels comparable and the shape honest -- and the
+     binding constraint simply moves from the width to the height where the volume demands it.
+     After this, thirteen of the fourteen usable datasets are WIDTH-bound and fill the card; only
+     the 5:1 Pacinian hits the ceiling, and that one is centred rather than left hugging the edge
+     so it reads as deliberate. */
+  var MAP_H_MIN = 240, MAP_H_MAX = 700;
+  function mapLayout(dsId, wPx, hMin, hMax){
     var ext = extentNm(dsId); if (!ext) return null;
+    hMin = hMin || MAP_H_MIN; hMax = hMax || MAP_H_MAX;
     var ex = ext[0]/1000, ey = ext[1]/1000, ez = ext[2]/1000;
-    var scale = Math.min((wPx - 2*MAP_GAP) / (ex + ex + ey), hPx / Math.max(ey, ez));
+    var sumW = ex + ex + ey, maxH = Math.max(ey, ez);
+    var avail = wPx - 2*MAP_GAP;
+    /* The height the panels WOULD need to be width-bound, then clamped. */
+    var want = avail * (maxH / sumW);
+    var hPx = Math.max(hMin, Math.min(hMax, want));
+    var scale = Math.min(avail / sumW, hPx / maxH);
     var panels = [
       { plane:"x–y", ax:0, ay:1, wUm:ex, hUm:ey },
       { plane:"x–z", ax:0, ay:2, wUm:ex, hUm:ez },
       { plane:"y–z", ax:1, ay:2, wUm:ey, hUm:ez }
     ];
-    var ox = 0;
+    var width = sumW * scale + 2*MAP_GAP;
+    /* Centred when the shared scale cannot fill the width -- an elongated volume otherwise sits
+       in the top-left corner of an empty card, which reads as a rendering failure. */
+    var ox = Math.max(0, (avail - sumW*scale) / 2);
     panels.forEach(function(p){
       p.scale = scale; p.x = ox; p.y = 0;
       p.w = p.wUm * scale; p.h = p.hUm * scale;
       ox += p.w + MAP_GAP;
     });
-    return { panels:panels, scale:scale, width: ox - MAP_GAP,
-             height: Math.max(ey, ez) * scale, extUm:[ex, ey, ez] };
+    return { panels:panels, scale:scale, width: Math.max(width, avail),
+             height: maxH * scale, extUm:[ex, ey, ez],
+             /* Epsilon because the two are exactly equal whenever the volume's aspect ratio
+                lands inside the clamp -- floating point then makes the tie fall either way, and
+                the caption would say "elongated" about a cube. */
+             heightBound: (hPx / maxH) < (avail / sumW) * 0.999 };
   }
   /* Nanometres in, panel pixels out. The +p.x is why this is a function and not two multiplies at
      each call site: forgetting the panel offset puts every dot in the first panel. */
@@ -922,7 +980,8 @@ UJ.wjump = (function(){
       layers.push({ type:L.type, name:L.name, source: root + L.path, visible:false });
     });
     var sb = searchBoxLayer(cell); if (sb) layers.push(sb);
-    annotationLayers(known).forEach(function(a){ layers.push(a); });
+    var shown = nearestFew(known, posNm, ANNOT_MAX);
+    annotationLayers(shown.list, shown.capped ? shown.of : 0).forEach(function(a){ layers.push(a); });
     /* Armed while a box is being SEARCHED, and now also when a caller asks for it.
        The original rule was "only when searching -- revisiting a known nucleus is not a moment to
        be dropping new points, and an armed tool there would just collect accidents." That reason
@@ -958,8 +1017,10 @@ UJ.wjump = (function(){
            annotationLayers:annotationLayers, searchBoxLayer:searchBoxLayer,
            markLayer:markLayer, parseFinds:parseFinds, MARK_LAYER:MARK_LAYER,
            identifyNeed:identifyNeed, identifyQueue:identifyQueue, tallySummary:tallySummary,
+           gridDims:gridDims,
            mapLayout:mapLayout, mapProject:mapProject, mapCoverage:mapCoverage,
            nearestNucleus:nearestNucleus, parseCoord:parseCoord,
+           nearestFew:nearestFew, ANNOT_MAX:ANNOT_MAX,
            walkIds:walkIds, walkModes:walkModes, walkIsAnchored:walkIsAnchored,
            settledLabel:settledLabel,
            buildState:buildState, viewerUrl:viewerUrl };
@@ -1005,7 +1066,17 @@ UJ.app = (function(){
   function esc(s){ return String(s == null ? "" : s)
     .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
   function el(id){ return document.getElementById(id); }
-  function enabled(){ return UJ.cfg.datasets.filter(function(d){ return W.usable(d); }); }
+  /* Smallest first. Fourteen tissues spanning a fifty-fold range in size -- 18 boxes for the
+     Meissner corpuscle, 1,936 for a liver zonation block -- so the first question a newcomer has
+     is "which of these can I actually finish", and the order answers it before they read a word.
+     It also means the default selection is the most completable dataset rather than whichever
+     happened to be typed first. */
+  function enabled(){
+    return UJ.cfg.datasets.filter(function(d){ return W.usable(d); })
+      .map(function(d){ var g = W.gridDims(d.id); return { d:d, boxes: g ? g.total : 0 }; })
+      .sort(function(a, b){ return a.boxes - b.boxes || (a.d.id < b.d.id ? -1 : 1); })
+      .map(function(x){ x.d._boxes = x.boxes; return x.d; });
+  }
   function byId(id){
     for (var i = 0; i < STATE.nuclei.length; i++)
       if (STATE.nuclei[i].id === id) return STATE.nuclei[i];
@@ -1818,7 +1889,7 @@ UJ.app = (function(){
 
   function renderMap(){
     var host = el("volmap"); if (!host) return;
-    var L = W.mapLayout(DS, 880, 250);
+    var L = W.mapLayout(DS, 880);
     if (!L){ host.innerHTML = "<p class='hint' style='margin:0'>No measured resolution for this "
       + "dataset, so there is no map to draw.</p>"; return; }
 
@@ -1856,12 +1927,21 @@ UJ.app = (function(){
           + "style='cursor:pointer'><title>" + esc(String(n.id)) + " — "
           + esc(W.tallySummary(n).leader || "not yet named") + "</title></circle>");
       });
-      parts.push("<text x='" + (p.x + p.w/2).toFixed(1) + "' y='" + (L.height + 13).toFixed(1)
+      /* Under ITS OWN panel, not on a shared baseline. With a fixed 250 px map every panel ended
+         at the same height so the difference never showed; on the Pacinian corpuscle the x–y panel
+         is 150 px tall inside a 700 px map, and a label pinned to the bottom floated 580 px below
+         the thing it named. */
+      parts.push("<text x='" + (p.x + p.w/2).toFixed(1) + "' y='" + (p.y + p.h + 14).toFixed(1)
         + "' text-anchor='middle' fill='var(--mut)' font-size='11'>" + p.plane + "</text>");
     });
 
-    /* One scale bar, because the panels share a scale. A per-panel bar would suggest they do not. */
-    var barUm = 10, barPx = barUm * L.scale;
+    /* One scale bar, because the panels share a scale -- a per-panel bar would suggest they do
+       not. The LENGTH adapts: 10 µm was fine on a 37 µm corpuscle and is a 15-pixel stub on a
+       427 µm liver block, which is a scale bar you cannot read on the datasets where judging
+       distance matters most. Pick the largest round value that still fits comfortably. */
+    var barUm = 1;
+    [1, 2, 5, 10, 20, 50, 100, 200].forEach(function(v){ if (v * L.scale <= 120) barUm = v; });
+    var barPx = barUm * L.scale;
     parts.push("<line x1='0' y1='" + (H - 6).toFixed(1) + "' x2='" + barPx.toFixed(1)
       + "' y2='" + (H - 6).toFixed(1) + "' stroke='var(--mut)' stroke-width='2'/>");
     parts.push("<text x='" + (barPx + 6).toFixed(1) + "' y='" + (H - 2).toFixed(1)
@@ -1880,8 +1960,10 @@ UJ.app = (function(){
       + "<p class='hint' style='margin:8px 0 0'>" + legend + "</p>"
       + "<p class='hint' style='margin:6px 0 0'>"
       + L.extUm.map(function(v){ return v.toFixed(1); }).join(" &times; ") + " &micro;m &middot; "
-      + "all three panels share one scale, so the shape is the real one. Shading is the fraction "
-      + "of boxes behind each square that has been searched. "
+      + "all three panels share one scale, so the shape is the real one"
+      + (L.heightBound ? " &mdash; this volume is long enough that the map is capped in height "
+                       + "rather than shrunk to fit" : "")
+      + ". Shading is the fraction of boxes behind each square that has been searched. "
       + (CUR && SHOWBOX ? "The dashed box is the one you are being offered. " : "")
       + "Click a nucleus to walk to it.</p>";
 
@@ -2206,13 +2288,16 @@ UJ.app = (function(){
     /* A skip is "not this one, right now" -- it is about the sitting, not about the nucleus, and
        carrying it across a dataset switch would silently hide nuclei in the new one. */
     SKIPPED = {}; CURID = null; REVEALED = false; WALK = { mode:"needs", ids:[], i:0 };
-    var d = W.byId(id);
+    var d = W.byId(id), g = W.gridDims(id);
     if (el("dslabel")) el("dslabel").textContent = d.tissue + " — " + d.species;
-    if (el("dstier")) el("dstier").innerHTML = {
-      gt:  "expert organelle ground truth exists for this dataset",
-      inf: "machine organelle predictions only — no ground truth here",
-      em:  "image only — no labels of any kind"
-    }[d.tier] || "";
+    if (el("dstier")) el("dstier").innerHTML =
+        "<code>" + esc(d.id) + "</code> &middot; "
+      + (g ? g.extentNm.map(function(v){ return Math.round(v/1000); }).join(" &times; ")
+             + " &micro;m &middot; <b>" + g.total + "</b> boxes of "
+             + UJ.cfg.explore.boxUm + " &micro;m &middot; " : "")
+      + ({ gt:  "expert organelle ground truth exists for this dataset",
+           inf: "machine organelle predictions only — no ground truth here",
+           em:  "image only — no labels of any kind" }[d.tier] || "");
     return STORE.load().then(function(){ pickBox(); render(); })
       .catch(function(e){ msg("could not load the map: " + e.message, false); pickBox(); render(); });
   }
@@ -2221,7 +2306,9 @@ UJ.app = (function(){
     var sel = el("dataset");
     if (sel){
       sel.innerHTML = enabled().map(function(d){
-        return "<option value='" + esc(d.id) + "'>" + esc(d.tissue) + " — " + esc(d.id) + "</option>";
+        return "<option value='" + esc(d.id) + "'>" + esc(d.tissue)
+          + (d.species !== "mouse" ? " (" + esc(d.species) + ")" : "")
+          + " — " + d._boxes + (d._boxes === 1 ? " box" : " boxes") + "</option>";
       }).join("");
       sel.addEventListener("change", function(){ selectDataset(sel.value); });
     }
