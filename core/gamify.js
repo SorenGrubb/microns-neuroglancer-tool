@@ -89,6 +89,17 @@ function perList(t){
   var out=[]; for(var k in p){ if(p.hasOwnProperty(k)&&p[k]){ var e=p[k]; if(e.ds==null) e.ds=k; out.push(e); } }
   return out;
 }
+/* Name the level for the number actually on screen. MYSTATS.level is computed server-side from
+   THIS tool's points alone, so showing it next to the pooled total made βJump read "Contributor"
+   (>=100 points there) while every other tool read "Novice" for the same person -- two numbers on
+   one chip disagreeing about the same account. The ladder now comes down with ?profileTotals=;
+   falling back to MYSTATS.level keeps a not-yet-redeployed backend working. */
+function levelName(points, levels){
+  if(!levels||!levels.length) return null;
+  var name=null;
+  for(var i=0;i<levels.length;i++){ if(points>=levels[i][0]) name=levels[i][1]; }
+  return name;
+}
 function combinedPoints(){
   var live=(MYSTATS&&MYSTATS.points)||0, t=window.__PROFILE_TOTALS;
   if(!t||t.combinedPoints==null) return {points:live,combined:false,per:null};
@@ -99,7 +110,8 @@ function combinedPoints(){
      instant you submit, the others come from the rebuild. Without a `ds` on each entry this
      subtraction never matched and the current tool was counted twice. */
   per.forEach(function(p){ if(p&&p.ds===ds) mine=p.points||0; });
-  return {points:Math.max(live,(t.combinedPoints-mine)+live),combined:true,per:per};
+  var pts=Math.max(live,(t.combinedPoints-mine)+live);
+  return {points:pts,combined:true,per:per,level:levelName(pts,t.levels)};
 }
 /* Nothing in here may throw. A chip stuck on "loading…" is indistinguishable from a backend that
    never answered, and that is exactly how the perDataset shape mismatch presented for weeks --
@@ -125,7 +137,7 @@ function renderChipInner(){
          +". This page's own "+((MYSTATS.points)||0)+" update immediately; the others come from the 4-hourly rebuild.")
       : "Points on this dataset only. The combined cross-tool total appears once rebuildProfileTotals() has run — see installProfileTotalsTrigger() in Datasets.gs.";
     c.innerHTML='<div class="chipbtn" id="chipOpen" title="'+escHtml(tip)+'"><span>'+escHtml(MYSTATS.handle||"you")+'</span>'
-      +'<span class="lvl">'+escHtml(MYSTATS.level||"")+'</span><span class="pts">'+cp.points+' pts</span>'+((MYSTATS.downvoted>0)?'<span style="color:#e3b341" title="You have '+MYSTATS.downvoted+' down-voted report(s) to review">⚠ '+MYSTATS.downvoted+'</span>':'')+'</div>';
+      +'<span class="lvl">'+escHtml(cp.level||MYSTATS.level||"")+'</span><span class="pts">'+cp.points+' pts</span>'+((MYSTATS.downvoted>0)?'<span style="color:#e3b341" title="You have '+MYSTATS.downvoted+' down-voted report(s) to review">⚠ '+MYSTATS.downvoted+'</span>':'')+'</div>';
     var o=document.getElementById("chipOpen");if(o)o.addEventListener("click",openDashboard);
   } else if(GOOGLE_VERIFIED){
     c.innerHTML='<div class="chipbtn" id="chipOpen"><span>signed in</span><span class="pts">loading…</span></div>';

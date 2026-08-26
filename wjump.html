@@ -3,10 +3,11 @@
 <title>ωJump — find the cells</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
- :root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ee;--mut:#9aa4b2;--line:#262c35;--accent:#7aa2ff;
+ :root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ee;--mut:#9aa4b2;--line:#262c35;
+       --accent:#fbbf24;--on-accent:#2a1f04;
        --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444}
  @media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mut:#5b6472;
-       --line:#e3e6ea;--accent:#1d4ed8}}
+       --line:#e3e6ea;--accent:#854d0e;--on-accent:#ffffff}}
  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);
    font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
  .wrap{max-width:960px;margin:0 auto;padding:24px 18px 70px}
@@ -17,7 +18,11 @@
  button{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;
    padding:9px 14px;font-size:14px;cursor:pointer} button:hover{border-color:var(--accent)}
  button:disabled{opacity:.45;cursor:not-allowed}
- button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+ /* NOT white. The dark theme's accent is a light gold; white on it measures about 1.6:1 and is
+    unreadable. index.html pairs each accent with its own readable text colour and both are read
+    from there together, so they cannot be mismatched. */
+ button.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);
+   font-weight:600}
  button.bad{border-color:#5b2b2b} .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
  input[type=text],select{background:var(--bg);border:1px solid var(--line);color:var(--ink);
    border-radius:8px;padding:9px 11px;font-size:14px;width:100%}
@@ -626,7 +631,12 @@ UJ.wjump = (function(){
     var dims = { x:[1e-9,"m"], y:[1e-9,"m"], z:[1e-9,"m"] };
     return { type:"annotation", name:"search box",
              source:{ url:"local://annotations", transform:{ outputDimensions: dims } },
-             tab:"source", annotationColor:"#7aa2ff",
+             /* ωJump's accent, and it must stay ωJump's accent: this box is drawn in a
+                different application, so nothing makes it follow the page automatically. It is
+                the index card's omega gold -- build_wjump.py asserts this literal against what it
+                reads out of index.html, which is the only thing keeping the three in step. The
+                page shipped in λJump's blue once already. */
+             tab:"source", annotationColor:"#fbbf24",
              annotations:[{ type:"axis_aligned_bounding_box", id:"searchbox",
                             pointA: cell.lo, pointB: cell.hi }] };
   }
@@ -1610,6 +1620,11 @@ UJ.app = (function(){
   }
 
 
+  /* The one place a nucleus's status becomes a colour: the map dots, the panel chip
+     and (via wjump_logic.js) the Neuroglancer annotation layers all read from here. */
+  var STATUS_COLOUR = { unnamed:"#ef4444", single:"#f59e0b", contested:"#a855f7",
+                        agreed:"#22c55e", retracted:"#6b7280" };
+
   /* ── the identity block, µJump's shape ─────────────────────────────────────────────────────
      µJump renders a community identification as a headline: the NAME is the thing, it is a link
      that opens the cell, and it is attributed -- "first proposed by Søren Grubb", "1 user has
@@ -1651,10 +1666,16 @@ UJ.app = (function(){
     var s = W.tallySummary(n);
     if (!s.labels.length) return "<b>Nobody has answered this one yet.</b>"
       + (opts.first ? " Yours is the first opinion on it." : "");
-    var chip = { agreed:["community identification","var(--ok)"],
-                 single:["one person's answer","var(--warn)"],
-                 contested:["disputed","var(--warn)"],
-                 retracted:["retracted","var(--mut)"] }[s.status] || ["", "var(--mut)"];
+    /* The chip takes its colour from the SAME table as the dot on the map and the annotation
+       layer in the viewer, rather than from --warn. One nucleus should not be amber in the map,
+       amber-but-a-different-amber in the panel, and a third shade in Neuroglancer -- and now that
+       the page accent is gold, --warn sat close enough to it that "one person's answer" read as
+       a highlight rather than a caution. */
+    var chip = { agreed:["community identification", STATUS_COLOUR.agreed],
+                 single:["one person's answer",      STATUS_COLOUR.single],
+                 contested:["disputed",              STATUS_COLOUR.contested],
+                 retracted:["retracted",             STATUS_COLOUR.retracted] }[s.status]
+             || ["", "var(--mut)"];
     var url = W.viewerUrl(DS, n.pos, STATE.nuclei);
     var h = "<div class='row' style='gap:8px;align-items:baseline'>"
       + "<a href='" + esc(url) + "' target='_blank' rel='noopener' class='idname'>"
@@ -1794,8 +1815,7 @@ UJ.app = (function(){
   /* A tie gets its own colour rather than sharing amber with "one vote". They are different
      states -- one is thin evidence, the other is people actively disagreeing -- and a map that
      paints them the same cannot show you where the argument is. */
-  var STATUS_COLOUR = { unnamed:"#ef4444", single:"#f59e0b", contested:"#a855f7",
-                        agreed:"#22c55e", retracted:"#6b7280" };
+
   function renderMap(){
     var host = el("volmap"); if (!host) return;
     var L = W.mapLayout(DS, 880, 250);
@@ -2126,12 +2146,22 @@ UJ.app = (function(){
     for (var k in p) if (p.hasOwnProperty(k) && p[k]){ var e = p[k]; if (e.ds == null) e.ds = k; out.push(e); }
     return out;
   }
+  /* Name the level for the number actually on screen. The server's myStats level is computed from
+     THIS tool's points alone -- which is why βJump read "Contributor" while every other tool read
+     "Novice" for the same account. Pool the points and the rank has to be pooled with them. */
+  function levelName(points, levels){
+    if (!levels || !levels.length) return null;
+    var name = null;
+    for (var i = 0; i < levels.length; i++) if (points >= levels[i][0]) name = levels[i][1];
+    return name;
+  }
   function combinedPoints(){
     var live = (MYSTATS && MYSTATS.points) || 0;
     if (!TOTALS || TOTALS.combinedPoints == null) return { points: live, combined: false, per: [] };
     var ds = UJ.cfg.backend.ds, mine = 0, per = perList(TOTALS);
     per.forEach(function(p){ if (p && p.ds === ds) mine = p.points || 0; });
-    return { points: Math.max(live, (TOTALS.combinedPoints - mine) + live), combined: true, per: per };
+    var pts = Math.max(live, (TOTALS.combinedPoints - mine) + live);
+    return { points: pts, combined: true, per: per, level: levelName(pts, TOTALS.levels) };
   }
   function renderPoints(){
     var c = el("pointsChip"); if (!c) return;
@@ -2148,7 +2178,8 @@ UJ.app = (function(){
         + "has run in Apps Script — see installProfileTotalsTrigger() in Datasets.gs.";
     c.innerHTML = "<div class='ptchip' title='" + esc(tip) + "'>"
       + "<span>" + esc(MYSTATS.handle || "you") + "</span>"
-      + (MYSTATS.level ? "<span class='lvl'>" + esc(MYSTATS.level) + "</span>" : "")
+      + ((cp.level || MYSTATS.level)
+          ? "<span class='lvl'>" + esc(cp.level || MYSTATS.level) + "</span>" : "")
       + "<span class='pts'>" + cp.points + " pts</span>"
       + (cp.combined ? "" : "<span class='chip' style='border-color:var(--warn);color:var(--warn)'>"
                           + "this tool only</span>")
