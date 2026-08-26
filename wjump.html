@@ -49,6 +49,10 @@
    margin:0}
  .tick input{width:auto;margin:0;cursor:pointer;accent-color:var(--accent)}
  a{color:var(--accent)}
+ .idname{font-size:17px;font-weight:650;text-decoration:none}
+ .idname:hover{text-decoration:underline}
+ .chip{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;font-weight:650;
+   border:1px solid;border-radius:999px;padding:2px 8px;white-space:nowrap}
 </style></head><body>
 
 <div class="wrap">
@@ -78,6 +82,15 @@
 <div class="card" id="map-card">
   <label>Map of this volume</label>
   <div id="volmap"><p class="hint" style="margin:0">Loading&hellip;</p></div>
+  <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+    <label for="jump-coord">Have a coordinate? Find the nearest nucleus</label>
+    <div class="row">
+      <input type="text" id="jump-coord" style="flex:1 1 240px"
+             placeholder="x, y, z in nanometres &mdash; or paste a Neuroglancer link">
+      <button id="jump-go" style="width:auto">Find it</button>
+    </div>
+    <p class="hint" id="jump-msg" style="margin:8px 0 0"></p>
+  </div>
 </div>
 
 <div class="card" id="identify-card">
@@ -695,6 +708,53 @@ UJ.wjump = (function(){
              leader: t.length ? t[0].label : "" };
   }
 
+  /* ── jump to a coordinate ──────────────────────────────────────────────────────────────────
+     "I have a coordinate from somewhere in this dataset -- what is the nearest nucleus?"
+
+     Returns the nearest one AND how far away it is, because the distance is the answer as often
+     as the nucleus is: 2 µm away means you are looking at it, 40 µm away means nobody has
+     recorded anything near where you are pointing, and a page that showed only the nucleus would
+     make those two look identical. `inside` says whether the coordinate is even in the volume --
+     a paste from the wrong dataset lands far outside and should say so rather than silently
+     returning whichever nucleus happens to sit nearest the corner. */
+  function nearestNucleus(dsId, posNm, known){
+    if (!posNm || posNm.length !== 3 || posNm.some(function(v){ return !isFinite(v); })) return null;
+    var ext = extentNm(dsId);
+    var inside = !!ext && posNm.every(function(v, i){ return v >= 0 && v <= ext[i]; });
+    var best = null, bestD = Infinity;
+    (known || []).forEach(function(n){
+      var q = d2(n.pos, posNm);
+      if (q < bestD){ bestD = q; best = n; }
+    });
+    return { pos: posNm, inside: inside, extentNm: ext,
+             nucleus: best, distanceUm: best ? Math.sqrt(bestD) / 1000 : null };
+  }
+
+  /* Accepts what a person actually pastes: "x, y, z", "x y z", a bracketed triple, or a whole
+     neuroglancer URL. Nanometres, like everything else here.
+
+     A URL is handled by finding its "position" FIELD, not by grabbing numbers out of the text.
+     The first version took the last three numbers it could see, on the reasoning that a URL has
+     numbers in it long before it has a position -- and that is true, but it is also full of
+     numbers AFTER it: the last three in a real ωJump state are -1, -1 and the 4 of "4panel".
+     It returned a confident, entirely fictional coordinate, and the check that was supposed to
+     catch it only asserted the answer was not one specific wrong value. Parse the field. */
+  function parseCoord(text){
+    if (!text) return null;
+    var t = String(text).trim();
+    if (/%7B|%22/.test(t)){ try { t = decodeURIComponent(t); } catch (e){} }
+    var f = t.match(/"position"\s*:\s*\[\s*(-?[\d.eE+-]+)\s*,\s*(-?[\d.eE+-]+)\s*,\s*(-?[\d.eE+-]+)\s*\]/);
+    if (f){
+      var v = [Number(f[1]), Number(f[2]), Number(f[3])];
+      if (v.every(function(x){ return isFinite(x); })) return v;
+    }
+    /* Not a state: three plain numbers, and ONLY three. "1, 2, 3, 4" is not a coordinate and
+       guessing which three were meant is how a wrong answer gets to look like a right one. */
+    var m = t.match(/-?\d+(?:\.\d+)?/g);
+    if (!m || m.length !== 3) return null;
+    return m.map(Number);
+  }
+
   /* ── a map of the volume ───────────────────────────────────────────────────────────────────
      Three orthographic projections -- x–y, x–z, y–z -- at ONE shared scale, so a distance in one
      panel is the same distance in the others. Separate per-panel scaling would fit the card
@@ -868,6 +928,7 @@ UJ.wjump = (function(){
            markLayer:markLayer, parseFinds:parseFinds, MARK_LAYER:MARK_LAYER,
            identifyNeed:identifyNeed, identifyQueue:identifyQueue, tallySummary:tallySummary,
            mapLayout:mapLayout, mapProject:mapProject, mapCoverage:mapCoverage,
+           nearestNucleus:nearestNucleus, parseCoord:parseCoord,
            walkIds:walkIds, walkModes:walkModes, walkIsAnchored:walkIsAnchored,
            settledLabel:settledLabel,
            buildState:buildState, viewerUrl:viewerUrl };
@@ -1224,15 +1285,16 @@ UJ.app = (function(){
       +   "<button class='bad' id='id-not'>Not a nucleus</button>"
       + "</div>"
       + "<p class='hint' id='id-msg' style='margin:10px 0 0'></p>"
+      + "<div id='id-saved'></div>"
 
       + "<div style='margin-top:12px'>"
       +   (anchored
-          ? "<div class='callout' style='margin:0'>" + tallyHtml(s, n)
-            + "<br><span class='hint'>You chose this list by cell type, so you already know what "
+          ? "<div class='callout' style='margin:0'>" + identityBlockHtml(n)
+            + "<div class='hint' style='margin-top:6px'>You chose this list by cell type, so you already know what "
             + "was said here &mdash; hiding it would be theatre. Answers given in a type walk are "
-            + "recorded as anchored.</span></div>"
+            + "recorded as anchored.</div></div>"
           : REVEALED
-          ? "<div class='callout' style='margin:0'>" + tallyHtml(s, n) + "</div>"
+          ? "<div class='callout' style='margin:0'>" + identityBlockHtml(n) + "</div>"
           : "<button id='id-reveal' style='font-size:13px;padding:5px 10px'>"
             + "Show what others said</button> <span class='hint'>&mdash; "
             + (s.total ? s.total + " " + (s.total === 1 ? "person has" : "people have") + " answered this one. "
@@ -1506,6 +1568,66 @@ UJ.app = (function(){
     if (el("walk-next")) el("walk-next").addEventListener("click", function(){ step(1); });
   }
 
+
+  /* ── the identity block, µJump's shape ─────────────────────────────────────────────────────
+     µJump renders a community identification as a headline: the NAME is the thing, it is a link
+     that opens the cell, and it is attributed -- "first proposed by Søren Grubb", "1 user has
+     logged organelle locations for this cell — 1× centriole, 1× cilium". That reads as a claim
+     somebody made, which is what it is, rather than as a fact the database happens to hold.
+
+     WHERE it may appear is the constraint. The identify panel hides the existing votes until you
+     have answered, so a headline naming the cell above the input would walk straight through that
+     rule and turn every answer into a confirmation. So this is a READ-BACK, not a prompt: it is
+     rendered only where the tally is already legitimately visible -- after you answer, inside the
+     reveal, in a type walk, and in the list below. Never above an unanswered question.
+
+     Attribution is by NAME only. wjumpState never reads reporterEmail, because that endpoint is
+     public: anything it returns is returned to everyone. A missing name reads "someone". */
+  function identityBlockHtml(n, opts){
+    if (!n) return "";
+    opts = opts || {};
+    var s = W.tallySummary(n);
+    if (!s.labels.length) return "<b>Nobody has answered this one yet.</b>"
+      + (opts.first ? " Yours is the first opinion on it." : "");
+    var chip = { agreed:["community identification","var(--ok)"],
+                 single:["one person's answer","var(--warn)"],
+                 contested:["disputed","var(--warn)"],
+                 retracted:["retracted","var(--mut)"] }[s.status] || ["", "var(--mut)"];
+    var url = W.viewerUrl(DS, n.pos, STATE.nuclei);
+    var h = "<div class='row' style='gap:8px;align-items:baseline'>"
+      + "<a href='" + esc(url) + "' target='_blank' rel='noopener' class='idname'>"
+      +   esc(s.leader) + " &#8599;</a>"
+      + "<span class='chip' style='border-color:" + chip[1] + ";color:" + chip[1] + "'>"
+      +   chip[0] + "</span></div>";
+
+    /* The full breakdown, always. A bare winning label reads like a fact, and on a dataset where
+       nothing is verified it is not one. */
+    h += "<div class='hint' style='margin-top:4px'>"
+      + s.labels.map(function(t){
+          return "<b>" + t.n + "</b> said &ldquo;" + esc(t.label) + "&rdquo;"; }).join(" &middot; ");
+    if (n.unsure)  h += " &middot; " + n.unsure + " could not tell";
+    if (s.rejects) h += " &middot; <span style='color:var(--bad)'>" + s.rejects
+                      + " say it is not a nucleus</span>";
+    h += "</div>";
+
+    h += "<div class='hint' style='margin-top:2px'>"
+      + (s.total === 1 ? "1 person" : s.total + " people") + " &mdash; first proposed by <b>"
+      + esc(n.proposedBy || "someone") + "</b>.</div>";
+
+    var org = UJ.organelles.countParts(n.organelles);
+    if (org.length){
+      var who = n.organelleReporters || 1;
+      h += "<div class='hint' style='margin-top:2px'>"
+        + (who === 1 ? "1 person has" : who + " people have")
+        + " logged organelle locations for this cell &mdash; "
+        + org.map(function(o){ return o.n + "\u00d7 " + esc(o.short); }).join(", ") + ".</div>";
+    }
+    if (s.status === "contested")
+      h += "<div class='hint' style='margin-top:2px'>Tied, so this is not settled &mdash; your "
+        + "answer breaks it or confirms the disagreement.</div>";
+    return h;
+  }
+
   function tallyHtml(s, n){
     if (!s.labels.length && !s.rejects && !s.unsure)
       return "<b>Nobody has answered this one yet.</b> Yours is the first opinion on it.";
@@ -1580,8 +1702,11 @@ UJ.app = (function(){
         render();
         /* The reveal AFTER answering is free -- the vote is already cast, so seeing the others
            cannot bend it, and it is the only moment where being told is actually teaching. */
-        say("id-msg", "Saved: &ldquo;" + esc(v) + "&rdquo;."
-          + (s2 ? " Counting yours, " + tallyHtml(s2, n2) : ""), true);
+        /* The read-back AFTER answering is free -- the vote is already cast, so seeing the
+           others cannot bend it, and it is the only moment where being told is teaching. */
+        say("id-msg", "Saved: &ldquo;" + esc(v) + "&rdquo;. Counting yours:", true);
+        if (el("id-saved") && n2) el("id-saved").innerHTML =
+          "<div class='callout' style='margin:10px 0 0'>" + identityBlockHtml(n2) + "</div>";
       })
       .catch(function(e){
         if (inp) inp.disabled = false;
@@ -1720,7 +1845,16 @@ UJ.app = (function(){
           var col = STATUS_COLOUR[s.status] || "var(--mut)";
           var text = !s.labels.length
             ? "<span class='hint'>not named yet</span>"
-            : s.labels.map(function(t){ return esc(t.label) + " &times;" + t.n; }).join(" &middot; ");
+            /* The NAME is the link, as in µJump -- clicking what the cell IS opens the cell.
+               A separate "view" button beside a plain label makes the label look inert. */
+            : "<a href='" + esc(W.viewerUrl(DS, n.pos, STATE.nuclei)) + "' target='_blank' "
+              + "rel='noopener' class='idname' style='font-size:14.5px'>" + esc(s.leader)
+              + " &#8599;</a>"
+              + (s.labels.length > 1 ? " <span class='hint'>&middot; "
+                  + s.labels.map(function(t){ return esc(t.label) + " &times;" + t.n; }).join(" &middot; ")
+                  + "</span>" : " <span class='hint'>&times;" + s.labels[0].n + "</span>")
+              + (n.proposedBy ? "<br><span class='hint'>first proposed by "
+                  + esc(n.proposedBy) + "</span>" : "");
           if (n.unsure)  text += " <span class='hint'>&middot; " + n.unsure + " unsure</span>";
           if (n.rejects) text += " <span style='color:var(--bad)'>&middot; " + n.rejects
                               + " say not a nucleus</span>";
@@ -1732,8 +1866,8 @@ UJ.app = (function(){
             + esc(String(n.id).split(":").pop()) + "</td>"
             + "<td><code>" + n.pos.map(Math.round).join(", ") + "</code></td>"
             + "<td>" + text + "</td>"
-            + "<td style='white-space:nowrap'><button data-view='" + esc(n.id) + "'>view</button> "
-            + "<button data-ask='" + esc(n.id) + "'>question this</button></td></tr>";
+            + "<td style='white-space:nowrap'><button data-ask='" + esc(n.id) + "'>"
+            + (W.identifyNeed(n) > 0 ? "answer this" : "question this") + "</button></td></tr>";
         }).join("") + "</table>")
         : "<p class='hint' style='margin:0'>Nothing in this category.</p>")
       + "<p class='hint'>Free text on purpose: these tissues have no published cell-type list, so "
@@ -1745,12 +1879,6 @@ UJ.app = (function(){
     host.querySelectorAll("[data-filter]").forEach(function(b){
       b.addEventListener("click", function(){ FILTER = b.dataset.filter; renderList(); });
     });
-    host.querySelectorAll("[data-view]").forEach(function(b){
-      b.addEventListener("click", function(){
-        var n = byId(b.dataset.view);
-        if (n) window.open(W.viewerUrl(DS, n.pos, STATE.nuclei), "_blank", "noopener");
-      });
-    });
     host.querySelectorAll("[data-ask]").forEach(function(b){
       b.addEventListener("click", function(){
         delete SKIPPED[b.dataset.ask];
@@ -1759,6 +1887,60 @@ UJ.app = (function(){
         var c = el("identify-card"); if (c && c.scrollIntoView) c.scrollIntoView({ behavior:"smooth" });
       });
     });
+  }
+
+
+  /* ── "I have a coordinate, what is near it?" ────────────────────────────────────────────────
+     The inverse of everything else on this page. Explore sends you somewhere and Identify hands
+     you a nucleus; this is for when you already know where you are -- a coordinate out of a
+     paper, a colleague's email, another tool -- and want to know what ωJump has recorded there.
+
+     The DISTANCE is as much the answer as the nucleus. 2 µm away means you are looking at it;
+     40 µm away means nobody has recorded anything near where you are pointing, and a result that
+     showed only the nucleus would make those two read the same. So the distance is stated first,
+     and beyond one box the wording changes from "here is the one" to "nothing is recorded near
+     there" with the option to go and look. */
+  function jumpToCoord(){
+    var box = el("jump-coord"); if (!box) return;
+    var p = W.parseCoord(box.value);
+    if (!p){
+      say("jump-msg", "Give three numbers &mdash; <code>20475, 26080, 56539</code> &mdash; in "
+        + "nanometres, or paste a Neuroglancer link and the position is read out of it.", false);
+      return;
+    }
+    var r = W.nearestNucleus(DS, p, STATE.nuclei);
+    if (!r){ say("jump-msg", "Could not read that as a coordinate.", false); return; }
+    var where = "<code>" + p.map(Math.round).join(", ") + "</code> nm";
+    if (!r.inside && r.extentNm){
+      say("jump-msg", where + " is <b>outside this volume</b> ("
+        + r.extentNm.map(function(v){ return Math.round(v/1000) + " &micro;m"; }).join(" &times; ")
+        + "). If it came from another dataset, switch dataset above &mdash; a coordinate from one "
+        + "volume means nothing in another.", false);
+      return;
+    }
+    if (!r.nucleus){
+      say("jump-msg", "No nucleus has been recorded in this dataset yet, so there is nothing to "
+        + "be near. " + openHere(p), false);
+      return;
+    }
+    var d = r.distanceUm;
+    if (d > UJ.cfg.explore.boxUm){
+      say("jump-msg", "Nearest recorded nucleus is <b>" + d.toFixed(1) + " &micro;m</b> away "
+        + "&mdash; further than one search box, so nothing has been recorded near " + where
+        + " yet. " + openHere(p), false);
+      return;
+    }
+    jumpTo(r.nucleus.id);
+    var c = el("identify-card"); if (c && c.scrollIntoView) c.scrollIntoView({ behavior:"smooth" });
+    say("jump-msg", "Nearest is <code>" + esc(String(r.nucleus.id)) + "</code>, <b>"
+      + d.toFixed(1) + " &micro;m</b> from " + where
+      + (d < UJ.cfg.explore.dedupUm ? " &mdash; close enough to be the same object." : ".")
+      + " Identify is now on it.", true);
+  }
+  function openHere(p){
+    var u = W.viewerUrl(DS, p, STATE.nuclei);
+    return "<a href='" + esc(u) + "' target='_blank' rel='noopener'>Open the viewer there "
+      + "&#8599;</a> and add it if there is one.";
   }
 
   function render(){
@@ -1882,6 +2064,10 @@ UJ.app = (function(){
       if (CUR) window.open(W.viewerUrl(DS, CUR.box.centre, STATE.nuclei, CUR.box), "_blank", "noopener");
     });
     if (el("skip")) el("skip").addEventListener("click", function(){ pickBox(); msg(""); });
+    if (el("jump-go")) el("jump-go").addEventListener("click", jumpToCoord);
+    if (el("jump-coord")) el("jump-coord").addEventListener("keydown", function(e){
+      if (e.key === "Enter") jumpToCoord();
+    });
     if (el("found")) el("found").addEventListener("click", submitClicked);
     if (el("empty")) el("empty").addEventListener("click", submitEmpty);
     var first = enabled()[0];
