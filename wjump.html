@@ -475,9 +475,14 @@ UJ.cfg.datasets = [
 
      Region: the dataset's own metadata says brainRegion "L2/3 STG"; the annotation Søren linked
      is titled "Macaque L2/3 (S1)". Those disagree and it is recorded here unresolved. */
-  /* Tissue reads plainly in the picker; the STG/S1 disagreement is recorded above rather than
-     dumped into a dropdown label as "cortex L2/3 (STG?) (macaque)". */
-  { id:"wk-mk1-f6-l23", tissue:"cortex L2/3", species:"macaque",
+  /* Region: THREE sources, two of which agree. The annotation Søren linked is titled "Macaque
+     L2/3 (S1)" and Loomba's own WEBKNOSSOS publication record lists it as "Macaque L2/3 (S1)";
+     only the dataset's `brainRegion` metadata says "L2/3 STG". The sibling macaque block below
+     has the mirror-image problem -- named STG everywhere except its metadata, which says IFG --
+     so the metadata field is what is unreliable on both, not the naming. Labelled S1 here on the
+     two agreeing sources, with the disagreement recorded rather than hidden. Grouped next to its
+     sibling in the picker, where "cortex L2/3" twice over would have read as a duplicate row. */
+  { id:"wk-mk1-f6-l23", tissue:"cortex L2/3 (S1)", species:"macaque",
     /* shape and origin are the DATA, in (z,y,x) voxels -- not the padded array. */
     shape:[3359,19544,14942], origin:[21,3352,3308], res_nm:[30,11.24,11.24],
     tier:"inf", enabled:true,
@@ -511,6 +516,8 @@ UJ.cfg.datasets = [
                 "Science 377, eabo0924 (2022)",
       doi: "https://doi.org/10.1126/science.abo0924"
     } },
+  /* Named STG by the dataset name (Mk1_T2_STG_VG), by the annotation, and by Loomba's publication
+     record; its `brainRegion` metadata alone says "L2/3 IFG". Same unreliable field as above. */
   { id:"wk-mk1-t2-stg", tissue:"cortex L2/3 (STG)", species:"macaque",
     shape:[3599, 20324, 15907], origin:[1, 0, 0],
     res_nm:[30, 11.24, 11.24], tier:"inf", enabled:true,
@@ -633,6 +640,37 @@ UJ.cfg.datasets = [
                licenceUrl:"", portal:"https://webknossos.org/", bucket:"https://demo.wk1.connectomics.hpccloud.mpg.de",
                citation:"", doi:"" } }
 
+];
+
+/* ── how the picker is grouped ─────────────────────────────────────────────────────────────────
+   Søren, 2026-08-27: "brain tissue at top and then different tissues below, starting with heart,
+   kidney, liver, skeletal muscle, pancreas, thymus". Twenty-six entries in one flat list is a
+   scroll, and the thing a neuroscientist is looking for is at the bottom of it.
+
+   ORDER IS EDITORIAL, so it lives here as data rather than being derived. Alphabetical would put
+   brain fourth; by size it is scattered across the whole list. This is the order he asked for.
+
+   `match` is a list of TISSUE PREFIXES, matched case-insensitively. Prefixes rather than exact
+   strings so that "liver" also takes "liver (zonation)" and "cortex" takes every cortical area,
+   without a new group having to be declared each time a variant arrives.
+
+   The guard that makes this safe is in wjumpcheck.js: every enabled dataset must match EXACTLY
+   ONE group -- not zero, not two. A dataset that matched nothing would otherwise vanish from the
+   picker while staying in the registry, countable and documented and completely unreachable,
+   which is the worst of both. */
+UJ.cfg.groups = [
+  { label: "Brain",                     match: ["cortex", "olfactory bulb", "choroid plexus"] },
+  /* The corpuscles are nervous tissue but not brain: encapsulated mechanoreceptor endings sitting
+     in skin. They are kept next to the brain rather than filed under skin because what somebody
+     opens them to look at is the afferent and its lamellar cells. */
+  { label: "Peripheral nervous system", match: ["Meissner corpuscle", "Pacinian corpuscle"] },
+  { label: "Heart",                     match: ["heart"] },
+  { label: "Kidney",                    match: ["kidney"] },
+  { label: "Liver",                     match: ["liver"] },
+  { label: "Skeletal muscle",           match: ["skeletal muscle"] },
+  { label: "Pancreas",                  match: ["pancreas"] },
+  { label: "Thymus",                    match: ["thymus"] },
+  { label: "Skin",                      match: ["skin", "guard hair follicle"] }
 ];
 
 /* ── exploration ──────────────────────────────────────────────────────────────────────────── */
@@ -848,6 +886,56 @@ UJ.wjump = (function(){
     var r = resVec(d); if (!d || !r || !d.origin) return [0, 0, 0];
     var o = d.origin;
     return [o[2] * r[2], o[1] * r[1], o[0] * r[0]];
+  }
+
+  /* Which picker group a dataset belongs to, and the ordered grouping itself.
+
+     Returns the INDEX of the matching group, or -1. Deliberately not the label: the caller needs
+     the order, and returning a string would make "which comes first" a second lookup that could
+     disagree with this one. */
+  function groupIndex(d){
+    if (typeof d === "string") d = byId(d);
+    if (!d || !d.tissue) return -1;
+    var t = String(d.tissue).toLowerCase(), gs = UJ.cfg.groups || [];
+    for (var i = 0; i < gs.length; i++)
+      for (var j = 0; j < (gs[i].match || []).length; j++)
+        if (t.indexOf(String(gs[i].match[j]).toLowerCase()) === 0) return i;
+    return -1;
+  }
+  /* The picker's contents: groups in the configured order, each holding its usable datasets
+     smallest first. A dataset matching no group is NOT silently dropped -- it comes back under
+     `ungrouped` so the caller can decide, and so the check can fail on it. */
+  function groupedDatasets(){
+    var gs = UJ.cfg.groups || [], out = gs.map(function(g){
+      return { label: g.label, datasets: [] };
+    }), ungrouped = [];
+    UJ.cfg.datasets.forEach(function(d){
+      if (!usable(d)) return;
+      var i = groupIndex(d);
+      (i < 0 ? ungrouped : out[i].datasets).push(d);
+    });
+    out.forEach(function(g){
+      g.datasets.sort(function(a, b){
+        var x = gridDims(a.id).total, y = gridDims(b.id).total;
+        return x - y || (a.id < b.id ? -1 : 1);
+      });
+    });
+    return { groups: out.filter(function(g){ return g.datasets.length; }), ungrouped: ungrouped };
+  }
+  /* The smallest usable dataset on the whole roster, whatever group it lands in.
+
+     Grouping took away a property the flat list had for free: the first option was the most
+     finishable one, so the page opened on something a person could actually complete. Under
+     groups the first option is whatever the first group's smallest happens to be. Rather than
+     lose that, the page GROUPS the list and then SELECTS this -- both properties, no compromise. */
+  function smallestDataset(){
+    var best = null, bestN = Infinity;
+    UJ.cfg.datasets.forEach(function(d){
+      if (!usable(d)) return;
+      var n = gridDims(d.id).total;
+      if (n < bestN || (n === bestN && best && d.id < best.id)){ best = d; bestN = n; }
+    });
+    return best;
   }
 
   /* Who published a volume, and under what terms.
@@ -1429,6 +1517,7 @@ UJ.wjump = (function(){
   }
 
   return { byId:byId, usable:usable, extentNm:extentNm, resVec:resVec, originNm:originNm,
+           groupIndex:groupIndex, groupedDatasets:groupedDatasets, smallestDataset:smallestDataset,
            provider:provider,
            grid:grid, rankUnvisited:rankUnvisited,
            crossSectionScaleFor:crossSectionScaleFor,
@@ -2811,11 +2900,34 @@ UJ.app = (function(){
   function init(){
     var sel = el("dataset");
     if (sel){
-      sel.innerHTML = enabled().map(function(d){
+      /* Grouped by tissue, in the order UJ.cfg.groups declares -- brain first. Twenty-six entries
+         in one flat list is a scroll, and the thing a neuroscientist opens this for was at the
+         bottom of it.
+
+         The flat list had one property for free that grouping takes away: its first option was the
+         smallest dataset on the roster, so the page opened on something a person could actually
+         finish. Under groups the first option is whatever the first group's smallest happens to
+         be. So the list is grouped AND the smallest is then selected explicitly -- keeping both,
+         rather than trading one for the other and not noticing. */
+      var opt = function(d){
         return "<option value='" + esc(d.id) + "'>" + esc(d.tissue)
           + (d.species !== "mouse" ? " (" + esc(d.species) + ")" : "")
           + " — " + d._boxes + (d._boxes === 1 ? " box" : " boxes") + "</option>";
-      }).join("");
+      };
+      var sized = {}; enabled().forEach(function(d){ sized[d.id] = d; });
+      var gr = W.groupedDatasets(), html = gr.groups.map(function(g){
+        return "<optgroup label='" + esc(g.label) + "'>"
+             + g.datasets.map(function(d){ return opt(sized[d.id] || d); }).join("") + "</optgroup>";
+      });
+      /* A dataset that matched no group would otherwise be usable, in the registry, and absent
+         from the picker -- unreachable without being reported anywhere. It gets its own group
+         instead, and wjumpcheck.js fails if this is ever non-empty. */
+      if (gr.ungrouped.length)
+        html.push("<optgroup label='Ungrouped'>"
+                + gr.ungrouped.map(function(d){ return opt(sized[d.id] || d); }).join("") + "</optgroup>");
+      sel.innerHTML = html.join("");
+      var small = W.smallestDataset();
+      if (small) sel.value = small.id;
       sel.addEventListener("change", function(){ selectDataset(sel.value); });
     }
     if (el("open")) el("open").addEventListener("click", function(){
