@@ -94,6 +94,9 @@
 <div class="card">
   <label>Dataset</label>
   <select id="dataset"></select>
+  <!-- Filled by renderSpeciesLegend(). An emoji on its own is a rebus; this is what makes it
+       readable, and it lists only the species actually on the open roster. -->
+  <p class="hint" id="dsspecies" style="margin:6px 0 0"></p>
   <p class="hint" id="dstier" style="margin:8px 0 0"></p>
 </div>
 
@@ -642,6 +645,28 @@ UJ.cfg.datasets = [
 
 ];
 
+/* ── species marks ─────────────────────────────────────────────────────────────────────────────
+   Søren, 2026-08-27: every row should say which species it is, as an emoji.
+
+   Until now the picker printed "(human)" and so on only for NON-mouse rows, on the reasoning that
+   fourteen mouse volumes did not each need saying so. That held while the roster was almost all
+   mouse; at four species it just means most rows say nothing and you have to know that silence
+   means mouse. An explicit mark on every row is better, and it is one glyph rather than a word.
+
+   MACAQUE IS 🐒 AND NOT 🦍. Søren wrote "ape", but macaques are Old World MONKEYS -- the apes are
+   the hominoids, and this is Macaca. Using the ape glyph would put a taxonomic error on every row
+   of the biggest group in the picker.
+
+   An emoji alone is a rebus, so it is not the only thing carrying the species: a legend under the
+   picker spells the four out, and the line under the selected dataset names the species in words.
+   The emoji is for scanning a list of 26; the words are what make it unambiguous. */
+UJ.cfg.species = {
+  mouse:     "\ud83d\udc2d",   /* mouse face */
+  human:     "\ud83e\uddd1",   /* person */
+  macaque:   "\ud83d\udc12",   /* monkey -- NOT the ape glyph; see above */
+  zebrafish: "\ud83d\udc1f"    /* fish */
+};
+
 /* ── how the picker is grouped ─────────────────────────────────────────────────────────────────
    Søren, 2026-08-27: "brain tissue at top and then different tissues below, starting with heart,
    kidney, liver, skeletal muscle, pancreas, thymus". Twenty-six entries in one flat list is a
@@ -888,6 +913,27 @@ UJ.wjump = (function(){
     return [o[2] * r[2], o[1] * r[1], o[0] * r[0]];
   }
 
+  /* The species mark for a dataset, or "" if its species has no glyph declared.
+
+     Empty rather than a fallback glyph on purpose: a wrong-but-plausible mark (a mouse face on a
+     rat, say) is worse than a missing one, because a missing one is visible and gets fixed.
+     wjumpcheck.js fails if any enabled dataset comes back empty here. */
+  function speciesMark(d){
+    if (typeof d === "string") d = byId(d);
+    var m = UJ.cfg.species || {};
+    return (d && m[d.species]) || "";
+  }
+  /* Only the species actually on the open roster, in the order the config declares them -- the
+     legend must not advertise a species nobody can select. */
+  function speciesLegend(){
+    var m = UJ.cfg.species || {}, seen = {}, out = [];
+    UJ.cfg.datasets.forEach(function(d){ if (usable(d)) seen[d.species] = 1; });
+    Object.keys(m).forEach(function(sp){
+      if (seen[sp]) out.push({ species: sp, mark: m[sp] });
+    });
+    return out;
+  }
+
   /* Which picker group a dataset belongs to, and the ordered grouping itself.
 
      Returns the INDEX of the matching group, or -1. Deliberately not the label: the caller needs
@@ -922,12 +968,25 @@ UJ.wjump = (function(){
     });
     return { groups: out.filter(function(g){ return g.datasets.length; }), ungrouped: ungrouped };
   }
-  /* The smallest usable dataset on the whole roster, whatever group it lands in.
+  /* What the page opens on: the FIRST entry of the FIRST group. Søren, 2026-08-27 --
+     "it should default on choroid plexus instead of Meissner corpuscle".
 
-     Grouping took away a property the flat list had for free: the first option was the most
-     finishable one, so the page opened on something a person could actually complete. Under
-     groups the first option is whatever the first group's smallest happens to be. Rather than
-     lose that, the page GROUPS the list and then SELECTS this -- both properties, no compromise. */
+     This deliberately reverses yesterday's arrangement, where the page grouped the list and then
+     jumped the selection to the globally smallest dataset. That existed to preserve a property the
+     old flat list had for free -- open on something finishable -- and it is being traded away on
+     purpose, because a neuroscience tool that opens on a skin mechanoreceptor is answering the
+     wrong question first. Brain leads the picker, so brain is what it should open on.
+
+     The trade costs almost nothing, which is why it is an easy call: choroid plexus is 36 boxes,
+     the SECOND smallest on the whole roster. The page still opens on something completable in an
+     evening. If the group order is ever rearranged so the first group leads with a 9,600-box
+     column, that stops being true -- so the check asserts the default is still among the five
+     smallest, rather than trusting it to stay that way. */
+  function defaultDataset(){
+    var g = groupedDatasets().groups;
+    return (g.length && g[0].datasets.length) ? g[0].datasets[0] : smallestDataset();
+  }
+  /* Still exported and still used: the check measures the default against it. */
   function smallestDataset(){
     var best = null, bestN = Infinity;
     UJ.cfg.datasets.forEach(function(d){
@@ -1518,6 +1577,8 @@ UJ.wjump = (function(){
 
   return { byId:byId, usable:usable, extentNm:extentNm, resVec:resVec, originNm:originNm,
            groupIndex:groupIndex, groupedDatasets:groupedDatasets, smallestDataset:smallestDataset,
+           defaultDataset:defaultDataset,
+           speciesMark:speciesMark, speciesLegend:speciesLegend,
            provider:provider,
            grid:grid, rankUnvisited:rankUnvisited,
            crossSectionScaleFor:crossSectionScaleFor,
@@ -2449,6 +2510,17 @@ UJ.app = (function(){
      field it is false about is the LICENCE, which is the one thing here that must never be
      asserted by inheritance. Reading it from the dataset makes the wrong answer impossible
      rather than merely unlikely. */
+  /* The key to the glyphs in the picker. Without it the marks are a guessing game -- 🐒 and 🐭 at
+     12 px are two small dark animals -- and a screen reader gets "monkey face", not "macaque". */
+  function renderSpeciesLegend(){
+    var host = el("dsspecies"); if (!host) return;
+    var L = W.speciesLegend();
+    host.innerHTML = L.length
+      ? L.map(function(x){ return "<span style='white-space:nowrap'>" + esc(x.mark) + " "
+          + esc(x.species) + "</span>"; }).join(" &nbsp; ")
+      : "";
+  }
+
   function renderAttribution(){
     var host = el("attribution"); if (!host) return;
     var pr = W.provider(DS);
@@ -2714,7 +2786,7 @@ UJ.app = (function(){
           return t + (n.organelles || []).reduce(function(u, o){ return u + o.n; }, 0); }, 0)
       + "</b></div>";
     if (el("pbar")) el("pbar").style.width = p.pctVisited + "%";
-    renderAttribution();
+    renderAttribution(); renderSpeciesLegend();
     renderIdentify();
     renderMap();
     renderList();
@@ -2904,14 +2976,17 @@ UJ.app = (function(){
          in one flat list is a scroll, and the thing a neuroscientist opens this for was at the
          bottom of it.
 
-         The flat list had one property for free that grouping takes away: its first option was the
-         smallest dataset on the roster, so the page opened on something a person could actually
-         finish. Under groups the first option is whatever the first group's smallest happens to
-         be. So the list is grouped AND the smallest is then selected explicitly -- keeping both,
-         rather than trading one for the other and not noticing. */
+         The page opens on the first entry of the first group -- brain, and within brain the
+         choroid plexus at 36 boxes. Set explicitly rather than left to the browser, because
+         "whichever option happens to be first" is a property nothing would notice losing. */
+      /* Species goes on EVERY row now, as a leading glyph. It used to be printed only for
+         non-mouse datasets, on the reasoning that fourteen mouse volumes did not each need saying
+         so -- true while the roster was almost all mouse, and false at four species, where it
+         means most rows say nothing and you have to know that silence means mouse. */
       var opt = function(d){
-        return "<option value='" + esc(d.id) + "'>" + esc(d.tissue)
-          + (d.species !== "mouse" ? " (" + esc(d.species) + ")" : "")
+        var mark = W.speciesMark(d);
+        return "<option value='" + esc(d.id) + "'>" + (mark ? esc(mark) + " " : "")
+          + esc(d.tissue)
           + " — " + d._boxes + (d._boxes === 1 ? " box" : " boxes") + "</option>";
       };
       var sized = {}; enabled().forEach(function(d){ sized[d.id] = d; });
@@ -2926,8 +3001,8 @@ UJ.app = (function(){
         html.push("<optgroup label='Ungrouped'>"
                 + gr.ungrouped.map(function(d){ return opt(sized[d.id] || d); }).join("") + "</optgroup>");
       sel.innerHTML = html.join("");
-      var small = W.smallestDataset();
-      if (small) sel.value = small.id;
+      var first = W.defaultDataset();
+      if (first) sel.value = first.id;
       sel.addEventListener("change", function(){ selectDataset(sel.value); });
     }
     if (el("open")) el("open").addEventListener("click", function(){
