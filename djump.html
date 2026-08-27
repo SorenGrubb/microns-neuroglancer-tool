@@ -466,6 +466,7 @@ UJ.cfg.mesh = {
    code always used, so this extraction changes nothing observable here. βJump sets its own
    bjump_active_tab/bjump_stepthrough_v1 keys so the two tools, opened in the same browser,
    never share (and corrupt) each other's remembered tab or step-through progress. */
+UJ.cfg.projection = { orientation: [0.11139907, 0.0, 0.00288045, 0.99377216] };
 UJ.cfg.layerBands = { style: "lines", gridX: 2, gridZ: 2 };
 UJ.cfg.tabs = { lsKey: "djump_active_tab", urlParam: "tab" };
 UJ.cfg.stepthrough = { lsKey: "djump_stepthrough_v1" };
@@ -3212,6 +3213,12 @@ function looksLikeNeuron(text){return /neuron/i.test(text||"");}
    projectionScale units -- this preserves whatever Neuroglancer's real internal
    scale-to-projectionScale relationship actually is without needing to know it explicitly. */
 function PROJECTION_SCALE(isNeuron){return isNeuron?120500:26850;}
+/* Spread into a Neuroglancer state to set the 3D camera. Returns {} when the dataset defines
+   none, which leaves Neuroglancer's own default (identity) exactly as before. */
+function PROJ_ORIENT(){
+  var o=(window.UJ&&UJ.cfg&&UJ.cfg.projection&&UJ.cfg.projection.orientation);
+  return o?{projectionOrientation:o}:{};
+}
 /* Only ever set for a community-reported "new cell, no nucleus" point that also has its own,
    separate nucleus segmentation ID (see renderUserReportedCell()) -- the raw minnie35
    segmentation occasionally splits a cell's nucleus off from its cell body as its own distinct
@@ -3724,7 +3731,7 @@ function buildState(pos){
      µJump itself is in light mode, Neuroglancer's normal dark default otherwise. Applies to both
      the 2D cross-section slice panels and the 3D perspective panel -- confirmed against
      Neuroglancer's own JSON state schema (both keys accept a plain hex string). */
-  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
+  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),...PROJ_ORIENT(),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function fail(m){const e=document.getElementById("err");e.textContent=m;e.style.display="block";document.getElementById("out").classList.remove("show");}
 /* Shows/hides the persistent "Back to previous cell" row (a sibling of #nucpanel, NOT inside it --
@@ -6217,7 +6224,7 @@ function buildExampleState(pos,modality,rootOverride,isNeuron){
   }
   const hasSeg=layers.some(l=>l.name==="segmentation");
   layers.push(...buildLayerAnnotationLayers(pos));
-  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(isNeuron),layers,selectedLayer:{layer:hasSeg?"segmentation":"EM",visible:true},layout:{type:is3D?"3d":"xy",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
+  return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(isNeuron),...PROJ_ORIENT(),layers,selectedLayer:{layer:hasSeg?"segmentation":"EM",visible:true},layout:{type:is3D?"3d":"xy",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function exampleUrl(coord,modality,rootOverride,isNeuron){
   const state=buildExampleState(coord,modality,rootOverride,isNeuron);
