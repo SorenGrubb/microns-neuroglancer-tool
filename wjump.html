@@ -1358,6 +1358,51 @@ UJ.app = (function(){
     }
   };
 
+  /* Every call to Apps Script goes through here, and the reason is one message Søren saw:
+
+         save failed: Unexpected token '<', "
+
+     That is JSON.parse being handed an HTML page. It says nothing about what went wrong, blames
+     the parser for somebody else's problem, and sends you looking in the wrong place -- at the
+     coordinates, at the dataset, at the page -- when the actual answer is that Apps Script
+     answered with a web page instead of data.
+
+     Apps Script returns HTML in a small number of situations, all of which have different fixes,
+     and the response body says which one it is. So read the body as TEXT first, and only then try
+     to parse it. `r.json()` throws away the very evidence needed to explain the failure. */
+  function readJson(r, what){
+    return r.text().then(function(body){
+      var t = (body || "").trim();
+      try { return JSON.parse(t); }
+      catch (e){
+        var hint;
+        if (/^\s*</.test(t)){
+          if (/accounts\.google\.com|Sign in|ServiceLogin/i.test(t))
+            hint = "the deployment is asking for a Google sign-in, so it is not published as "
+                 + "\u201cAnyone\u201d. Deploy \u2192 Manage deployments \u2192 edit \u2192 Who has access: Anyone.";
+          else if (/script\.google\.com.*(error|Error)|Exception|TypeError|ReferenceError/.test(t))
+            hint = "the script threw before it could answer. Almost always this means the deployed "
+                 + "code is OLDER than this page \u2014 re-paste the .gs files and then "
+                 + "Deploy \u2192 Manage deployments \u2192 edit \u2192 New version. Pasting without "
+                 + "redeploying leaves the old code serving, which looks exactly like this.";
+          else if (r.status === 404)
+            hint = "the deployment URL is gone (404). A new deployment gets a new /exec URL; "
+                 + "the one in wjump_config.js may be stale.";
+          else
+            hint = "Apps Script answered with a web page rather than data \u2014 usually a stale "
+                 + "deployment, or one not published to \u201cAnyone\u201d.";
+        } else if (!t){
+          hint = "the backend returned nothing at all (HTTP " + r.status + ").";
+        } else {
+          hint = "the backend returned something that is not JSON: " + t.slice(0, 120);
+        }
+        var err = new Error((what ? what + ": " : "") + hint);
+        err.notJson = true; err.status = r.status; err.body = t.slice(0, 2000);
+        throw err;
+      }
+    });
+  }
+
   var ApiStore = {
     live: true, credential: null, who: "",
     canWrite: function(){ return !!this.credential; },
@@ -1368,13 +1413,15 @@ UJ.app = (function(){
       payload.ds = UJ.cfg.backend.ds;
       payload.credential = this.credential;
       payload.timestamp = new Date().toISOString();
+      var what = payload.type;
       return fetch(UJ.cfg.backend.endpoint, { method:"POST", body: JSON.stringify(payload) })
-        .then(function(r){ return r.json(); });
+        .then(function(r){ return readJson(r, what); });
     },
     load: function(){
       var u = UJ.cfg.backend.endpoint + "?wjumpState=1&ds=" + encodeURIComponent(UJ.cfg.backend.ds)
             + "&dataset=" + encodeURIComponent(DS);
-      return fetch(u).then(function(r){ return r.json(); }).then(function(d){
+      return fetch(u).then(function(r){ return readJson(r, "reading the map"); })
+        .then(function(d){
         if (!d || !d.ok) throw new Error((d && d.error) || "could not read the map");
         STATE = { visited: d.visited || [], nuclei: d.nuclei || [],
                   contradicted: d.contradictedEmptyBoxes || [] };
@@ -2539,10 +2586,10 @@ UJ.app = (function(){
     /* Both fired at once and each rendered as it lands: the combined total is a cheap single
        sheet read, myStats is a full recompute, and making the fast one wait for the slow one is
        how a page ends up looking like it never loads. */
-    fetch(base + "?myStats=" + tok + "&ds=" + ds).then(function(r){ return r.json(); })
+    fetch(base + "?myStats=" + tok + "&ds=" + ds).then(function(r){ return readJson(r); })
       .then(function(d){ if (d && !d.error) MYSTATS = d; renderPoints(); })
       .catch(function(){ renderPoints(); });
-    fetch(base + "?profileTotals=" + tok + "&ds=" + ds).then(function(r){ return r.json(); })
+    fetch(base + "?profileTotals=" + tok + "&ds=" + ds).then(function(r){ return readJson(r); })
       .then(function(d){ if (d && d.ok) TOTALS = d; renderPoints(); })
       .catch(function(){ renderPoints(); });
   }
