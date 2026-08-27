@@ -1087,7 +1087,12 @@ function buildState(pos){
        minnie65 and Lee16 have IDENTICAL 4/4/40 nm voxels, so the same number means the same
        physical zoom in both. Scale bar lands near 1 µm. */
     position:pos, crossSectionScale:3.0, projectionScale:20000,
-    layers:[{type:"image",source:V.em,tab:"source",name:"lee16"}],
+    /* Contrast: Søren's own window, read off the viewer's Rendering panel 2026-08-20.
+       Lee16's signal sits in 66-230 of a 25-255 data range; with no shaderControls at all
+       Neuroglancer maps the full 0-255 and the EM reads flat. Same key µJump uses for its
+       own [86,172]. */
+    layers:[{type:"image",source:V.em,tab:"rendering",name:"lee16",
+             shaderControls:{normalized:{range:[66,230]}}}],
     selectedLayer:{visible:true,layer:"lee16"},
     /* "xy" and not µJump's "xy-3d": a 3D panel with no segmentation to render is an empty
        black quadrant taking a quarter of the screen. */

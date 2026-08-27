@@ -264,32 +264,72 @@ UJ.cfg.datasets = [
     extraLayers:[{ name:"Ab_RA_TrkB", type:"image",
                    path:"recon-1/labels/inference/Ab_RA_TrkB" }] },
   { id:"jrc_mus-choroid-plexus-3", tissue:"choroid plexus", species:"mouse",
-    shape:[7560,7500,7500],    res_nm:8, tier:"em",  enabled:true },
+    shape:[7560,7500,7500],    res_nm:8, tier:"em",  enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       choroid plexus (36 boxes): signal sits in 120-201 of a 100-221 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[120,201] },
   { id:"jrc_mus-guard-hair-follicle", tissue:"guard hair follicle", species:"mouse",
     shape:[12992,16000,14720], res_nm:6, tier:"inf", enabled:true },
   { id:"jrc_mus-liver", tissue:"liver", species:"mouse",
-    shape:[8932,12728,12747],  res_nm:8, tier:"gt",  enabled:true },
+    shape:[8932,12728,12747],  res_nm:8, tier:"gt",  enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       liver (144 boxes): signal sits in 61-178 of a 32-207 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[61,178] },
   { id:"jrc_mus-kidney", tissue:"kidney", species:"mouse",
     shape:[22199,7976,12287],  res_nm:8, tier:"gt",  enabled:true },
   { id:"jrc_mus-pacinian-corpuscle", tissue:"Pacinian corpuscle", species:"mouse",
     shape:[48576,10496,9728],  res_nm:6, tier:"inf", enabled:true,
     extraLayers:[{ name:"Ab_RA", type:"image", path:"recon-1/labels/inference/Ab_RA" }] },
   { id:"jrc_mus-kidney-2", tissue:"kidney", species:"mouse",
-    shape:[13817,12683,12874], res_nm:8, tier:"inf", enabled:true },
+    shape:[13817,12683,12874], res_nm:8, tier:"inf", enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       kidney (216 boxes): signal sits in 91-185 of a 67-209 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[91,185] },
   { id:"jrc_mus-pancreas-4", tissue:"pancreas", species:"mouse",
-    shape:[14381,14130,18284], res_nm:8, tier:"inf", enabled:true },
+    shape:[14381,14130,18284], res_nm:8, tier:"inf", enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       pancreas (288 boxes): signal sits in 88-165 of a 69-184 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[88,165] },
   { id:"jrc_mus-thymus-1", tissue:"thymus", species:"mouse",
-    shape:[14502,14542,18400], res_nm:8, tier:"inf", enabled:true },
+    shape:[14502,14542,18400], res_nm:8, tier:"inf", enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       thymus (288 boxes): signal sits in 117-178 of a 102-193 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[117,178] },
   { id:"jrc_mus-skin-1", tissue:"skin", species:"mouse",
-    shape:[19700,14277,17300], res_nm:8, tier:"inf", enabled:true },
+    shape:[19700,14277,17300], res_nm:8, tier:"inf", enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       skin (336 boxes): signal sits in 107-194 of a 85-216 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[107,194] },
   { id:"jrc_mus-heart-1", tissue:"heart", species:"mouse",
-    shape:[16984,18961,20404], res_nm:8, tier:"gt",  enabled:true },
+    shape:[16984,18961,20404], res_nm:8, tier:"gt",  enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       heart, mouse (504 boxes): signal sits in 113-193 of a 93-213 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[113,193] },
   { id:"jrc_zf-cardiac-1", tissue:"heart", species:"zebrafish",
-    shape:[40152,19814,20629], res_nm:8, tier:"gt",  enabled:true },
+    shape:[40152,19814,20629], res_nm:8, tier:"gt",  enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       heart, zebrafish (1224 boxes): signal sits in 16-148 of a 0-181 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[16,148] },
   { id:"jrc_mus-liver-zon-1", tissue:"liver (zonation)", species:"mouse",
-    shape:[49645,21451,23601], res_nm:8, tier:"gt",  enabled:true },
+    shape:[49645,21451,23601], res_nm:8, tier:"gt",  enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       liver zonation (1800 boxes): signal sits in 17-130 of a 0-158 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[17,130] },
   { id:"jrc_mus-liver-zon-2", tissue:"liver (zonation)", species:"mouse",
-    shape:[53336,19466,26250], res_nm:8, tier:"gt",  enabled:true },
+    shape:[53336,19466,26250], res_nm:8, tier:"gt",  enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
+       liver zonation (1936 boxes): signal sits in 56-176 of a 26-206 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[56,176] },
   /* Zarr v3 (zarr.json, not .zgroup) and its scale did not read through the v2 metadata path.
      res_nm is therefore UNKNOWN and this dataset stays out of the registry's usable set until it
      is measured -- a guessed resolution would put every box in the wrong place. */
@@ -974,8 +1014,13 @@ UJ.wjump = (function(){
   function buildState(dsId, posNm, known, cell, opts){
     var d = byId(dsId); if (!usable(d)) return null;
     var root = "zarr://s3://" + UJ.cfg.dataset.bucket + "/" + d.id + "/" + d.id + ".zarr/";
-    var layers = [{ type:"image", name:"em", tab:"source",
-                    source: root + "recon-1/em/fibsem-uint8" }];
+    /* tab:"rendering" when a window is set, so the contrast slider is the first thing on
+       screen -- that is where these numbers are read off and re-tuned. Datasets with no
+       em_range keep tab:"source" and Neuroglancer's default stretch, unchanged. */
+    var emLayer = { type:"image", name:"em", tab: d.em_range ? "rendering" : "source",
+                    source: root + "recon-1/em/fibsem-uint8" };
+    if (d.em_range) emLayer.shaderControls = { normalized:{ range: d.em_range } };
+    var layers = [emLayer];
     (d.extraLayers || []).forEach(function(L){
       layers.push({ type:L.type, name:L.name, source: root + L.path, visible:false });
     });
