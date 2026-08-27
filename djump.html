@@ -466,7 +466,7 @@ UJ.cfg.mesh = {
    code always used, so this extraction changes nothing observable here. βJump sets its own
    bjump_active_tab/bjump_stepthrough_v1 keys so the two tools, opened in the same browser,
    never share (and corrupt) each other's remembered tab or step-through progress. */
-UJ.cfg.layerBands = { axis: "z", stepNm: 80000 };
+UJ.cfg.layerBands = { style: "lines", gridX: 2, gridZ: 2 };
 UJ.cfg.tabs = { lsKey: "djump_active_tab", urlParam: "tab" };
 UJ.cfg.stepthrough = { lsKey: "djump_stepthrough_v1" };
 UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
@@ -2657,6 +2657,40 @@ function buildLayerAnnotationLayers(pos,opts){
      thickness of every segment, preserving the proportional-rescaling convention estimateLayer
      itself uses. */
   const queryThick=wmY-piaY;
+  const BAND_STYLE=BCFG.style==="lines"?"lines":"boxes";
+  /* Surface height at an arbitrary (x,z) for a given depth fraction — the exact plane, with no
+     band quantisation. Falls back to the query point's own pia/WM if the interpolator returns
+     nothing (outside the traced region). */
+  const yAt=(x,z,frac)=>{
+    const p=idwSurfaceY(x,z,PIA_X,PIA_Y,PIA_Z,PIA_N,8);
+    const wv=idwSurfaceY(x,z,WM_X,WM_Y,WM_Z,WM_N,8);
+    const p2=isFinite(p)?p:piaY,w2=isFinite(wv)?wv:wmY;
+    return p2+frac*(w2-p2);
+  };
+  /* One boundary, drawn as straight lines lying in the tilted plane. */
+  function pushPlane(name,label,frac,color,labelBelow,skipLines){
+    const gx=Math.max(1,BCFG.gridX||2),gz=Math.max(1,BCFG.gridZ||2);
+    let k=0;
+    /* skipLines: emit the label only. Used where this boundary coincides with another
+       one, so its lines would be laid straight over that boundary's. */
+    if(!skipLines){
+    for(let j=0;j<=gz;j++){
+      const z=zmin+(zmax-zmin)*j/gz;
+      anns.push({type:"line",id:name+"-ln"+(k++),
+        pointA:[xmin/UJ_RX,yAt(xmin,z,frac)/UJ_RY,z/UJ_RZ],
+        pointB:[xmax/UJ_RX,yAt(xmax,z,frac)/UJ_RY,z/UJ_RZ],props:[color]});
+    }
+    for(let i=0;i<=gx;i++){
+      const x=xmin+(xmax-xmin)*i/gx;
+      anns.push({type:"line",id:name+"-ln"+(k++),
+        pointA:[x/UJ_RX,yAt(x,zmin,frac)/UJ_RY,zmin/UJ_RZ],
+        pointB:[x/UJ_RX,yAt(x,zmax,frac)/UJ_RY,zmax/UJ_RZ],props:[color]});
+    }
+    }
+    const yh=yAt(labelX,labelZ,frac);
+    const labelY=labelBelow?yh+glyphH*0.3:yh-glyphH*1.3;
+    for(const a of stickTextAnnotations(label,labelX,labelY,labelZ,glyphH,name+"-txt")){a.props=[color];anns.push(a);}
+  }
   const ySeg=(i,frac)=>bPia[i]+frac*(bWm[i]-bPia[i]);
   const segOfX=v=>Math.min(BAND_NX-1,Math.max(0,Math.floor((v-alo)/(ahi-alo)*BAND_NX)));
   /* The label sits at a fixed spot along the stepping axis, so it must be looked up with the
@@ -2689,9 +2723,22 @@ function buildLayerAnnotationLayers(pos,opts){
     const labelY=below?yHere+glyphH*0.3:yHere-glyphH*1.3;
     for(const a of stickTextAnnotations(label,labelX,labelY,labelZ,glyphH,name+"-txt")){a.props=[color];anns.push(a);}
   }
-  pushMarker("Pia surface","PIA",0,"#58a6ff");
-  for(const b of info.bounds)pushBand(b[0],SHORT_LAYER_LABEL[b[0]]||b[0],piaY+b[1]*1000,piaY+b[2]*1000,LAYER_COLORS[b[0]]||"#888");
-  pushMarker("White matter surface","WM",1,"#c9c9c9",true);
+  if(BAND_STYLE==="lines"){
+    /* Boundaries, not bands: each layer is named on the line that OPENS it, with the label
+       hanging just below the line so it sits inside the layer it names. */
+    pushPlane("Pia surface","PIA",0,"#58a6ff",false);
+    for(const b of info.bounds){
+      const f=queryThick?(b[1]*1000)/queryThick:0;
+      /* Layer 1's top IS the pia, so drawing it again would lay a second line straight over
+         the blue PIA one. Keep the label, drop the duplicate lines. */
+      pushPlane(b[0],SHORT_LAYER_LABEL[b[0]]||b[0],f,LAYER_COLORS[b[0]]||"#888",true,f<=1e-6);
+    }
+    pushPlane("White matter surface","WM",1,"#c9c9c9",true);
+  }else{
+    pushMarker("Pia surface","PIA",0,"#58a6ff");
+    for(const b of info.bounds)pushBand(b[0],SHORT_LAYER_LABEL[b[0]]||b[0],piaY+b[1]*1000,piaY+b[2]*1000,LAYER_COLORS[b[0]]||"#888");
+    pushMarker("White matter surface","WM",1,"#c9c9c9",true);
+  }
   return[{type:"annotation",source:"local://annotations",annotations:anns,
     annotationProperties:[{id:"color",type:"rgb",default:"#ffffff"}],
     shader:"void main() { setColor(prop_color()); }",
