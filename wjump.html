@@ -2952,6 +2952,13 @@ UJ.app = (function(){
   /* ── boot ────────────────────────────────────────────────────────────────────────────────── */
   function selectDataset(id){
     DS = id;
+    /* The select is set HERE, not by the caller. Until 2026-08-27 boot did it separately, and the
+       two disagreed the moment they were asked to pick different things: the picker read "choroid
+       plexus" while DS, the header, the box count and the map were all still Meissner. It had
+       worked until then only because both happened to choose the same dataset -- a coincidence,
+       not an agreement. One writer for both, so they cannot drift apart again. */
+    var sel = el("dataset");
+    if (sel && sel.value !== id) sel.value = id;
     /* A skip is "not this one, right now" -- it is about the sitting, not about the nucleus, and
        carrying it across a dataset switch would silently hide nuclei in the new one. */
     SKIPPED = {}; CURID = null; REVEALED = false; WALK = { mode:"needs", ids:[], i:0 };
@@ -3001,8 +3008,6 @@ UJ.app = (function(){
         html.push("<optgroup label='Ungrouped'>"
                 + gr.ungrouped.map(function(d){ return opt(sized[d.id] || d); }).join("") + "</optgroup>");
       sel.innerHTML = html.join("");
-      var first = W.defaultDataset();
-      if (first) sel.value = first.id;
       sel.addEventListener("change", function(){ selectDataset(sel.value); });
     }
     if (el("open")) el("open").addEventListener("click", function(){
@@ -3015,9 +3020,12 @@ UJ.app = (function(){
     });
     if (el("found")) el("found").addEventListener("click", submitClicked);
     if (el("empty")) el("empty").addEventListener("click", submitEmpty);
-    var first = enabled()[0];
-    if (!first){ msg("No dataset in the registry has a measured resolution yet.", false); return; }
-    selectDataset(first.id);
+    /* THE one decision about which dataset the page opens on -- previously made twice, once here
+       as enabled()[0] (the smallest) and once above as W.defaultDataset() (the first of the first
+       group). They agreed by accident until the default changed. */
+    var opening = W.defaultDataset();
+    if (!opening){ msg("No dataset in the registry has a measured resolution yet.", false); return; }
+    selectDataset(opening.id);
   }
 
   return { init:init, selectDataset:selectDataset, render:render, pickBox:pickBox,
