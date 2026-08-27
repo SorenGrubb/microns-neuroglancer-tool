@@ -180,9 +180,9 @@
   built out of confirmations measures how convincing the first answer was rather than what the
   tissue is. You can still look &mdash; it is one click &mdash; and the click is recorded next to
   your answer so the effect of looking can be measured rather than assumed away.</p>
-  <p class="hint">Sixteen volumes are open, listed smallest first with the number of 20 &micro;m
-  boxes each one takes &mdash; 18 for the Meissner corpuscle, 1,936 for a liver zonation block,
-  7,892 across the roster. The map above sizes itself to whichever volume you pick and keeps one
+  <p class="hint">Twenty-six volumes are open, listed smallest first with the number of 20 &micro;m
+  boxes each one takes &mdash; 18 for the Meissner corpuscle, 9,600 for a mouse parietal column,
+  20,800 across the roster. The map above sizes itself to whichever volume you pick and keeps one
   scale across its three panels, so a distance in one is the same distance in the others.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
@@ -198,8 +198,8 @@
 
 <script>window.WJUMP_LIVE = true;</script>
 <script>/* ── ωJump configuration ────────────────────────────────────────────────────────────────────
-   Sixteen datasets: fifteen Janelia OpenOrganelle / COSEM FIB-SEM volumes plus one macaque
-   cortex block streamed from a WEBKNOSSOS instance. The roster is expected to GROW -- and the
+   Twenty-nine datasets: fifteen Janelia OpenOrganelle / COSEM FIB-SEM volumes, and fourteen
+   streamed from WEBKNOSSOS across five publications. The roster is expected to GROW -- and the
    reason to expect it is Søren, 2026-08-25: "in the future I hope to add more smaller
    datasets from different tissues". So the dataset list is DATA, read by the page and by the
    build script; adding a tissue is a row here plus a rebuild, never a change to the logic.
@@ -255,6 +255,78 @@ UJ.cfg.viewer = { base: "https://neuroglancer-demo.appspot.com/" };
    reach a user by accident. As of 2026-08-27 all fifteen are enabled and measured: the list is
    offered smallest first, so a user who wants a roster they can finish still starts at Meissner's
    18 boxes rather than liver-zon-2's 1,936. */
+/* ── providers for the WEBKNOSSOS-hosted rows ──────────────────────────────────────────────────
+   Four publications, four credit lines. They are declared once and shared because eleven inline
+   copies of a citation is eleven chances for one of them to drift, and the field that would drift
+   is the one that must not: the licence.
+
+   NONE of them names a reuse licence for the imagery, and none is invented here. WEBKNOSSOS has
+   no licence field, `isPublic:true` only means "anyone may view this", and a journal's own licence
+   covers its article -- eLife is CC-BY, Science is not, and neither statement is about the pixels.
+   The Motta dataset goes further and asserts "© Max Planck Institute for Brain Research" in its
+   own description. So each provider records the BASIS instead, and wjumpcheck.js will not enable
+   a row whose basis is missing or whose verifiedFrom is not a URL.
+
+   What ωJump actually does with these is narrower than redistribution: `source` points at the
+   publisher's own datastore and every byte reaches the user's browser from there, exactly as it
+   would on webknossos.org. */
+var WK_NOTE = "\u03c9Jump links to the publisher's own server and redistributes nothing";
+var PROV_LOOMBA = {
+  name: "MPI for Brain Research (Helmstaedter lab), via WEBKNOSSOS",
+  licence: "publicly released — no reuse licence stated",
+  licenceUrl: "https://doi.org/10.1126/science.abo0924",
+  portal: "https://webknossos.org/publication/62b979370e130578529d66ca",
+  bucket: "demo.wk1.connectomics.hpccloud.mpg.de",
+  citation: "Loomba, Straehle, Gangadharan, Heike, Khalifa, Motta, Ju, Sievers, Gempt, Meyer & " +
+            "Helmstaedter, “Connectomic comparison of mouse and human cortex”, " +
+            "Science 377, eabo0924 (2022)",
+  doi: "https://doi.org/10.1126/science.abo0924",
+  terms: { basis: "the paper states the image data are publicly available through " +
+                  "webknossos.org, and this dataset is attached to that paper's own WEBKNOSSOS " +
+                  "publication record",
+           verifiedFrom: "https://doi.org/10.1126/science.abo0924", note: WK_NOTE } };
+var PROV_KARIMI = {
+  name: "MPI for Brain Research (Helmstaedter lab), via WEBKNOSSOS",
+  licence: "publicly released — no reuse licence stated",
+  licenceUrl: "https://doi.org/10.7554/eLife.46876",
+  portal: "https://elifesciences.org/articles/46876",
+  bucket: "demo.wk1.connectomics.hpccloud.mpg.de",
+  citation: "Karimi, Odenthal, Drawitsch, Boergens & Helmstaedter, “Cell-type specific " +
+            "innervation of cortical pyramidal cells at their apical dendrites”, " +
+            "eLife 9, e46876 (2020)",
+  doi: "https://doi.org/10.7554/eLife.46876",
+  /* eLife articles are CC-BY. That covers the ARTICLE. It is not a statement about the imagery,
+     and treating it as one would be the same borrowed-licence mistake as reading Science
+     abo0924's MIT software licence onto its pixels. */
+  terms: { basis: "the dataset record itself carries this citation in its own description field, " +
+                  "written by the data producers",
+           verifiedFrom: "https://doi.org/10.7554/eLife.46876", note: WK_NOTE } };
+var PROV_MOTTA = {
+  name: "MPI for Brain Research (Helmstaedter lab), via WEBKNOSSOS",
+  licence: "© MPI for Brain Research — no reuse licence stated",
+  licenceUrl: "https://doi.org/10.1126/science.aay3134",
+  portal: "https://l4dense2019.brain.mpg.de/",
+  bucket: "demo.wk1.connectomics.hpccloud.mpg.de",
+  citation: "Motta, Berning, Boergens, Staffler, Beining, Loomba, Hennig, Wissler & " +
+            "Helmstaedter, “Dense connectomic reconstruction in layer 4 of the somatosensory " +
+            "cortex”, Science 366, eaay3134 (2019)",
+  doi: "https://doi.org/10.1126/science.aay3134",
+  terms: { basis: "the dataset record carries this citation and an explicit © Max Planck " +
+                  "Institute for Brain Research line in its own description field",
+           verifiedFrom: "https://doi.org/10.1126/science.aay3134", note: WK_NOTE } };
+var PROV_WANNER = {
+  name: "Friedrich lab (FMI), via WEBKNOSSOS",
+  licence: "publicly released — no reuse licence stated",
+  licenceUrl: "https://doi.org/10.1038/nn.4290",
+  portal: "https://webknossos.org/datasets/wanner16-5c090ece01000020258c0e5a/view",
+  bucket: "data-humerus.webknossos.org",
+  citation: "Wanner, Genoud, Masudi, Siksou & Friedrich, “Dense EM-based reconstruction of the " +
+            "interglomerular projectome in the zebrafish olfactory bulb”, " +
+            "Nature Neuroscience 19, 816–825 (2016)",
+  doi: "https://doi.org/10.1038/nn.4290",
+  terms: { basis: "the dataset record itself carries this citation in its own description field",
+           verifiedFrom: "https://doi.org/10.1038/nn.4290", note: WK_NOTE } };
+
 UJ.cfg.datasets = [
   { id:"jrc_mus-meissner-corpuscle-1", tissue:"Meissner corpuscle", species:"mouse",
     shape:[9600,7680,6144],    res_nm:6, tier:"inf", enabled:true,
@@ -438,12 +510,134 @@ UJ.cfg.datasets = [
                 "Meyer & Helmstaedter, “Connectomic comparison of mouse and human cortex”, " +
                 "Science 377, eabo0924 (2022)",
       doi: "https://doi.org/10.1126/science.abo0924"
-    } }
+    } },
+  { id:"wk-mk1-t2-stg", tissue:"cortex L2/3 (STG)", species:"macaque",
+    shape:[3599, 20324, 15907], origin:[1, 0, 0],
+    res_nm:[30, 11.24, 11.24], tier:"inf", enabled:true,
+    /* 178.8 × 228.4 × 108.0 µm, 648 boxes */
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17f55010000eb0075d7be/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation",
+                   source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17f55010000eb0075d7be/segmentation" }],
+    provider:PROV_LOOMBA },
+  { id:"wk-h5-l23-stg", tissue:"cortex L2/3 (STG)", species:"human",
+    shape:[3759, 19260, 14845], origin:[21, 793, 713],
+    res_nm:[30, 11.24, 11.24], tier:"inf", enabled:true,
+    /* 166.9 × 216.5 × 112.8 µm, 594 boxes */
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17f19010000aa0075d7bc/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation",
+                   source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17f19010000aa0075d7bc/segmentation" }],
+    provider:PROV_LOOMBA },
+  { id:"wk-h6-l23-ifg", tissue:"cortex L2/3 (IFG)", species:"human",
+    shape:[2626, 19197, 15110], origin:[21, 624, 445],
+    res_nm:[30, 11.24, 11.24], tier:"inf", enabled:true,
+    /* 169.8 × 215.8 × 78.8 µm, 396 boxes */
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17fcd010000eb0075d7c0/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation",
+                   source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17fcd010000eb0075d7c0/segmentation" }],
+    provider:PROV_LOOMBA },
+  { id:"wk-ex144-l23-s1", tissue:"cortex L2/3 (S1)", species:"mouse",
+    shape:[7630, 5030, 7874], origin:[514, 514, 514],
+    res_nm:[28, 11.24, 11.24], tier:"inf", enabled:true,
+    /* 88.5 × 56.5 × 213.6 µm, 165 boxes */
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b19325010000860033e7c9/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation",
+                   source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b19325010000860033e7c9/segmentation" }],
+    provider:PROV_LOOMBA },
+  { id:"wk-ppc", tissue:"cortex (PPC)", species:"mouse",
+    shape:[4864, 12032, 12032], origin:[0, 0, 0],
+    res_nm:[30, 12, 12], tier:"inf", enabled:true,
+    /* 144.4 × 144.4 × 145.9 µm, 512 boxes */
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd439010000e66f8c2786/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation",
+                   source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd439010000e66f8c2786/segmentation" }],
+    provider:PROV_KARIMI },
+  { id:"wk-acc", tissue:"cortex L2 (ACC)", species:"mouse",
+    shape:[3328, 14336, 9216], origin:[0, 0, 0],
+    res_nm:[30, 12, 12], tier:"inf", enabled:true,
+    /* 110.6 × 172.0 × 99.8 µm, 270 boxes */
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd43801000026708c2783/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation",
+                   source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd43801000026708c2783/segmentation" }],
+    provider:PROV_KARIMI },
+  /* metadata brainRegion says "V1 Cortex"; the dataset NAME, its directory (V2_102_...) and
+       Loomba's record all say V2. The metadata field is wrong -- do not propagate it. */
+  { id:"wk-v2", tissue:"cortex L2/3 (V2)", species:"mouse",
+    shape:[5120, 10240, 7168], origin:[0, 0, 0],
+    res_nm:[30, 12, 12], tier:"inf", enabled:true,
+    /* 86.0 × 122.9 × 153.6 µm, 280 boxes */
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd4380100004f6f8c2785/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation",
+                   source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd4380100004f6f8c2785/segmentation" }],
+    provider:PROV_KARIMI },
+  /* 9,600 boxes -- larger than the whole OpenOrganelle roster was. Kept because the picker states
+       every dataset's size and sorts smallest first, so choosing it is the user's decision, not
+       one made for them. Its map draws at 14 px per box, the tightest on the roster. */
+  { id:"wk-ppc2", tissue:"cortex L1-5 (PPC-2)", species:"mouse",
+    shape:[13228, 55372, 25880], origin:[0, 0, 0],
+    res_nm:[30, 11.239999771118164, 11.239999771118164], tier:"em", enabled:true,
+    /* 290.9 × 622.4 × 396.8 µm, 9600 boxes */
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd4380100004f6f8c2784/color",
+    provider:PROV_KARIMI },
+  { id:"wk-ex145-l4-s1", tissue:"cortex L4 (S1)", species:"mouse",
+    shape:[3306, 8431, 5496], origin:[118, 103, 103],
+    res_nm:[28, 11.239999771118164, 11.239999771118164], tier:"inf", enabled:true,
+    /* 61.8 × 94.8 × 92.6 µm, 100 boxes */
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5da84e9401000018006d210b/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation",
+                   source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5da84e9401000018006d210b/segmentation" }],
+    provider:PROV_MOTTA },
+  { id:"wk-wanner16", tissue:"olfactory bulb", species:"zebrafish",
+    shape:[5505, 14976, 13440], origin:[0, 0, 0],
+    res_nm:[25, 9, 9], tier:"em", enabled:true,
+    /* 121.0 × 134.8 × 137.6 µm, 343 boxes */
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5c090ece01000020258c0e5a/color",
+    provider:PROV_WANNER },
+
+  /* ── held out, deliberately ────────────────────────────────────────────────────────────────
+     Three WEBKNOSSOS datasets Søren sent that ωJump cannot honestly offer yet.
+
+     THE TWO MultiSEM HUMAN BLOCKS are millimetre-scale surveys, and 20 µm boxes do not survive
+     contact with them:
+        H5_10_270um_L23_NH_NJ   1437.7 × 1495.0 × 116.7 µm  ->  32,400 boxes, 4.0 px per box
+        H5_10_270um_final_v1    1953.8 × 2691.1 ×  37.9 µm  ->  26,460 boxes, 2.6 px per box
+     Either one is four times the entire rest of the roster, and the map would draw 5,400 and
+     13,230 squares a few pixels across -- not a map, a grey wash. This is not a bug in them; it
+     is the box size meeting a different kind of dataset. A per-dataset boxUm of 100 µm would make
+     them 450 and 540 boxes with a readable map, at the cost of the premise the 20 µm cube was
+     chosen for -- "a field a user can actually judge in one look". That is Søren's call, not one
+     to make by quietly adding a field.
+
+     MOUSE A2 has no publication. It sits in the same 2022-06-21 upload batch as the Loomba
+     volumes and is named like them, but it is NOT attached to that paper's WEBKNOSSOS publication
+     record, and no other record claims it. Citing Loomba for it would be a guess printed under
+     somebody else's name. It needs one line from the lab, or from Søren, saying what it is. */
+  { id:"wk-h5-l23-msem", tissue:"cortex L2/3 (STG), MultiSEM", species:"human",
+    shape:[3072, 373760, 359424], origin:[0, 0, 18432], res_nm:[38, 4, 4],
+    tier:"em", enabled:false,
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17edd010000f70075d7ba/color",
+    provider:PROV_LOOMBA },
+  { id:"wk-h5-l16-msem", tissue:"cortex L1-6 (STG), MultiSEM", species:"human",
+    shape:[1024, 672768, 488448], origin:[0, 18432, 18432], res_nm:[37, 4, 4],
+    tier:"em", enabled:false,
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17f91010000ef0075d7bf/color",
+    provider:PROV_LOOMBA },
+  { id:"wk-mouse-a2", tissue:"cortex L2/3 (A2)", species:"mouse",
+    shape:[3642, 16102, 10394], origin:[1, 0, 0], res_nm:[30, 11.24, 11.24],
+    tier:"inf", enabled:false,
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17edd010000f20075d7b9/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation",
+                   source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17edd010000f20075d7b9/segmentation" }],
+    /* NOT PROV_LOOMBA. Deliberately its own block with no citation, because none is established. */
+    provider:{ name:"MPI for Brain Research, via WEBKNOSSOS",
+               licence:"publication not established",
+               licenceUrl:"", portal:"https://webknossos.org/", bucket:"https://demo.wk1.connectomics.hpccloud.mpg.de",
+               citation:"", doi:"" } }
+
 ];
 
 /* ── exploration ──────────────────────────────────────────────────────────────────────────── */
 UJ.cfg.explore = {
-  /* 20 µm: a field a user can actually judge in one look, and it makes the whole roster 7,892
+  /* 20 µm: a field a user can actually judge in one look, and it makes the open roster 20,800
      boxes -- finishable. 15 µm would be 1,210 boxes for heart-1 alone. */
   boxUm: 20,
   /* Serve the K farthest boxes and pick randomly among them. Deterministic farthest-point hands
@@ -677,7 +871,7 @@ UJ.wjump = (function(){
      not have been the region drawn around it. Truncating gives exact, non-overlapping coverage
      and lets the drawn box be the honest boundary of the assignment. The cost is that edge boxes
      are smaller -- Meissner's thinnest is 6.1 µm -- which is worth saying on screen. */
-  /* How many boxes a dataset is, WITHOUT building them. The picker asks this of all sixteen
+  /* How many boxes a dataset is, WITHOUT building them. The picker asks this of all 26 open
      datasets on every render; grid() allocates a cell object each, and liver-zon-2 alone is
      1,936 of them. Counting is arithmetic. */
   function gridDims(dsId){
@@ -795,7 +989,7 @@ UJ.wjump = (function(){
   /* Inline annotations live in the URL, and a URL has a practical ceiling around 64 kB. One
      nucleus is roughly 90 bytes of JSON once encoded, so a few hundred is comfortable and a few
      thousand is a link that silently truncates or refuses to open. That was a documented
-     "someday" while one 18-box dataset was open; with 7,892 boxes across sixteen datasets it is
+     "someday" while one 18-box dataset was open; with 20,800 boxes across 26 datasets it is
      a matter of time. Keep the ones NEAREST to where the viewer is being sent -- those are the
      only ones on screen anyway -- and say in the layer name that it is a subset, because a map
      that quietly omits points is worse than one that admits it. The real fix when a dataset gets
@@ -1040,7 +1234,7 @@ UJ.wjump = (function(){
      So the card grows with the aspect ratio instead, clamped at both ends. The shared scale stays
      -- it is the property that makes the three panels comparable and the shape honest -- and the
      binding constraint simply moves from the width to the height where the volume demands it.
-     After this, fifteen of the sixteen usable datasets are WIDTH-bound and fill the card; only
+     After this, all but one of the usable datasets are WIDTH-bound and fill the card; only
      the 5:1 Pacinian hits the ceiling, and that one is centred rather than left hugging the edge
      so it reads as deliberate. */
   var MAP_H_MIN = 240, MAP_H_MAX = 700;
