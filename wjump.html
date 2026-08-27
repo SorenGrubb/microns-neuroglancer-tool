@@ -180,9 +180,9 @@
   built out of confirmations measures how convincing the first answer was rather than what the
   tissue is. You can still look &mdash; it is one click &mdash; and the click is recorded next to
   your answer so the effect of looking can be measured rather than assumed away.</p>
-  <p class="hint">Fourteen tissues are open, listed smallest first with the number of 20 &micro;m
+  <p class="hint">Fifteen volumes are open, listed smallest first with the number of 20 &micro;m
   boxes each one takes &mdash; 18 for the Meissner corpuscle, 1,936 for a liver zonation block,
-  7,250 across the roster. The map above sizes itself to whichever volume you pick and keeps one
+  7,298 across the roster. The map above sizes itself to whichever volume you pick and keeps one
   scale across its three panels, so a distance in one is the same distance in the others.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
@@ -200,7 +200,7 @@
 
 <script>window.WJUMP_LIVE = true;</script>
 <script>/* ── ωJump configuration ────────────────────────────────────────────────────────────────────
-   Janelia OpenOrganelle / COSEM FIB-SEM. Fifteen datasets across fourteen tissues, and the
+   Janelia OpenOrganelle / COSEM FIB-SEM. Fifteen datasets across twelve tissues, and the
    roster is expected to GROW -- Søren, 2026-08-25: "in the future I hope to add more smaller
    datasets from different tissues". So the dataset list is DATA, read by the page and by the
    build script; adding a tissue is a row here plus a rebuild, never a change to the logic.
@@ -241,7 +241,8 @@ UJ.cfg.viewer = { base: "https://neuroglancer-demo.appspot.com/" };
 
 /* ── the registry ──────────────────────────────────────────────────────────────────────────
    shape is (z, y, x) IN VOXELS exactly as the OME-Zarr reports it; res_nm is isotropic. Both
-   were read live from each dataset's own s0 array on 2026-08-26, not copied from the portal.
+   were read live from each dataset's own s0 array on 2026-08-26 -- skel-muscle on 2026-08-27,
+   through the Zarr v3 path -- not copied from the portal.
    extentNm() below does the (z,y,x) -> (x,y,z) flip once, in one place, because doing it at
    each use site is how axis bugs happen.
 
@@ -250,8 +251,11 @@ UJ.cfg.viewer = { base: "https://neuroglancer-demo.appspot.com/" };
           "em"    image only
    Discovery works on ALL of them; tier only governs calibration.
 
-   enabled:true keeps a dataset in the registry -- visible, documented, countable -- without
-   putting it in front of users yet. The first release is Meissner alone: 18 boxes, finishable. */
+   enabled:false keeps a dataset in the registry -- visible, documented, countable -- without
+   putting it in front of users; usable() also requires res_nm, so an unmeasured volume can never
+   reach a user by accident. As of 2026-08-27 all fifteen are enabled and measured: the list is
+   offered smallest first, so a user who wants a roster they can finish still starts at Meissner's
+   18 boxes rather than liver-zon-2's 1,936. */
 UJ.cfg.datasets = [
   { id:"jrc_mus-meissner-corpuscle-1", tissue:"Meissner corpuscle", species:"mouse",
     shape:[9600,7680,6144],    res_nm:6, tier:"inf", enabled:true,
@@ -330,16 +334,23 @@ UJ.cfg.datasets = [
        liver zonation (1936 boxes): signal sits in 56-176 of a 26-206 data range. Without an
        em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
     em_range:[56,176] },
-  /* Zarr v3 (zarr.json, not .zgroup) and its scale did not read through the v2 metadata path.
-     res_nm is therefore UNKNOWN and this dataset stays out of the registry's usable set until it
-     is measured -- a guessed resolution would put every box in the wrong place. */
+  /* Zarr v3: the multiscale metadata lives in zarr.json under an "ome" key, not in .zgroup /
+     .zattrs, which is why the v2 metadata path read a shape but no scale. Measured 2026-08-27
+     through the v3 path, so shape and scale come from the SAME rung of the ladder -- the failure
+     mode of mixing them (s1's shape with s0's scale) is a volume half-size in every axis, which
+     shows up as "the tool keeps sending me outside the tissue" rather than as a wrong number.
+     All twelve levels reconstruct the same 101.2 × 60.9 × 20.4 µm extent, and the shape matches
+     what the v2 probe had already reported, so the old number was right by luck.
+     recon-1/labels does not exist -> tier "em", image only.
+     Plain zarr:// resolves v3 in neuroglancer-demo (zarr2:// renders black), so no per-dataset
+     source scheme is needed and wjump_logic.js's one URL builder still covers all fifteen. */
   { id:"jrc_mus-skel-muscle-1", tissue:"skeletal muscle", species:"mouse",
-    shape:[2545,7608,12651],   res_nm:null, tier:"em", enabled:false, note:"Zarr v3, scale unread" }
+    shape:[2545,7608,12651],   res_nm:8, tier:"em", enabled:true }
 ];
 
 /* ── exploration ──────────────────────────────────────────────────────────────────────────── */
 UJ.cfg.explore = {
-  /* 20 µm: a field a user can actually judge in one look, and it makes the whole roster 7,250
+  /* 20 µm: a field a user can actually judge in one look, and it makes the whole roster 7,298
      boxes -- finishable. 15 µm would be 1,210 boxes for heart-1 alone. */
   boxUm: 20,
   /* Serve the K farthest boxes and pick randomly among them. Deterministic farthest-point hands
@@ -522,7 +533,7 @@ UJ.wjump = (function(){
      not have been the region drawn around it. Truncating gives exact, non-overlapping coverage
      and lets the drawn box be the honest boundary of the assignment. The cost is that edge boxes
      are smaller -- Meissner's thinnest is 6.1 µm -- which is worth saying on screen. */
-  /* How many boxes a dataset is, WITHOUT building them. The picker asks this of all fourteen
+  /* How many boxes a dataset is, WITHOUT building them. The picker asks this of all fifteen
      datasets on every render; grid() allocates a cell object each, and liver-zon-2 alone is
      1,936 of them. Counting is arithmetic. */
   function gridDims(dsId){
@@ -633,7 +644,7 @@ UJ.wjump = (function(){
   /* Inline annotations live in the URL, and a URL has a practical ceiling around 64 kB. One
      nucleus is roughly 90 bytes of JSON once encoded, so a few hundred is comfortable and a few
      thousand is a link that silently truncates or refuses to open. That was a documented
-     "someday" while one 18-box dataset was open; with 7,250 boxes across fourteen tissues it is
+     "someday" while one 18-box dataset was open; with 7,298 boxes across fifteen datasets it is
      a matter of time. Keep the ones NEAREST to where the viewer is being sent -- those are the
      only ones on screen anyway -- and say in the layer name that it is a subset, because a map
      that quietly omits points is worse than one that admits it. The real fix when a dataset gets
@@ -878,7 +889,7 @@ UJ.wjump = (function(){
      So the card grows with the aspect ratio instead, clamped at both ends. The shared scale stays
      -- it is the property that makes the three panels comparable and the shape honest -- and the
      binding constraint simply moves from the width to the height where the volume demands it.
-     After this, thirteen of the fourteen usable datasets are WIDTH-bound and fill the card; only
+     After this, fourteen of the fifteen usable datasets are WIDTH-bound and fill the card; only
      the 5:1 Pacinian hits the ceiling, and that one is centred rather than left hugging the edge
      so it reads as deliberate. */
   var MAP_H_MIN = 240, MAP_H_MAX = 700;
