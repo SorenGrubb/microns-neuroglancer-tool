@@ -7525,7 +7525,9 @@ function cellContactsViewerBase(){
   return{
     SRC_SEG:"precomputed://gs://microns_public_datasets/pinky100_v185/seg",
     SRC_EM:"precomputed://https://storage.googleapis.com/microns_public_datasets/pinky100_v0/son_of_alignment_v15_rechunked",
-    EM_SHADER_CONTROLS_LOCAL:{normalized:{range:[86,172]}},
+    /* The one constant, not a copy of its numbers -- this used to hold its own [86,172] and
+       so kept minnie65's contrast in three viewers after the main one was corrected. */
+    EM_SHADER_CONTROLS_LOCAL:EM_SHADER_CONTROLS,
     DIM_LOCAL:{x:[UJ_RX*1e-9,"m"],y:[UJ_RY*1e-9,"m"],z:[UJ_RZ*1e-9,"m"]}
   };
 }
