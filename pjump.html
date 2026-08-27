@@ -3563,8 +3563,16 @@ function showNucleus(pos){
   else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">unsegmented &mdash; no MICrONS root ID</span>'+meshDlButtonHtml("",window.CUR_CELLTYPE_DISPLAY,[NX[i],NY[i],NZ[i]],true,NV[i],nid)+'</div>'+meshVolRowHtml();
   h+='</div>';
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
-  h+='<div id="connPanel" style="margin:6px 0"></div>';
-  h+='<div id="tripartitePanel" style="margin:6px 0"></div>';
+  /* No #connPanel / #tripartitePanel here -- see build_pjump.py. Both loaders return early
+     on a missing container, so their call sites below are no-ops rather than errors. */
+  h+='<p class="hint" style="margin:8px 0">Synaptic partners are not shown. The live query behind '
+   +'that panel reads MICrONS minnie65\'s CAVE tables, which say nothing about pinky100. '
+   +'pinky100\'s own synapses are published as static tables with the Phase&nbsp;1 release '
+   +'(<a class="ref" href="https://doi.org/10.5281/zenodo.7510511" target="_blank" rel="noopener">'
+   +'3.2&nbsp;M putative synapses</a>, and a proofread '
+   +'<a class="ref" href="https://doi.org/10.5281/zenodo.3710459" target="_blank" rel="noopener">'
+   +'soma-to-soma subgraph</a>), which this tool does not read yet. The astrocyte\u2013synapse '
+   +'panel used the same query and is absent for the same reason.</p>';
   h+='<div id="cellContactsPanel" style="margin:6px 0"></div>';
   h+='<div id="classHistoryPanel" style="margin:6px 0"></div>';
   h+='<button class="jump" data-x="'+NX[i]+'" data-y="'+NY[i]+'" data-z="'+NZ[i]+'">Jump to this nucleus &#8599;</button>';
