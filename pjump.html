@@ -1898,10 +1898,13 @@ document.getElementById("refreshBtn").addEventListener("click",function(){loadLi
 const SRC={em:"precomputed://https://storage.googleapis.com/microns_public_datasets/pinky100_v0/son_of_alignment_v15_rechunked",em35:"precomputed://https://storage.googleapis.com/microns_public_datasets/pinky100_v0/son_of_alignment_v15_rechunked",seg:"precomputed://gs://microns_public_datasets/pinky100_v185/seg",seg35:"precomputed://gs://microns_public_datasets/pinky100_v185/seg",nuc:"precomputed://https://td.princeton.edu/sseung-archive/pinky100-nuclei/seg"};
 /* The raw EM imagery renders low-contrast by default (Neuroglancer's default shader linearly
    maps the full 0-255 raw intensity range to black-white, but this tissue's actual signal sits
-   in a much narrower band). This normalizes the default grayscale shader's input range to
-   [86,172] instead, stretching that band to the full black-white display range -- applied to
-   every EM image layer this file builds (Img65 and Img35 alike). Per Søren. */
-const EM_SHADER_CONTROLS={normalized:{range:[86,172]}};
+   in a narrower band). This normalizes the default grayscale shader's input range to
+   [33,231], stretching that band to the full black-white display range, on every EM image
+   layer this file builds.
+   These are pinky100's numbers, read off Neuroglancer's Rendering panel on this volume
+   (Søren, 2026-08-27) -- NOT minnie65's [86,172], which is a different scope and stain
+   run and renders this tissue wrong without ever looking like a fault in the tool. */
+const EM_SHADER_CONTROLS={normalized:{range:[33,231]}};
 const NUC_INFO="https://td.princeton.edu/sseung-archive/pinky100-nuclei/seg/info";
 const DIM={x:[UJ_RX*1e-9,"m"],y:[UJ_RY*1e-9,"m"],z:[UJ_RZ*1e-9,"m"]};
 /* Distance (nm) past which the nearest MICrONS-detected nucleus is no longer treated as a
@@ -4720,7 +4723,8 @@ function postReport(payload,okMsg){
    the one they chose to attach. */
 /* organelle/structure ontology + read-back renderers moved to core/panel.js (2026-08-18) — see the header there. */
 /* identity vote panel + step-through vote rows moved to core/panel.js (2026-08-18) — see the header there. */
-function segTypeLabel(t){return t==="img35"?"Seg35":(t==="nucleus35"?"Nucleus·35":((t==="nucleus"||t==="nucleus65")?"Nucleus·65":"Seg65"));}
+/* The ·35 cases are kept, unreachable: the picker above can no longer produce them, but a row stored before that change would otherwise render under the wrong label. */
+function segTypeLabel(t){return t==="img35"?"Seg35":(t==="nucleus35"?"Nucleus·35":((t==="nucleus"||t==="nucleus65")?"Nucleus":"Segment"));}
 /* containerEl (optional, added 2026-07-30) lets this same propose/vote panel be embedded more
    than once on screen at once -- e.g. one instance per sub-nucleus row in the merged-nucleus
    report form (see renderMergedReport()), each keyed by that row's OWN coordinate string, same
@@ -4743,7 +4747,7 @@ function loadRootIdPanel(nid,containerEl){
     }
     const isOwner=OWNER_EMAIL&&REPORTER_EMAIL===OWNER_EMAIL;
     const n=list.length;
-    let body='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Segmentation and nucleus detection are often patchy — one cell can span several meshes. Proposed IDs are added to the matching Neuroglancer layer for everyone; vote whether each belongs. Pick which segmentation each ID comes from — an Img65 or Img35 segment ID, or a Nucleus ID — because an ID only works in its own segmentation.</div>';
+    let body='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Segmentation and nucleus detection are often patchy — one cell can span several meshes. Proposed IDs are added to the matching Neuroglancer layer for everyone; vote whether each belongs. Say whether each ID is a cell segment ID or a nucleus ID — they come from different segmentation volumes, and an ID only works in its own.</div>';
     if(n){
       list.forEach(x=>{
         var st=x.segType||"img65";
@@ -4768,7 +4772,7 @@ function loadRootIdPanel(nid,containerEl){
       body+='<div style="font-size:12px;color:var(--mut)">None proposed yet.</div>';
     }
     body+='<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">'
-      +'<select id="ridType" style="min-width:96px"><option value="img65">Root ID (Seg65)</option><option value="img35">Root ID (Seg35)</option><option value="nucleus65">Nucleus ID (Seg65)</option><option value="nucleus35">Nucleus ID (Seg35)</option></select>'
+      +'<select id="ridType" style="min-width:96px"><option value="img65">Root ID</option><option value="nucleus65">Nucleus ID</option></select>'
       +'<input type="text" id="ridInput" placeholder="ID (number)" style="flex:1;min-width:120px">'
       +'<button class="idbtn idbtn-submit" id="ridPropose" style="padding:2px 10px">Propose</button></div>';
     const label=()=>"additional root / nucleus IDs"+(n?" ("+n+")":"");
@@ -5983,7 +5987,7 @@ function renderUserReportedCell(ur,panel){
   oh+='<div class="celltype">'+celltypeLink(ur.pos,isUnclassified?"Unclassified cell":escHtml(ur.identified))+'</div>';
   oh+='<div class="meta">Reported by '+escHtml(who)+(ur.certainty?' &middot; certainty '+escHtml(ur.certainty)+'/5':'')+'</div>';
   if(ur.comment)oh+='<div class="meta">'+escHtml(ur.comment)+'</div>';
-  oh+='<div class="meta">'+(ur.dist<50?"at":ur.dist.toFixed(0)+" nm from")+' voxel ('+coordSpan(ur.pos[0],ur.pos[1],ur.pos[2])+') &mdash; this is the reporter’s own estimated location; the minnie35/Img35 imagery here has no MICrONS nucleus detection to compare against.</div>';
+  oh+='<div class="meta">'+(ur.dist<50?"at":ur.dist.toFixed(0)+" nm from")+' voxel ('+coordSpan(ur.pos[0],ur.pos[1],ur.pos[2])+') &mdash; this is the reporter’s own estimated location, outside pinky100’s imaged extent, so there is no soma in the published table to compare it against.</div>';
   oh+=renderLocationDiagram(ur.pos);
   /* 2026-08-09 (Søren: "cells lacking nuclei should allow assignment of a nucleus ID, future
      calculation of nucleus volume, future calculation of root ID volume") -- this block used to
@@ -6045,7 +6049,7 @@ function renderUserReportedCell(ur,panel){
        minnie35/Img35 territory at all, which is still very sparse. A "nearest" match here can
        easily be tens of µm away and say nothing about what's actually next to this cell, so this
        needs its own caveat rather than reusing the in-region list's implicit trust. */
-    oh+='<div class="meta" style="color:var(--warn);margin-bottom:8px">&#9888; Only a handful of cells have been identified in the minnie35/Img35 imagery so far, unlike the densely-covered minnie65 dataset &mdash; these "nearest" matches can easily be tens of &micro;m away and shouldn’t be trusted as real neighbours yet.</div>';
+    oh+='<div class="meta" style="color:var(--warn);margin-bottom:8px">&#9888; This point is outside pinky100’s imaged extent, where the published soma table has nothing &mdash; these "nearest" matches can easily be tens of &micro;m away and shouldn’t be trusted as real neighbours.</div>';
     for(const c of nearby)oh+=oobNeighborRowHtml(c);
     oh+='</div>';
   }

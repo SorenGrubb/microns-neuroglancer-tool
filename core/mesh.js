@@ -2,9 +2,6 @@
    Dataset-agnostic: the only per-dataset values (bucket URLs, sharding parameters, model->nm
    transform) now live in UJ.cfg.mesh, set by the page before this file loads. H01/hJump reuses
    this file unchanged and only supplies a different UJ.cfg.mesh.
-   A page with no segmentation at all can instead set UJ.cfg.mesh.fetchGeometry and skip the
-   neuroglancer format entirely -- lJump hosts its own per-nucleus .glb files. See the block
-   comment at the top of fetchMesh().
    Loaded as a classic <script src>, so it must appear BEFORE the main tool script; it publishes
    UJ.mesh, and the main script keeps its old name via `const MeshDL = UJ.mesh;`.
    Public surface: downloadRoot, downloadRootPptx, computeVolume, clearMeshNotFoundCache,
@@ -153,6 +150,21 @@ UJ.mesh=(()=>{
     if(!res){ infoLoaded=true; return; }   // both blocked -- use the built-in defaults
     if(!res.ok){infoLoaded=true;return;} // fall back to the built-in defaults above
     const j=await res.json();
+    /* THREE formats now, not one. "neuroglancer_legacy_mesh" is the ORIGINAL precomputed mesh
+       layout: a per-segment JSON manifest listing fragment files, each fragment a flat binary
+       blob of float32 vertices in nm plus uint32 triangle indices. No Draco, no LODs, no
+       quantization, no transform -- so it shares nothing with the multi-LOD path below except
+       the GLB/PPTX/volume code that consumes the result. MICrONS pinky100 (πJump) uses it, and
+       until this was added every 3D model / PowerPoint / Compute volume click there died on the
+       throw below with a correct root ID in hand (Søren, 2026-08-27). Verified against the real
+       bucket the same day: manifest at "<id>:0", 60 fragments for root 648518346349527116, the
+       first one 63,904 bytes = 4 + 1907*12 + 3418*12 exactly, indices all < numVertices, and
+       vertex coordinates already in absolute nm (x 398516..401408, inside pinky100's
+       140000..500000 nm extent). */
+    if(j["@type"]==="neuroglancer_legacy_mesh"){
+      CFG.legacy=true; CFG.unsharded=false; infoLoaded=true; return;
+    }
+    CFG.legacy=false;
     if(j["@type"]!=="neuroglancer_multilod_draco")throw new Error('unexpected mesh format "'+j["@type"]+'"');
     if(Array.isArray(j.transform)&&j.transform.length===12)CFG.transform=j.transform;
     if(j.vertex_quantization_bits)CFG.vertexQuantizationBits=j.vertex_quantization_bits;
@@ -382,45 +394,103 @@ UJ.mesh=(()=>{
      coordinates in micrometres so multiple downloaded meshes stay spatially aligned with each
      other and with Neuroglancer/Blender imports of MICrONS data -- same default as
      mesh_download_prototype.html's LOD table. */
-  async function fetchMesh(rootIdStr,onProgress,forceRecheck,forceCoarsestLod){
-    /* ---- geometry source override (2026-08-24, added for lJump) ------------------------------
-       Everything below this line reads neuroglancer's precomputed multi-LOD Draco format, keyed
-       on a segmentation root ID. Lee16 has no segmentation, so lJump has no root IDs and nothing
-       below can ever run for it -- but it DOES have geometry: its own notebook marches a mesh per
-       nucleus and hosts them as plain .glb files beside the page.
+  /* ── neuroglancer_legacy_mesh ──────────────────────────────────────────────────────────
+     Manifest: <meshBase><id>:0  ->  {"fragments":[name, ...]}
+     Fragment: <meshBase><name>  ->  uint32 numVertices
+                                     float32[numVertices*3] vertex xyz, ABSOLUTE nm
+                                     uint32[...]            triangle indices, to EOF
+     Returns the same shape as fetchMesh's multi-LOD path -- positions in MICROMETRES, indices
+     0-based into them -- so buildGLB, the PPTX exporter, computeVolume and the contact-grid
+     code all consume it unchanged.
 
-       CFG.fetchGeometry lets a page supply that geometry directly. It is ADDITIVE: a page that
-       does not set it reaches the identical code path it always did, byte for byte, so uJump,
-       dJump, hJump and bJump are unaffected. Everything DOWNSTREAM of here -- fetchCombinedMesh's
-       merge and per-id failure handling, the Y-flip, buildGLB, the scale bar, the PowerPoint
-       turntable, the volume integral -- is format-agnostic and works unchanged on whatever this
-       returns.
-
-       The contract is fetchMesh's own return contract, and it is not negotiable:
-         positions  Float32Array, xyz triples, ABSOLUTE dataset coordinates in MICROMETRES
-         indices    Uint32Array, triangles
-       Absolute, not centred on the object: fetchCombinedMesh concatenates several meshes into one
-       buffer and relies on them already being in their true positions relative to each other (see
-       the comment above it). A source that helpfully re-centres each mesh on its own centroid
-       would stack them on top of one another, and nothing would report an error -- so the shape
-       and the units are checked here rather than trusted. */
-    if(typeof CFG.fetchGeometry==="function"){
-      const g=await CFG.fetchGeometry(String(rootIdStr),onProgress);
-      if(!g||!(g.positions instanceof Float32Array)||!(g.indices instanceof Uint32Array))
-        throw new Error("UJ.cfg.mesh.fetchGeometry must resolve to "
-          +"{positions:Float32Array, indices:Uint32Array} in absolute micrometres");
-      if(!g.positions.length||g.positions.length%3||!g.indices.length||g.indices.length%3)
-        throw new Error("fetchGeometry returned "+g.positions.length+" position floats and "
-          +g.indices.length+" indices; both must be non-empty multiples of 3");
-      onProgress&&onProgress(1,"ready");
-      return {positions:g.positions,indices:g.indices,
-              lod:g.lod===undefined?null:g.lod,
-              numLods:g.numLods===undefined?null:g.numLods,
-              bytes:g.bytes||g.positions.byteLength+g.indices.byteLength};
+     There are no LODs here, so there is nothing to trade detail against size with: every
+     fragment is part of the surface and dropping one leaves a hole. The size guard is therefore
+     a hard refusal with a readable message rather than a silent downgrade. */
+  const LEGACY_MAX_BYTES=192*1048576;
+  const LEGACY_PARALLEL=6;
+  function decodeLegacyFragment(u8){
+    if(u8.length<4)throw new Error("fragment shorter than its own header");
+    const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
+    const nv=dv.getUint32(0,true);
+    const vBytes=nv*12;
+    if(4+vBytes>u8.length)throw new Error("fragment claims "+nv+" vertices but holds "+u8.length+" bytes");
+    const rest=u8.length-4-vBytes;
+    if(rest%12)throw new Error("index block is "+rest+" bytes, not a whole number of triangles");
+    /* .slice(), not a view: the byte offset is not guaranteed to be 4-aligned, and a
+       Float32Array view on an unaligned offset throws in every browser. */
+    const verts=new Float32Array(u8.buffer.slice(u8.byteOffset+4,u8.byteOffset+4+vBytes));
+    const idx=new Uint32Array(u8.buffer.slice(u8.byteOffset+4+vBytes,u8.byteOffset+u8.length));
+    for(let k=0;k<idx.length;k++)if(idx[k]>=nv)throw new Error("index "+idx[k]+" out of range for "+nv+" vertices");
+    return {verts,idx};
+  }
+  async function fetchLegacyMesh(rootIdStr,onProgress,forceRecheck){
+    if(!forceRecheck&&isRootKnownNotFound(rootIdStr)){
+      const err=new Error("root ID "+rootIdStr+" is cached as having no mesh in this dataset (an earlier lookup found none) — skipped the network check. Shift-click to force a fresh check.");
+      err.meshCached=true;throw err;
     }
+    onProgress&&onProgress(0,"reading manifest…");
+    let res=null,url=objUrl(rootIdStr+":0");
+    try{ res=await fetch(url); }catch(_e){ res=null; }
+    if((!res||!res.ok)&&!useAlt){            // same CORS fallback the other layouts use
+      useAlt=true; url=objUrl(rootIdStr+":0");
+      try{ res=await fetch(url); }catch(_e2){ res=null; }
+    }
+    if(!res||!res.ok){
+      markRootNotFound(rootIdStr);
+      throw new Error("no mesh for segment "+rootIdStr+" ("+(res?("HTTP "+res.status):"fetch blocked")+
+        ") — this segmentation does not mesh every segment. Cached; Shift-click to force a recheck.");
+    }
+    let man;
+    try{ man=JSON.parse(await res.text()); }
+    catch(_e){ throw new Error("mesh manifest for "+rootIdStr+" is not JSON — wrong mesh directory?"); }
+    const frags=(man&&man.fragments)||[];
+    if(!frags.length)throw new Error("mesh manifest for "+rootIdStr+" lists no fragments");
+    onProgress&&onProgress(0.05,frags.length+" fragments…");
+    const parts=new Array(frags.length);
+    let done=0,bytes=0,failed=0;
+    async function one(i){
+      let r=null;
+      try{ r=await fetch(objUrl(frags[i])); }catch(_e){ r=null; }
+      if(!r||!r.ok){ failed++; return; }
+      const u8=new Uint8Array(await r.arrayBuffer());
+      bytes+=u8.length;
+      if(bytes>LEGACY_MAX_BYTES)throw new Error("mesh is larger than "+mb(LEGACY_MAX_BYTES)+
+        " ("+frags.length+" fragments). This format has no coarser level to fall back to, so it "+
+        "cannot be downgraded — open the cell in Neuroglancer instead.");
+      try{ parts[i]=decodeLegacyFragment(u8); }catch(e){ failed++; }
+      done++;
+      if(done%4===0)onProgress&&onProgress(0.05+0.9*(done/frags.length),"fetching "+done+"/"+frags.length+"…");
+    }
+    for(let i=0;i<frags.length;i+=LEGACY_PARALLEL){
+      const batch=[];
+      for(let k=i;k<Math.min(i+LEGACY_PARALLEL,frags.length);k++)batch.push(one(k));
+      await Promise.all(batch);
+    }
+    const got=parts.filter(Boolean);
+    if(!got.length)throw new Error("no fragments decoded ("+frags.length+" in the manifest, "+failed+" failed)");
+    let totalV=0,totalI=0;
+    for(const g of got){totalV+=g.verts.length;totalI+=g.idx.length;}
+    const positions=new Float32Array(totalV),indices=new Uint32Array(totalI);
+    let vo=0,io=0;
+    for(const g of got){
+      /* nm -> micrometres, the frame every consumer of this function expects (see the
+         "scale=1000 // micrometres" line in the multi-LOD path). No affine transform: these
+         vertices are already absolute dataset nm, confirmed against the volume's own extent. */
+      for(let k=0;k<g.verts.length;k++)positions[vo+k]=g.verts[k]/1000;
+      const base=vo/3;
+      for(let k=0;k<g.idx.length;k++)indices[io+k]=g.idx[k]+base;
+      vo+=g.verts.length;io+=g.idx.length;
+    }
+    return {positions,indices,lod:0,numLods:1,bytes,legacyFragments:frags.length,legacyFailed:failed};
+  }
+  async function fetchMesh(rootIdStr,onProgress,forceRecheck,forceCoarsestLod){
+    /* The legacy layout has no shards, no minishards, no manifest byte ranges and no LOD choice,
+       so it branches out before any of that -- right after loadInfo(), which is what decides
+       which layout this dataset uses. */
+    await loadInfo();
+    if(CFG.legacy)return await fetchLegacyMesh(rootIdStr,onProgress,forceRecheck);
     const rootId=BigInt(rootIdStr);
     onProgress&&onProgress(0,"reading manifest…");
-    await loadInfo();
     const info=await findManifest(rootId,forceRecheck);
     const {parsed,layout}=await readManifest(info,onProgress);
     let lod=parsed.numLods-1;
@@ -583,18 +653,10 @@ UJ.mesh=(()=>{
     /* When there's no main root ID (community-only combine), fall back to the first combined ID
        so the filename is still a real, traceable segmentation ID rather than a blank/underscore. */
     const idForName=rootIdStr||rootIds[0];
-    /* CFG.filePrefix (2026-08-24): "microns_" is the right prefix for a MICrONS root ID and the
-       wrong one for anything else -- lJump's ids are its own nucleus numbers in a Lee16 volume
-       that has nothing to do with MICrONS. Defaults to the old literal, so every existing page's
-       filenames are byte-for-byte unchanged.
-       lod is null whenever the geometry did not come from a multi-resolution source, which is
-       true for every fetchGeometry page; "_lod"+null renders as the string "_lodnull", which is
-       what the first version of this shipped. */
-    const pfx=CFG.filePrefix||"microns_";
-    const tag=fragmentCount>1?"_combined"+fragmentCount:(lod==null?"":"_lod"+lod);
-    const glb=buildGLB(positions,indices,pfx+idForName+tag);
+    const tag=fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod;
+    const glb=buildGLB(positions,indices,"microns_"+idForName+tag);
     onProgress&&onProgress(1,"saving…");
-    const filename=pfx+idForName+tag+"_um.glb";
+    const filename="microns_"+idForName+tag+"_um.glb";
     const url=URL.createObjectURL(new Blob([glb],{type:"model/gltf-binary"}));
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
@@ -860,7 +922,7 @@ UJ.mesh=(()=>{
     const cx=(minX+maxX)/2,cy=(minY+maxY)/2,cz=(minZ+maxZ)/2;
     const n=Math.round(PPTX_FILL_BOOST*1000000/longest),d=1000000;
     const pre=[Math.round(-cx*n*36),Math.round(-cy*n*36),Math.round(-cz*n*36)];
-    const glb=buildGLB(positions,indices,(CFG.filePrefix||"microns_")+idForName+(fragmentCount>1?"_combined"+fragmentCount:""));
+    const glb=buildGLB(positions,indices,"microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:""));
     const zip=await JSZip.loadAsync(PPTXSK_B64,{base64:true});
     zip.file("ppt/media/model3d1.glb",glb);
     const pngB64=renderThumbnailPNG(positions,minX,maxX,minY,maxY);
@@ -880,7 +942,7 @@ UJ.mesh=(()=>{
     zip.file("ppt/slides/slide2.xml",slideXml);
     const blob=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation"});
     onProgress&&onProgress(1,"saving…");
-    const filename=(CFG.filePrefix||"microns_")+idForName+(fragmentCount>1?"_combined"+fragmentCount:"")+"_turntable.pptx";
+    const filename="microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:"")+"_turntable.pptx";
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a");
     a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
