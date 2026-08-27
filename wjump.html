@@ -345,7 +345,11 @@ UJ.cfg.datasets = [
      Plain zarr:// resolves v3 in neuroglancer-demo (zarr2:// renders black), so no per-dataset
      source scheme is needed and wjump_logic.js's one URL builder still covers all fifteen. */
   { id:"jrc_mus-skel-muscle-1", tissue:"skeletal muscle", species:"mouse",
-    shape:[2545,7608,12651],   res_nm:8, tier:"em", enabled:true }
+    shape:[2545,7608,12651],   res_nm:8, tier:"em", enabled:true,
+    /* Søren's own window, read off the viewer's Rendering panel 2026-08-27 for
+       skeletal muscle (48 boxes): signal sits in 58-207 of a 20-245 data range. Without an
+       em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
+    em_range:[58,207] }
 ];
 
 /* ── exploration ──────────────────────────────────────────────────────────────────────────── */
