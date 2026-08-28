@@ -527,16 +527,8 @@ against the 488 nuclei embedded in this page &mdash; no network needed to previe
 Identity and organelles read the community backend, since neither can live in a static page.</p>
 
 <div style="margin-top:14px">
-<label style="font-size:12px" title="Reads the Master cell list sheet -- the same current_identity a signed-in user's latest identification, discrepancy or confirmation last set. Fetched once per page load and cached until you press Refresh.">Current community identity</label>
+<label style="font-size:12px" title="Reads the Master cell list sheet -- the same current_identity a signed-in user's latest identification, discrepancy or confirmation last set. Fetched once per page load and cached.">Current community identity</label>
 <div id="fIdentityBox"></div>
-<!-- The identity read is cached for the life of the page, so an identification submitted in
-     another tab (or by somebody else while this one sat open) is invisible until a reload.
-     µJump's dashboard has had a "Refresh live data" button since it went live for exactly this
-     reason; λJump shipped without one. -->
-<div class="row" style="margin-top:8px;align-items:center">
-<button class="idbtn" id="fReloadLive" style="flex:0 0 auto">&#8635; Refresh live data</button>
-<span class="hint" id="fReloadMsg" style="margin:0"></span>
-</div>
 </div>
 
 <div style="margin-top:14px">
@@ -677,10 +669,6 @@ reviewed those rows. That review is what &lambda;Jump is for.</p>
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Statistics dashboard</div>
 <p class="hint" style="margin-top:6px">Charts built from the <span id="dashTotal"></span> nuclei embedded in this page, plus one bulk read of the community&rsquo;s current identifications (the same read the Filter tab&rsquo;s identity dropdown uses). The charting library only loads once this tab is opened.</p>
 <p class="hint" style="margin-top:6px">This dataset has no published cell types, so every chart is keyed on <b>current community identity</b> &mdash; a live consensus that can still change. The six most-identified names get their own bucket; anything else named folds into &ldquo;Other&rdquo;, and every nucleus nobody has classified yet is &ldquo;Unclassified&rdquo;.</p>
-<div class="row" style="margin-top:10px;align-items:center">
-<button class="idbtn" id="dReloadLive" style="flex:0 0 auto">&#8635; Refresh live data</button>
-<span class="hint" id="dReloadMsg" style="margin:0"></span>
-</div>
 </div>
 
 <div class="card"><label>Nuclei per community identity</label><div id="dIdentity" style="height:340px"></div></div>
@@ -735,133 +723,17 @@ var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
 UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
 UJ.toVox = function(p){ return [p[0]/UJ_RX, p[1]/UJ_RY, p[2]/UJ_RZ]; };
 
-/* ── λJump: its own geometry source ──────────────────────────────────────────────────────────
-   Lee16 has no segmentation, so there are no root IDs and core/mesh.js's neuroglancer
-   sharded-Draco pipeline can never run here. What lJump has instead is 487 nucleus meshes its
-   own notebook marched out of the detector's own masks (step 9), hosted as plain .glb files in
-   ljump_meshes/ beside this page.
+/* NO UJ.cfg.mesh, and that is a statement rather than an omission.
+   ------------------------------------------------------------------------------------
+   Lee16 publishes no segmentation, so there are no segment IDs, no meshes, no root IDs and
+   no synapses. Every surface that depends on them -- the 3D viewer, mesh-computed volume,
+   GLB and PowerPoint export, Cell contacts, root-ID proposals, the Connectivity panel -- is
+   REMOVED from this page rather than left present and broken. core/mesh.js is deliberately
+   not loaded by build_ljump.py either; ljumpcheck.js asserts that it isn't, so a future
+   copy-paste from βJump cannot quietly reintroduce a mesh button that can never work.
 
-   UJ.cfg.mesh.fetchGeometry is core/mesh.js's additive hook for exactly this: supply
-   {positions, indices} and every surface downstream -- the Y-flip, buildGLB, the scale bar, the
-   PowerPoint turntable -- works unchanged. See the block comment at the top of fetchMesh(). */
-UJ.cfg.mesh = {
-  /* Downloaded files are named from this, not from core/mesh.js's default "microns_" -- these
-     are Lee16 nuclei and nothing about them is MICrONS. */
-  filePrefix: "lee16_nucleus_",
-  dir: "ljump_meshes/",
-  manifestUrl: "ljump_meshes/manifest.json",
-
-  /* Which nuclei have one. 487 of 488 do; the one that does not could not be re-extracted at
-     mesh resolution, and saying so is better than a button that 404s. Fetched once, lazily --
-     a user who never opens the 3D controls never pays for it. */
-  _man: null,
-  manifest: function(){
-    if(!this._man) this._man = fetch(this.manifestUrl)
-      .then(function(r){ if(!r.ok) throw new Error("manifest "+r.status); return r.json(); })
-      .catch(function(e){ UJ.cfg.mesh._man = null; throw e; });
-    return this._man;
-  },
-
-  /* GLB -> {positions, indices}. Written against the glTF 2.0 binary container rather than
-     against the exact bytes write_glb() happens to emit, so a mesh re-exported through Blender
-     or any other tool still loads: accessor/bufferView byteOffsets are honoured and all three
-     legal index component types are accepted. */
-  parseGlb: function(buf){
-    var dv = new DataView(buf), u8 = new Uint8Array(buf);
-    if(dv.getUint32(0, true) !== 0x46546C67) throw new Error("not a GLB (bad magic)");
-    if(dv.getUint32(8, true) !== buf.byteLength)
-      throw new Error("GLB length field disagrees with the file: header says "
-        + dv.getUint32(8, true) + ", file is " + buf.byteLength);
-    /* Chunks: [uint32 length][uint32 type][length bytes]. The spec requires length to already
-       be a multiple of 4 (the writer pads the JSON chunk with spaces and the BIN chunk with
-       NULs), but tolerate an unpadded length rather than walking off into the middle of the
-       next header. */
-    var p = 12, json = null, bin = null;
-    while(p + 8 <= buf.byteLength){
-      var len = dv.getUint32(p, true), type = dv.getUint32(p + 4, true);
-      if(p + 8 + len > buf.byteLength) throw new Error("GLB chunk runs past the end of the file");
-      var body = buf.slice(p + 8, p + 8 + len);
-      if(type === 0x4E4F534A) json = JSON.parse(new TextDecoder().decode(body));
-      else if(type === 0x004E4942) bin = body;
-      p += 8 + len;
-      if(len % 4) p += 4 - (len % 4);
-    }
-    if(!json || !bin) throw new Error("GLB is missing its JSON or BIN chunk");
-    var prim = json.meshes[0].primitives[0];
-    function read(accIdx){
-      var a = json.accessors[accIdx], bv = json.bufferViews[a.bufferView];
-      var off = (bv.byteOffset || 0) + (a.byteOffset || 0);
-      var n = a.count * ({SCALAR:1, VEC2:2, VEC3:3, VEC4:4}[a.type]);
-      switch(a.componentType){
-        case 5126: return new Float32Array(bin.slice(off, off + n * 4));
-        case 5125: return new Uint32Array(bin.slice(off, off + n * 4));
-        case 5123: return new Uint16Array(bin.slice(off, off + n * 2));
-        case 5121: return new Uint8Array(bin.slice(off, off + n));
-        default: throw new Error("unsupported componentType " + a.componentType);
-      }
-    }
-    var pos = read(prim.attributes.POSITION);
-    var idxRaw = read(prim.indices);
-    return { positions: pos instanceof Float32Array ? pos : new Float32Array(pos),
-             indices: idxRaw instanceof Uint32Array ? idxRaw : new Uint32Array(idxRaw) };
-  },
-
-  /* core/mesh.js documents its contract as ABSOLUTE dataset coordinates in micrometres, because
-     fetchCombinedMesh concatenates meshes and relies on them already being in their true
-     positions. Step 9 writes each .glb re-centred on its own centroid -- good for a standalone
-     file, wrong for that contract -- so the nucleus's own centre goes back on here. A mesh left
-     at the origin would look right on screen and be silently wrong the day anything combines
-     two of them. */
-  fetchGeometry: function(id, onProgress){
-    var CFG = UJ.cfg.mesh;
-    onProgress && onProgress(0.05, "fetching mesh…");
-    return fetch(CFG.dir + encodeURIComponent(id) + ".glb").then(function(r){
-      /* A 404 has TWO completely different causes and the first version of this reported only
-         one of them, which sent a real deployment problem out as a false statement about the
-         data. 487 of 488 nuclei have a mesh; exactly one (66) does not. So a 404 on any OTHER
-         nucleus does not mean "this nucleus has no mesh", it means the directory is not on the
-         server -- and saying otherwise sends someone looking at the detector when the fix is a
-         git push. The manifest is the only thing that can tell the two apart, so ask it before
-         claiming anything. */
-      if(r.status === 404) return CFG.manifest().then(function(man){
-        var rec = man && man.meshes && man.meshes[String(id)];
-        if(rec && !rec.ok) throw new Error("No mesh for nucleus " + id
-          + " \u2014 it could not be re-extracted at mesh resolution. It is the only one of "
-          + "the 488 that could not.");
-        throw new Error("ljump_meshes/" + id + ".glb is missing from the server, though the "
-          + "manifest lists it. The mesh directory has not been deployed \u2014 unzip "
-          + "ljump_meshes.zip beside ljump.html and push it.");
-      }, function(){
-        throw new Error("ljump_meshes/ is not reachable on this server. The mesh directory has "
-          + "not been deployed \u2014 unzip ljump_meshes.zip beside ljump.html and push it.");
-      });
-      if(!r.ok) throw new Error("mesh fetch failed (" + r.status + ")");
-      return r.arrayBuffer();
-    }).then(function(buf){
-      onProgress && onProgress(0.7, "decoding…");
-      var g = CFG.parseGlb(buf);
-      var c = UJ.ljumpCentreUm && UJ.ljumpCentreUm(id);
-      if(!c) throw new Error("no recorded position for nucleus " + id);
-      var q = g.positions;
-      for(var k = 0; k < q.length; k += 3){
-        q[k] += c[0]; q[k+1] += c[1]; q[k+2] += c[2];
-      }
-      return { positions: q, indices: g.indices, bytes: buf.byteLength };
-    });
-  }
-};
-
-/* WHAT IS STILL ABSENT, and still deliberately so. Having geometry does NOT give Lee16 a
-   segmentation. There are still no segment IDs, no cell meshes, no synapses -- so root-ID
-   proposals, Cell contacts, the Connectivity panel and everything keyed on a segmentation stay
-   REMOVED from this page rather than present and broken, and ljumpcheck.js still asserts that
-   none of their identifiers reaches the built page.
-
-   There is also no "Compute volume" button, which is a subtler call: the machinery for one now
-   exists and works. It is left out because the mesh IS the nucleus, re-extracted from the same
-   mask on the same grid as the volume already shown, and its integral reproduces that number to
-   0.001% -- so the button would look like a second opinion and be an echo. See the comment
-   beside the buttons in ljump_logic.js. */
+   If nucleus meshes are ever generated from the notebook's own label volumes and hosted
+   statically, this is where their config goes, and core/mesh.js comes back with it. */
 
 /* Guided identification.
    ------------------------------------------------------------------------------------
@@ -952,7 +824,6 @@ document.addEventListener("DOMContentLoaded", function(){
 
 </script>
 
-<script src="core/mesh.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/ontology.js"></script>
 <script src="core/panel.js"></script>
@@ -1080,19 +951,8 @@ function buildState(pos){
   /* nm -> m by DIVISION, not *1e-9: 4*1e-9 is not exactly representable and dividing keeps
      the generated URL character-identical to the dataset's own published states. */
   return {dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
-    /* crossSectionScale 3.0, not the 20 this shipped with. 20 opened the viewer so far out that
-       the scale bar read ~7.5 µm -- a whole nucleus is 8 µm, so the cell you were sent to look at
-       was a smudge and its ultrastructure was invisible, which is the one thing this tool exists
-       to show. 3.0 is not a guess: it is the value µJump uses in all seven of its own states, and
-       minnie65 and Lee16 have IDENTICAL 4/4/40 nm voxels, so the same number means the same
-       physical zoom in both. Scale bar lands near 1 µm. */
-    position:pos, crossSectionScale:3.0, projectionScale:20000,
-    /* Contrast: Søren's own window, read off the viewer's Rendering panel 2026-08-20.
-       Lee16's signal sits in 66-230 of a 25-255 data range; with no shaderControls at all
-       Neuroglancer maps the full 0-255 and the EM reads flat. Same key µJump uses for its
-       own [86,172]. */
-    layers:[{type:"image",source:V.em,tab:"rendering",name:"lee16",
-             shaderControls:{normalized:{range:[66,230]}}}],
+    position:pos, crossSectionScale:20, projectionScale:20000,
+    layers:[{type:"image",source:V.em,tab:"source",name:"lee16"}],
     selectedLayer:{visible:true,layer:"lee16"},
     /* "xy" and not µJump's "xy-3d": a 3D panel with no segmentation to render is an empty
        black quadrant taking a quarter of the screen. */
@@ -1293,28 +1153,6 @@ function showCell(i, distNm){
     +'placeholder="comment (optional) — what it looks like" style="flex:1"></div>';
   h+='<p class="hint" id="fixnewmsg"></p>';
 
-  /* ── the nucleus in 3D ─────────────────────────────────────────────────────────────────
-     Step 9 of λJump's own notebook marched a mesh out of each nucleus's detector mask and they
-     are hosted in ljump_meshes/ beside this page. 487 of 488 nuclei have one.
-
-     There is NO "Compute volume" button here, and its absence is deliberate. µJump and βJump
-     have one because their mesh is the whole CELL and their table's volume is the NUCLEUS --
-     two different quantities, so the button tells you something new. Here the mesh IS the
-     nucleus, re-extracted from the same mask on the same voxel grid that produced the volume
-     already printed above. Measured across all 487: the mesh's own closed-surface integral
-     reproduces the number in the manifest to 0.001%. A button offering it again would read as
-     independent confirmation of a figure it cannot confirm. */
-  h+='<label style="margin-top:16px;display:block">This nucleus in 3D</label>';
-  h+='<p class="hint" style="margin-top:0">Nuclear shape carries real identification evidence '
-    +'&mdash; lobulation, invagination, the flattened profile of an endothelial or meningeal '
-    +'nucleus. These meshes come from the detector\u2019s own masks at '
-    +'256&nbsp;&times;&nbsp;256&nbsp;&times;&nbsp;240&nbsp;nm, so they describe the nucleus '
-    +'envelope, not its contents.</p>';
-  h+='<div class="row" style="margin-top:8px">'
-    +'<button class="idbtn" id="meshbtn" style="flex:1;min-width:150px">&#8681; 3D model</button>'
-    +'<button class="idbtn" id="pptxbtn" style="flex:1;min-width:150px">&#8681; PowerPoint</button></div>';
-  h+='<p class="hint" id="meshmsg"></p>';
-
   h+='<button class="jump" id="jumphere">Jump to this nucleus &#8599;</button>';
 
   h+='<div class="neigh"><h4>3 nearest neighbouring nuclei</h4>';
@@ -1361,73 +1199,10 @@ function showCell(i, distNm){
     const u=neuroglancerLinkForPos([Number(b.dataset.x),Number(b.dataset.y),Number(b.dataset.z)]);
     if(u) window.open(u,"_blank","noopener");
   });
-  wireMesh(i);
   wireCorrection(i);
   startGuided(i);
   loadCommunity(i);
 }
-
-/* ── mesh buttons ──────────────────────────────────────────────────────────────────────────
-   core/mesh.js is keyed on a segmentation root ID everywhere else in this family. Lee16 has no
-   segmentation, so here the "root ID" IS the nucleus id and UJ.cfg.mesh.fetchGeometry (in
-   ljump_config.js) turns it into geometry by fetching ljump_meshes/<id>.glb. Everything
-   downstream of that -- the Y-flip, the GLB rebuild, the scale bar, the PowerPoint turntable --
-   is the shared code every other tool uses.
-
-   The one nucleus with no mesh disables the buttons and says why, rather than letting the fetch
-   404 at a user who cannot act on it. The manifest is fetched once, lazily, on the first cell
-   opened; until it resolves the buttons stay enabled and a click would report the 404 itself,
-   which is the right way round -- a slow manifest must not hide a mesh that exists. */
-function wireMesh(i){
-  const mb=document.getElementById("meshbtn"), pb=document.getElementById("pptxbtn"),
-        msg=document.getElementById("meshmsg");
-  if(!mb||!pb||!msg) return;
-  const id=String(BID[i]);
-  UJ.cfg.mesh.manifest().then(function(man){
-    const rec=man&&man.meshes&&man.meshes[id];
-    if(rec&&rec.ok) return;
-    mb.disabled=true; pb.disabled=true;
-    msg.textContent="No mesh for this nucleus \u2014 it could not be re-extracted at mesh "
-      +"resolution. 487 of the 488 nuclei have one.";
-  }).catch(function(){
-    /* Manifest unreachable means ljump_meshes/ is not deployed at all, so BOTH buttons are dead.
-       The first version left them enabled here, reasoning that a slow manifest must not hide a
-       mesh that exists -- but that optimised for the wrong failure: a pending fetch never
-       reaches this handler, only a failed one does. Leaving them live on a deployment with no
-       meshes just moves the error to the click. */
-    mb.disabled=true; pb.disabled=true;
-    msg.textContent="The mesh directory is not available on this server, so the 3D exports are "
-      +"disabled.";
-  });
-
-  function prog(f,t){ msg.textContent=(t||"")+(f>0&&f<1?" "+Math.round(100*f)+"%":""); }
-  function run(btn,fn){
-    btn.disabled=true; prog(0,"starting\u2026");
-    Promise.resolve().then(fn)
-      .then(function(){ msg.textContent="done."; })
-      .catch(function(err){ msg.textContent="failed: "+((err&&err.message)||err); })
-      .then(function(){ btn.disabled=false; });
-  }
-  mb.addEventListener("click",function(){
-    run(mb,function(){ return UJ.mesh.downloadRoot(id,prog); });
-  });
-  pb.addEventListener("click",function(){
-    const coord=[BX[i],BY[i],BZ[i]].join(", ");
-    run(pb,function(){ return UJ.mesh.downloadRootPptx(id,cellLabel(i),coord,prog); });
-  });
-}
-
-/* core/mesh.js documents its geometry contract as ABSOLUTE dataset coordinates in micrometres.
-   Step 9 writes each .glb re-centred on its own centroid, so fetchGeometry puts the nucleus back
-   where it belongs -- and this is the lookup it uses. Defined on UJ rather than passed in
-   because ljump_config.js runs BEFORE this file and must not capture an array that does not
-   exist yet; resolving the id at call time makes the load order irrelevant. */
-UJ.ljumpCentreUm=function(id){
-  const k=Number(id);
-  for(let j=0;j<N;j++) if(BID[j]===k)
-    return [BX[j]*UJ.cfg.res[0]/1000, BY[j]*UJ.cfg.res[1]/1000, BZ[j]*UJ.cfg.res[2]/1000];
-  return null;
-};
 function jumpToIndex(i){ showCell(i,null); window.scrollTo({top:0,behavior:"smooth"}); }
 
 /* ── community panel ──────────────────────────────────────────────────────────────────── */
@@ -1706,7 +1481,18 @@ function postReport(payload,okMsg){
   payload.credential=GOOGLE_CREDENTIAL; payload.ds=UJ.cfg.backend.ds;
   return fetch(REPORT_ENDPOINT,{method:"POST",body:JSON.stringify(payload)})
     .then(r=>r.json())
-    .then(function(d){ if(typeof showSubmitToast==="function") showSubmitToast(!!(d&&d.ok),okMsg||""); return d; });
+    .then(function(d){
+      /* NORMALISE THE TWO RESPONSE SHAPES (2026-08-28). Handlers with their own gJson() return
+         {ok:true,...}; doPost's shared success return said only {status:"ok"} until this was
+         found, so every identification filed through it came back looking like a failure -- the
+         page said "Could not record that." underneath a submission that had been written,
+         upserted into the Master cell list and counted. Setting d.ok here rather than editing the
+         ~dozen call sites that test `d && d.ok` means the page is correct whether or not the
+         backend has been redeployed yet. */
+      if(d&&d.ok===undefined&&d.status==="ok")d.ok=true;
+      if(typeof showSubmitToast==="function") showSubmitToast(!!(d&&d.ok),okMsg||"");
+      return d;
+    });
 }
 if(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID.indexOf("REPLACE")!==0){ gamifyInit(12); }
 
@@ -2166,51 +1952,6 @@ function initDashboardTab(){
     ljumpDashDraw();
   });
 }
-
-/* ── refresh live data ─────────────────────────────────────────────────────────────────────
-   Every community read on this page is fetched once and then cached in a module-level variable
-   for the life of the page: identities, organelles and position fixes. That is right for a page
-   somebody opens, uses and closes, and wrong for the way this tool is actually used -- a tab left
-   open while identifications are submitted from another window, or by somebody else. µJump's
-   dashboard has had a "Refresh live data" button from the start; λJump shipped without one, so
-   the only way to see a new identification was a full reload.
-
-   Clears ALL THREE caches, not just identities. Clearing one and leaving the others would produce
-   a page whose identity dropdown is current and whose correction badges are minutes stale, which
-   is harder to reason about than either being uniformly fresh or uniformly cached. */
-function ljumpReloadLive(msgId){
-  const msg=msgId&&document.getElementById(msgId);
-  if(msg) msg.textContent="reloading…";
-  IDENTITY_BY_NID=null; IDENTITY_FETCH=null;
-  ORGANELLES_BY_NID=null; ORGANELLES_FETCH=null;
-  FIXES_RESP=null; FIXES_FETCH=null; FIXES_BY_NUCID=null;
-  return fetchLjumpIdentities().then(function(map){
-    const named=Object.keys(map).filter(function(k){
-      const r=map[k]; return r&&String(r.current||r.community||"").trim()!==""; }).length;
-    /* Rebuild whatever is on screen. The dashboard only exists once its tab has been opened, and
-       the filter's identity dropdown only once the filter tab has -- so both are guarded rather
-       than assumed. */
-    /* __ljumpBuildIdentityDropdown, not an invented name: the dropdown builder is a closure
-       inside the filter-tab IIFE and is deliberately exposed on window (see its comment there)
-       precisely so it can be re-run after the cache is dropped. */
-    if(typeof window.__ljumpBuildIdentityDropdown==="function") window.__ljumpBuildIdentityDropdown();
-    if(__ljumpDashInited){ ljumpDashAggregate(); ljumpDashDraw(); }
-    if(CUR_IDX!==null && typeof loadCommunity==="function") loadCommunity(CUR_IDX);
-    if(msg) msg.textContent=named
-      ? (named+" of "+N+" nuclei now carry a community identity.")
-      : ("no nucleus carries a community identity yet \u2014 if you have submitted one, the "
-         +"spreadsheet's \u201cMaster cell list\u201d tab may not be seeded.");
-    return map;
-  }).catch(function(e){
-    if(msg) msg.textContent="reload failed: "+((e&&e.message)||e);
-  });
-}
-document.addEventListener("DOMContentLoaded",function(){
-  const f=document.getElementById("fReloadLive");
-  if(f) f.addEventListener("click",function(){ ljumpReloadLive("fReloadMsg"); });
-  const d=document.getElementById("dReloadLive");
-  if(d) d.addEventListener("click",function(){ ljumpReloadLive("dReloadMsg"); });
-});
 
 </script>
 </body></html>

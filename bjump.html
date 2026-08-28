@@ -2734,7 +2734,7 @@ function submitIdentification(slug){
     certainty:certainty,
     timestamp:new Date().toISOString()
   }, nm).then(function(d){
-    msg.textContent=(d&&d.ok)?("Recorded: "+nm+". Thank you."):"Could not record that.";
+    msg.textContent=(d&&d.ok)?("Recorded: "+nm+". Thank you."):("Could not record that."+((d&&d.error)?" The server said: "+d.error:""));
     if(d&&d.ok) loadCommunity(i);          // show the user their own identification immediately
   }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
 }
@@ -2753,7 +2753,7 @@ function wireCorrection(i){
     payload.timestamp=new Date().toISOString();
     msg.textContent="sending…";
     postReport(payload,label).then(function(d){
-      msg.textContent=(d&&d.ok)?"Thank you — recorded.":"Could not record that.";
+      msg.textContent=(d&&d.ok)?"Thank you — recorded.":("Could not record that."+((d&&d.error)?" The server said: "+d.error:""));
     }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
   }
   const mv=document.getElementById("fixmove");
@@ -2812,7 +2812,7 @@ function wireCorrection(i){
       comment:(commentEl&&commentEl.value||"").trim(),
       timestamp:new Date().toISOString()
     },"missed nucleus").then(function(d){
-      nmsg.textContent=(d&&d.ok)?"Thank you — recorded.":"Could not record that.";
+      nmsg.textContent=(d&&d.ok)?"Thank you — recorded.":("Could not record that."+((d&&d.error)?" The server said: "+d.error:""));
       if(d&&d.ok){ coordEl.value=""; if(commentEl)commentEl.value=""; }
     }).catch(function(e){ nmsg.textContent="failed: "+netErr(e); });
   });
@@ -2874,7 +2874,18 @@ function postReport(payload,okMsg){
   payload.credential=GOOGLE_CREDENTIAL; payload.ds=UJ.cfg.backend.ds;
   return fetch(REPORT_ENDPOINT,{method:"POST",body:JSON.stringify(payload)})
     .then(r=>r.json())
-    .then(function(d){ if(typeof showSubmitToast==="function") showSubmitToast(!!(d&&d.ok),okMsg||""); return d; });
+    .then(function(d){
+      /* NORMALISE THE TWO RESPONSE SHAPES (2026-08-28). Handlers with their own gJson() return
+         {ok:true,...}; doPost's shared success return said only {status:"ok"} until this was
+         found, so every identification filed through it came back looking like a failure -- the
+         page said "Could not record that." underneath a submission that had been written,
+         upserted into the Master cell list and counted. Setting d.ok here rather than editing the
+         ~dozen call sites that test `d && d.ok` means the page is correct whether or not the
+         backend has been redeployed yet. */
+      if(d&&d.ok===undefined&&d.status==="ok")d.ok=true;
+      if(typeof showSubmitToast==="function") showSubmitToast(!!(d&&d.ok),okMsg||"");
+      return d;
+    });
 }
 if(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID.indexOf("REPLACE")!==0){ gamifyInit(12); }
 
