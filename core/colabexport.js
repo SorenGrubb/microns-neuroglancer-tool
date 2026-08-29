@@ -182,7 +182,9 @@ def nm_box_to_voxels(cv, box_nm):
     ));
 
     if (wantEM || wantSeg) {
-      cells.push(mdCell(`## Memory-budget guard\n\nA Colab kernel that dies with **no Python traceback** (just a "restarting kernel" message) was killed for running out of RAM, not a code bug -- this estimates peak memory for a cutout BEFORE fetching it and raises a clear error instead, so a too-large box fails fast rather than mid-download. If you hit this, either shrink the box in the app, or regenerate the notebook with EM/segmentation unticked and download meshes only.\n\n**2026-08-29 recalibration:** the first version of this guard used one conservative 22 bytes/voxel figure for everything, borrowed from an unrelated heavier pipeline -- it rejected an EM box that almost certainly would have fit. EM here is a single uint8 fetch that's written straight to disk, so it gets its own, much lower estimate; segmentation keeps a high one since it holds a raw 64-bit array AND a remapped 32-bit array in memory at the same time. Neither number comes from a measured Colab run yet -- if this guard is still wrong in either direction for you, tell Søren so the defaults below can be corrected from real numbers instead of estimates.`));
+      cells.push(mdCell(`## Memory-budget guard\n\nA Colab kernel that dies with **no Python traceback** (just a "restarting kernel" message) was killed for running out of RAM, not a code bug -- this estimates peak memory for a cutout BEFORE fetching it and raises a clear error instead, so a too-large box fails fast rather than mid-download. If you hit this, either shrink the box in the app, or regenerate the notebook with EM/segmentation unticked and download meshes only.\n\n**2026-08-29 recalibration:** the first version of this guard used one conservative 22 bytes/voxel figure for everything, borrowed from an unrelated heavier pipeline -- it rejected an EM box that almost certainly would have fit. EM here is a single uint8 fetch that's written straight to disk, so it gets its own, much lower estimate; segmentation keeps a high one since it holds a raw 64-bit array AND a remapped 32-bit array in memory at the same time. Neither number comes from a measured Colab run yet -- if this guard is still wrong in either direction for you, tell Søren so the defaults below can be corrected from real numbers instead of estimates.
+
+**Same day, 2nd fix:** \`avail_gb\` is read fresh each time \`check_budget\` runs, so if EM and segmentation are both ticked, the segmentation check sees whatever memory the EM step already used -- correct behaviour, not a bug, but only if the EM step actually frees its own array once it's saved. It didn't before; now it does (\`del\` + \`gc.collect()\` at the end of each cutout cell), so the segmentation check should see close to the full runtime memory again rather than whatever was left over from EM.`));
       cells.push(codeCell(
 `import psutil
 
@@ -209,9 +211,10 @@ def check_budget(shape, label, bytes_per_voxel):
     }
 
     if (wantEM) {
-      cells.push(mdCell(`## EM cutout\n\nSaved as a multi-page TIFF stack (\`em_cutout.tif\`) -- opens directly in FIJI/ImageJ.`));
+      cells.push(mdCell(`## EM cutout\n\nSaved as a multi-page TIFF stack (\`em_cutout.tif\`) -- opens directly in FIJI/ImageJ.${wantSeg||wantMeshes ? " Frees its own working array once saved, so it doesn't eat into the budget for the segmentation/mesh cells that follow in this same session." : ""}`));
       cells.push(codeCell(
-`import tifffile
+`import gc
+import tifffile
 
 cv_em = CloudVolume(EM_SOURCE, use_https=True, mip=0, fill_missing=True)
 lo, hi = nm_box_to_voxels(cv_em, BOX_NM)
@@ -219,7 +222,9 @@ check_budget(hi - lo, "EM", BYTES_PER_VOXEL_EM)
 em_vol = np.asarray(cv_em[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]])[..., 0]  # drop the trailing channel axis
 em_vol = np.moveaxis(em_vol, 2, 0)  # cloud-volume gives (x, y, z) -- TIFF stacks want (z, y, x)
 tifffile.imwrite("em_cutout.tif", em_vol)
-print("Saved em_cutout.tif", em_vol.shape, em_vol.dtype)`
+print("Saved em_cutout.tif", em_vol.shape, em_vol.dtype)
+del cv_em, em_vol  # already on disk -- free it now rather than let it count against the next cutout's budget check
+gc.collect()`
       ));
     }
 
@@ -247,6 +252,7 @@ else:
       cells.push(mdCell(`## Segmentation cutout\n\nSegment IDs here are large 64-bit values FIJI/ImageJ can't display as a label image, so the saved TIFF (\`segmentation_cutout.tif\`) uses small sequential label numbers instead -- \`segmentation_label_lookup.csv\` maps each label back to its real root ID.${opts.segCaveAuth ? " Uses the CAVE token from the cell above." : ""}`));
       cells.push(codeCell(
 `import csv
+import gc
 import tifffile
 
 cv_seg = CloudVolume(SEG_SOURCE, use_https=True, mip=0, fill_missing=True${opts.segCaveAuth ? `, secrets={"token": CAVE_TOKEN} if CAVE_TOKEN else None` : ""})
@@ -264,7 +270,9 @@ with open("segmentation_label_lookup.csv", "w", newline="") as f:
     w.writerow(["label", "root_id"])
     for v, i in remap.items():
         w.writerow([i, int(v)])
-print("Saved segmentation_cutout.tif", seg_small.shape, "and segmentation_label_lookup.csv (", len(uniq), "distinct IDs incl. background)")`
+print("Saved segmentation_cutout.tif", seg_small.shape, "and segmentation_label_lookup.csv (", len(uniq), "distinct IDs incl. background)")
+del seg_vol, seg_small, uniq  # both already on disk -- free before the mesh cell below, which only needs cv_seg itself
+gc.collect()`
       ));
     } else if (wantMeshes) {
       cells.push(mdCell(`## Segmentation volume (meshes only)\n\nSegmentation itself wasn't ticked for download, but meshes are read through the same segmentation volume's built-in mesh support, so it still needs to be opened here -- no voxel cutout happens in this cell.${opts.segCaveAuth ? " Uses the CAVE token from the cell above." : ""}`));
