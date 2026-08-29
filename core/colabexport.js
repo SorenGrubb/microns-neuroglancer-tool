@@ -182,23 +182,28 @@ def nm_box_to_voxels(cv, box_nm):
     ));
 
     if (wantEM || wantSeg) {
-      cells.push(mdCell(`## Memory-budget guard\n\nA Colab kernel that dies with **no Python traceback** (just a "restarting kernel" message) was killed for running out of RAM, not a code bug -- this estimates peak memory for a cutout BEFORE fetching it and raises a clear error instead, so a too-large box fails fast rather than mid-download. If you hit this, either shrink the box in the app, or regenerate the notebook with EM/segmentation unticked and download meshes only.`));
+      cells.push(mdCell(`## Memory-budget guard\n\nA Colab kernel that dies with **no Python traceback** (just a "restarting kernel" message) was killed for running out of RAM, not a code bug -- this estimates peak memory for a cutout BEFORE fetching it and raises a clear error instead, so a too-large box fails fast rather than mid-download. If you hit this, either shrink the box in the app, or regenerate the notebook with EM/segmentation unticked and download meshes only.\n\n**2026-08-29 recalibration:** the first version of this guard used one conservative 22 bytes/voxel figure for everything, borrowed from an unrelated heavier pipeline -- it rejected an EM box that almost certainly would have fit. EM here is a single uint8 fetch that's written straight to disk, so it gets its own, much lower estimate; segmentation keeps a high one since it holds a raw 64-bit array AND a remapped 32-bit array in memory at the same time. Neither number comes from a measured Colab run yet -- if this guard is still wrong in either direction for you, tell Søren so the defaults below can be corrected from real numbers instead of estimates.`));
       cells.push(codeCell(
 `import psutil
 
-BYTES_PER_VOXEL = 22  # conservative headroom for cloud-volume's own decompression buffers -- measure, don't just trust this if you push it
-RAM_BUDGET_GB = 6     # stay well under Colab's free-tier RAM; raise this only if you know your runtime has more
+BYTES_PER_VOXEL_EM  = 4    # single-channel uint8 fetch + one moveaxis copy + one TIFF write buffer
+BYTES_PER_VOXEL_SEG = 20   # 64-bit raw IDs (8 B/voxel) AND a remapped 32-bit array (4 B/voxel) held
+                            # at once, plus np.unique/dict overhead -- kept close to the original
+                            # conservative figure since segmentation genuinely needs more headroom
+RAM_BUDGET_GB = 10          # a soft absolute ceiling regardless of runtime -- lower it yourself for
+                            # extra safety margin, or raise it if you know this runtime has more RAM
 
-def check_budget(shape, label):
+def check_budget(shape, label, bytes_per_voxel):
     n_vox = int(np.prod(shape))
-    est_gb = n_vox * BYTES_PER_VOXEL / 1e9
+    est_gb = n_vox * bytes_per_voxel / 1e9
     avail_gb = psutil.virtual_memory().available / 1e9
     print(f"{label}: shape {tuple(shape)} = {n_vox:,} voxels, ~{est_gb:.2f} GB estimated peak, {avail_gb:.2f} GB available")
     if est_gb > RAM_BUDGET_GB or est_gb > 0.75 * avail_gb:
         raise MemoryError(
-            f"{label} cutout looks too large for this session (~{est_gb:.1f} GB estimated). "
-            f"Shrink the bounding box in the app and regenerate this notebook, or raise "
-            f"RAM_BUDGET_GB above if you know this Colab runtime has more memory."
+            f"{label} cutout looks too large for this session (~{est_gb:.1f} GB estimated, "
+            f"{avail_gb:.1f} GB available). Shrink the bounding box in the app and regenerate "
+            f"this notebook, or raise RAM_BUDGET_GB / BYTES_PER_VOXEL_{label.upper()[:3]} above "
+            f"if you're confident this runtime can handle it."
         )`
       ));
     }
@@ -210,7 +215,7 @@ def check_budget(shape, label):
 
 cv_em = CloudVolume(EM_SOURCE, use_https=True, mip=0, fill_missing=True)
 lo, hi = nm_box_to_voxels(cv_em, BOX_NM)
-check_budget(hi - lo, "EM")
+check_budget(hi - lo, "EM", BYTES_PER_VOXEL_EM)
 em_vol = np.asarray(cv_em[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]])[..., 0]  # drop the trailing channel axis
 em_vol = np.moveaxis(em_vol, 2, 0)  # cloud-volume gives (x, y, z) -- TIFF stacks want (z, y, x)
 tifffile.imwrite("em_cutout.tif", em_vol)
@@ -246,7 +251,7 @@ import tifffile
 
 cv_seg = CloudVolume(SEG_SOURCE, use_https=True, mip=0, fill_missing=True${opts.segCaveAuth ? `, secrets={"token": CAVE_TOKEN} if CAVE_TOKEN else None` : ""})
 lo_s, hi_s = nm_box_to_voxels(cv_seg, BOX_NM)
-check_budget(hi_s - lo_s, "Segmentation")
+check_budget(hi_s - lo_s, "Segmentation", BYTES_PER_VOXEL_SEG)
 seg_vol = np.asarray(cv_seg[lo_s[0]:hi_s[0], lo_s[1]:hi_s[1], lo_s[2]:hi_s[2]])[..., 0]
 seg_vol = np.moveaxis(seg_vol, 2, 0)
 
