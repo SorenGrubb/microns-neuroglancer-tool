@@ -808,6 +808,19 @@ UJ.cfg.mesh = {
   dracoWasm: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
 };
 
+/* Per-dataset EM/segmentation source, consumed by core/colabexport.js (2026-08-29, Søren's
+   "download a bounding box as EM/segmentation/meshes via a generated Colab notebook" feature,
+   already live in µJump/δJump/πJump). Plain gs:// paths, same convention as those three -- the
+   "precomputed://" prefix on UJ.cfg.viewer.em/seg above is a Neuroglancer source-URL convention,
+   not a cloud-volume one, so it's stripped here rather than in the shared module (µJump's own
+   colabexport.js comment already reserves that choice for a future differently-shaped source).
+   Both h01-release buckets are public/anonymous, same as MICrONS proper, so no CAVE token or
+   auth cell is needed in the generated notebook (no segCaveAuth flag here). */
+UJ.cfg.em = {
+  emSource:"gs://h01-release/data/20210601/4nm_raw",
+  segSource:"gs://h01-release/data/20210601/c3"
+};
+
 /* Same Apps Script deployment as µJump -> one OAuth consent, one sign-in, one level.
    ds:"hjump" routes writes to the H01 spreadsheet once Datasets.gs is deployed. */
 UJ.cfg.backend = {
@@ -834,6 +847,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 
 <script src="core/mesh.js"></script>
+<script src="core/colabexport.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/ontology.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
@@ -2707,6 +2721,11 @@ function regionRowHtml(k){
     +'<div class="row" style="gap:6px;margin-top:6px"><div class="coord"><input type="text" class="rb-x2" placeholder="x2" inputmode="numeric"></div>'
       +'<div class="coord"><input type="text" class="rb-y2" placeholder="y2" inputmode="numeric"></div>'
       +'<div class="coord"><input type="text" class="rb-z2" placeholder="z2" inputmode="numeric"></div></div>'
+    +'<div class="row" style="margin-top:6px">'
+      +'<button type="button" class="idbtn rb-colab" style="font-size:11px;padding:3px 8px" '
+      +'title="Generates a Colab notebook (.ipynb) that downloads the EM imagery, segmentation, and meshes for any cells matched inside THIS box -- nothing is downloaded here, the notebook does the actual fetching when you run it in Colab.">'
+      +'&#11015; Colab notebook for this box</button>'
+    +'</div>'
     +'</div>';
 }
 function renumberRegionRows(){
@@ -2727,6 +2746,39 @@ function addRegionBox(){
     /* Never leave zero rows while the limit is ticked -- an empty list would silently mean
        "no region", which is not what a ticked checkbox says. */
     if(!host.querySelectorAll(".rbox-row").length) addRegionBox();
+  });
+  /* 2026-08-29, Søren: same "download a bounding box via a generated Colab notebook" feature as
+     µJump/δJump/πJump (see core/colabexport.js and each of their own rbox-colab handlers). hJump's
+     region boxes are stored in VOXEL units (rb-x1.. above), not nm like µJump's rx1.., and its
+     Filter-and-show match list is FILTER.rows -- a plain array of dataset INDICES (see runFilter()
+     a few hundred lines down), not row objects -- so this reads HX/HY/HZ (the same voxel-unit
+     position arrays inAnyBox() above already uses) and c3Id(i) (H01's >32-bit root-id split, see
+     line ~867) rather than µJump's rowPos()/rowRootId(). Reads THIS row's own corners only, same
+     per-box scoping as µJump; if Filter-and-show hasn't been run yet FILTER.rows is simply [],
+     so MESH_ROOT_IDS in the generated notebook comes out empty -- same graceful-empty behaviour
+     µJump's own comment documents for its "no filter run yet" case. */
+  row.querySelector(".rb-colab").addEventListener("click",function(){
+    const gv=function(cls){ const el=row.querySelector("."+cls); return el?parseFloat(el.value):NaN; };
+    const x1=gv("rb-x1"),y1=gv("rb-y1"),z1=gv("rb-z1"),x2=gv("rb-x2"),y2=gv("rb-y2"),z2=gv("rb-z2");
+    if([x1,y1,z1,x2,y2,z2].some(function(v){ return isNaN(v); })){ alert("Fill in both corners of this box first."); return; }
+    if(!UJ.cfg.em||!UJ.colab){ alert("This tool doesn't have a region-download notebook configured yet."); return; }
+    const bx=[Math.min(x1,x2),Math.max(x1,x2)],by=[Math.min(y1,y2),Math.max(y1,y2)],bz=[Math.min(z1,z2),Math.max(z1,z2)];
+    const boxNM={xmin:bx[0]*UJ_RX,xmax:bx[1]*UJ_RX,ymin:by[0]*UJ_RY,ymax:by[1]*UJ_RY,zmin:bz[0]*UJ_RZ,zmax:bz[1]*UJ_RZ};
+    const rootIds=[];
+    const matched=(FILTER&&FILTER.rows)||[];
+    for(const i of matched){
+      if(HX[i]>=bx[0]&&HX[i]<=bx[1]&&HY[i]>=by[0]&&HY[i]<=by[1]&&HZ[i]>=bz[0]&&HZ[i]<=bz[1]){
+        const rid=c3Id(i);
+        if(rid)rootIds.push(String(rid));
+      }
+    }
+    const boxIdx=Array.from(document.querySelectorAll("#regionBoxes .rbox-row")).indexOf(row);
+    const boxLabel="Box "+(boxIdx>=0?boxIdx+1:1);
+    UJ.colab.downloadNotebook({
+      datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
+      emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,
+      boxNM:boxNM,boxLabel:boxLabel,rootIds:rootIds
+    });
   });
   [["rb-x1","rb-y1","rb-z1"],["rb-x2","rb-y2","rb-z2"]].forEach(function(cls){
     const el=row.querySelector("."+cls[0]);

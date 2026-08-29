@@ -441,6 +441,14 @@ UJ.cfg.mesh = {
   dracoWrapper:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
   dracoWasm:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
 };
+/* Per-dataset EM/segmentation source, consumed by core/colabexport.js (2026-08-29, Søren's
+   "download a bounding box as EM/segmentation/meshes via a generated Colab notebook" feature).
+   Plain gs:// paths -- pinky100 is fully public/anonymous, same as MICrONS proper, so no CAVE
+   token or auth cell is needed in the generated notebook (no segCaveAuth flag here). */
+UJ.cfg.em = {
+  emSource:"gs://microns_public_datasets/pinky100_v0/son_of_alignment_v15_rechunked",
+  segSource:"gs://microns_public_datasets/pinky100_v185/seg"
+};
 /* core/stepthrough.js config (2026-08-18) -- exact same key names πJump's own inline tab/step
    code always used, so this extraction changes nothing observable here. βJump sets its own
    bjump_active_tab/bjump_stepthrough_v1 keys so the two tools, opened in the same browser,
@@ -455,6 +463,7 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 </script>
 <script src="core/mesh.js"></script>
+<script src="core/colabexport.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/ontology.js"></script>
 <script src="core/panel.js"></script>
@@ -10659,8 +10668,43 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       +'<div class="coord"><input type="text" class="rx2" inputmode="decimal" placeholder="x2"></div>'
       +'<div class="coord"><input type="text" class="ry2" inputmode="decimal" placeholder="y2"></div>'
       +'<div class="coord"><input type="text" class="rz2" inputmode="decimal" placeholder="z2"></div>'
+      +'</div>'
+      +'<div class="row" style="margin-top:6px">'
+      +'<button type="button" class="rbox-colab" style="font-size:11px;padding:3px 8px" '
+      +'title="Generates a Colab notebook (.ipynb) that downloads the EM imagery, segmentation, and meshes for any cells matched inside THIS box -- nothing is downloaded here, the notebook does the actual fetching when you run it in Colab.">'
+      +'&#11015; Colab notebook for this box</button>'
       +'</div>';
     row.querySelectorAll("input").forEach(el=>el.addEventListener("input",drawRegionViz));
+    /* 2026-08-29, ported verbatim from µJump (see core/colabexport.js's own header for the full
+       feature history) -- reads THIS row's own corners only, and searches lastResult (the current
+       Filter-and-show query, same closure scope as this function -- see its own "let lastResult"
+       a few hundred lines up) for matches whose nucleus position falls inside THIS specific box. */
+    row.querySelector(".rbox-colab").addEventListener("click",()=>{
+      const gv=cls=>{const el=row.querySelector("."+cls);return el?parseFloat(el.value):NaN;};
+      const x1=gv("rx1"),y1=gv("ry1"),z1=gv("rz1"),x2=gv("rx2"),y2=gv("ry2"),z2=gv("rz2");
+      if([x1,y1,z1,x2,y2,z2].some(v=>isNaN(v))){alert("Fill in both corners of this box first.");return;}
+      if(!UJ.cfg.em||!UJ.colab){alert("This tool doesn't have a region-download notebook configured yet.");return;}
+      const nx1=x1*UJ_RX,nx2=x2*UJ_RX,ny1=y1*UJ_RY,ny2=y2*UJ_RY,nz1=z1*UJ_RZ,nz2=z2*UJ_RZ;
+      const boxNM={xmin:Math.min(nx1,nx2),xmax:Math.max(nx1,nx2),ymin:Math.min(ny1,ny2),ymax:Math.max(ny1,ny2),zmin:Math.min(nz1,nz2),zmax:Math.max(nz1,nz2)};
+      const rootIds=[];
+      if(lastResult&&lastResult.matches){
+        for(const m of lastResult.matches){
+          const p=rowPos(m.row); // voxel
+          const nx=p[0]*UJ_RX,ny=p[1]*UJ_RY,nz=p[2]*UJ_RZ;
+          if(nx>=boxNM.xmin&&nx<=boxNM.xmax&&ny>=boxNM.ymin&&ny<=boxNM.ymax&&nz>=boxNM.zmin&&nz<=boxNM.zmax){
+            const rid=rowRootId(m.row);
+            if(rid)rootIds.push(String(rid));
+          }
+        }
+      }
+      const boxIdx=Array.from(document.querySelectorAll("#regionBoxes .rbox-row")).indexOf(row);
+      const boxLabel="Box "+(boxIdx>=0?boxIdx+1:1);
+      UJ.colab.downloadNotebook({
+        datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
+        emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,segCaveAuth:UJ.cfg.em.segCaveAuth,
+        boxNM:boxNM,boxLabel:boxLabel,rootIds:rootIds
+      });
+    });
     /* Paste-split for each corner's x field, matching the main coordinate field's behaviour:
        paste "x, y, z" into either corner's first field and it auto-splits into that corner's
        three inputs. */
