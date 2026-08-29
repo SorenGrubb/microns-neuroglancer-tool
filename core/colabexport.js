@@ -182,49 +182,43 @@ def nm_box_to_voxels(cv, box_nm):
     ));
 
     if (wantEM || wantSeg) {
-      cells.push(mdCell(`## Memory-budget guard\n\nA Colab kernel that dies with **no Python traceback** (just a "restarting kernel" message) was killed for running out of RAM, not a code bug -- this estimates peak memory for a cutout BEFORE fetching it and raises a clear error instead, so a too-large box fails fast rather than mid-download. If you hit this, either shrink the box in the app, or regenerate the notebook with EM/segmentation unticked and download meshes only.\n\n**2026-08-29 recalibration:** the first version of this guard used one conservative 22 bytes/voxel figure for everything, borrowed from an unrelated heavier pipeline -- it rejected an EM box that almost certainly would have fit. EM here is a single uint8 fetch that's written straight to disk, so it gets its own, much lower estimate; segmentation keeps a high one since it holds a raw 64-bit array AND a remapped 32-bit array in memory at the same time. Neither number comes from a measured Colab run yet -- if this guard is still wrong in either direction for you, tell Søren so the defaults below can be corrected from real numbers instead of estimates.
+      cells.push(mdCell(`## Chunked processing (bounds memory regardless of box size)\n\nEM and segmentation are fetched and written one thin Z-slab at a time, not as a single whole-box array -- peak memory stays close to the size of ONE slab no matter how large the box is, so there's no box size this notebook has to refuse to even attempt.\n\n**History:** two earlier versions of this cell instead tried to predict whole-box peak memory with a single bytes-per-voxel figure and refuse to run if the estimate looked too large. The first estimate was borrowed from an unrelated pipeline and rejected an EM box that would likely have fit; a corrected estimate then rejected a segmentation box where the peak turned out to be roughly what was predicted after all -- there's no fixed bytes/voxel number that's both safe AND permissive for a box of unbounded size. Slab-wise processing sidesteps the question: only one slab is ever resident in memory, so the box's total size stops being a memory concern (it still affects runtime and output disk space).
 
-**Same day, 2nd fix:** \`avail_gb\` is read fresh each time \`check_budget\` runs, so if EM and segmentation are both ticked, the segmentation check sees whatever memory the EM step already used -- correct behaviour, not a bug, but only if the EM step actually frees its own array once it's saved. It didn't before; now it does (\`del\` + \`gc.collect()\` at the end of each cutout cell), so the segmentation check should see close to the full runtime memory again rather than whatever was left over from EM.`));
+`));
       cells.push(codeCell(
-`import psutil
+`BYTES_PER_VOXEL_EM  = 4    # single-channel uint8 -- used only to size EM's z-chunks below, never to reject a box
+BYTES_PER_VOXEL_SEG = 20   # 64-bit raw IDs held alongside a remapped 32-bit array -- used only to size segmentation's z-chunks
+CHUNK_BUDGET_GB = 1.5      # target peak memory for ONE z-chunk -- small and safe on any Colab runtime; lower this if
+                            # you still see memory trouble, raise it for fewer/larger (faster) chunks
 
-BYTES_PER_VOXEL_EM  = 4    # single-channel uint8 fetch + one moveaxis copy + one TIFF write buffer
-BYTES_PER_VOXEL_SEG = 20   # 64-bit raw IDs (8 B/voxel) AND a remapped 32-bit array (4 B/voxel) held
-                            # at once, plus np.unique/dict overhead -- kept close to the original
-                            # conservative figure since segmentation genuinely needs more headroom
-RAM_BUDGET_GB = 10          # a soft absolute ceiling regardless of runtime -- lower it yourself for
-                            # extra safety margin, or raise it if you know this runtime has more RAM
-
-def check_budget(shape, label, bytes_per_voxel):
-    n_vox = int(np.prod(shape))
-    est_gb = n_vox * bytes_per_voxel / 1e9
-    avail_gb = psutil.virtual_memory().available / 1e9
-    print(f"{label}: shape {tuple(shape)} = {n_vox:,} voxels, ~{est_gb:.2f} GB estimated peak, {avail_gb:.2f} GB available")
-    if est_gb > RAM_BUDGET_GB or est_gb > 0.75 * avail_gb:
-        raise MemoryError(
-            f"{label} cutout looks too large for this session (~{est_gb:.1f} GB estimated, "
-            f"{avail_gb:.1f} GB available). Shrink the bounding box in the app and regenerate "
-            f"this notebook, or raise RAM_BUDGET_GB / BYTES_PER_VOXEL_{label.upper()[:3]} above "
-            f"if you're confident this runtime can handle it."
-        )`
+def z_chunk_size(nx, ny, bytes_per_voxel):
+    plane_voxels = max(1, nx * ny)
+    return max(1, int(CHUNK_BUDGET_GB * 1e9 / (plane_voxels * bytes_per_voxel)))`
       ));
     }
 
     if (wantEM) {
-      cells.push(mdCell(`## EM cutout\n\nSaved as a multi-page TIFF stack (\`em_cutout.tif\`) -- opens directly in FIJI/ImageJ.${wantSeg||wantMeshes ? " Frees its own working array once saved, so it doesn't eat into the budget for the segmentation/mesh cells that follow in this same session." : ""}`));
+      cells.push(mdCell(`## EM cutout\n\nSaved as a multi-page TIFF stack (\`em_cutout.tif\`) -- opens directly in FIJI/ImageJ. Written one z-chunk at a time (see the chunking cell above).`));
       cells.push(codeCell(
 `import gc
 import tifffile
 
 cv_em = CloudVolume(EM_SOURCE, use_https=True, mip=0, fill_missing=True)
 lo, hi = nm_box_to_voxels(cv_em, BOX_NM)
-check_budget(hi - lo, "EM", BYTES_PER_VOXEL_EM)
-em_vol = np.asarray(cv_em[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]])[..., 0]  # drop the trailing channel axis
-em_vol = np.moveaxis(em_vol, 2, 0)  # cloud-volume gives (x, y, z) -- TIFF stacks want (z, y, x)
-tifffile.imwrite("em_cutout.tif", em_vol)
-print("Saved em_cutout.tif", em_vol.shape, em_vol.dtype)
-del cv_em, em_vol  # already on disk -- free it now rather than let it count against the next cutout's budget check
-gc.collect()`
+nx, ny, nz = (hi - lo).tolist()
+zc = z_chunk_size(nx, ny, BYTES_PER_VOXEL_EM)
+print(f"EM: {nx}x{ny}x{nz} voxels, writing in z-chunks of up to {zc} ({-(-nz // zc)} chunk(s))")
+with tifffile.TiffWriter("em_cutout.tif") as tw:
+    for z0 in range(lo[2], hi[2], zc):
+        z1 = min(z0 + zc, hi[2])
+        chunk = np.asarray(cv_em[lo[0]:hi[0], lo[1]:hi[1], z0:z1])[..., 0]  # (x, y, z-chunk)
+        chunk = np.moveaxis(chunk, 2, 0)  # -> (z-chunk, x, y), matching the final stack's page order
+        for page in chunk:
+            tw.write(page, contiguous=True)
+        del chunk
+del cv_em
+gc.collect()
+print("Saved em_cutout.tif", (nz, nx, ny))`
       ));
     }
 
@@ -249,7 +243,7 @@ else:
     }
 
     if (wantSeg) {
-      cells.push(mdCell(`## Segmentation cutout\n\nSegment IDs here are large 64-bit values FIJI/ImageJ can't display as a label image, so the saved TIFF (\`segmentation_cutout.tif\`) uses small sequential label numbers instead -- \`segmentation_label_lookup.csv\` maps each label back to its real root ID.${opts.segCaveAuth ? " Uses the CAVE token from the cell above." : ""}`));
+      cells.push(mdCell(`## Segmentation cutout\n\nSegment IDs here are large 64-bit values FIJI/ImageJ can't display as a label image, so the saved TIFF (\`segmentation_cutout.tif\`) uses small sequential label numbers instead -- \`segmentation_label_lookup.csv\` maps each label back to its real root ID. Two passes over the box, both chunked (see the chunking cell above): the first just collects every distinct segment ID so the label numbers are consistent across the whole box (a per-chunk-only numbering would give the same cell a different label in different chunks); the second remaps and writes.${opts.segCaveAuth ? " Uses the CAVE token from the cell above." : ""}`));
       cells.push(codeCell(
 `import csv
 import gc
@@ -257,22 +251,38 @@ import tifffile
 
 cv_seg = CloudVolume(SEG_SOURCE, use_https=True, mip=0, fill_missing=True${opts.segCaveAuth ? `, secrets={"token": CAVE_TOKEN} if CAVE_TOKEN else None` : ""})
 lo_s, hi_s = nm_box_to_voxels(cv_seg, BOX_NM)
-check_budget(hi_s - lo_s, "Segmentation", BYTES_PER_VOXEL_SEG)
-seg_vol = np.asarray(cv_seg[lo_s[0]:hi_s[0], lo_s[1]:hi_s[1], lo_s[2]:hi_s[2]])[..., 0]
-seg_vol = np.moveaxis(seg_vol, 2, 0)
+nx_s, ny_s, nz_s = (hi_s - lo_s).tolist()
+zc_s = z_chunk_size(nx_s, ny_s, BYTES_PER_VOXEL_SEG)
+print(f"Segmentation: {nx_s}x{ny_s}x{nz_s} voxels, processing in z-chunks of up to {zc_s} ({-(-nz_s // zc_s)} chunk(s))")
 
-uniq = np.unique(seg_vol)
-remap = {v: i for i, v in enumerate(uniq)}  # 0 (background) maps to 0 if present, since np.unique is sorted
-seg_small = np.vectorize(remap.get)(seg_vol).astype(np.uint32)
-tifffile.imwrite("segmentation_cutout.tif", seg_small)
+# Pass 1: every distinct segment ID touching this box, one z-chunk at a time.
+uniq_ids = set()
+for z0 in range(lo_s[2], hi_s[2], zc_s):
+    z1 = min(z0 + zc_s, hi_s[2])
+    chunk = np.asarray(cv_seg[lo_s[0]:hi_s[0], lo_s[1]:hi_s[1], z0:z1])[..., 0]
+    uniq_ids.update(np.unique(chunk).tolist())
+    del chunk
+uniq = np.array(sorted(uniq_ids), dtype=np.uint64)
+remap = {int(v): i for i, v in enumerate(uniq)}  # 0 (background) maps to 0 if present, since uniq is sorted
+
+# Pass 2: remap each chunk against the GLOBAL id list above, and write.
+with tifffile.TiffWriter("segmentation_cutout.tif") as tw:
+    for z0 in range(lo_s[2], hi_s[2], zc_s):
+        z1 = min(z0 + zc_s, hi_s[2])
+        chunk = np.asarray(cv_seg[lo_s[0]:hi_s[0], lo_s[1]:hi_s[1], z0:z1])[..., 0]
+        chunk = np.moveaxis(chunk, 2, 0)
+        small = np.searchsorted(uniq, chunk).astype(np.uint32)
+        for page in small:
+            tw.write(page, contiguous=True)
+        del chunk, small
+
 with open("segmentation_label_lookup.csv", "w", newline="") as f:
     w = csv.writer(f)
     w.writerow(["label", "root_id"])
     for v, i in remap.items():
         w.writerow([i, int(v)])
-print("Saved segmentation_cutout.tif", seg_small.shape, "and segmentation_label_lookup.csv (", len(uniq), "distinct IDs incl. background)")
-del seg_vol, seg_small, uniq  # both already on disk -- free before the mesh cell below, which only needs cv_seg itself
-gc.collect()`
+gc.collect()
+print("Saved segmentation_cutout.tif", (nz_s, nx_s, ny_s), "and segmentation_label_lookup.csv (", len(uniq), "distinct IDs incl. background)")`
       ));
     } else if (wantMeshes) {
       cells.push(mdCell(`## Segmentation volume (meshes only)\n\nSegmentation itself wasn't ticked for download, but meshes are read through the same segmentation volume's built-in mesh support, so it still needs to be opened here -- no voxel cutout happens in this cell.${opts.segCaveAuth ? " Uses the CAVE token from the cell above." : ""}`));
