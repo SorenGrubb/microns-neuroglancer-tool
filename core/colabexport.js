@@ -186,9 +186,7 @@ def nm_box_to_voxels(cv, box_nm):
     ));
 
     if (wantEM || wantSeg) {
-      cells.push(mdCell(`## Chunked processing (bounds memory regardless of box size)\n\nEM and segmentation are fetched and written one thin Z-slab at a time, not as a single whole-box array -- peak memory stays close to the size of ONE slab no matter how large the box is, so there's no box size this notebook has to refuse to even attempt.\n\n**History:** two earlier versions of this cell instead tried to predict whole-box peak memory with a single bytes-per-voxel figure and refuse to run if the estimate looked too large. The first estimate was borrowed from an unrelated pipeline and rejected an EM box that would likely have fit; a corrected estimate then rejected a segmentation box where the peak turned out to be roughly what was predicted after all -- there's no fixed bytes/voxel number that's both safe AND permissive for a box of unbounded size. Slab-wise processing sidesteps the question: only one slab is ever resident in memory, so the box's total size stops being a memory concern (it still affects runtime and output disk space).
-
-`));
+      cells.push(mdCell(`## Chunked processing (bounds memory regardless of box size)\n\nEM and segmentation are fetched and written one thin Z-slab at a time, not as a single whole-box array -- peak memory stays close to the size of ONE slab no matter how large the box is, so there's no box size this notebook has to refuse to even attempt.\n\n**History:** two earlier versions of this cell instead tried to predict whole-box peak memory with a single bytes-per-voxel figure and refuse to run if the estimate looked too large. The first estimate was borrowed from an unrelated pipeline and rejected an EM box that would likely have fit; a corrected estimate then rejected a segmentation box where the peak turned out to be roughly what was predicted after all -- there's no fixed bytes/voxel number that's both safe AND permissive for a box of unbounded size. Slab-wise processing sidesteps the question: only one slab is ever resident in memory, so the box's total size stops being a memory concern (it still affects runtime and output disk space).\n\n**2026-08-29, separate issue from RAM:** a big box can also blow past classic TIFF's OWN 4 GB-per-file ceiling (\`'I' format requires 0 <= number <= 4294967295\` -- a plain 32-bit byte offset, unrelated to memory) once the output file itself grows past ~4 GB, regardless of how carefully the chunking above avoids an out-of-memory crash. Every TIFF this notebook writes uses \`bigtiff=True\` for exactly this reason -- BigTIFF uses 64-bit offsets, is written and read the same way, and FIJI/ImageJ opens it exactly like any other .tif, so there's no reason not to use it everywhere rather than only for boxes known in advance to need it.`));
       cells.push(codeCell(
 `BYTES_PER_VOXEL_EM  = 4    # single-channel uint8 -- used only to size EM's z-chunks below, never to reject a box
 BYTES_PER_VOXEL_SEG = 20   # 64-bit raw IDs held alongside a remapped 32-bit array -- used only to size segmentation's z-chunks
@@ -211,8 +209,8 @@ cv_em = CloudVolume(EM_SOURCE, use_https=True, mip=0, fill_missing=True)
 lo, hi = nm_box_to_voxels(cv_em, BOX_NM)
 nx, ny, nz = (hi - lo).tolist()
 zc = z_chunk_size(nx, ny, BYTES_PER_VOXEL_EM)
-print(f"EM: {nx}x{ny}x{nz} voxels, writing in z-chunks of up to {zc} ({-(-nz // zc)} chunk(s))")
-with tifffile.TiffWriter("em_cutout.tif") as tw:
+print(f"EM: {nx}x{ny}x{nz} voxels, writing in z-chunks of up to {zc} ({-(-nz // zc)} chunk(s)), ~{nx*ny*nz/1e9:.2f} GB uncompressed on disk")
+with tifffile.TiffWriter("em_cutout.tif", bigtiff=True) as tw:
     for z0 in range(lo[2], hi[2], zc):
         z1 = min(z0 + zc, hi[2])
         chunk = np.asarray(cv_em[lo[0]:hi[0], lo[1]:hi[1], z0:z1])[..., 0]  # (x, y, z-chunk)
@@ -244,7 +242,7 @@ except ImportError:
     _method = "global histogram equalization (OpenCV not available in this runtime -- CLAHE needs it; this numpy fallback has no extra dependency)"
 print("EM contrast enhancement:", _method)
 
-with tifffile.TiffFile("em_cutout.tif") as em_tf, tifffile.TiffWriter("em_cutout_enhanced.tif") as tw:
+with tifffile.TiffFile("em_cutout.tif") as em_tf, tifffile.TiffWriter("em_cutout_enhanced.tif", bigtiff=True) as tw:
     for p in range(len(em_tf.pages)):
         page = em_tf.pages[p].asarray()
         tw.write(_enhance(page), contiguous=True)
@@ -295,9 +293,10 @@ for z0 in range(lo_s[2], hi_s[2], zc_s):
     del chunk
 uniq = np.array(sorted(uniq_ids), dtype=np.uint64)
 remap = {int(v): i for i, v in enumerate(uniq)}  # 0 (background) maps to 0 if present, since uniq is sorted
+print(f"Segmentation labels: ~{nx_s*ny_s*nz_s*4/1e9:.2f} GB uncompressed on disk (uint32 labels)")
 
 # Pass 2: remap each chunk against the GLOBAL id list above, and write.
-with tifffile.TiffWriter("segmentation_cutout.tif") as tw:
+with tifffile.TiffWriter("segmentation_cutout.tif", bigtiff=True) as tw:
     for z0 in range(lo_s[2], hi_s[2], zc_s):
         z1 = min(z0 + zc_s, hi_s[2])
         chunk = np.asarray(cv_seg[lo_s[0]:hi_s[0], lo_s[1]:hi_s[1], z0:z1])[..., 0]
@@ -360,7 +359,7 @@ def _nn_resize(arr, target_shape):
     return arr[np.ix_(*idx)]
 
 with tifffile.TiffFile("em_cutout_enhanced.tif") as em_tf, tifffile.TiffFile("segmentation_cutout.tif") as seg_tf, \\
-     tifffile.TiffWriter("overlay_em_segmentation.tif") as tw:
+     tifffile.TiffWriter("overlay_em_segmentation.tif", bigtiff=True) as tw:
     n_pages = len(em_tf.pages)
     if len(seg_tf.pages) != n_pages:
         print(f"EM has {n_pages} z-slices, segmentation has {len(seg_tf.pages)} -- using the smaller of the two so every written page has both.")
