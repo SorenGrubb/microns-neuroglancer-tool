@@ -128,6 +128,8 @@ print("Connection-pool patch applied (pool size", _POOL, ").")`;
     if (wantSeg) parts.push("segmentation");
     if (wantMeshes) parts.push(`meshes for ${opts.rootIds.length} matched cell(s)`);
     const partsText = parts.length ? parts.join(", ").replace(/, ([^,]*)$/, " and $1") : "nothing (no format was selected -- regenerate with at least one ticked)";
+    const emEnhanceNote = wantEM ? " EM is saved twice: `em_cutout.tif` (raw, untouched intensities) and `em_cutout_enhanced.tif` (contrast-enhanced, CLAHE if available)." : "";
+    const overlayNote = (wantEM && wantSeg) ? " Since both EM and segmentation are included, a further file -- `overlay_em_segmentation.tif` -- combines them into one ready-to-view colored overlay (built from the enhanced EM), no FIJI steps needed." : "";
 
     cells.push(mdCell(
 `# ${opts.datasetLabel} — region download
@@ -139,7 +141,7 @@ Bounding box (physical nanometres):
 - Y: ${box.ymin.toFixed(0)} to ${box.ymax.toFixed(0)} (${dims[1].toFixed(0)} nm)
 - Z: ${box.zmin.toFixed(0)} to ${box.zmax.toFixed(0)} (${dims[2].toFixed(0)} nm)
 
-This downloads ${partsText} for this box. Run every cell in order (**Runtime → Run all**). The last cell zips whatever was fetched and offers it as a download.
+This downloads ${partsText} for this box.${emEnhanceNote}${overlayNote} Run every cell in order (**Runtime → Run all**). The last cell zips whatever was fetched and offers it as a download.
 
 EM and segmentation are decoded here with the Python \`cloud-volume\` library rather than in the browser -- this dataset's segmentation is stored in a compact format Neuroglancer decodes internally but that has no standalone JavaScript decoder, so a browser-side cutout isn't practical for segmentation.${opts.segCaveAuth && (wantSeg||wantMeshes) ? "\n\n**This dataset's segmentation requires your own CAVE access** -- EM downloads without any login, but the segmentation and mesh cells need a CAVE token (see the cell below titled \"CAVE token\")." : ""}`
     ));
@@ -220,6 +222,33 @@ del cv_em
 gc.collect()
 print("Saved em_cutout.tif", (nz, nx, ny))`
       ));
+      cells.push(mdCell(`## EM contrast enhancement\n\n2026-08-29, Søren: "the contrast was too low in the EM... enhance contrast to match histogram or if possible a CLAHE." \`em_cutout.tif\` above is left exactly as fetched -- untouched raw intensities, in case you want to do anything quantitative with the actual pixel values. This cell makes a SEPARATE, better-looking copy, \`em_cutout_enhanced.tif\`: CLAHE (contrast-limited adaptive histogram equalization, via OpenCV) if it's available in this runtime, since it adapts per local region rather than stretching the whole slice by one global curve; a plain global histogram-equalization fallback (pure numpy, no extra dependency) if OpenCV isn't importable for some reason. Either way it's applied per z-slice, in the same chunked/lazy-page style as the rest of this notebook.`));
+      cells.push(codeCell(
+`try:
+    import cv2
+    _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    def _enhance(page):
+        return _clahe.apply(page)
+    _method = "CLAHE (OpenCV, clipLimit=2.0, tileGridSize=8x8)"
+except ImportError:
+    def _enhance(page):
+        hist, _ = np.histogram(page.ravel(), bins=256, range=(0, 256))
+        cdf = hist.cumsum()
+        nz = cdf[cdf > 0]
+        cdf_min = int(nz.min()) if nz.size else 0
+        denom = max(page.size - cdf_min, 1)
+        lut = np.clip(np.round((cdf - cdf_min) / denom * 255), 0, 255).astype(np.uint8)
+        return lut[page]
+    _method = "global histogram equalization (OpenCV not available in this runtime -- CLAHE needs it; this numpy fallback has no extra dependency)"
+print("EM contrast enhancement:", _method)
+
+with tifffile.TiffFile("em_cutout.tif") as em_tf, tifffile.TiffWriter("em_cutout_enhanced.tif") as tw:
+    for p in range(len(em_tf.pages)):
+        page = em_tf.pages[p].asarray()
+        tw.write(_enhance(page), contiguous=True)
+        del page
+print("Saved em_cutout_enhanced.tif")`
+      ));
     }
 
     if (opts.segCaveAuth && (wantSeg || wantMeshes)) {
@@ -291,6 +320,52 @@ print("Saved segmentation_cutout.tif", (nz_s, nx_s, ny_s), "and segmentation_lab
       ));
     }
 
+    if (wantEM && wantSeg) {
+      cells.push(mdCell(`## Combined overlay (viewable with no extra steps)\n\n2026-08-29, Søren: "make it even easier for the user" -- rather than making everyone open both TIFFs in FIJI and combine them by hand (glasbey LUT + Image > Overlay > Add Image), this cell does it here and saves \`overlay_em_segmentation.tif\`: EM as the base image with each segment colored on top at partial opacity, using a maximally-distinct-hue palette applied to the same small label numbers as \`segmentation_cutout.tif\` (background/label 0 stays fully transparent, so unsegmented EM is untouched). Open it directly -- no LUT or overlay step needed. Uses \`em_cutout_enhanced.tif\` (the contrast-enhanced copy from the cell above) as its EM base rather than the raw cutout, since this file is a purely visual convenience product anyway. \`em_cutout.tif\`, \`em_cutout_enhanced.tif\`, \`segmentation_cutout.tif\`, and the label lookup CSV are still saved too, for anyone who wants to build their own overlay differently (a different opacity, a different palette, or working with the raw label values instead of colors).\n\nBuilt by re-reading the TIFFs already saved above, one z-page at a time (see the chunking cell) -- no extra network fetching. If EM and segmentation ever turn out to have different pixel grids for the same box (their mip-0 resolutions aren't assumed to match anywhere else in this notebook either), segmentation is nearest-neighbour resampled onto EM's grid per page before blending, since nearest-neighbour is the only resampling that doesn't invent meaningless in-between label values.`));
+      cells.push(codeCell(
+`import colorsys
+
+OVERLAY_OPACITY = 0.45  # 0 (invisible) .. 1 (solid) -- how strongly segmentation colors show over EM; tweak and re-run this cell alone to try a different value without re-fetching anything
+
+def _label_rgb(label):
+    if label == 0:
+        return (0, 0, 0)
+    hue = (label * 0.6180339887) % 1.0  # golden-ratio hue step -- adjacent labels land far apart on the color wheel, same idea as FIJI's glasbey LUT
+    r, g, b = colorsys.hsv_to_rgb(hue, 0.85, 1.0)
+    return (int(r * 255), int(g * 255), int(b * 255))
+
+n_labels = int(uniq.size)
+label_lut = np.zeros((n_labels, 3), dtype=np.uint8)
+for _i in range(n_labels):
+    label_lut[_i] = _label_rgb(_i)
+
+def _nn_resize(arr, target_shape):
+    # Nearest-neighbour resample -- safe for label data (no averaging across distinct IDs into
+    # meaningless values), and correct whether or not EM/segmentation share a voxel grid.
+    idx = [np.clip((np.arange(t) * s / t).astype(int), 0, s - 1) for s, t in zip(arr.shape, target_shape)]
+    return arr[np.ix_(*idx)]
+
+with tifffile.TiffFile("em_cutout_enhanced.tif") as em_tf, tifffile.TiffFile("segmentation_cutout.tif") as seg_tf, \\
+     tifffile.TiffWriter("overlay_em_segmentation.tif") as tw:
+    n_pages = len(em_tf.pages)
+    if len(seg_tf.pages) != n_pages:
+        print(f"EM has {n_pages} z-slices, segmentation has {len(seg_tf.pages)} -- using the smaller of the two so every written page has both.")
+        n_pages = min(n_pages, len(seg_tf.pages))
+    for p in range(n_pages):
+        em_page = em_tf.pages[p].asarray()
+        seg_page = seg_tf.pages[p].asarray()
+        if seg_page.shape != em_page.shape:
+            seg_page = _nn_resize(seg_page, em_page.shape)
+        em_rgb = np.repeat(em_page[..., None], 3, axis=2).astype(np.float32)
+        seg_rgb = label_lut[seg_page].astype(np.float32)
+        alpha = np.where(seg_page == 0, 0.0, OVERLAY_OPACITY)[..., None]
+        blended = (em_rgb * (1 - alpha) + seg_rgb * alpha).round().astype(np.uint8)
+        tw.write(blended, photometric="rgb", contiguous=True)
+        del em_page, seg_page, em_rgb, seg_rgb, alpha, blended
+print("Saved overlay_em_segmentation.tif --", n_pages, "z-slices, opacity", OVERLAY_OPACITY, "-- open directly in FIJI/ImageJ, no LUT or overlay step needed.")`
+      ));
+    }
+
     if (wantMeshes) {
       cells.push(mdCell(`## Meshes for matched cells\n\nOne \`.obj\` file per root ID in \`MESH_ROOT_IDS\` (defined above), via the same segmentation volume's built-in mesh support -- cloud-volume finds and decodes the mesh directory from the segmentation's own info file, so no separate mesh path is needed. IDs are converted to real Python integers before fetching (the app keeps them as strings in JavaScript to avoid float-precision loss, but cloud-volume's shard lookups need actual ints), and a batch fetch that fails outright falls back to fetching one ID at a time so a single bad or missing segment can't block every other mesh in the box.`));
       cells.push(codeCell(
@@ -340,7 +415,7 @@ import zipfile
 from google.colab import files
 
 with zipfile.ZipFile("region_download.zip", "w") as zf:
-    for fn in ("em_cutout.tif", "segmentation_cutout.tif", "segmentation_label_lookup.csv"):
+    for fn in ("em_cutout.tif", "em_cutout_enhanced.tif", "segmentation_cutout.tif", "segmentation_label_lookup.csv", "overlay_em_segmentation.tif"):
         if os.path.exists(fn):
             zf.write(fn)
     if os.path.isdir("meshes"):
