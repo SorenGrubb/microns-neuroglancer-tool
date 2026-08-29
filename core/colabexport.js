@@ -292,7 +292,7 @@ print("Saved segmentation_cutout.tif", (nz_s, nx_s, ny_s), "and segmentation_lab
     }
 
     if (wantMeshes) {
-      cells.push(mdCell(`## Meshes for matched cells\n\nOne \`.obj\` file per root ID in \`MESH_ROOT_IDS\` (defined above), via the same segmentation volume's built-in mesh support -- cloud-volume finds and decodes the mesh directory from the segmentation's own info file, so no separate mesh path is needed.`));
+      cells.push(mdCell(`## Meshes for matched cells\n\nOne \`.obj\` file per root ID in \`MESH_ROOT_IDS\` (defined above), via the same segmentation volume's built-in mesh support -- cloud-volume finds and decodes the mesh directory from the segmentation's own info file, so no separate mesh path is needed. IDs are converted to real Python integers before fetching (the app keeps them as strings in JavaScript to avoid float-precision loss, but cloud-volume's shard lookups need actual ints), and a batch fetch that fails outright falls back to fetching one ID at a time so a single bad or missing segment can't block every other mesh in the box.`));
       cells.push(codeCell(
 `import os
 
@@ -302,7 +302,23 @@ if not MESH_ROOT_IDS:
           "generated. Run Filter and show with this box active in the app, then regenerate this "
           "notebook, if you want mesh downloads.")
 else:
-    meshes = cv_seg.mesh.get(MESH_ROOT_IDS)
+    # MESH_ROOT_IDS is a list of STRINGS -- the app keeps 64-bit segment IDs as strings in
+    # JavaScript to avoid float-precision loss (IDs here can exceed 2**53), but cloud-volume
+    # expects real integers for its shard/manifest lookups. Python ints are arbitrary precision,
+    # so converting here is safe and doesn't lose anything the JS side was protecting against.
+    mesh_ids = [int(rid) for rid in MESH_ROOT_IDS]
+    try:
+        meshes = cv_seg.mesh.get(mesh_ids)
+    except Exception as e:
+        # A single bad/missing segment can raise from inside cloud-volume's shard lookup and take
+        # the whole batch down with it -- fall back to one ID at a time so the rest still succeed.
+        print(f"Batch mesh fetch failed ({type(e).__name__}: {e}) -- retrying one ID at a time so a single problem segment doesn't block the rest.")
+        meshes = {}
+        for rid in mesh_ids:
+            try:
+                meshes.update(cv_seg.mesh.get([rid]))
+            except Exception as e2:
+                print(f"  skipped {rid} -- {type(e2).__name__}: {e2}")
     for rid, mesh in meshes.items():
         path = f"meshes/{rid}.obj"
         with open(path, "w") as f:
@@ -310,7 +326,10 @@ else:
                 f.write(f"v {v[0]} {v[1]} {v[2]}\\n")
             for face in mesh.faces:
                 f.write(f"f {face[0]+1} {face[1]+1} {face[2]+1}\\n")  # OBJ vertex indices are 1-based
-        print("Saved", path, "--", len(mesh.vertices), "vertices,", len(mesh.faces), "faces")`
+        print("Saved", path, "--", len(mesh.vertices), "vertices,", len(mesh.faces), "faces")
+    missing = sorted(set(mesh_ids) - set(meshes.keys()))
+    if missing:
+        print(f"No mesh returned for {len(missing)} of {len(mesh_ids)} ID(s) -- these segments may not have a mesh, or may not exist in this segmentation:", missing)`
       ));
     }
 
