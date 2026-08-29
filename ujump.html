@@ -10603,12 +10603,17 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       +'<div class="coord"><input type="text" class="ry2" inputmode="decimal" placeholder="y2"></div>'
       +'<div class="coord"><input type="text" class="rz2" inputmode="decimal" placeholder="z2"></div>'
       +'</div>'
+      +'<div class="row" style="margin-top:6px;gap:10px;align-items:center;flex-wrap:wrap">'
+      +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" class="colab-em" checked>EM</label>'
+      +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" class="colab-seg" checked>Segmentation</label>'
+      +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" class="colab-meshes" checked>Meshes</label>'
+      +'</div>'
       +'<div class="row" style="margin-top:6px">'
       +'<button type="button" class="rbox-colab" style="font-size:11px;padding:3px 8px" '
-      +'title="Generates a Colab notebook (.ipynb) that downloads the EM imagery, segmentation, and meshes for any cells matched inside THIS box -- nothing is downloaded here, the notebook does the actual fetching when you run it in Colab.">'
+      +'title="Generates a Colab notebook (.ipynb) that downloads whichever of EM imagery, segmentation, and meshes are ticked above, for cells matched inside THIS box -- nothing is downloaded here, the notebook does the actual fetching when you run it in Colab.">'
       +'&#11015; Colab notebook for this box</button>'
       +'</div>';
-    row.querySelectorAll("input").forEach(el=>el.addEventListener("input",drawRegionViz));
+    row.querySelectorAll('input[type="text"]').forEach(el=>el.addEventListener("input",drawRegionViz));
     /* 2026-08-29, Søren: "give the user a colab code they can upload to colab and make it download
        the cutout... available when ticking Limit to region(s)... If more than one bounding box,
        this should be available to each of the bounding boxes." No extra checkbox-gating needed
@@ -10618,18 +10623,27 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
        lastResult (the current Filter-and-show query, in the same closure scope as this function --
        see its own "let lastResult" a few hundred lines up) for matches whose nucleus position
        falls inside THIS specific box, so a multi-box filter's meshes don't all pile into every
-       box's notebook. If no filter has been run yet, or nobody matched inside this exact box,
-       MESH_ROOT_IDS in the generated notebook is simply empty -- the notebook's own mesh cell
-       explains that rather than erroring. */
+       box's notebook.
+       2026-08-29 (2nd round), Søren: "we need to be able to specify whether it should download EM
+       and/or segmentation, and/or 3D meshes" -- the three checkboxes above, all default-checked,
+       thread straight into core/colabexport.js's opts.include. Also: "we should make sure that it
+       downloads the filtered cells, so the download from colab should be after the preview
+       matches" -- meshes now REQUIRE lastResult to already exist (i.e. Filter-and-show has been
+       run at least once since the page loaded or the box was last edited) rather than silently
+       shipping an empty MESH_ROOT_IDS; EM/segmentation don't depend on the filter at all (they're
+       a pure spatial cutout of the box) so they're never gated on it. */
     row.querySelector(".rbox-colab").addEventListener("click",()=>{
       const gv=cls=>{const el=row.querySelector("."+cls);return el?parseFloat(el.value):NaN;};
       const x1=gv("rx1"),y1=gv("ry1"),z1=gv("rz1"),x2=gv("rx2"),y2=gv("ry2"),z2=gv("rz2");
       if([x1,y1,z1,x2,y2,z2].some(v=>isNaN(v))){alert("Fill in both corners of this box first.");return;}
       if(!UJ.cfg.em||!UJ.colab){alert("This tool doesn't have a region-download notebook configured yet.");return;}
+      const wantEM=row.querySelector(".colab-em").checked, wantSeg=row.querySelector(".colab-seg").checked, wantMeshes=row.querySelector(".colab-meshes").checked;
+      if(!wantEM&&!wantSeg&&!wantMeshes){alert("Tick at least one of EM, Segmentation, or Meshes.");return;}
+      if(wantMeshes&&!(lastResult&&lastResult.matches)){alert('Meshes need a current "Filter and show" result so the notebook matches what you\'re previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again -- or untick Meshes to download EM/segmentation only.');return;}
       const nx1=x1*UJ_RX,nx2=x2*UJ_RX,ny1=y1*UJ_RY,ny2=y2*UJ_RY,nz1=z1*UJ_RZ,nz2=z2*UJ_RZ;
       const boxNM={xmin:Math.min(nx1,nx2),xmax:Math.max(nx1,nx2),ymin:Math.min(ny1,ny2),ymax:Math.max(ny1,ny2),zmin:Math.min(nz1,nz2),zmax:Math.max(nz1,nz2)};
       const rootIds=[];
-      if(lastResult&&lastResult.matches){
+      if(wantMeshes&&lastResult&&lastResult.matches){
         for(const m of lastResult.matches){
           const p=rowPos(m.row); // voxel
           const nx=p[0]*UJ_RX,ny=p[1]*UJ_RY,nz=p[2]*UJ_RZ;
@@ -10644,7 +10658,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       UJ.colab.downloadNotebook({
         datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
         emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,
-        boxNM:boxNM,boxLabel:boxLabel,rootIds:rootIds
+        boxNM:boxNM,boxLabel:boxLabel,rootIds:rootIds,
+        include:{em:wantEM,seg:wantSeg,meshes:wantMeshes}
       });
     });
     /* Paste-split for each corner's x field, matching the main coordinate field's behaviour:
