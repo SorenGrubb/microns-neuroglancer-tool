@@ -201,11 +201,17 @@
 
 <script>window.WJUMP_LIVE = true;</script>
 <script>/* ── ωJump configuration ────────────────────────────────────────────────────────────────────
-   Twenty-nine datasets: fifteen Janelia OpenOrganelle / COSEM FIB-SEM volumes, and fourteen
-   streamed from WEBKNOSSOS across five publications. The roster is expected to GROW -- and the
-   reason to expect it is Søren, 2026-08-25: "in the future I hope to add more smaller
-   datasets from different tissues". So the dataset list is DATA, read by the page and by the
-   build script; adding a tissue is a row here plus a rebuild, never a change to the logic.
+   Forty-two datasets, forty-one of them enabled: fifteen Janelia OpenOrganelle / COSEM FIB-SEM
+   volumes, and twenty-six streamed from WEBKNOSSOS by eleven different labs. The roster is
+   expected to GROW -- and the reason to expect it is Søren, 2026-08-25: "in the future I hope to
+   add more smaller datasets from different tissues". So the dataset list is DATA, read by the
+   page and by the build script; adding a tissue is a row here plus a rebuild, never a change to
+   the logic.
+
+   COUNTS IN THIS COMMENT GO STALE. They have twice: it said "twenty-nine ... fourteen" while the
+   roster was 42/26. Nothing reads them, so nothing catches them. The live numbers are whatever
+   UJ.cfg.datasets holds; wjumpcheck.js and wjcardcheck.js compute from the array, never from
+   prose, and that is the only place a count should be trusted.
 
    WHAT MAKES THIS TOOL DIFFERENT FROM THE OTHER FIVE. There is no nucleus table. None of these
    volumes has a published soma list or any cell-type label, and no detector is being built --
@@ -216,8 +222,12 @@
 window.UJ = window.UJ || {};
 UJ.cfg = { id: "wjump", label: "OpenOrganelle — Janelia FIB-SEM" };
 
-/* Every source is public S3, no account, no token. CC-BY-4.0 -- attribution required, and a
-   DIFFERENT instrument from λJump's ODC-By. Do not paraphrase either as the other. */
+/* THE OPENORGANELLE FALLBACK, not the roster's terms. This block describes the fifteen jrc_*
+   rows only -- public S3, no account, no token, CC-BY-4.0, attribution required, and a DIFFERENT
+   instrument from λJump's ODC-By; do not paraphrase either as the other. The other twenty-six
+   rows carry their own provider object and most of them state NO reuse licence at all (23 of the
+   41 enabled, as of 2026-08-30). Anything that reads this block for a whole-roster licence is
+   wrong: use d.provider || UJ.cfg.dataset per dataset, which is what the page does. */
 UJ.cfg.dataset = {
   name: "OpenOrganelle (COSEM / CellMap)",
   licence: "CC-BY-4.0",
@@ -360,7 +370,7 @@ UJ.cfg.datasets = [
   { id:"jrc_mus-pacinian-corpuscle", tissue:"Pacinian corpuscle", species:"mouse",
     shape:[48576,10496,9728],  res_nm:6, tier:"inf", enabled:true,
     extraLayers:[{ name:"Ab_RA", type:"image", path:"recon-1/labels/inference/Ab_RA" }] },
-  { id:"jrc_mus-kidney-2", tissue:"kidney", species:"mouse",
+  { id:"jrc_mus-kidney-2", tissue:"kidney (kidney-2)", species:"mouse",
     shape:[13817,12683,12874], res_nm:8, tier:"inf", enabled:true,
     /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
        kidney (216 boxes): signal sits in 91-185 of a 67-209 data range. Without an
@@ -396,13 +406,13 @@ UJ.cfg.datasets = [
        heart, zebrafish (1224 boxes): signal sits in 16-148 of a 0-181 data range. Without an
        em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
     em_range:[16,148] },
-  { id:"jrc_mus-liver-zon-1", tissue:"liver (zonation)", species:"mouse",
+  { id:"jrc_mus-liver-zon-1", tissue:"liver (zonation, zon-1)", species:"mouse",
     shape:[49645,21451,23601], res_nm:8, tier:"gt",  enabled:true,
     /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
        liver zonation (1800 boxes): signal sits in 17-130 of a 0-158 data range. Without an
        em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
     em_range:[17,130] },
-  { id:"jrc_mus-liver-zon-2", tissue:"liver (zonation)", species:"mouse",
+  { id:"jrc_mus-liver-zon-2", tissue:"liver (zonation, zon-2)", species:"mouse",
     shape:[53336,19466,26250], res_nm:8, tier:"gt",  enabled:true,
     /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
        liver zonation (1936 boxes): signal sits in 56-176 of a 26-206 data range. Without an
@@ -603,33 +613,40 @@ UJ.cfg.datasets = [
     source:"zarr://https://data-humerus.webknossos.org/data/zarr/5c090ece01000020258c0e5a/color",
     provider:PROV_WANNER },
 
-  /* ── held out, deliberately ────────────────────────────────────────────────────────────────
-     Three WEBKNOSSOS datasets Søren sent that ωJump cannot honestly offer yet.
+  /* ── the two MultiSEM human blocks ─────────────────────────────────────────────────────────
+     These are millimetre-scale surveys, and they were held out on SIZE, never on provenance:
+     both are attached to the Loomba 2022 WEBKNOSSOS publication record, same as the other human
+     STG rows here, and both carry PROV_LOOMBA unchanged.
 
-     THE TWO MultiSEM HUMAN BLOCKS are millimetre-scale surveys. At 20 µm they were hopeless --
-     32,400 and 26,460 boxes, each four times the rest of the roster, drawn as squares 5.9 and
-     3.3 px across: not a map, a grey wash.
-
-     The move to 40 µm (2026-08-30) changes that arithmetic by a factor of eight:
+     At 20 µm they were hopeless -- 32,400 and 26,460 boxes, each four times the rest of the
+     roster, drawn on the map as squares 5.9 and 3.3 px across: not a map, a grey wash. The move
+     to 40 µm (2026-08-30) divides that by eight:
         H5_10_270um_L23_NH_NJ   1437.7 × 1495.0 × 116.7 µm  ->  4,104 boxes, 11.8 px per box
         H5_10_270um_final_v1    1953.8 × 2691.1 ×  37.9 µm  ->  3,332 boxes,  6.5 px per box
-     The first now clears the 10 px floor and is about 1.4x the rest of the roster -- large, but
-     no longer absurd. The second is still under it. Neither is enabled here: the reason they were
-     held out has weakened, not vanished, and turning them on is Søren's call rather than a side
-     effect of a box-size change.
+     Søren turned both on (2026-08-30).
 
-     MOUSE A2 has no publication. It sits in the same 2022-06-21 upload batch as the Loomba
-     volumes and is named like them, but it is NOT attached to that paper's WEBKNOSSOS publication
-     record, and no other record claims it. Citing Loomba for it would be a guess printed under
-     somebody else's name. It needs one line from the lab, or from Søren, saying what it is. */
+     THE SECOND ONE IS STILL UNDER THE 10 px FLOOR and that is not fixed by enabling it. It is
+     37.9 µm deep -- ONE box thick in z -- and 1.95 × 2.69 mm wide, so its map is a single very
+     wide sheet: 49 × 68 boxes at 6.5 px each. It will be legible to click but the individual
+     boxes will be small. If that reads badly in use, the fix is a per-dataset map zoom, not a
+     smaller box: shrinking the box makes both numbers worse.
+
+     tier stays "em" for both: image only, no ground-truth organelle labels, so neither can
+     calibrate anybody's organelle skill.
+
+     MOUSE A2, below, is still held out, and on the other objection entirely. It has no
+     publication. It sits in the same 2022-06-21 upload batch as the Loomba volumes and is named
+     like them, but it is NOT attached to that paper's WEBKNOSSOS publication record, and no other
+     record claims it. Citing Loomba for it would be a guess printed under somebody else's name.
+     It needs one line from the lab, or from Søren, saying what it is. */
   { id:"wk-h5-l23-msem", tissue:"cortex L2/3 (STG), MultiSEM", species:"human",
     shape:[3072, 373760, 359424], origin:[0, 0, 18432], res_nm:[38, 4, 4],
-    tier:"em", enabled:false,
+    tier:"em", enabled:true,
     source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17edd010000f70075d7ba/color",
     provider:PROV_LOOMBA },
   { id:"wk-h5-l16-msem", tissue:"cortex L1-6 (STG), MultiSEM", species:"human",
     shape:[1024, 672768, 488448], origin:[0, 18432, 18432], res_nm:[37, 4, 4],
-    tier:"em", enabled:false,
+    tier:"em", enabled:true,
     source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17f91010000ef0075d7bf/color",
     provider:PROV_LOOMBA },
   { id:"wk-mouse-a2", tissue:"cortex L2/3 (A2)", species:"mouse",
@@ -866,29 +883,46 @@ UJ.cfg.datasets = [
              verifiedFrom: "https://webknossos.org/datasets/Zebra%20finch%20HVC%20j0256-5c051f59010000b538527270/view",
              note: WK_NOTE } } },
 
-  /* HELD OUT, and the only one of this batch that is. 800 × 800 × 300 µm -- by far the
-     largest volume on the roster, 3,200 boxes at 40 µm, which is now tractable (it was 24,000 at
-     20 µm, more than the entire roster). Size is no longer the objection.
+  /* THE BIGGEST VOLUME ON THE ROSTER. 800 × 800 × 300 µm, 3,200 boxes at 40 µm -- roughly the
+     size of everything else here put together. It was 24,000 boxes at 20 µm, which is why it sat
+     out; the move to 40 µm (2026-08-30) made the coverage arithmetic tractable.
 
-     The objection is provenance. Every other dataset here carries a description naming its paper;
-     this one carries nothing. The rule this file has followed since the first WEBKNOSSOS row is
-     "a recognised licence, or a stated basis with a resolvable URL" -- and a guess from the
-     directory name is neither. One line from Søren confirming the citation flips enabled to true;
-     until then it is off, with the reason recorded rather than the row quietly absent. */
+     PROVENANCE, RESOLVED 2026-08-30. This row was held out because its WEBKNOSSOS record carries
+     no description at all -- no paper, no institution, no licence -- and "the folder is called
+     morgan2020" is a guess, not a citation. It is enabled now because the chain closes from the
+     PAPER's end rather than from the filename's:
+
+       Morgan & Lichtman 2020 states, in its own data availability line, "Full resolution
+       available at http://bossdb.org/project/morgan2020"        <- the authors name the archive
+       BossDB API: collection morgan2020 / experiment lgn / channel em, public: true
+       BossDB coord frame morgan2020: 0-200000 x, 0-200000 y, 0-10000 z at 4 / 4 / 30 nm
+       WEBKNOSSOS row 6373490b01000026011a53f7 streams s3://bossdb-open-data/morgan2020/lgn/em
+
+     The third line is the part that matters for us: the geometry in this row was transcribed from
+     the WEBKNOSSOS probe, and the BossDB coordinate frame -- a completely independent source --
+     reports the same extent and the same voxel size to the digit. Two records agreeing is what
+     lets the grid be trusted; one round-looking number would not have been.
+
+     LICENCE IS STILL NOT PINNED PER-DATASET, and the row says so rather than rounding it up to
+     CC-BY. The AWS Open Data registry entry for the bossdb-open-data bucket lists CC BY 4.0,
+     CC0 1.0 and CC BY-NC-SA 4.0 across the collection without saying which covers which project,
+     so the honest statement is "openly released through BossDB; specific licence not stated". */
   { id:"wk-morgan2020", tissue:"thalamus (dLGN)", species:"mouse",
     shape:[10000,200000,200000], origin:[0,0,0], res_nm:[30,4,4],
-    tier:"inf", enabled:false,
+    tier:"inf", enabled:true,
     source:"zarr://https://data-humerus.webknossos.org/data/zarr/6373490b01000026011a53f7/em",
     provider:{
-    name: "via WEBKNOSSOS; hosted in the BossDB AWS Open Data collection",
-    licence: "unknown — the WEBKNOSSOS record states no licence and gives no citation",
-    licenceUrl: "",
-    portal: "https://webknossos.org/datasets/morgan2020-6373490b01000026011a53f7/view",
+    name: "Morgan & Lichtman, deposited in BossDB; served here through WEBKNOSSOS",
+    licence: "openly released through BossDB — specific reuse licence not stated for this project",
+    licenceUrl: "https://doi.org/10.1016/j.neuron.2020.02.001",
+    portal: "https://bossdb.org/project/morgan2020",
     bucket: "s3://bossdb-open-data/morgan2020/lgn/em",
-    citation: "",
-    doi: "",
-    terms: { basis: "NONE ESTABLISHED. The dataset is marked public and streams without an account, but unlike every other row here its WEBKNOSSOS record carries no description at all -- no paper, no institution, no licence. The name and the bucket path point at Morgan & Lichtman's dLGN volume, but ORIGIN INFERRED FROM A FILENAME IS NOT PROVENANCE.",
-             verifiedFrom: "https://webknossos.org/datasets/morgan2020-6373490b01000026011a53f7/view",
+    citation: "Morgan & Lichtman, “An individual interneuron participates in many kinds of " +
+              "inhibition and innervates much of the mouse visual thalamus”, " +
+              "Neuron 106, 468–481.e2 (2020)",
+    doi: "https://doi.org/10.1016/j.neuron.2020.02.001",
+    terms: { basis: "the paper's own data availability statement names bossdb.org/project/morgan2020 as the home of the full-resolution volume; the BossDB API reports that collection and its lgn/em channel as public: true, and its coordinate frame (0–200000 × 0–200000 × 0–10000 at 4/4/30 nm) matches this row's geometry exactly; the AWS Open Data registry lists the bossdb-open-data bucket under CC BY 4.0 / CC0 1.0 / CC BY-NC-SA 4.0 but does not say which applies to this project, so no specific licence is claimed here",
+             verifiedFrom: "https://www.biorxiv.org/content/10.1101/683276v2.full",
              note: WK_NOTE } } },
 
   /* THE ORIGINAL. This is the volume from the 2004 paper that introduced serial block-face
@@ -1679,38 +1713,127 @@ UJ.wjump = (function(){
      the 5:1 Pacinian hits the ceiling, and that one is centred rather than left hugging the edge
      so it reads as deliberate. */
   var MAP_H_MIN = 240, MAP_H_MAX = 700;
+
+  /* A GRID SQUARE MUST READ AS A SQUARE. Below about 10 px it stops being a cell of a grid and
+     becomes texture; a thousand of them are a grey wash, which is the opposite of a coverage map.
+     The number is the same one wjumpcheck.js asserts, deliberately: this is the floor the layout
+     TRIES to honour, and the check is what confirms it actually did on every dataset -- including
+     the case below where honouring it is impossible and the layout says so instead of pretending.
+
+     Introduced 2026-08-30, when Søren enabled the two MultiSEM human blocks. They are 1.4 mm and
+     2.7 mm across, and the old layout -- three panels in one row, shared scale, fitted to the
+     card -- put their boxes at 7.8 and 5.2 px. Nothing was wrong with those datasets; the row was
+     simply the wrong shape for them. */
+  var MAP_BOX_MIN = 10;
+  var MAP_W_MAX_MULT = 3;   /* how far the map may run past the card before that is a failure too */
+
   function mapLayout(dsId, wPx, hMin, hMax){
     var ext = extentNm(dsId); if (!ext) return null;
     hMin = hMin || MAP_H_MIN; hMax = hMax || MAP_H_MAX;
     var ex = ext[0]/1000, ey = ext[1]/1000, ez = ext[2]/1000;
-    var sumW = ex + ex + ey, maxH = Math.max(ey, ez);
+    var boxUm = (UJ.cfg.explore && UJ.cfg.explore.boxUm) || 40;
     var avail = wPx - 2*MAP_GAP;
-    /* The height the panels WOULD need to be width-bound, then clamped. */
-    var want = avail * (maxH / sumW);
-    var hPx = Math.max(hMin, Math.min(hMax, want));
-    var scale = Math.min(avail / sumW, hPx / maxH);
-    var panels = [
-      { plane:"x–y", ax:0, ay:1, wUm:ex, hUm:ey },
-      { plane:"x–z", ax:0, ay:2, wUm:ex, hUm:ez },
-      { plane:"y–z", ax:1, ay:2, wUm:ey, hUm:ez }
+
+    var all = [
+      { plane:"x–y", ax:0, ay:1, wUm:ex, hUm:ey, depthUm:ez },
+      { plane:"x–z", ax:0, ay:2, wUm:ex, hUm:ez, depthUm:ey },
+      { plane:"y–z", ax:1, ay:2, wUm:ey, hUm:ez, depthUm:ex }
     ];
+    /* WHEN AN AXIS IS ONE BOX DEEP, ONE PANEL IS THE WHOLE MAP.
+
+       Three orthogonal panels earn their space by disagreeing: each stacks the boxes behind it,
+       so a square that is half-searched from x–y may be fully searched from x–z. That stops being
+       true the moment an axis holds a single box. If z is one box deep then x–y stacks nothing --
+       it shows every box in the volume, once, at full size -- and x–z and y–z are one-row strips
+       of the same squares. They are not merely redundant, they are expensive: the panels share
+       one scale across one row, so a 38 µm strip still charges the full width of its own axis.
+
+       The human L1-6 MultiSEM block is the case that forced this. 1953.8 x 2691.1 x 37.9 µm, one
+       box deep in z: x–z and y–z were 5-pixel hairlines consuming 70% of the row, and the panel
+       that actually was the map, x–y, came out at 5.2 px per box. Keeping x–y alone lifts it to
+       17.5 with nothing lost.
+
+       DECIDED ON BOX COUNTS, NOT ON MICROMETRES. My first version of this rule compared each
+       panel's HEIGHT against one box and dropped whatever was shorter. That is a different rule
+       that happens to agree on the MultiSEM block, and it got denk2004 backwards: 20.5 x 17.7 x
+       98.2 µm is thin in Y, so the panel to keep is x–z -- and a height test drops x–y (17.7 tall)
+       while keeping y–z, which is the same 1-box strip standing up. The axis is what is thin, not
+       the panel; a panel is redundant when it DISPLAYS a thin axis, and informative when it
+       projects along one.
+
+       Two thin axes (a rod) leaves no panel free of them, so the thinner axis is the one given
+       up. Three thin axes is a volume smaller than one box, where nothing is lost either way.
+
+       ONLY WHEN IT IS NEEDED. This reduction is a LAST RESORT, not the normal layout, and the
+       first version of it was not: applied unconditionally it also collapsed the Meissner
+       corpuscle -- 37.7 x 46.1 x 42.6 µm, one box deep in x, and perfectly legible at 486 px per
+       box -- from three panels to one. Nothing was gained there; three orthogonal views of a
+       small volume are worth having even when one of them stacks a single layer. So the layout is
+       computed with all three panels first, and panels are given up only if that came out below
+       the readable floor. */
+    var nBox = (gridDims(dsId) || {}).n || [2,2,2];
+    var minScale = MAP_BOX_MIN / boxUm;
+
+    function fit(panels){
+      var sw = panels.reduce(function(s,p){ return s + p.wUm; }, 0);
+      var mh = panels.reduce(function(m,p){ return Math.max(m, p.hUm); }, 0);
+      var want = avail * (mh / sw);              /* the height it WOULD need to be width-bound */
+      var hp = Math.max(hMin, Math.min(hMax, want));
+      var sc = Math.min(avail / sw, hp / mh);
+      return { panels:panels, sumW:sw, maxH:mh, scale:sc,
+               heightBound: (hp / mh) < (avail / sw) * 0.999 };
+    }
+
+    var F = fit(all);
+    if (F.scale < minScale){
+      var thin = [0,1,2].filter(function(a){ return nBox[a] <= 1; });
+      if (thin.length){
+        /* Give up the smallest thin axis; the panel that omits it is the map. */
+        var drop = thin.slice().sort(function(a,b){ return ext[a] - ext[b]; })[0];
+        var kept = all.filter(function(p){ return p.ax !== drop && p.ay !== drop; });
+        if (thin.length === 1) kept = kept.slice(0, 1); /* exactly one panel omits one axis */
+        if (kept.length) F = fit(kept);
+      }
+    }
+    var keep = F.panels, sumW = F.sumW, maxH = F.maxH, scale = F.scale,
+        heightBound = F.heightBound;
+    var dropped = all.filter(function(p){ return keep.indexOf(p) < 0; })
+                     .map(function(p){ return p.plane; });
+
+    /* WHEN FITTING THE CARD WOULD MAKE THE BOXES UNREADABLE, STOP FITTING THE CARD. The map then
+       keeps its scale and runs wider than the card, which renderMap turns into a horizontal
+       scroll. This is the right trade for a millimetre-scale survey: a map you pan is usable, a
+       map you cannot resolve is not.
+
+       It is refused if the taller map would then blow the height ceiling -- widening does not buy
+       height, so that case is genuinely unserveable by this layout and is reported as `starved`
+       rather than quietly drawn too small. Nothing on the roster is starved today; the flag
+       exists so that the day something is, the check fails instead of the map lying. */
+    var scrolls = false, starved = false;
+    if (scale < minScale){
+      if (maxH * minScale <= hMax){ scale = minScale; scrolls = true; heightBound = false; }
+      else starved = true;
+    }
+
     var width = sumW * scale + 2*MAP_GAP;
     /* Centred when the shared scale cannot fill the width -- an elongated volume otherwise sits
        in the top-left corner of an empty card, which reads as a rendering failure. */
-    var ox = Math.max(0, (avail - sumW*scale) / 2);
+    var ox = scrolls ? 0 : Math.max(0, (avail - sumW*scale) / 2);
     var org0 = originNm(dsId);
-    panels.forEach(function(p){
+    keep.forEach(function(p){
       p.scale = scale; p.x = ox; p.y = 0;
       p.oa = org0[p.ax]; p.ob = org0[p.ay];
       p.w = p.wUm * scale; p.h = p.hUm * scale;
       ox += p.w + MAP_GAP;
     });
-    return { panels:panels, scale:scale, width: Math.max(width, avail),
+    return { panels:keep, scale:scale, width: Math.max(width, avail),
              height: maxH * scale, extUm:[ex, ey, ez],
+             dropped:dropped, scrolls:scrolls, starved:starved,
+             cardWidth: avail + 2*MAP_GAP, boxPx: scale * boxUm,
              /* Epsilon because the two are exactly equal whenever the volume's aspect ratio
                 lands inside the clamp -- floating point then makes the tie fall either way, and
                 the caption would say "elongated" about a cube. */
-             heightBound: (hPx / maxH) < (avail / sumW) * 0.999 };
+             heightBound: heightBound };
   }
   /* Nanometres in, panel pixels out. The +p.x is why this is a function and not two multiplies at
      each call site: forgetting the panel offset puts every dot in the first panel. */
@@ -2856,9 +2979,18 @@ UJ.app = (function(){
       + "dataset, so there is no map to draw.</p>"; return; }
 
     var parts = [], PAD = 16, H = L.height + 34;
+    /* WIDTH:100% IS A SCALE CONTROL, NOT A LAYOUT DETAIL. The SVG has a viewBox, so stretching it
+       to the host stretches the drawing with it -- which is exactly what is wanted while the map
+       fits, and exactly wrong once it does not. mapLayout returns scrolls:true when it has
+       deliberately kept a scale that runs wider than the card (the 1.4 mm MultiSEM block), and if
+       the SVG still said width:100% the browser would squash that back down and undo the whole
+       point, silently, at the last step. So a scrolling map gets its width in real pixels and the
+       host gets overflow-x:auto to pan it. */
     parts.push("<svg viewBox='0 0 " + Math.ceil(L.width) + " " + Math.ceil(H)
-      + "' style='width:100%;height:auto;display:block' role='img' "
-      + "aria-label='orthographic map of this volume'>");
+      + "' style='" + (L.scrolls
+          ? "width:" + Math.ceil(L.width) + "px;max-width:none;height:auto"
+          : "width:100%;height:auto")
+      + ";display:block' role='img' aria-label='orthographic map of this volume'>");
 
     L.panels.forEach(function(p){
       parts.push("<rect x='" + p.x.toFixed(1) + "' y='" + p.y.toFixed(1) + "' width='"
@@ -2918,13 +3050,30 @@ UJ.app = (function(){
       return "<span style='white-space:nowrap'><span class='dot' style='background:"
         + STATUS_COLOUR[k[0]] + "'></span>" + k[1] + "</span>"; }).join(" &nbsp; ");
 
-    host.innerHTML = parts.join("")
+    /* The caption used to open "all three panels share one scale". It is a claim about what you
+       are looking at, so it has to follow what was actually drawn: on a volume one box deep the
+       map is a single panel, and saying "all three" over one panel would read as a bug. When a
+       panel has been given up, say which and why -- a reader who knows the volume has three
+       dimensions is owed the reason the third view is missing. */
+    var np = L.panels.length;
+    var shape = np > 1
+      ? ("all " + (np === 3 ? "three" : "two") + " panels share one scale, so the shape is the "
+         + "real one")
+      : ("one panel, because this volume is a single box deep along "
+         + (L.dropped.indexOf("x–y") < 0 ? "z" : (L.dropped.indexOf("x–z") < 0 ? "y" : "x"))
+         + " &mdash; the view you are looking at already contains every box, once");
+    if (np < 3 && np > 1) shape += " (" + L.dropped.join(" and ") + " omitted: one box deep)";
+
+    host.innerHTML = "<div style='" + (L.scrolls ? "overflow-x:auto" : "") + "'>"
+      + parts.join("") + "</div>"
       + "<p class='hint' style='margin:8px 0 0'>" + legend + "</p>"
       + "<p class='hint' style='margin:6px 0 0'>"
       + L.extUm.map(function(v){ return v.toFixed(1); }).join(" &times; ") + " &micro;m &middot; "
-      + "all three panels share one scale, so the shape is the real one"
+      + shape
       + (L.heightBound ? " &mdash; this volume is long enough that the map is capped in height "
                        + "rather than shrunk to fit" : "")
+      + (L.scrolls ? " &mdash; and wide enough that the map scrolls sideways rather than "
+                   + "shrinking its squares past the point of being readable" : "")
       + ". Shading is the fraction of boxes behind each square that has been searched. "
       + (CUR && SHOWBOX ? "The dashed box is the one you are being offered. " : "")
       + "Click a nucleus to walk to it.</p>";
