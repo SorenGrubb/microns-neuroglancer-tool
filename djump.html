@@ -744,21 +744,20 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 </div>
 </div>
 </details>
-<details class="rv-panel filter-section" id="filterSecBorders">
-<summary title="Glia-limitans/white-matter proximity is measured from the pia and white-matter surfaces. (Vessel proximity isn't offered here yet -- V1DD's vasculature segmentation isn't reliable enough to filter by.) Combine both if you like.">Should the cells be close to a dataset border (pia surface or white matter)?</summary>
-<div style="margin-top:10px">
-<div class="row" style="align-items:center;gap:8px">
-<label style="font-size:12px"><input type="checkbox" id="filterGLOn"> Within</label>
-<input type="text" id="filterGLDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
-<span style="font-size:12px;color:var(--mut)">µm of the glia limitans</span>
-</div>
-<div class="row" style="margin-top:10px;align-items:center;gap:8px">
-<label style="font-size:12px"><input type="checkbox" id="filterWMOn"> Within</label>
-<input type="text" id="filterWMDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
-<span style="font-size:12px;color:var(--mut)">µm of the white matter border</span>
-</div>
-</div>
-</details>
+<!-- 2026-08-30, Søren: "we have not identified glia limitans or white matter border yet, so they
+     should not show, but keep them in the code if we want to implement later." The GL/WM
+     proximity controls (#filterGLOn/#filterGLDist/#filterWMOn/#filterWMDist) that used to live in
+     a "filterSecBorders" section here are REMOVED FROM THE HTML ONLY -- runFilter()'s glOn/wmOn
+     const declarations and evalRow()'s GL/WM distance checks are untouched and already guarded
+     (`document.getElementById("filterGLOn")?...: false`, same pattern as the vessel-proximity
+     controls δJump never had at all -- see the doc comment above where those were omitted), so
+     they silently no-op with these elements gone rather than erroring. buildColumns()'s "Distance
+     to glia limitans"/"Distance to white matter border" export columns are similarly dormant
+     (gated on result.glActive/result.wmActive, which can now never be true). To bring this back
+     once a real V1DD pia/white-matter trace is validated: re-add a filterSecBorders <details
+     class="rv-panel filter-section"> section here with the same two rows ujump.html/pjump.html
+     have (or djump.html had before this removal -- see git history), and put "filterSecBorders"
+     back in the persistDetailsOpen() forEach list near the top of the main <script> tag. -->
 <details class="rv-panel filter-section" id="filterSecNear">
 <summary title="Finds cells (from the type checkboxes ticked in &quot;Select the cell(s) of interest&quot; above) that fall within a chosen distance of AT LEAST ONE cell of the type(s) ticked below -- e.g. tick &quot;Microglia&quot; there and &quot;23P&quot; here to find microglia near layer 2/3 pyramidal neurons, or tick every excitatory-neuron subtype here to find cells near ANY excitatory neuron. The reference population below is exactly the same cells &quot;Select the cell(s) of interest&quot; would find if you ticked those boxes as the PRIMARY filter -- own-verified and community-identified cells included -- just used here as landmarks instead of as the result being returned.">Do you want to find cells close to another cell type?</summary>
 <div style="margin-top:10px">
@@ -769,14 +768,24 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-top:8px" title="Off by default: normally only the cells ticked in &quot;Select the cell(s) of interest&quot; are returned (the ones found NEAR a reference-type cell), not the reference-type cells themselves. Check this to ALSO add every matched reference-type cell to the results (e.g. see both the microglia AND the layer 2/3 neurons they're near together, in the export or the 3D view) -- these landmark rows still respect every other filter on this panel (region box, layer, etc.), they just don't have to be near anything themselves."><input type="checkbox" id="filterNearIncludeRef"> Also include the reference-type cell(s) themselves in the results</label>
 </div>
 </details>
-<details class="rv-panel filter-section" id="filterSecV1Col">
-<summary title="Restricts matches to cells in the Allen Institute's manually identified V1 column (allen_v1_column_types_slanted_ref / aibs_column_nonneuronal_ref) — a hand-classified reference set, not an automated MICrONS prediction. &quot;Any member&quot; matches every column cell regardless of type (including pericytes/vascular); &quot;Neuronal members&quot; and &quot;non-vascular, non-neuronal members&quot; (glia and other non-neuronal calls, excluding pericytes) are narrower and can be checked together to match either. Check &quot;Include V1 column boundary&quot; further down to also draw the column's outline in the 3D view. IMPORTANT: about 8% of V1 column members have no MICrONS prediction of their own and no own-verified override, so they're invisible to this filter unless &quot;Include unclassified cells&quot; (top section) is ALSO checked — leave both on to see every V1 column member.">Should the cells belong to the Allen Institute's V1 column ground-truth set?</summary>
-<div class="toggles" style="margin-top:10px">
-<label style="font-size:12px"><input type="checkbox" id="filterV1ColAny"> V1 column — any member (all cell types)</label>
-<label style="font-size:12px"><input type="checkbox" id="filterV1ColNeuron"> V1 column — neuronal members</label>
-<label style="font-size:12px"><input type="checkbox" id="filterV1ColNonVasc"> V1 column — non-vascular, non-neuronal members</label>
-</div>
-</details>
+<!-- 2026-08-30, Søren: "There is no V1 column in the dJump as far as I know... please remove
+     this filtering option from dJump." Confirmed: the embedded #v1columndata/#v1columnboundary
+     JSON blocks below (search "v1columndata") are a placeholder with N:0 -- this whole feature
+     (including its own doc comment, which cites minnie65_public / the MICrONS Elabbady et al.
+     2025 paper) was inherited from ujump.html's template and was never populated with any real
+     V1DD-specific column data, because the Allen Institute's manually-identified V1 column is a
+     MICrONS (minnie65)-only ground-truth set with no V1DD equivalent. The filterSecV1Col section
+     that used to live here (#filterV1ColAny/#filterV1ColNeuron/#filterV1ColNonVasc) and the
+     "Include V1 column boundary" checkbox in "Add extra layers to the 3D view" below are REMOVED
+     FROM THE HTML ONLY -- v1ColumnInfo()/buildV1ColumnLayer()/evalRow()'s v1On check/buildColumns()'s
+     "V1 column bucket" export column are all untouched and already null-guarded (each checkbox
+     read is `document.getElementById("filterV1ColAny")?...: false`), so they silently no-op with
+     these elements gone. If V1DD ever gets a real, published column-membership dataset: fill in
+     the #v1columndata/#v1columnboundary JSON with the real values, re-add the filterSecV1Col
+     section (see ujump.html/pjump.html for the current version, or git history for djump.html's
+     own pre-removal version) and the "Include V1 column boundary" checkbox, and put
+     "filterSecV1Col" back in the persistDetailsOpen() forEach list near the top of the main
+     <script> tag. -->
 <details class="rv-panel filter-section" id="filterSecLayer">
 <summary title="Layer filtering re-estimates each candidate cell's cortical depth on the fly and can take a few seconds for large result sets.">Which cortical layer should the cells be in?</summary>
 <div class="toggles" style="margin-top:10px" id="filterLayers">
@@ -815,7 +824,11 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div style="margin-top:10px">
 <label style="text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterVasc" style="width:auto"> Include vasculature outline</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterEMOn" style="width:auto"> Include EM imagery (ultrastructure)</label>
-<label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer" title="Draws a wireframe outline around the Allen Institute's manually identified V1 column. This is not an official published shape — it's a derived envelope (slanted to match the real tilt of the manually annotated member cells) computed from the member coordinates, since MICrONS only publishes the membership list, not a column geometry."><input type="checkbox" id="filterV1ColOn" style="width:auto"> Include V1 column boundary (Allen manually-annotated column, derived+slanted envelope)</label>
+<!-- "Include V1 column boundary" checkbox removed here 2026-08-30 -- see the doc comment above
+     the (also removed) filterSecV1Col section for why: no real V1DD column data exists yet.
+     #filterV1ColOn is still read by the viewer-build click handler below (`document.getElementById
+     ("filterV1ColOn")` -- see v1ColChk), which already tolerates a missing element the same way
+     every other optional viewer checkbox does. -->
 <div style="margin-top:10px">
 <label style="font-size:12px" title="Draws Søren's hand-traced vessel centerlines as colour-coded 3D line annotations in the viewer opened below, one independently-toggleable layer per category you check here. Distinct from &quot;Include vasculature outline&quot; above, which shows the pre-segmented vessel mesh rather than the actual tracing. The tracing data is hosted separately (not embedded in this file) and is only fetched for the categories you check, cached in this browser tab after the first load — requires network access.">Traced vasculature outlines, by vessel type &amp; capillary order (arterial → capillary bed → venous)</label>
 <div class="toggles" style="margin-top:4px">
@@ -2917,7 +2930,12 @@ persistDetailsOpen("rootNucSearchPanel","djump_rootnuc_search_open");
 persistDetailsOpen("randomCellPanel","djump_random_panel_open");
 // 2026-08-30: "Filter and show" collapsible restructuring (see the big HTML comment above
 // #filterSecSelect) -- same pattern, one storage key per section, collapsed by default.
-["filterSecSelect","filterSecBorders","filterSecNear","filterSecV1Col","filterSecLayer","filterSecOrganelle","filterSecRegion","filterSecViewer"].forEach(id=>persistDetailsOpen(id,"djump_"+id+"_open"));
+/* filterSecBorders and filterSecV1Col removed 2026-08-30 (no validated V1DD pia/white-matter
+   trace or V1 column data yet -- see the doc comments in the HTML above where each section used
+   to be) -- persistDetailsOpen() already no-ops gracefully on a missing id, but they're dropped
+   from this list too rather than left pointing at nothing. Re-add both ids here if either section
+   comes back. */
+["filterSecSelect","filterSecNear","filterSecLayer","filterSecOrganelle","filterSecRegion","filterSecViewer"].forEach(id=>persistDetailsOpen(id,"djump_"+id+"_open"));
 
 /* Root ID / Nucleus ID search (see the HTML comment above #rootNucSearchPanel for the request).
    Nucleus ID uses the existing nidToIndex() reverse map; root ID gets its own lazy reverse map
@@ -8939,6 +8957,34 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
   const nearTypeBox=document.getElementById("filterNearTypes");
   window.buildNearTypeCheckboxes=function(){window.buildTypeCheckboxesInto(nearTypeBox,"fneartype");};
   window.buildNearTypeCheckboxes();
+  /* 2026-08-30, Søren: "the panel with the cells should be greyed out until the first tick box is
+     marked, otherwise you may select a cell type without ticking the first tick box and think that
+     it filters for it" -- same problem, and same fix, as updateAttentionUI()/updateRegionUI() below
+     solve for the type checkboxes / region boxes: runFilter()'s nearValid requires BOTH
+     filterNearOn AND at least one .fneartype checked (see "const nearValid=nearOn&&nearTypes.size
+     >0;"), so ticking a type here while filterNearOn is off silently does nothing. Greys the
+     distance input, the whole type-checkbox panel (container-level opacity+pointerEvents, same
+     technique as typeBox/regionBoxes -- NOT per-checkbox .disabled, since #filterNearTypes is
+     rebuilt from scratch by buildNearTypeCheckboxes() and per-checkbox state would be lost on
+     rebuild), and the "include reference cells" checkbox (a single static element, so .disabled
+     directly, same as filterIncludeUnclassified in updateAttentionUI()). */
+  function updateNearUI(){
+    const on=document.getElementById("filterNearOn");
+    const nearOn=!!(on&&on.checked);
+    const distEl=document.getElementById("filterNearDist");
+    if(distEl)distEl.disabled=!nearOn;
+    const typesEl=document.getElementById("filterNearTypes");
+    if(typesEl){typesEl.style.opacity=nearOn?"":"0.4";typesEl.style.pointerEvents=nearOn?"":"none";}
+    const inclEl=document.getElementById("filterNearIncludeRef");
+    if(inclEl){
+      inclEl.disabled=!nearOn;
+      const lbl=inclEl.closest("label");
+      if(lbl)lbl.style.opacity=nearOn?"":"0.4";
+    }
+  }
+  const nearOnEl=document.getElementById("filterNearOn");
+  if(nearOnEl)nearOnEl.addEventListener("change",updateNearUI);
+  updateNearUI();
   /* "Organelles and extracellular structures" checkboxes in "Add to the Neuroglancer view" --
      same generation pattern as the cell-type checkboxes just above (topic sub-headline + one
      .toggles div per topic), built from window.ORGANELLE_GROUPS (defined in an earlier <script>
@@ -9962,6 +10008,18 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
      segmentation volumes with separate IDs, so both are offered as separate layers. */
   const VASC_ID_IMG65="864691134966128927",VASC_ID_IMG35="864691138069012732";
   function categoryForRowType(type){return ROWTYPE_CATEGORY[type]||"Other";}
+  /* Blends a "#rrggbb" color toward white by `amt` (0 = unchanged, 1 = pure white) -- used by
+     buildFilterViewerState() to render cross-cell-type-proximity "reference/landmark" cells
+     (m.isRefRow) in a lighter tint of their own category color, so they're always visually
+     distinguishable from primary-matched cells in the 3D view even when both share a category
+     (2026-08-30, Søren: "the two cell types should both be shown in Neuroglancer, in different
+     colors"). */
+  function lightenHex(hex,amt){
+    const h=hex.replace("#","");
+    const r=parseInt(h.substring(0,2),16),g=parseInt(h.substring(2,4),16),b=parseInt(h.substring(4,6),16);
+    const lr=Math.round(r+(255-r)*amt),lg=Math.round(g+(255-g)*amt),lb=Math.round(b+(255-b)*amt);
+    return "#"+[lr,lg,lb].map(v=>v.toString(16).padStart(2,"0")).join("");
+  }
   /* Traced vasculature outline data (10 categories, by vessel type & capillary order -- pial
      arterioles through pial venules) is hosted separately, NOT embedded in this file: the raw
      hand tracings run to ~52 MB, which is too heavy to bundle given nucleus/celltype data already
@@ -10394,7 +10452,16 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       if(nz<nzmin)nzmin=nz;if(nz>nzmax)nzmax=nz;
       sx+=p[0];sy+=p[1];sz+=p[2];n++;
       if(inRegion(p[0],p[1],p[2]))anyIn65=true;else anyIn35=true;
-      const bucket=catBucket(categoryForRowType(m.row.type));
+      /* 2026-08-30, Søren: "the two cell types should both be shown in Neuroglancer, in different
+         colors" -- a reference-type "landmark" cell (m.isRefRow, only ever present when the
+         "Also include the reference-type cell(s) themselves in the results" checkbox is on, see
+         runFilter()) is bucketed SEPARATELY from primary matches of the same category by
+         appending "__ref" to the category key, even when the two share the same category (e.g.
+         primary "Pericyte" + reference "Smooth muscle cell" are both "Mural cells") -- the "cats"
+         loop and its color lookup below (see lightenHex()) key off this suffix to always render
+         landmark cells in a visibly lighter tint of their own category color, guaranteed distinct
+         from the primary matches' solid color regardless of whether the categories coincide. */
+      const bucket=catBucket(categoryForRowType(m.row.type)+(m.isRefRow?"__ref":""));
       const rid=rowRootId(m.row);if(rid)bucket.segIds.add(String(rid));
       const nid=rowNucId(m.row);if(nid)bucket.nucIds.add(String(nid));
       bucket.points.push([p[0],p[1],p[2]]);
@@ -10439,23 +10506,46 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       if(anyIn65||vascSpansBoth)layers.push({type:"image",source:SRC.em,tab:"rendering",name:"EM (Img65)",shaderControls:EM_SHADER_CONTROLS});
       if(anyIn35||vascSpansBoth)layers.push({type:"image",source:SRC.em35,tab:"rendering",name:"EM (Img35)",shaderControls:EM_SHADER_CONTROLS});
     }
-    const cats=VIEWER_CATEGORY_ORDER.filter(c=>byCat[c]).concat(Object.keys(byCat).filter(c=>VIEWER_CATEGORY_ORDER.indexOf(c)===-1));
-    for(const cat of cats){
-      const bucket=byCat[cat];
+    /* Sort by the PRIMARY (non-"__ref") category order, with a bucket's "__ref" landmark twin
+       always immediately following its own primary bucket (or on its own, in category order, if
+       there's no primary bucket of that category at all -- e.g. reference type ticked but nothing
+       of that type happened to also be a primary match). See the catBucket() call above for why
+       "__ref" buckets exist at all. */
+    function baseCat(key){return key.slice(-5)==="__ref"?key.slice(0,-5):key;}
+    function isRefKey(key){return key.slice(-5)==="__ref";}
+    const cats=Object.keys(byCat).sort((a,b)=>{
+      const oa=VIEWER_CATEGORY_ORDER.indexOf(baseCat(a)),ob=VIEWER_CATEGORY_ORDER.indexOf(baseCat(b));
+      const ia=oa===-1?999:oa,ib=ob===-1?999:ob;
+      if(ia!==ib)return ia-ib;
+      return(isRefKey(a)?1:0)-(isRefKey(b)?1:0);
+    });
+    for(const catKey of cats){
+      const bucket=byCat[catKey];
+      const isRef=isRefKey(catKey);
+      const cat=baseCat(catKey);
+      /* Landmark (reference-type) buckets always use a lightened tint of their own category's
+         color rather than the solid color -- see the doc comment above catBucket()'s call site
+         for why this has to be true even when the primary and reference cell types share a
+         category (same hue, different shade = still visually distinct; a wholly different color
+         per reference type would also work but would lose the "same type family" cue and could
+         collide with some OTHER category's own solid color instead). */
+      const baseColor=CATEGORY_COLORS[cat]||CATEGORY_COLORS.Other;
+      const color=isRef?lightenHex(baseColor,0.55):baseColor;
+      const nameSuffix=isRef?" (near-type reference)":"";
       if(bucket.segIds.size){
         const segArr=Array.from(bucket.segIds),colors={};
-        for(const id of segArr)colors[id]=CATEGORY_COLORS[cat]||CATEGORY_COLORS.Other;
-        layers.push({type:"segmentation",source:SRC.seg,tab:"source",name:cat,segments:segArr,segmentColors:colors,objectAlpha:0.85});
+        for(const id of segArr)colors[id]=color;
+        layers.push({type:"segmentation",source:SRC.seg,tab:"source",name:cat+nameSuffix,segments:segArr,segmentColors:colors,objectAlpha:0.85});
       }
       if(bucket.nucIds.size){
         const nucArr=Array.from(bucket.nucIds),colors={};
         for(const id of nucArr)colors[id]=NUCLEUS_COLOR;
-        layers.push({type:"segmentation",source:SRC.nuc,tab:"source",name:cat+" nuclei",segments:nucArr,segmentColors:colors,objectAlpha:0.4});
+        layers.push({type:"segmentation",source:SRC.nuc,tab:"source",name:cat+nameSuffix+" nuclei",segments:nucArr,segmentColors:colors,objectAlpha:0.4});
       }
       if(bucket.seg35Ids&&bucket.seg35Ids.size){
         const seg35Arr=Array.from(bucket.seg35Ids),colors35={};
-        for(const id of seg35Arr)colors35[id]=CATEGORY_COLORS[cat]||CATEGORY_COLORS.Other;
-        layers.push({type:"segmentation",source:SRC.seg35,tab:"source",name:cat+" (Img35 proposed)",segments:seg35Arr,segmentColors:colors35,objectAlpha:0.85});
+        for(const id of seg35Arr)colors35[id]=color;
+        layers.push({type:"segmentation",source:SRC.seg35,tab:"source",name:cat+nameSuffix+" (Img35 proposed)",segments:seg35Arr,segmentColors:colors35,objectAlpha:0.85});
         anyIn35=true;
       }
       /* A point at every matched cell of this category -- crucially INCLUDING cells with no
@@ -10465,8 +10555,8 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
          as points even though only ~7 have a nucleus segment. Coords are voxel units, matching
          the top-level DIM/position convention. */
       if(bucket.points&&bucket.points.length){
-        const ptAnns=bucket.points.map((pp,idx)=>({type:"point",id:cat.replace(/[^A-Za-z0-9]/g,"_")+"_pt_"+idx,point:[pp[0],pp[1],pp[2]]}));
-        layers.push({type:"annotation",source:"local://annotations",annotations:ptAnns,annotationColor:CATEGORY_COLORS[cat]||CATEGORY_COLORS.Other,name:cat+" (all cells)"});
+        const ptAnns=bucket.points.map((pp,idx)=>({type:"point",id:catKey.replace(/[^A-Za-z0-9]/g,"_")+"_pt_"+idx,point:[pp[0],pp[1],pp[2]]}));
+        layers.push({type:"annotation",source:"local://annotations",annotations:ptAnns,annotationColor:color,name:cat+nameSuffix+" (all cells)"});
       }
     }
     if(includeVasc){
