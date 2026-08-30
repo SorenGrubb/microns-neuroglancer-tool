@@ -466,6 +466,12 @@ UJ.cfg.mesh = {
   meshBaseAltSuffix:"?alt=media",
   manifestBase:"https://api.em.brain.allentech.org/meshing/api/v1/table/v1dd_public/manifest/",
   manifestNeedsToken:true,
+  /* Same localStorage key the Connectivity panel's own "Need a CAVE token?" box already reads/
+     writes (see the two savedToken blocks in this file) -- core/mesh.js reads this key generically
+     via CFG.caveTokenKey rather than hardcoding "djump_cave_token" itself, so it stays usable by
+     any future dataset without editing the shared module. Entering a token once, anywhere in the
+     page, unlocks both Connectivity and mesh downloads/Compute volume. 2026-08-30. */
+  caveTokenKey:"djump_cave_token",
   preshiftBits:6,minishardBits:8,shardBits:13,vertexQuantizationBits:16,
   transform:[9.7,0,0,0, 0,9.7,0,0, 0,0,45,0],
   dracoWrapper:"https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",

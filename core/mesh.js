@@ -483,7 +483,115 @@ UJ.mesh=(()=>{
     }
     return {positions,indices,lod:0,numLods:1,bytes,legacyFragments:frags.length,legacyFailed:failed};
   }
+  /* ── graphene (chunked-graph) meshes, e.g. V1DD's CAVE-served segmentation ──────────────────
+     Verified 2026-08-30 against seung-lab/cloud-volume's public source (datasource/graphene/mesh/
+     {un,}sharded.py) and cross-checked against the fact that V1DD's own Neuroglancer/Spelunker
+     viewer -- itself browser JS -- already renders these meshes live today (Søren: "Spelunker
+     needs the same login to render V1DD segmentation at all"). A graphene mesh is NOT one object
+     with LODs to choose between like the two paths above -- it is assembled by concatenating
+     EVERY fragment the manifest lists (a segment spans multiple chunked-graph layers/chunks), and
+     locating those fragments needs a CAVE-token-authenticated manifest call first:
+       1. GET manifestBase + rootId + ":0" (+ ?verify=true&return_seg_ids=1), header
+          Authorization: Bearer <token> -> JSON {fragments:[...], seg_ids:[...]}.
+       2. Each fragment string self-describes its location -- no murmur-hash shard/minishard
+          lookup needed at all, unlike the sharded path above. A tilde prefix means "initial"
+          (already-sharded): "~2/344239114-0.shard:224659:442" is layer 2, shard file
+          "344239114-0.shard", byte range [224659, 224659+442). No tilde means "dynamic" (meshed
+          since the last shard build, e.g. a very recent proofreading edit) -- these live at a
+          different, unsharded location this tool does not have a URL for yet, so they are
+          skipped with a count surfaced to the user rather than silently dropped.
+     cloud-volume's Python client also sends a "start_layer" hint as a JSON body on that GET
+     request (fetch_manifest_remote) -- browsers cannot do that (the Fetch spec forbids a body on
+     GET/HEAD), so it is omitted here. That has to be fine: Neuroglancer is under the exact same
+     browser restriction and already gets working manifests from this same service, so the
+     server's default (no start_layer) must be a valid request shape on its own.
+     NOT YET LIVE-VERIFIED (needs Søren's own CAVE token, which this tool cannot obtain or hold on
+     his behalf -- see the "Need a CAVE token?" box in the Connectivity panel): whether the
+     Draco-decoded vertex positions that come back are already absolute nanometres (assumed here,
+     the documented CAVE/PCG convention) or need the chunk-shape/grid-origin quantization math the
+     sharded neuroglancer_multilod_draco path above applies. If a downloaded V1DD mesh looks
+     offset, squashed, or wrongly scaled, that assumption is the first thing to revisit. */
+  function caveToken(){
+    try{return localStorage.getItem(CFG.caveTokenKey||"djump_cave_token")||"";}catch(_e){return "";}
+  }
+  function parseGrapheneManifest(manifest){
+    const frags=(manifest&&manifest.fragments)||[],segids=(manifest&&manifest.seg_ids)||[];
+    const initial=[],dynamic=[];
+    const re=/^~(\d+)\/([\d\-]+\.shard):(\d+):(\d+)$/;
+    for(let i=0;i<frags.length;i++){
+      const f=frags[i];
+      if(!f)continue;
+      if(f[0]==="~"){
+        const m=re.exec(f);
+        if(!m)continue;
+        initial.push({layer:m[1],shard:m[2],start:Number(m[3]),size:Number(m[4]),segid:segids[i]});
+      }else dynamic.push(f);
+    }
+    return {initial,dynamic};
+  }
+  async function fetchGrapheneMesh(rootIdStr,onProgress,forceRecheck){
+    if(!forceRecheck&&isRootKnownNotFound(rootIdStr)){
+      const err=new Error("root ID "+rootIdStr+" is cached as unavailable (an earlier lookup found no mesh manifest) — skipped the network check. Shift-click to force a fresh check.");
+      err.meshCached=true;throw err;
+    }
+    const token=caveToken();
+    if(!token)throw new Error("This cell's mesh needs a free CAVE token (V1DD's segmentation is token-gated, same as viewing it in Spelunker). Open the “Need a CAVE token?” link in the Connectivity panel, paste the token there once, then retry.");
+    onProgress&&onProgress(0,"reading manifest…");
+    const url=CFG.manifestBase+rootIdStr+":0?verify=true&return_seg_ids=1";
+    let res;
+    try{res=await fetch(url,{headers:{"Authorization":"Bearer "+token}});}
+    catch(e){throw new Error("could not reach the mesh manifest service (network error) — "+(e&&e.message||e));}
+    if(res.status===401||res.status===403)throw new Error("CAVE token was rejected (HTTP "+res.status+") — it may have expired. Get a fresh one from the “Need a CAVE token?” link and try again.");
+    if(!res.ok){
+      markRootNotFound(rootIdStr);
+      throw new Error("no mesh manifest for segment "+rootIdStr+" (HTTP "+res.status+") — this ID may not be meshed, or predates/postdates the current segmentation. Cached; Shift-click to force a recheck.");
+    }
+    let manifest;
+    try{manifest=await res.json();}
+    catch(_e){throw new Error("mesh manifest for "+rootIdStr+" was not valid JSON.");}
+    const {initial,dynamic}=parseGrapheneManifest(manifest);
+    if(!initial.length&&!dynamic.length){
+      markRootNotFound(rootIdStr);
+      throw new Error("mesh manifest for "+rootIdStr+" lists no fragments.");
+    }
+    onProgress&&onProgress(0.05,initial.length+" fragment(s)…"+(dynamic.length?(" ("+dynamic.length+" too freshly edited to fetch yet)"):""));
+    const draco=await loadDraco();
+    const decoder=new draco.Decoder();
+    const vertChunks=[],idxChunks=[];
+    let totalVerts=0,totalIdx=0,decoded=0,failed=dynamic.length,bytes=0;
+    for(let i=0;i<initial.length;i++){
+      const fr=initial[i];
+      const fragUrl=CFG.meshBase+fr.layer+"/"+fr.shard;
+      let blob;
+      try{ blob=await rangeGet(fragUrl,fr.start,fr.start+fr.size-1); }
+      catch(_e){ failed++; continue; }
+      bytes+=blob.length;
+      let r;
+      try{ r=decodeDracoFragment(draco,decoder,blob); }catch(_e){ failed++; continue; }
+      const base=totalVerts/3;
+      if(base)for(let k=0;k<r.idx.length;k++)r.idx[k]+=base;
+      for(let k=0;k<r.verts.length;k++)r.verts[k]=r.verts[k]/1000;   // nm -> µm, this file's usual frame
+      vertChunks.push(r.verts);idxChunks.push(r.idx);
+      totalVerts+=r.verts.length;totalIdx+=r.idx.length;decoded++;
+      if(i%8===0){onProgress&&onProgress(0.1+0.85*(i/initial.length),"fetching+decoding "+(i+1)+"/"+initial.length+"…");await new Promise(requestAnimationFrame);}
+    }
+    draco.destroy(decoder);
+    if(!decoded)throw new Error("no fragments decoded ("+initial.length+" in the manifest, "+failed+" failed)");
+    const positions=new Float32Array(totalVerts),indices=new Uint32Array(totalIdx);
+    let vo=0,io=0;
+    for(let i=0;i<vertChunks.length;i++){
+      positions.set(vertChunks[i],vo);vo+=vertChunks[i].length;
+      indices.set(idxChunks[i],io);io+=idxChunks[i].length;
+    }
+    return {positions,indices,lod:0,numLods:1,bytes,grapheneFragments:initial.length,grapheneFailed:failed};
+  }
   async function fetchMesh(rootIdStr,onProgress,forceRecheck,forceCoarsestLod){
+    /* Graphene datasets are known statically from config (CFG.manifestBase), not discovered from
+       an info file -- check this FIRST and skip loadInfo() entirely for them. loadInfo() fetches
+       CFG.meshBase+"info", and for V1DD that base has no meaning as a directory listing (it's the
+       sharded fragment bucket root); calling it would waste a round trip at best and at worst trip
+       the "unexpected mesh format" throw below if that URL ever returns unrelated JSON. */
+    if(CFG.manifestBase)return await fetchGrapheneMesh(rootIdStr,onProgress,forceRecheck);
     /* The legacy layout has no shards, no minishards, no manifest byte ranges and no LOD choice,
        so it branches out before any of that -- right after loadInfo(), which is what decides
        which layout this dataset uses. */
