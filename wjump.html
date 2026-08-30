@@ -643,7 +643,273 @@ UJ.cfg.datasets = [
                licence:"publication not established",
                licenceUrl:"", portal:"https://webknossos.org/", bucket:"https://demo.wk1.connectomics.hpccloud.mpg.de",
                citation:"", doi:"" } }
+,
 
+  /* THE LEPTOMENINGES VOLUME (Søren, 2026-08-30: "which includes the leptomeninges!").
+     λJump is the other volume in this family that images the pial surface; this one is 542 × 479
+     × 50 µm of it at 4 nm.
+
+     ORIGIN IS NOT ZERO. Its bounding box starts at z = 2912 voxels (116.5 µm), the only dataset
+     on the roster with a non-zero z origin. grid() lays boxes from originNm(), so an omitted
+     origin here would put every box 116 µm from the tissue and every one of them would look
+     empty -- a dataset that reads as "nothing here" rather than as broken.
+
+     Stored as neuroglancerPrecomputed on s3://open-neurodata, so it could be read directly with
+     a precomputed:// source and no WEBKNOSSOS in the path. It is streamed like every other row
+     instead: verified working (200 on /data/zarr/.../image/.zattrs, scale [1,4,4,40]), and one
+     access path for the whole roster beats two. */
+  { id:"wk-bock11", tissue:"cortex (V1) + leptomeninges", species:"mouse",
+    shape:[1244,119808,135424], origin:[2912,0,0], res_nm:[40,4,4],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5ca213c8010000450331c4cc/image",
+    provider:{
+    name: "Bock et al. 2011, via WEBKNOSSOS",
+    licence: "ODC-By v1.0",
+    licenceUrl: "https://opendatacommons.org/licenses/by/1-0/",
+    portal: "https://webknossos.org/datasets/bock11-5ca213c8010000450331c4cc/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Bock, Lee, Kerlin, Andermann, Hood, Wetzel, Yurgenson, Soucy, Kim & Reid, “Network anatomy and in vivo physiology of visual cortical neurons”, Nature 471, 177–182 (2011)",
+    doi: "https://doi.org/10.1038/nature09802",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below; the record states the licence outright",
+             verifiedFrom: "https://webknossos.org/datasets/bock11-5ca213c8010000450331c4cc/view",
+             note: WK_NOTE } } },
+
+  /* THE FIRST RETINA ON THE ROSTER. Retina is CNS, but it is the one place here where the
+     cell types are a settled, named catalogue -- bipolar, amacrine, ganglion, horizontal,
+     Müller glia -- rather than something the community has to invent, which makes it a good
+     tissue for the free-text naming to be checked against. */
+  { id:"wk-k0563", tissue:"retina (k0563)", species:"mouse",
+    shape:[5760,5504,4608], origin:[0,0,0], res_nm:[25,12,12],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5a7c737448d7a73cea3c83aa/color",
+    provider:{
+    name: "MPI for Medical Research (Denk lab), via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.1038/nature09818",
+    portal: "https://webknossos.org/datasets/100527_k0563-5a7c737448d7a73cea3c83aa/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Briggman, Helmstaedter & Denk, “Wiring specificity in the direction-selectivity circuit of the retina”, Nature 471, 183–188 (2011); further analysed in Helmstaedter, Briggman, Turaga, Jain, Seung & Denk, Nature 500, 168–174 (2013)",
+    doi: "https://doi.org/10.1038/nature09818",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below; the record also carries © Max Planck Institute for Medical Research, Heidelberg",
+             verifiedFrom: "https://webknossos.org/datasets/100527_k0563-5a7c737448d7a73cea3c83aa/view",
+             note: WK_NOTE } } },
+
+  /* Ships a segmentation layer as well as the EM. Note its segmentation covers only half the
+     block (its own bounding box starts at x = 4096 while the EM starts at 0) -- which is why the
+     origin here is the EM layer's, not the segmentation's. */
+  { id:"wk-e2006", tissue:"retina (e2006)", species:"mouse",
+    shape:[3456,7424,8192], origin:[0,0,0], res_nm:[25,16.5,16.5],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5a7c737448d7a73cea3c83ae/color",
+    extraLayers:[{ name:"segmentation", type:"segmentation", source:"zarr://https://data-humerus.webknossos.org/data/zarr/5a7c737448d7a73cea3c83ae/segmentation" }],
+    provider:{
+    name: "MPI for Medical Research (Denk lab), via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.1038/nature12346",
+    portal: "https://webknossos.org/datasets/e2006-5a7c737448d7a73cea3c83ae/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Helmstaedter, Briggman, Turaga, Jain, Seung & Denk, “Connectomic reconstruction of the inner plexiform layer in the mouse retina”, Nature 500, 168–174 (2013)",
+    doi: "https://doi.org/10.1038/nature12346",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below; the record also carries © Max Planck Institute for Medical Research, Heidelberg",
+             verifiedFrom: "https://webknossos.org/datasets/e2006-5a7c737448d7a73cea3c83ae/view",
+             note: WK_NOTE } } },
+
+  { id:"wk-k0725", tissue:"retina (k0725)", species:"mouse",
+    shape:[10112,16000,4992], origin:[0,0,0], res_nm:[26,13.199999809265137,13.199999809265137],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5c98db84010000b02339b49b/color",
+    provider:{
+    name: "Briggman lab, via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.1038/nature18609",
+    portal: "https://webknossos.org/datasets/Mouse%20retina%20110629_k0725-5c98db84010000b02339b49b/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Ding, Smith, Poleg-Polsky, Diamond & Briggman, “Species-specific wiring for direction selectivity in the mammalian retina”, Nature 535, 105–110 (2016)",
+    doi: "https://doi.org/10.1038/nature18609",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below",
+             verifiedFrom: "https://webknossos.org/datasets/Mouse%20retina%20110629_k0725-5c98db84010000b02339b49b/view",
+             note: WK_NOTE } } },
+
+  /* Carries a hand-traced GROUND TRUTH segmentation, which no other row here does. That makes
+     it the one volume where a community identification can be checked against a human expert's
+     own labelling rather than against other volunteers. */
+  { id:"wk-kasthuri2011", tissue:"cortex", species:"mouse",
+    shape:[1850,13312,10752], origin:[0,0,0], res_nm:[30,6,6],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5c42004001000096156f49d8/image",
+    extraLayers:[{ name:"ground_truth", type:"segmentation", source:"zarr://https://data-humerus.webknossos.org/data/zarr/5c42004001000096156f49d8/ground_truth" }],
+    provider:{
+    name: "Lichtman lab, via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.1016/j.cell.2015.06.054",
+    portal: "https://webknossos.org/datasets/kasthuri2011-5c42004001000096156f49d8/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Kasthuri, Hayworth, Berger, Schalek, Conchello, Knowles-Barley, Lee, Vázquez-Reina, Kaynig, Jones, Roberts, Morgan, Tapia, Seung, Roncal, Vogelstein, Burns, Sussman, Priebe, Pfister & Lichtman, “Saturated reconstruction of a volume of neocortex”, Cell 162, 648–661 (2015)",
+    doi: "https://doi.org/10.1016/j.cell.2015.06.054",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below",
+             verifiedFrom: "https://webknossos.org/datasets/kasthuri2011-5c42004001000096156f49d8/view",
+             note: WK_NOTE } } },
+
+  /* Inner ear -- hair cells, spiral ganglion neurons and their ribbon synapses. The first
+     sensory epithelium on the roster that is not skin. */
+  { id:"wk-cochlea", tissue:"cochlea", species:"mouse",
+    shape:[2501,9171,17101], origin:[0,0,0], res_nm:[40,11,11],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5ff2feb90100001800af8d3c/color",
+    provider:{
+    name: "Hua lab / Shanghai Jiao Tong University, via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.1016/j.celrep.2020.108551",
+    portal: "https://webknossos.org/datasets/EM%20Reconstruction%20of%20Neural%20Circuitry%20in%20the%20Cochlea-5ff2feb90100001800af8d3c/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Hua, Ding, Wang, Wang, Lu, Neef, Gao, Moser & Wu, “Electron microscopic reconstruction of neural circuitry in the cochlea”, Cell Reports 34, 108551 (2021)",
+    doi: "https://doi.org/10.1016/j.celrep.2020.108551",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below",
+             verifiedFrom: "https://webknossos.org/datasets/EM%20Reconstruction%20of%20Neural%20Circuitry%20in%20the%20Cochlea-5ff2feb90100001800af8d3c/view",
+             note: WK_NOTE } } },
+
+  /* Spinal cord, not brain -- the escape circuit. Second zebrafish volume after Wanner's
+     olfactory bulb, and the only spinal tissue here. */
+  { id:"wk-zf-vertebra", tissue:"spinal cord", species:"zebrafish",
+    shape:[7095,15644,20951], origin:[0,0,0], res_nm:[35,12,12],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/6064317a010000740060d95a/color",
+    provider:{
+    name: "Song lab / Karolinska, via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.1073/pnas.2106785118",
+    portal: "https://webknossos.org/datasets/zebrafish_vertebra_250um-6064317a010000740060d95a/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Guan, Xu, Zhang, Huang, Wang, Dahlberg, Wang, Wang, Pallucchi, Hua, El Manira & Song, “A specialized spinal circuit for command amplification and directionality during escape behavior”, PNAS 118, e2106785118 (2021)",
+    doi: "https://doi.org/10.1073/pnas.2106785118",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below",
+             verifiedFrom: "https://webknossos.org/datasets/zebrafish_vertebra_250um-6064317a010000740060d95a/view",
+             note: WK_NOTE } } },
+
+  /* A SECOND MEISSNER CORPUSCLE, and deliberately not a duplicate of jrc_mus-meissner-
+     corpuscle-1. That one is Janelia FIB-SEM at 8 nm isotropic; this is MPI serial block-face at
+     11.24 × 11.24 × 30 nm -- a different animal, microscope and preparation of the same
+     structure, which is exactly the comparison somebody identifying cells would want.
+
+     "Sham" is the surgical control arm of a nerve-injury experiment, so this is the UNINJURED
+     corpuscle. Worth keeping in the label if the injured one is ever added beside it. */
+  { id:"wk-meissner-sham", tissue:"Meissner corpuscle (sham, SBEM)", species:"mouse",
+    shape:[1294,6395,10160], origin:[0,0,0], res_nm:[30,11.24,11.24],
+    tier:"inf", enabled:true,
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/621e215801000011015dcdc8/color",
+    provider:{
+    name: "MPI for Brain Research (Helmstaedter lab), via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.1038/s41586-022-04777-z",
+    portal: "https://webknossos.org/datasets/Meissner_Sham_1-621e215801000011015dcdc8/view",
+    bucket: "demo.wk1.connectomics.hpccloud.mpg.de",
+    citation: "Gangadharan, Zheng, Taberner, Landry, Nees, Pistolic, Agarwal, Männich, Benes, Helmstaedter, Ommer, Lechner, Kuner & Kuner, “Neuropathic pain caused by miswiring and abnormal end organ targeting”, Nature 606, 137–145 (2022)",
+    doi: "https://doi.org/10.1038/s41586-022-04777-z",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below",
+             verifiedFrom: "https://webknossos.org/datasets/Meissner_Sham_1-621e215801000011015dcdc8/view",
+             note: WK_NOTE } } },
+
+  /* POSTNATAL DAY 7. Every other cortical volume on the roster is adult; this one is a week
+     old, and immature neurons and glia do not look like their adult versions. Filed as cortex so
+     it sits with them, with the age in the label because it changes what you are looking at. */
+  { id:"wk-gour21-p7-l4", tissue:"cortex L4 (barrel, P7)", species:"mouse",
+    shape:[5376,10240,7168], origin:[0,0,0], res_nm:[30,11.239999771118164,11.239999771118164],
+    tier:"inf", enabled:true,
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5fce18c50100001900cfafec/color",
+    provider:{
+    name: "MPI for Brain Research (Helmstaedter lab), via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.1126/science.abb4534",
+    portal: "https://webknossos.org/datasets/Gour21_P7a_L4-5fce18c50100001900cfafec/view",
+    bucket: "demo.wk1.connectomics.hpccloud.mpg.de",
+    citation: "Gour, Boergens, Heike, Hua, Laserstein, Song & Helmstaedter, “Postnatal connectomic development of inhibition in mouse barrel cortex”, Science 371, eabb4534 (2021)",
+    doi: "https://doi.org/10.1126/science.abb4534",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below; the record also carries © Max Planck Institute for Brain Research, Frankfurt",
+             verifiedFrom: "https://webknossos.org/datasets/Gour21_P7a_L4-5fce18c50100001900cfafec/view",
+             note: WK_NOTE } } },
+
+  /* CA1 -- the same region as βJump's Alzheimer's model, in a healthy animal. It is a thin
+     slab: 319 × 414 µm across and only 15.9 µm deep, so at 40 µm boxes it is one box thick and
+     every box is a sliver. That is the tissue, not a bug in the grid. */
+  { id:"wk-bloss18", tissue:"hippocampus", species:"mouse",
+    shape:[318,106496,81920], origin:[0,0,0], res_nm:[50,3.89,3.89],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5c9cbcdd010000ca0d605d6a/image",
+    provider:{
+    name: "Bloss et al. 2018, via WEBKNOSSOS",
+    licence: "ODC-By v1.0",
+    licenceUrl: "https://opendatacommons.org/licenses/by/1-0/",
+    portal: "https://webknossos.org/datasets/bloss18-5c9cbcdd010000ca0d605d6a/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Bloss, Cembrowski, Karsh, Colonell, Fetter & Spruston, “Single excitatory axons form clustered synapses onto CA1 pyramidal cell dendrites”, Nature Neuroscience 21, 353–363 (2018)",
+    doi: "https://doi.org/10.1038/s41593-018-0084-6",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below; the record states the licence outright and names AWS Open Data as the host",
+             verifiedFrom: "https://webknossos.org/datasets/bloss18-5c9cbcdd010000ca0d605d6a/view",
+             note: WK_NOTE } } },
+
+  /* THE FIRST BIRD. HVC is the song-sequence nucleus of the zebra finch -- a telencephalic
+     structure with no mammalian homologue, so the cell types are not the ones the guided tree
+     was built for. Free-text naming earns its keep here. */
+  { id:"wk-j0256", tissue:"HVC (song nucleus)", species:"zebrafinch",
+    shape:[2661,15104,15104], origin:[0,0,0], res_nm:[29,11,11],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5c051f59010000b538527270/color",
+    provider:{
+    name: "Denk lab / Long lab, via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.7554/eLife.24364",
+    portal: "https://webknossos.org/datasets/Zebra%20finch%20HVC%20j0256-5c051f59010000b538527270/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Kornfeld, Benezra, Narayanan, Svara, Egger, Oberlaender, Denk & Long, “EM connectomics reveals axonal target variation in a sequence-generating network”, eLife 6, e24364 (2017)",
+    doi: "https://doi.org/10.7554/eLife.24364",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below; note eLife's CC-BY covers the article, not the imagery",
+             verifiedFrom: "https://webknossos.org/datasets/Zebra%20finch%20HVC%20j0256-5c051f59010000b538527270/view",
+             note: WK_NOTE } } },
+
+  /* HELD OUT, and the only one of this batch that is. 800 × 800 × 300 µm -- by far the
+     largest volume on the roster, 3,200 boxes at 40 µm, which is now tractable (it was 24,000 at
+     20 µm, more than the entire roster). Size is no longer the objection.
+
+     The objection is provenance. Every other dataset here carries a description naming its paper;
+     this one carries nothing. The rule this file has followed since the first WEBKNOSSOS row is
+     "a recognised licence, or a stated basis with a resolvable URL" -- and a guess from the
+     directory name is neither. One line from Søren confirming the citation flips enabled to true;
+     until then it is off, with the reason recorded rather than the row quietly absent. */
+  { id:"wk-morgan2020", tissue:"thalamus (dLGN)", species:"mouse",
+    shape:[10000,200000,200000], origin:[0,0,0], res_nm:[30,4,4],
+    tier:"inf", enabled:false,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/6373490b01000026011a53f7/em",
+    provider:{
+    name: "via WEBKNOSSOS; hosted in the BossDB AWS Open Data collection",
+    licence: "unknown — the WEBKNOSSOS record states no licence and gives no citation",
+    licenceUrl: "",
+    portal: "https://webknossos.org/datasets/morgan2020-6373490b01000026011a53f7/view",
+    bucket: "s3://bossdb-open-data/morgan2020/lgn/em",
+    citation: "",
+    doi: "",
+    terms: { basis: "NONE ESTABLISHED. The dataset is marked public and streams without an account, but unlike every other row here its WEBKNOSSOS record carries no description at all -- no paper, no institution, no licence. The name and the bucket path point at Morgan & Lichtman's dLGN volume, but ORIGIN INFERRED FROM A FILENAME IS NOT PROVENANCE.",
+             verifiedFrom: "https://webknossos.org/datasets/morgan2020-6373490b01000026011a53f7/view",
+             note: WK_NOTE } } },
+
+  /* THE ORIGINAL. This is the volume from the 2004 paper that introduced serial block-face
+     SEM -- the method behind most of the rest of this roster. It is tiny by modern standards,
+     20.5 × 17.7 × 98.2 µm, ten boxes in total, and it is RAT rather than mouse: easy to file as
+     mouse cortex by reflex, and the WEBKNOSSOS metadata says otherwise. */
+  { id:"wk-denk2004", tissue:"cortex", species:"rat",
+    shape:[1964,1768,2048], origin:[0,0,0], res_nm:[50,10,10],
+    tier:"inf", enabled:true,
+    source:"zarr://https://data-humerus.webknossos.org/data/zarr/5bfd0b1c0100003f3574cc8e/color",
+    provider:{
+    name: "Denk lab, via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.1371/journal.pbio.0020329",
+    portal: "https://webknossos.org/datasets/denk2004-5bfd0b1c0100003f3574cc8e/view",
+    bucket: "data-humerus.webknossos.org",
+    citation: "Denk & Horstmann, “Serial block-face scanning electron microscopy to reconstruct three-dimensional tissue nanostructure”, PLoS Biology 2, e329 (2004)",
+    doi: "https://doi.org/10.1371/journal.pbio.0020329",
+    terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below; note PLoS Biology's CC-BY covers the article, not this re-hosted volume",
+             verifiedFrom: "https://webknossos.org/datasets/denk2004-5bfd0b1c0100003f3574cc8e/view",
+             note: WK_NOTE } } }
 ];
 
 /* ── species marks ─────────────────────────────────────────────────────────────────────────────
@@ -665,7 +931,14 @@ UJ.cfg.species = {
   mouse:     "\ud83d\udc2d",   /* mouse face */
   human:     "\ud83e\uddd1",   /* person */
   macaque:   "\ud83d\udc12",   /* monkey -- NOT the ape glyph; see above */
-  zebrafish: "\ud83d\udc1f"    /* fish */
+  zebrafish: "\ud83d\udc1f",   /* fish */
+  /* 2026-08-30, with the second WEBKNOSSOS batch. Zebra finch is Taeniopygia guttata -- a
+     songbird, and the only non-mammal on the roster besides the zebrafish. Rat arrives with
+     denk2004, which is easy to file as "mouse cortex" by reflex and is not: the 2004
+     serial block-face paper used rat. The WEBKNOSSOS record says so in its own metadata
+     (species: "Rat"), which is where both of these came from rather than from the name. */
+  zebrafinch:"\ud83d\udc26",   /* bird */
+  rat:       "\ud83d\udc00"    /* rat -- NOT the mouse face; a different animal, said plainly */
 };
 
 /* ── how the picker is grouped ─────────────────────────────────────────────────────────────────
@@ -685,11 +958,18 @@ UJ.cfg.species = {
    picker while staying in the registry, countable and documented and completely unreachable,
    which is the worst of both. */
 UJ.cfg.groups = [
-  { label: "Brain",                     match: ["cortex", "olfactory bulb", "choroid plexus"] },
+  { label: "Brain",                     match: ["cortex", "olfactory bulb", "choroid plexus",
+                                                  "hippocampus", "thalamus", "HVC"] },
+  /* Retina is CNS -- it develops from the diencephalon -- but it reads as its own thing to
+     anyone looking for it, and there are now three of them. Same for the spinal cord and the
+     cochlea: nervous tissue, not brain, and nobody looks for "cochlea" under "Brain". */
+  { label: "Retina",                    match: ["retina"] },
+  { label: "Spinal cord",               match: ["spinal cord"] },
   /* The corpuscles are nervous tissue but not brain: encapsulated mechanoreceptor endings sitting
      in skin. They are kept next to the brain rather than filed under skin because what somebody
      opens them to look at is the afferent and its lamellar cells. */
   { label: "Peripheral nervous system", match: ["Meissner corpuscle", "Pacinian corpuscle"] },
+  { label: "Inner ear",                 match: ["cochlea"] },
   { label: "Heart",                     match: ["heart"] },
   { label: "Kidney",                    match: ["kidney"] },
   { label: "Liver",                     match: ["liver"] },
@@ -1851,7 +2131,9 @@ UJ.app = (function(){
     if (!CUR){
       host.innerHTML = "<b style='color:var(--ok)'>Every box in this dataset has been looked at.</b> "
         + "That is a completion state no other tool in this family has.";
-      if (brief) brief.textContent = "all 18 boxes done";
+      /* Was the literal "all 18 boxes done" -- Meissner's count when boxes were 20 µm and it was
+         the only dataset. It stayed correct for exactly one dataset at one box size. */
+      if (brief) brief.textContent = "all " + (W.gridDims(DS) || {total:0}).total + " boxes done";
       ["open","found","empty","skip"].forEach(function(i){ if (el(i)) el(i).disabled = true; });
       renderMap();
       return;
