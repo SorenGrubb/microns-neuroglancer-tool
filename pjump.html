@@ -11291,7 +11291,22 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
 <script>
 /* πJump: filters whose data pinky100 does not have. See build_pjump.py. */
 (function(){
+  /* 2026-08-30, Søren: "The proximity to vasculature filter in pJump does not make sense, as the
+     vascular segmentation is pretty bad and therefore is not usable as it is now... remove the
+     option for now." Root cause of why he could even see a broken half of it: filterVesselDistOn/
+     filterVesselDist were missing from this list, so the section-hiding walk below (allDead()
+     climbing from each dead control up toward filterCard) could hide the "Vessel proximity" type
+     dropdown, GL row and WM row individually -- each of THOSE rows was 100% dead IDs -- but never
+     the whole filterSecBorders <details>, because the "Within [10] µm of the nearest traced vessel
+     point" row had one live (non-dead) control in it and broke the all-dead chain right there. That
+     orphaned row, with no dropdown above it and no GL/WM rows below it to give it context, is
+     exactly the "does not make sense" panel from the screenshot. Adding these two IDs completes the
+     list (all 7 filterSecBorders controls now dead) so the WHOLE section collapses correctly, same
+     as every other pinky100-doesn't-have-this-data filter below -- consistent with this file's own
+     explanatory note further down ("vessel proximity... are not shown here: pinky100... has no
+     published vasculature"), which already documented this as the intended state. */
   var DEAD_IDS = ["filterLayers","filterWMOn","filterWMDist","filterVessel",
+                  "filterVesselDistOn","filterVesselDist",
                   "filterGLOn","filterGLDist","filterV1ColAny","filterV1ColNeuron",
                   "filterV1ColNonVasc","filterV1ColOn","filterVasc"];
   var dead = [];

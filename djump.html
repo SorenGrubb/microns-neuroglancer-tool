@@ -3497,7 +3497,23 @@ function celltypeLink(pos,innerHtml){
 function longName(name){
   if(!window.LONG_BY_CODE){window.LONG_BY_CODE={};try{for(var _k in LEAF_NAMES){var _m=String(LEAF_NAMES[_k]).match(/\(([^)]+)\)\s*$/);if(_m)window.LONG_BY_CODE[_m[1]]=LEAF_NAMES[_k];}}catch(_e){}}
   if(window.LONG_BY_CODE[name])return window.LONG_BY_CODE[name];
-  var g={astrocyte:"Astrocyte",microglia:"Microglia",oligo:"Oligodendrocyte",OPC:"OPC"};
+  /* 2026-08-30, Søren: "the 6P-SP, L2P and L3P are abbreviations while the rest are spelled out...
+     I want them also spelled out." These three have no LEAF_NAMES entry (unlike 4P/5P-IT/5P-ET/
+     5P-NP/6P-IT/6P-CT, which match a µJump decision-tree leaf and get its full "(CODE)" name for
+     free above) because V1DD's own excitatory taxonomy has no µJump equivalent for them: L2P/L3P
+     split what µJump lumps into one "23P" leaf, and 6P-SP (layer 6 subplate) has no µJump leaf at
+     all -- see djump-build/build_djump.py's CT_RENAME/DJUMP_LABELS comment ("L2IT\L3IT... MICrONS
+     lumps them as 23P, V1DD separates them"; "L6SP... is V1DD's layer 6 subplate class (Søren,
+     2026-08-20)"), which already vetted "subplate" as the right term for SP. Phrased here in the
+     same "Layer N ... neuron (CODE)" style as every other entry so they read consistently and
+     sort correctly: alphabetizing by this full string is exactly what fixes the "6P-SP" random-
+     picker ordering bug too (see populateRandomTypeSelect's items.sort by label) -- "Layer 6
+     subplate..." naturally sorts after "Layer 6 CT..."/"Layer 6 IT..." once it stops being the bare
+     string "6P-SP", which sorted first only because a digit-first string sorts before every
+     "Layer..." string. No separate reordering logic needed. */
+  var g={astrocyte:"Astrocyte",microglia:"Microglia",oligo:"Oligodendrocyte",OPC:"OPC",
+    "L2P":"Layer 2 pyramidal neuron (L2P)","L3P":"Layer 3 pyramidal neuron (L3P)",
+    "6P-SP":"Layer 6 subplate pyramidal neuron (6P-SP)"};
   if(g[name])return g[name];
   return String(name).charAt(0).toUpperCase()+String(name).slice(1);
 }
@@ -5150,8 +5166,13 @@ function buildConnectivityState(centerPos,queryRootIds,shown,points){
       annotationProperties:[{id:"color",type:"rgb",default:SYN_POINT_COLOR}],
       shader:"void main() { setColor(prop_color()); }",name:"synapse points"});
   }
+  /* 2026-08-30, Søren: "in Filter and Show, the Neuroglancer view is from the wrong angle... check
+     if other neuroglancer instances have the same problem." This one did -- missing ...PROJ_ORIENT()
+     (see its own comment) meant Neuroglancer's default identity camera instead of V1DD's calibrated
+     tilt (UJ.cfg.projection.orientation), same root cause as buildFilterViewerState's fix below. */
   return{dimensions:DIM,position:centerPos,crossSectionScale:3.0,
     projectionScale:Math.max(computeConnSpanNm(centerPos,shown,points)*0.3,10000),
+    ...PROJ_ORIENT(),
     layers,selectedLayer:{layer:"cell + partners",visible:true},
     layout:{type:"3d",orthographicProjection:true},showDefaultAnnotations:false,
     crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
@@ -7808,7 +7829,9 @@ function buildCellContactsAllViewerState(i,rootIdStr,cellType,typeLabel,rows,own
      point annotation layer's own Annotations tab when one exists (see firstAnnLayerName above), so
      its coordinate list is showing immediately -- falls back to the red center-cell segmentation
      layer only when nothing is touching (no annotation layers exist at all). */
+  // 2026-08-30: missing ...PROJ_ORIENT() -- see buildConnectivityState's comment on the same fix.
   return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
+    ...PROJ_ORIENT(),
     layers,selectedLayer:firstAnnLayerName?{layer:firstAnnLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
     layout:{type:"4panel",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
@@ -7865,7 +7888,9 @@ function buildCellContactsSingleViewerState(i,rootIdStr,cellType,row,ownExtraRoo
   /* 4panel layout + annotation-tab selection, same as buildCellContactsAllViewerState above and
      for the same reason (2026-08-14, Soren) -- see that function's own comment. Only one possible
      annotation layer here, so no "first of several" logic is needed. */
+  // 2026-08-30: missing ...PROJ_ORIENT() -- see buildConnectivityState's comment on the same fix.
   return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,4000),
+    ...PROJ_ORIENT(),
     layers,selectedLayer:touchPoints.length?{layer:annLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
     layout:{type:"4panel",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
@@ -8217,7 +8242,9 @@ function buildTripartiteViewerState(i,rootIdStr,cellType,rows,ownExtraRootIds){
   // keep an irrelevant, off-screen soma in frame.
   const cx=posVox[0]*UJ_RX,cy=posVox[1]*UJ_RY,cz=posVox[2]*UJ_RZ;
   const span=Math.max(...pts.map(p=>{const dx=p[0]*UJ_RX-cx,dy=p[1]*UJ_RY-cy,dz=p[2]*UJ_RZ-cz;return Math.hypot(dx,dy,dz);}),5000)*2.4;
+  // 2026-08-30: missing ...PROJ_ORIENT() -- see buildConnectivityState's comment on the same fix.
   return{dimensions:B.DIM_LOCAL,position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
+    ...PROJ_ORIENT(),
     layers,selectedLayer:{layer:selectedLayerName,visible:true,tab:selectedLayerName===centerLayerName?undefined:"annotations"},
     layout:{type:"4panel",orthographicProjection:true},
     showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
@@ -10768,6 +10795,16 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       position:center,
       crossSectionScale:3.0,
       projectionScale,
+      /* 2026-08-30, Søren: "the 3D view has the correct angle when clicking on the cell type, but
+         in the Filter and Show, the Neuroglancer view is from the wrong angle." This was the exact
+         cause -- every OTHER viewer-state builder in this file spreads ...PROJ_ORIENT() (V1DD's
+         calibrated camera tilt, UJ.cfg.projection.orientation) into its returned state; this one
+         never did, so it fell back to Neuroglancer's default identity orientation. Also missing
+         (and now fixed the same way) from buildConnectivityState, buildCellContactsAllViewerState,
+         buildCellContactsSingleViewerState and the tripartite-synapse viewer -- see their own
+         2026-08-30 comments. buildState() (single-cell click) and the merged/example-cell state
+         builder already had it, which is why only SOME views looked wrong, not all of them. */
+      ...PROJ_ORIENT(),
       layers,
       selectedLayer:{layer:layers.length?layers[0].name:"segmentation",visible:true},
       layout:{type:"3d",orthographicProjection:true},
