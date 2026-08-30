@@ -8491,15 +8491,24 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const ot=OWN_TYPE[i];
       if(ot!==255){rows.push({type:OWN_TYPE_NAMES[ot],source:"own",space:"N",i});continue;}
       const t=NT[i];
-      if(t===0)continue;
-      const name=CT_NAMES[t-1];
+      const name=t!==0?CT_NAMES[t-1]:null;
       const mg=mergedInfo(i);
-      if(mg&&!mg.some(m=>m.type===name))continue;
+      if(t!==0&&mg&&!mg.some(m=>m.type===name))continue;
       // Community/user reports trump the MICrONS prediction (but never override own-verified or
       // merged-nucleus breakdowns, which rank above community reports). __COMM_ROWTYPE maps a
       // nucleus to its community-reported identity, already translated into filter row.type space.
+      // 2026-08-30, Søren: identified a microglia by bounding box and it never showed up under
+      // the "Microglia" checkbox -- root cause was this covr check sitting AFTER "if(t===0)
+      // continue", so any nucleus MICrONS made NO prediction for (t===0, common for cell types its
+      // automated model handles poorly, e.g. microglia) was skipped before ever reaching the
+      // community-override lookup, no matter how confidently the community had since named it.
+      // The `!mg` gate is unchanged and still applies regardless of t -- a merged nucleus already
+      // gets its per-sub-cell rows from the MERGED loop below, so a t===0 merged nucleus must NOT
+      // also get a single combined-type community row here (that would misrepresent a multi-cell
+      // detection as one cell, and could duplicate a sub-cell already listed there).
       const covr=(!mg&&window.__COMM_ROWTYPE)?window.__COMM_ROWTYPE[String(NID[i])]:null;
       if(covr){rows.push({type:covr,source:"community",space:"N",i});continue;}
+      if(t===0)continue; // no MICrONS prediction and no community override -- still reachable via "Include unclassified cells"
       rows.push({type:name,source:"micrONS",space:"N",i});
     }
     for(let i=0;i<ST_N;i++)rows.push({type:OWN_TYPE_NAMES[ST_TYPE[i]],source:"own",space:"ST",i});
