@@ -712,6 +712,11 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div class="row" style="margin-top:12px;align-items:center">
 <div style="flex:1 1 200px"><label style="font-size:12px">Vessel proximity</label><select id="filterVessel" style="width:100%"></select></div>
 </div>
+<div class="row" style="margin-top:8px;align-items:center;gap:8px">
+<label style="font-size:12px" title="Applies to fineDist, the raw nearest-traced-vessel-point distance -- independent of the type dropdown above (see its own doc comment in runFilter()). Combine both to require a SPECIFIC vessel type within a distance, or check this alone for &quot;near any vessel, don't care which type&quot; with an actual number attached (unlike &quot;Near any vessel type&quot; above, which has no distance limit at all on its own)."><input type="checkbox" id="filterVesselDistOn"> Within</label>
+<input type="text" id="filterVesselDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:12px;color:var(--mut)">µm of the nearest traced vessel point</span>
+</div>
 <div class="row" style="margin-top:10px;align-items:center;gap:8px">
 <label style="font-size:12px"><input type="checkbox" id="filterGLOn"> Within</label>
 <input type="text" id="filterGLDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
@@ -721,6 +726,12 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <label style="font-size:12px"><input type="checkbox" id="filterWMOn"> Within</label>
 <input type="text" id="filterWMDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
 <span style="font-size:12px;color:var(--mut)">µm of the white matter border</span>
+</div>
+<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+<label style="font-size:12px" title="Finds cells (from the type checkboxes ticked at the top of this panel) that fall within a chosen distance of AT LEAST ONE cell of the type(s) ticked below -- e.g. tick &quot;Microglia&quot; up top and &quot;23P&quot; below to find microglia near layer 2/3 pyramidal neurons, or tick every excitatory-neuron subtype below to find cells near ANY excitatory neuron. The reference population below is exactly the same cells &quot;Filter the data&quot; would find if you ticked those boxes as the PRIMARY filter -- own-verified and community-identified cells included -- just used here as landmarks instead of as the result being returned."><input type="checkbox" id="filterNearOn"> Also require being within</label>
+<input type="text" id="filterNearDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:12px;color:var(--mut)">µm of at least one cell of type(s):</span>
+<div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterNearTypes"></div>
 </div>
 <div style="margin-top:10px">
 <label style="font-size:12px" title="Restricts matches to cells in the Allen Institute's manually identified V1 column (allen_v1_column_types_slanted_ref / aibs_column_nonneuronal_ref) — a hand-classified reference set, not an automated MICrONS prediction. &quot;Any member&quot; matches every column cell regardless of type (including pericytes/vascular); &quot;Neuronal members&quot; and &quot;non-vascular, non-neuronal members&quot; (glia and other non-neuronal calls, excluding pericytes) are narrower and can be checked together to match either. Check &quot;Include V1 column boundary&quot; below to also draw the column's outline in the 3D view. IMPORTANT: about 8% of V1 column members have no MICrONS prediction of their own and no own-verified override, so they're invisible to this filter unless &quot;Include unclassified cells&quot; above is ALSO checked — leave both on to see every V1 column member.">V1 column membership (Allen's manual ground-truth set — optional, in addition to any cell type(s) checked above)</label>
@@ -8858,8 +8869,13 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
   /* Declared out here rather than inside the builder: updateAttentionUI() dims this box and a
      change listener is bound to it further down, both in this same scope. */
   const typeBox=document.getElementById("filterTypes");
-  window.buildFilterTypeCheckboxes=function(){
-    if(!typeBox)return;
+  /* Shared renderer behind BOTH the primary "Filter the data" type checkboxes (.ftype) and the
+     2026-08-30 cross-cell-type proximity filter's reference-type checkboxes (.fneartype, see
+     #filterNearTypes below) -- same category grouping, same live counts (filterTypeTally() is the
+     same population definition either list searches over), just a different container/class so
+     the two lists' :checked state never collides in activeTypeSet()/activeNearTypeSet(). */
+  window.buildTypeCheckboxesInto=function(container,cls){
+    if(!container)return;
     const tally=filterTypeTally();
     const countFor=v=>{const al=TYPE_ALIASES[v]||[v];let n=0;for(const a of al)n+=(tally.get(a)||0);return n;};
     let html="";
@@ -8867,12 +8883,16 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       const members=(CATEGORY_MEMBERS[cat]||[]).filter(n=>countFor(n)>0);
       if(!members.length)continue;
       html+='<div style="margin-top:8px"><b style="font-size:12px;color:var(--mut)">'+cat+'</b><div class="toggles" style="margin-top:4px">';
-      for(const n of members)html+='<label style="font-size:12px" title="'+typeTitle(n)+'"><input type="checkbox" class="ftype" value="'+n+'"> '+n+' <span class="nsub">'+countFor(n).toLocaleString()+'</span></label>';
+      for(const n of members)html+='<label style="font-size:12px" title="'+typeTitle(n)+'"><input type="checkbox" class="'+cls+'" value="'+n+'"> '+n+' <span class="nsub">'+countFor(n).toLocaleString()+'</span></label>';
       html+="</div></div>";
     }
-    typeBox.innerHTML=html;
+    container.innerHTML=html;
   };
+  window.buildFilterTypeCheckboxes=function(){window.buildTypeCheckboxesInto(typeBox,"ftype");};
   window.buildFilterTypeCheckboxes();
+  const nearTypeBox=document.getElementById("filterNearTypes");
+  window.buildNearTypeCheckboxes=function(){window.buildTypeCheckboxesInto(nearTypeBox,"fneartype");};
+  window.buildNearTypeCheckboxes();
   /* "Organelles and extracellular structures" checkboxes in "Add to the Neuroglancer view" --
      same generation pattern as the cell-type checkboxes just above (topic sub-headline + one
      .toggles div per topic), built from window.ORGANELLE_GROUPS (defined in an earlier <script>
@@ -8954,6 +8974,15 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
 
   function activeTypeSet(){
     const raw=[...document.querySelectorAll(".ftype:checked")].map(c=>c.value);
+    const out=new Set();
+    for(const v of raw){const aliases=TYPE_ALIASES[v];if(aliases)for(const a of aliases)out.add(a);else out.add(v);}
+    return out;
+  }
+  /* Same alias-expansion as activeTypeSet() above, over the separate .fneartype checkbox list
+     (2026-08-30 cross-cell-type proximity filter) -- kept as its own function rather than a
+     shared helper taking a class name so both call sites stay a plain, greppable one-liner. */
+  function activeNearTypeSet(){
+    const raw=[...document.querySelectorAll(".fneartype:checked")].map(c=>c.value);
     const out=new Set();
     for(const v of raw){const aliases=TYPE_ALIASES[v];if(aliases)for(const a of aliases)out.add(a);else out.add(v);}
     return out;
@@ -9116,6 +9145,9 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     // already is this population (and more, sliced by verified/reported/untouched).
     const includeUnclassified=(!attention)&&(document.getElementById("filterIncludeUnclassified")?document.getElementById("filterIncludeUnclassified").checked:false);
     const vesselSel=fineSel?fineSel.value:"";
+    const vesselDistOn=document.getElementById("filterVesselDistOn")?document.getElementById("filterVesselDistOn").checked:false;
+    const vesselDistInput=document.getElementById("filterVesselDist");
+    const vesselMaxUm=vesselDistInput&&vesselDistInput.value?parseFloat(vesselDistInput.value):10;
     const glOn=document.getElementById("filterGLOn")?document.getElementById("filterGLOn").checked:false;
     const glDistInput=document.getElementById("filterGLDist");
     const glMax=glDistInput&&glDistInput.value?parseFloat(glDistInput.value)*1000:10000;
@@ -9131,6 +9163,70 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     const v1NeuronOn=document.getElementById("filterV1ColNeuron")?document.getElementById("filterV1ColNeuron").checked:false;
     const v1NonVascOn=document.getElementById("filterV1ColNonVasc")?document.getElementById("filterV1ColNonVasc").checked:false;
     const v1On=v1AnyOn||v1NeuronOn||v1NonVascOn;
+    const nearOn=document.getElementById("filterNearOn")?document.getElementById("filterNearOn").checked:false;
+    const nearDistInput=document.getElementById("filterNearDist");
+    const nearMaxUm=nearDistInput&&nearDistInput.value?parseFloat(nearDistInput.value):10;
+    const nearTypes=activeNearTypeSet();
+    const nearValid=nearOn&&nearTypes.size>0;
+    /* Cross-cell-type proximity filter (2026-08-30, Søren: "find the cells ticked in Filter the
+       data that are within a modifiable range from another cell type... e.g. all microglia
+       within 10 µm of a layer 2/3 neuron, or all excitatory neurons [by ticking every
+       excitatory-neuron subtype]"). The reference population is built from buildAllIdentities()
+       -- the SAME rows/types the primary type checkboxes search over -- so a community-identified
+       reference cell counts here exactly as it would if ticked as the primary filter (see the
+       2026-08-30 buildAllIdentities fix above, which made that population actually complete).
+
+       Built ONCE per run, not once per candidate row: a uniform grid with cell size EQUAL to the
+       search radius, so a candidate only ever needs to check its own grid cell's 3x3x3 (27-cell)
+       neighbourhood -- the standard fixed-radius grid trick. Any point within radius r of a query
+       must fall inside that neighbourhood whenever the grid's cell size is >= r, so this is exact,
+       not an approximation, and never needs kNearestGrid's expanding-radius retry (that trick
+       exists for variable-k nearest-neighbour queries; this is a fixed-radius "is anything within
+       r" query, a simpler case). Rebuilt fresh every "Preview matches" click since the radius
+       and/or the reference type set can change between runs and neither is cheap to invalidate
+       piecemeal against a cached grid. */
+    let nearGrid=null,nearCellNm=0,nearMaxNm=0;
+    if(nearValid){
+      nearMaxNm=nearMaxUm*1000;
+      nearCellNm=Math.max(1,nearMaxNm);
+      nearGrid=new Map();
+      for(const refRow of buildAllIdentities()){
+        if(!nearTypes.has(refRow.type))continue;
+        const p=rowPos(refRow);
+        const x=p[0]*UJ_RX,y=p[1]*UJ_RY,z=p[2]*UJ_RZ;
+        const cx=Math.floor(x/nearCellNm),cy=Math.floor(y/nearCellNm),cz=Math.floor(z/nearCellNm);
+        const key=cx+","+cy+","+cz;
+        let arr=nearGrid.get(key);if(!arr){arr=[];nearGrid.set(key,arr);}
+        arr.push({x,y,z,key:rowIdentityKey(refRow)});
+      }
+    }
+    /* Stable per-row identity, used only to exclude a candidate from counting itself as its own
+       "nearby" reference cell when the SAME type is ticked in both the primary and reference
+       lists (e.g. "microglia near microglia") -- without this every row would trivially be
+       distance-0 from itself and the filter would do nothing. MS rows have no shared index array
+       of their own (see buildAllIdentities()'s own comment on row.space==="MS"), so they're keyed
+       by their group/sub-index/position instead of row.i. */
+    function rowIdentityKey(row){return row.space+":"+(row.space==="MS"?((row.subRef.groupId||"")+"|"+(row.subRef.subIndex||"")+"|"+row.subRef.pos.join(",")):row.i);}
+    /* Returns the distance in nm from `row` to the nearest reference-population cell (excluding
+       itself), or null if nearGrid wasn't built (filter off) or nothing qualifies. */
+    function nearestRefDistNm(row){
+      if(!nearGrid)return null;
+      const p=rowPos(row);
+      const x=p[0]*UJ_RX,y=p[1]*UJ_RY,z=p[2]*UJ_RZ;
+      const cx=Math.floor(x/nearCellNm),cy=Math.floor(y/nearCellNm),cz=Math.floor(z/nearCellNm);
+      const selfKey=rowIdentityKey(row);
+      let best=Infinity;
+      for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){
+        const arr=nearGrid.get((cx+dx)+","+(cy+dy)+","+(cz+dz));
+        if(!arr)continue;
+        for(const pt of arr){
+          if(pt.key===selfKey)continue;
+          const ddx=x-pt.x,ddy=y-pt.y,ddz=z-pt.z,d2=ddx*ddx+ddy*ddy+ddz*ddz;
+          if(d2<best)best=d2;
+        }
+      }
+      return best===Infinity?null:Math.sqrt(best);
+    }
     /* Shared per-row coordinate/vessel/layer checks -- used both for the normal type-classified
        pass (over ALL_IDENTITIES) and the needs-attention pass (over every nucleus, see below).
        Returns the match object to push, or null if this row should be excluded. */
@@ -9189,6 +9285,15 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
           if(String(fine)!==vesselSel)return null;
         }
       }
+      /* 2026-08-30, Søren: "I want the user to be able to regulate the distance from the
+         vessels, like you can with the glia limitans and the white matter border" -- fineDist
+         already existed (see the doc comment just above) but nothing let you cap it to an actual
+         number; the dropdown alone can only match a TYPE or "has some distance at all". Combines
+         with vesselSel exactly like glOn/wmOn combine with nothing else -- independent of which
+         (if any) vessel type is selected above, since fineDist is that same independent value. */
+      if(vesselDistOn){
+        if(fineDist===null||fineDist>vesselMaxUm*1000)return null;
+      }
       let gl=null;
       if(glOn){
         const g=rowGL(row);
@@ -9245,7 +9350,15 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
           organelleSel==="neither"?(!hasCil&&!hasCent):true;
         if(!organelleMatch)return null;
       }
-      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,regionBoxLabel,hasCil,hasCent};
+      /* Cross-cell-type proximity check -- see the nearGrid/nearestRefDistNm doc comment above.
+         Placed last among the distance-style filters (after vessel/GL/WM/layer/organelle) purely
+         so a row that's already excluded by something cheaper never pays for a grid lookup. */
+      let nearDist=null;
+      if(nearValid){
+        nearDist=nearestRefDistNm(row);
+        if(nearDist===null||nearDist>nearMaxNm)return null;
+      }
+      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,regionBoxLabel,hasCil,hasCent,nearDist};
     }
     const out=[];
     if(attention){
@@ -9319,7 +9432,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
         }
       }
     }
-    return{matches:out,vesselActive:!!vesselSel,glActive:glOn,layerActive:layers.size>0,wmActive:wmOn,regionActive:!!(regionOn&&regionValid),attentionActive:!!attention,v1ColActive:v1On};
+    return{matches:out,vesselActive:!!vesselSel,vesselDistActive:vesselDistOn,glActive:glOn,layerActive:layers.size>0,wmActive:wmOn,regionActive:!!(regionOn&&regionValid),attentionActive:!!attention,v1ColActive:v1On,nearActive:nearValid};
   }
 
   /* Grid-accelerated k-nearest-neighbour lookup for the bulk Excel export. kNearest() above is
@@ -9685,6 +9798,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     if(result.wmActive)cols.push({header:"Distance to white matter border (µm)",get:m=>m.wmDist!=null?m.wmDist.toFixed(1):""});
     if(result.v1ColActive)cols.push({header:"V1 column bucket",get:m=>m.v1Bucket==="neuron"?"Neuronal":m.v1Bucket==="nonvascular"?"Non-vascular, non-neuronal":m.v1Bucket==="vascular"?"Vascular (pericyte)":""});
     if(result.regionActive)cols.push({header:"Region box",get:m=>m.regionBoxLabel||""});
+    if(result.nearActive)cols.push({header:"Distance to nearest matched reference-type cell (µm)",get:m=>m.nearDist!=null?(m.nearDist/1000).toFixed(1):""});
     /* Organelle location columns -- one column per (kind, instance#, role), each a single
        paste-ready "x, y, z" string (see orgPtText()/organelleInstancesForRow() above for the full
        reasoning). Pass 1 below computes, per checked kind, the most instances any ONE row in this
