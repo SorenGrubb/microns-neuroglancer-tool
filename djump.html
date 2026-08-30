@@ -343,6 +343,15 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .rv-panel summary::-webkit-details-marker{display:none}
 .rv-panel summary::before{content:"\25B6";display:inline-block;flex:none;font-size:10px;color:var(--mut);transition:transform .15s ease}
 .rv-panel[open]>summary::before{transform:rotate(90deg)}
+/* 2026-08-30, Søren: "Filter and show looks way too messy... expandable options (remembered when
+   expanded or collapsed and by default is collapsed), and the titles for each filtering should be
+   more user friendly." Reuses .rv-panel's own arrow/summary mechanics (same collapse triangle,
+   same native <details>/<summary>, same persistDetailsOpen() remember-per-section pattern) --
+   .filter-section only adds the divider + friendlier (non-uppercase, sentence-style) summary type
+   these sections need instead of .rv-panel's plain small-panel look. */
+.filter-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.filter-section summary{font-size:13px;font-weight:600;color:var(--ink)}
+.filter-section:first-of-type{margin-top:10px;padding-top:0;border-top:none}
 .rv-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:280px;overflow-y:auto}
 .rv-row{border:1px solid var(--line);border-radius:7px;padding:7px 10px;cursor:pointer}
 .rv-row:hover{border-color:var(--accent)}
@@ -683,8 +692,32 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div class="tabpanel" data-tabpanel="filter">
 <div class="card" id="filterCard">
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Filter and show</div>
-<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="Select any combination of cell type(s), vessel proximity, glia-limitans proximity, white-matter-border proximity, and/or cortical layer, then download the matching cells (with coordinates and root/nucleus IDs) as an Excel file.">Filter the data</div>
-<div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterTypes"></div>
+<!-- 2026-08-30, Søren: "Filter and show looks way too messy... expandable options (remembered
+     when expanded or collapsed and by default is collapsed), and the titles for each filtering
+     should be more user friendly... Make it also as consistent as possible across the different
+     tools. For the dJump it does not make sense with vessel proximity yet, because the
+     vasculature segmentations are not useful." Every filter dimension below is now its own
+     <details class="rv-panel filter-section"> (see the CSS comment above .filter-section for why
+     it reuses .rv-panel's mechanics), collapsed by default and remembered per-section via
+     persistDetailsOpen() (see the calls next to the existing rootNucSearchPanel/randomCellPanel
+     ones). Every element ID is UNCHANGED from before this restructuring -- only the surrounding
+     markup and visible headings moved -- so none of runFilter()/updateAttentionUI()/
+     updateRegionUI()/buildFilterTypeCheckboxes() etc. needed to change; they all look elements up
+     by ID regardless of nesting depth. DIFFERENT FROM ujump.html/pjump.html: the "borders" section
+     below has NO vessel-proximity dropdown or vessel-distance control at all (not just hidden --
+     the #filterVessel/#filterVesselDistOn/#filterVesselDist elements don't exist in this file), and
+     its title/tooltip say "dataset border" rather than "vasculature or dataset borders" -- V1DD's
+     vessel segmentation isn't reliable enough yet for this filter to mean anything here. The GL/WM
+     controls are unaffected (they're pia/white-matter-surface distance, not vasculature). If V1DD
+     ever gets a trustworthy vessel skeleton, add the same two rows ujump.html/pjump.html have back
+     into this section (runFilter()'s vesselSel/vesselDistOn/vesselMaxUm/fineSel all already handle
+     a missing #filterVessel gracefully -- see their own `?...: false/""` guards -- so nothing else
+     needs to change to re-enable it here). Also note djump.html's own layer set differs from
+     ujump/pjump (Layer 2 / Layer 3 / Layer 5 / Layer 6, not 2/3, 5a/5b, 6a/6b) -- preserved as-is. -->
+<details class="rv-panel filter-section" id="filterSecSelect">
+<summary title="Select any combination of cell type(s), or use the &quot;needing attention&quot; dropdown below to find cells MICrONS never made a prediction for at all, sliced by verification/report status.">Select the cell(s) of interest</summary>
+<div style="margin-top:10px">
+<div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px" id="filterTypes"></div>
 <div style="margin-top:12px">
 <label style="font-size:12px" title="The &quot;user-reported&quot; and &quot;totally unclassified&quot; options require a brief internet fetch to check which cells already have a report on file.">...or find cells needing attention (ignores the cell-type checkboxes above)</label>
 <select id="filterAttention" style="width:100%" title="The &quot;user-reported&quot; and &quot;totally unclassified&quot; options require a brief internet fetch to check which cells already have a report on file.">
@@ -694,7 +727,7 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <option value="reported">User-reported unclassified cells (no MICrONS prediction, not yet verified, but someone has reported an identification)</option>
 <option value="untouched">Totally unclassified cells (no MICrONS prediction, not verified, no report on file — needs attention most)</option>
 </select>
-<p class="hint" id="filterAttnWarning" style="display:none;color:var(--warn);font-weight:600">This dropdown overrides the cell-type checkboxes above — with it set, you're filtering only by attention status (plus vessel/glia-limitans/layer/region below, if those are also set), and the checked cell type(s) above are being ignored.</p>
+<p class="hint" id="filterAttnWarning" style="display:none;color:var(--warn);font-weight:600">This dropdown overrides the cell-type checkboxes above — with it set, you're filtering only by attention status (plus glia-limitans/layer/region below, if those are also set), and the checked cell type(s) above are being ignored.</p>
 <!-- 2026-08-09 (Søren: "Master Cell List reports >150,000 cells... Filter and Show with no
      filters applied returns only ~106,000 cells... implement the include unclassified cells
      checkbox") -- runFilter()'s normal pass (over ALL_IDENTITIES) silently skips any nucleus
@@ -709,15 +742,12 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
      the attention dropdown is in use, since it would be redundant (a subset of "all" there). -->
 <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-top:8px" title="Includes every nucleus with no MICrONS prediction on file and no verification/override of any kind (source: 'Unclassified'), alongside whatever else this filter run already matches — the population Master Cell List counts that the checkboxes above otherwise never surface. Ignored while the 'needing attention' dropdown above is set (it already covers this, and more)."><input type="checkbox" id="filterIncludeUnclassified"> Include unclassified cells (no MICrONS prediction, not yet verified — this is what makes a plain "no filters" run match Master Cell List's total)</label>
 </div>
-<div class="row" style="margin-top:12px;align-items:center">
-<div style="flex:1 1 200px"><label style="font-size:12px">Vessel proximity</label><select id="filterVessel" style="width:100%"></select></div>
 </div>
-<div class="row" style="margin-top:8px;align-items:center;gap:8px">
-<label style="font-size:12px" title="Applies to fineDist, the raw nearest-traced-vessel-point distance -- independent of the type dropdown above (see its own doc comment in runFilter()). Combine both to require a SPECIFIC vessel type within a distance, or check this alone for &quot;near any vessel, don't care which type&quot; with an actual number attached (unlike &quot;Near any vessel type&quot; above, which has no distance limit at all on its own)."><input type="checkbox" id="filterVesselDistOn"> Within</label>
-<input type="text" id="filterVesselDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
-<span style="font-size:12px;color:var(--mut)">µm of the nearest traced vessel point</span>
-</div>
-<div class="row" style="margin-top:10px;align-items:center;gap:8px">
+</details>
+<details class="rv-panel filter-section" id="filterSecBorders">
+<summary title="Glia-limitans/white-matter proximity is measured from the pia and white-matter surfaces. (Vessel proximity isn't offered here yet -- V1DD's vasculature segmentation isn't reliable enough to filter by.) Combine both if you like.">Should the cells be close to a dataset border (pia surface or white matter)?</summary>
+<div style="margin-top:10px">
+<div class="row" style="align-items:center;gap:8px">
 <label style="font-size:12px"><input type="checkbox" id="filterGLOn"> Within</label>
 <input type="text" id="filterGLDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
 <span style="font-size:12px;color:var(--mut)">µm of the glia limitans</span>
@@ -727,23 +757,29 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <input type="text" id="filterWMDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
 <span style="font-size:12px;color:var(--mut)">µm of the white matter border</span>
 </div>
-<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
-<label style="font-size:12px" title="Finds cells (from the type checkboxes ticked at the top of this panel) that fall within a chosen distance of AT LEAST ONE cell of the type(s) ticked below -- e.g. tick &quot;Microglia&quot; up top and &quot;23P&quot; below to find microglia near layer 2/3 pyramidal neurons, or tick every excitatory-neuron subtype below to find cells near ANY excitatory neuron. The reference population below is exactly the same cells &quot;Filter the data&quot; would find if you ticked those boxes as the PRIMARY filter -- own-verified and community-identified cells included -- just used here as landmarks instead of as the result being returned."><input type="checkbox" id="filterNearOn"> Also require being within</label>
+</div>
+</details>
+<details class="rv-panel filter-section" id="filterSecNear">
+<summary title="Finds cells (from the type checkboxes ticked in &quot;Select the cell(s) of interest&quot; above) that fall within a chosen distance of AT LEAST ONE cell of the type(s) ticked below -- e.g. tick &quot;Microglia&quot; there and &quot;23P&quot; here to find microglia near layer 2/3 pyramidal neurons, or tick every excitatory-neuron subtype here to find cells near ANY excitatory neuron. The reference population below is exactly the same cells &quot;Select the cell(s) of interest&quot; would find if you ticked those boxes as the PRIMARY filter -- own-verified and community-identified cells included -- just used here as landmarks instead of as the result being returned.">Do you want to find cells close to another cell type?</summary>
+<div style="margin-top:10px">
+<label style="font-size:12px"><input type="checkbox" id="filterNearOn"> Also require being within</label>
 <input type="text" id="filterNearDist" value="10" style="width:50px;padding:4px 6px" inputmode="decimal">
 <span style="font-size:12px;color:var(--mut)">µm of at least one cell of type(s):</span>
 <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterNearTypes"></div>
+<label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-top:8px" title="Off by default: normally only the cells ticked in &quot;Select the cell(s) of interest&quot; are returned (the ones found NEAR a reference-type cell), not the reference-type cells themselves. Check this to ALSO add every matched reference-type cell to the results (e.g. see both the microglia AND the layer 2/3 neurons they're near together, in the export or the 3D view) -- these landmark rows still respect every other filter on this panel (region box, layer, etc.), they just don't have to be near anything themselves."><input type="checkbox" id="filterNearIncludeRef"> Also include the reference-type cell(s) themselves in the results</label>
 </div>
-<div style="margin-top:10px">
-<label style="font-size:12px" title="Restricts matches to cells in the Allen Institute's manually identified V1 column (allen_v1_column_types_slanted_ref / aibs_column_nonneuronal_ref) — a hand-classified reference set, not an automated MICrONS prediction. &quot;Any member&quot; matches every column cell regardless of type (including pericytes/vascular); &quot;Neuronal members&quot; and &quot;non-vascular, non-neuronal members&quot; (glia and other non-neuronal calls, excluding pericytes) are narrower and can be checked together to match either. Check &quot;Include V1 column boundary&quot; below to also draw the column's outline in the 3D view. IMPORTANT: about 8% of V1 column members have no MICrONS prediction of their own and no own-verified override, so they're invisible to this filter unless &quot;Include unclassified cells&quot; above is ALSO checked — leave both on to see every V1 column member.">V1 column membership (Allen's manual ground-truth set — optional, in addition to any cell type(s) checked above)</label>
-<div class="toggles" style="margin-top:4px">
+</details>
+<details class="rv-panel filter-section" id="filterSecV1Col">
+<summary title="Restricts matches to cells in the Allen Institute's manually identified V1 column (allen_v1_column_types_slanted_ref / aibs_column_nonneuronal_ref) — a hand-classified reference set, not an automated MICrONS prediction. &quot;Any member&quot; matches every column cell regardless of type (including pericytes/vascular); &quot;Neuronal members&quot; and &quot;non-vascular, non-neuronal members&quot; (glia and other non-neuronal calls, excluding pericytes) are narrower and can be checked together to match either. Check &quot;Include V1 column boundary&quot; further down to also draw the column's outline in the 3D view. IMPORTANT: about 8% of V1 column members have no MICrONS prediction of their own and no own-verified override, so they're invisible to this filter unless &quot;Include unclassified cells&quot; (top section) is ALSO checked — leave both on to see every V1 column member.">Should the cells belong to the Allen Institute's V1 column ground-truth set?</summary>
+<div class="toggles" style="margin-top:10px">
 <label style="font-size:12px"><input type="checkbox" id="filterV1ColAny"> V1 column — any member (all cell types)</label>
 <label style="font-size:12px"><input type="checkbox" id="filterV1ColNeuron"> V1 column — neuronal members</label>
 <label style="font-size:12px"><input type="checkbox" id="filterV1ColNonVasc"> V1 column — non-vascular, non-neuronal members</label>
 </div>
-</div>
-<div style="margin-top:10px">
-<label style="font-size:12px" title="Layer filtering re-estimates each candidate cell's cortical depth on the fly and can take a few seconds for large result sets.">Cortical layer</label>
-<div class="toggles" style="margin-top:4px" id="filterLayers">
+</details>
+<details class="rv-panel filter-section" id="filterSecLayer">
+<summary title="Layer filtering re-estimates each candidate cell's cortical depth on the fly and can take a few seconds for large result sets.">Which cortical layer should the cells be in?</summary>
+<div class="toggles" style="margin-top:10px" id="filterLayers">
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Leptomeninges"> Leptomeninges</label>
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 1"> Layer 1</label>
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 2"> Layer 2</label>
@@ -753,10 +789,10 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="Layer 6"> Layer 6</label>
 <label style="font-size:12px"><input type="checkbox" class="flayer" value="White matter"> White matter</label>
 </div>
-</div>
-<div style="margin-top:10px">
-<label style="font-size:12px" title="Filters by whether a primary cilium and/or centriole has been ANNOTATED for this cell — not a confirmed biological absence. &quot;Neither annotated yet&quot; could just mean nobody has looked yet, not that the cell genuinely lacks one. Cilium/centriole coordinates come from Søren's own-verified dataset (including merged-nucleus breakdowns); community-reported cells and plain MICrONS predictions have no organelle data recorded, so they always count as &quot;neither&quot; here regardless of biology.">Primary cilium / centriole</label>
-<select id="filterOrganelle" style="width:100%" title="Filters by whether a primary cilium and/or centriole has been ANNOTATED for this cell — not a confirmed biological absence. &quot;Neither annotated yet&quot; could just mean nobody has looked yet.">
+</details>
+<details class="rv-panel filter-section" id="filterSecOrganelle">
+<summary title="Filters by whether a primary cilium and/or centriole has been ANNOTATED for this cell — not a confirmed biological absence. &quot;Neither annotated yet&quot; could just mean nobody has looked yet, not that the cell genuinely lacks one. Cilium/centriole coordinates come from Søren's own-verified dataset (including merged-nucleus breakdowns); community-reported cells and plain MICrONS predictions have no organelle data recorded, so they always count as &quot;neither&quot; here regardless of biology.">Has the cell been annotated with a primary cilium or centriole?</summary>
+<select id="filterOrganelle" style="width:100%;margin-top:10px">
 <option value="">Not filtering by this</option>
 <option value="either">Has a cilium and/or centriole annotated</option>
 <option value="cilium">Has a cilium annotated</option>
@@ -764,15 +800,20 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <option value="both">Has both a cilium and a centriole annotated</option>
 <option value="neither">Neither annotated yet (may just mean not yet checked)</option>
 </select>
-</div>
+</details>
+<details class="rv-panel filter-section" id="filterSecRegion">
+<summary title="Two diagonal corners per box, in the same voxel coordinates as the main search box above (X/Y at 4 nm/voxel, Z at 40 nm/voxel). Either diagonal works — order doesn't matter. Add as many boxes as you like; a cell matches if it falls inside any of them. Matching cells within 10 µm of a traced vessel will include the vessel type and distance in the download. You can paste x, y, z into either corner's x field — it splits automatically, just like the main coordinate field above.">Should the cells fall inside specific bounding box(es)?</summary>
 <div style="margin-top:10px">
-<label style="font-size:12px" title="Two diagonal corners per box, in the same voxel coordinates as the main search box above (X/Y at 4 nm/voxel, Z at 40 nm/voxel). Either diagonal works — order doesn't matter. Add as many boxes as you like; a cell matches if it falls inside any of them. Matching cells within 10 µm of a traced vessel will include the vessel type and distance in the download. You can paste x, y, z into either corner's x field — it splits automatically, just like the main coordinate field above."><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box)</label>
+<label style="font-size:12px"><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box)</label>
 <div id="regionBoxes"></div>
 <button type="button" class="idbtn" id="regionAddBox" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another box</button>
 <div id="regionViz"></div>
 </div>
-<div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:18px 0 2px;padding-top:14px;border-top:1px solid var(--line)" title="These only add extra 3D layers to the Neuroglancer view opened below — they never change which cells match, and none of them show up in the Excel export.">Add to the Neuroglancer view (not included in the Excel export)</div>
-<label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterVasc" style="width:auto"> Include vasculature outline</label>
+</details>
+<details class="rv-panel filter-section" id="filterSecViewer" style="margin-top:22px">
+<summary title="These only add extra 3D layers to the Neuroglancer view opened below — they never change which cells match, and none of them show up in the Excel export.">Add extra layers to the 3D view (optional — doesn't change which cells match)</summary>
+<div style="margin-top:10px">
+<label style="text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterVasc" style="width:auto"> Include vasculature outline</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterEMOn" style="width:auto"> Include EM imagery (ultrastructure)</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer" title="Draws a wireframe outline around the Allen Institute's manually identified V1 column. This is not an official published shape — it's a derived envelope (slanted to match the real tilt of the manually annotated member cells) computed from the member coordinates, since MICrONS only publishes the membership list, not a column geometry."><input type="checkbox" id="filterV1ColOn" style="width:auto"> Include V1 column boundary (Allen manually-annotated column, derived+slanted envelope)</label>
 <div style="margin-top:10px">
@@ -794,6 +835,8 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <label style="font-size:12px" title="Draws organelle/extracellular-structure point annotations for the cells matched above — one independently-toggleable layer per kind you check here, colour-coded per kind, organized by topic. Sourced from the community 'report an organelle' data; centriole and primary cilium also draw from Søren's own-verified dataset. No point for a given cell just means nobody has logged one there yet, not a confirmed biological absence. The two vector checkboxes (under Centriole &amp; cilium) draw an additional 3D arrow on top of the plain points — check a point checkbox on its own to show the organelle's location without the vector.">Organelles and extracellular structures</label>
 <div id="filterOrganellesBox" style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px"></div>
 </div>
+</div>
+</details>
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
 <button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
@@ -2872,6 +2915,9 @@ function persistDetailsOpen(id,storageKey){
 }
 persistDetailsOpen("rootNucSearchPanel","djump_rootnuc_search_open");
 persistDetailsOpen("randomCellPanel","djump_random_panel_open");
+// 2026-08-30: "Filter and show" collapsible restructuring (see the big HTML comment above
+// #filterSecSelect) -- same pattern, one storage key per section, collapsed by default.
+["filterSecSelect","filterSecBorders","filterSecNear","filterSecV1Col","filterSecLayer","filterSecOrganelle","filterSecRegion","filterSecViewer"].forEach(id=>persistDetailsOpen(id,"djump_"+id+"_open"));
 
 /* Root ID / Nucleus ID search (see the HTML comment above #rootNucSearchPanel for the request).
    Nucleus ID uses the existing nidToIndex() reverse map; root ID gets its own lazy reverse map
@@ -9168,6 +9214,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     const nearMaxUm=nearDistInput&&nearDistInput.value?parseFloat(nearDistInput.value):10;
     const nearTypes=activeNearTypeSet();
     const nearValid=nearOn&&nearTypes.size>0;
+    const nearIncludeRef=document.getElementById("filterNearIncludeRef")?document.getElementById("filterNearIncludeRef").checked:false;
     /* Cross-cell-type proximity filter (2026-08-30, Søren: "find the cells ticked in Filter the
        data that are within a modifiable range from another cell type... e.g. all microglia
        within 10 µm of a layer 2/3 neuron, or all excitatory neurons [by ticking every
@@ -9230,7 +9277,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     /* Shared per-row coordinate/vessel/layer checks -- used both for the normal type-classified
        pass (over ALL_IDENTITIES) and the needs-attention pass (over every nucleus, see below).
        Returns the match object to push, or null if this row should be excluded. */
-    function evalRow(row){
+    function evalRow(row,isRefRow){
       let regionBoxLabel=null;
       if(regionOn&&regionValid){
         const pos=rowPos(row);
@@ -9352,13 +9399,17 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       }
       /* Cross-cell-type proximity check -- see the nearGrid/nearestRefDistNm doc comment above.
          Placed last among the distance-style filters (after vessel/GL/WM/layer/organelle) purely
-         so a row that's already excluded by something cheaper never pays for a grid lookup. */
+         so a row that's already excluded by something cheaper never pays for a grid lookup.
+         Skipped entirely for isRefRow (2026-08-30, the "Also include the reference-type cell(s)
+         themselves in the results" checkbox, see the reference-inclusion pass below) -- a
+         reference-population row obviously can't be required to be near a member of its OWN
+         population (that's what it IS), it still has to pass every OTHER filter on this panel. */
       let nearDist=null;
-      if(nearValid){
+      if(nearValid&&!isRefRow){
         nearDist=nearestRefDistNm(row);
         if(nearDist===null||nearDist>nearMaxNm)return null;
       }
-      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,regionBoxLabel,hasCil,hasCent,nearDist};
+      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,regionBoxLabel,hasCil,hasCent,nearDist,isRefRow:!!isRefRow};
     }
     const out=[];
     if(attention){
@@ -9432,7 +9483,25 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
         }
       }
     }
-    return{matches:out,vesselActive:!!vesselSel,vesselDistActive:vesselDistOn,glActive:glOn,layerActive:layers.size>0,wmActive:wmOn,regionActive:!!(regionOn&&regionValid),attentionActive:!!attention,v1ColActive:v1On,nearActive:nearValid};
+    /* "Also include the reference-type cell(s) themselves in the results" (2026-08-30) -- runs
+       AFTER both branches above (attention or normal) so it applies uniformly regardless of which
+       one produced `out`. Adds every cell of the ticked reference type(s) that passes every OTHER
+       filter on this panel (region box, layer, GL/WM, vessel, organelle, V1 column -- everything
+       evalRow() checks except the near-distance gate itself, which isRefRow=true skips), skipping
+       anything already in `out` by identity so a cell that qualifies BOTH ways (e.g. the same type
+       ticked in both the primary and reference lists) is never duplicated. */
+    const nearIncludeRefActive=nearValid&&nearIncludeRef;
+    if(nearIncludeRefActive){
+      const seen=new Set(out.map(m=>rowIdentityKey(m.row)));
+      for(const refRow of buildAllIdentities()){
+        if(!nearTypes.has(refRow.type))continue;
+        const key=rowIdentityKey(refRow);
+        if(seen.has(key))continue;
+        const m=evalRow(refRow,true);
+        if(m){out.push(m);seen.add(key);}
+      }
+    }
+    return{matches:out,vesselActive:!!vesselSel,vesselDistActive:vesselDistOn,glActive:glOn,layerActive:layers.size>0,wmActive:wmOn,regionActive:!!(regionOn&&regionValid),attentionActive:!!attention,v1ColActive:v1On,nearActive:nearValid,nearIncludeRefActive};
   }
 
   /* Grid-accelerated k-nearest-neighbour lookup for the bulk Excel export. kNearest() above is
@@ -9799,6 +9868,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     if(result.v1ColActive)cols.push({header:"V1 column bucket",get:m=>m.v1Bucket==="neuron"?"Neuronal":m.v1Bucket==="nonvascular"?"Non-vascular, non-neuronal":m.v1Bucket==="vascular"?"Vascular (pericyte)":""});
     if(result.regionActive)cols.push({header:"Region box",get:m=>m.regionBoxLabel||""});
     if(result.nearActive)cols.push({header:"Distance to nearest matched reference-type cell (µm)",get:m=>m.nearDist!=null?(m.nearDist/1000).toFixed(1):""});
+    if(result.nearIncludeRefActive)cols.push({header:"Included as reference-type cell (landmark)?",get:m=>m.isRefRow?"Yes":"No"});
     /* Organelle location columns -- one column per (kind, instance#, role), each a single
        paste-ready "x, y, z" string (see orgPtText()/organelleInstancesForRow() above for the full
        reasoning). Pass 1 below computes, per checked kind, the most instances any ONE row in this
