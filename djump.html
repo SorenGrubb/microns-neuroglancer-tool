@@ -5517,10 +5517,9 @@ function renderConnectivityToggle(el,containerId,rootId,centerPos,cellType,nucle
     let h='<div style="font-size:12px;color:var(--mut);margin-bottom:8px">Looks up this cell\'s synaptic partners directly from the CAVE materialization API and opens the cell plus its partners in Neuroglancer, coloured by direction (input '
       +'<span style="color:#00b7ff">&#9679;</span> / output <span style="color:#ff4fa3">&#9679;</span>).</div>';
     h+='<div style="font-size:11.5px;color:var(--mut);background:var(--inset);border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:8px">'
-      +'<b style="color:var(--ink)">Need a CAVE token?</b> Visit <a href="https://global.daf-apis.com/auth/api/v1/create_token" target="_blank" rel="noopener">global.daf-apis.com/auth/api/v1/create_token</a>, '
-      +'sign in with the Google account you use for MICrONS, and copy the token shown on the page. '
+      +'<b style="color:var(--ink)">Need a CAVE token?</b> V1DD issues its OWN token, separate from MICrONS \u2014 a MICrONS/daf-apis token returns 401 invalid_token here (found by S\u00f8ren, 2026-08-30). '
+      +'Visit <a href="'+CAVE_TOKEN_GUIDE_URL+'" target="_blank" rel="noopener">global.em.brain.allentech.org/auth/api/v1/create_token</a>, sign in with your Google account, and copy the token shown on the page. '
       +'Paste just that string below \u2014 with or without quotes around it, both are fine, they\'re stripped automatically. '
-      +'(Prefer Python instead? The <a href="'+CAVE_TOKEN_GUIDE_URL+'" target="_blank" rel="noopener">CAVEclient setup guide</a> covers that route too.) '
       +'The token stays in your browser and is sent only to CAVE\'s own server \u2014 never to this site\'s backend.</div>';
     h+='<div style="display:flex;gap:6px;flex-wrap:nowrap;align-items:flex-end;margin-bottom:8px;overflow-x:auto">'
       +'<div style="flex:1 1 auto;min-width:90px"><label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:3px">CAVE token</label>'
