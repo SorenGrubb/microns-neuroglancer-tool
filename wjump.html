@@ -183,9 +183,9 @@
   built out of confirmations measures how convincing the first answer was rather than what the
   tissue is. You can still look &mdash; it is one click &mdash; and the click is recorded next to
   your answer so the effect of looking can be measured rather than assumed away.</p>
-  <p class="hint">Twenty-six volumes are open, listed smallest first with the number of 20 &micro;m
+  <p class="hint">Twenty-six volumes are open, listed smallest first with the number of 40 &micro;m
   boxes each one takes &mdash; 18 for the Meissner corpuscle, 9,600 for a mouse parietal column,
-  20,800 across the roster. The map above sizes itself to whichever volume you pick and keeps one
+  2,922 across the roster. The map above sizes itself to whichever volume you pick and keeps one
   scale across its three panels, so a distance in one is the same distance in the others.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
@@ -606,16 +606,17 @@ UJ.cfg.datasets = [
   /* ── held out, deliberately ────────────────────────────────────────────────────────────────
      Three WEBKNOSSOS datasets Søren sent that ωJump cannot honestly offer yet.
 
-     THE TWO MultiSEM HUMAN BLOCKS are millimetre-scale surveys, and 20 µm boxes do not survive
-     contact with them:
-        H5_10_270um_L23_NH_NJ   1437.7 × 1495.0 × 116.7 µm  ->  32,400 boxes, 4.0 px per box
-        H5_10_270um_final_v1    1953.8 × 2691.1 ×  37.9 µm  ->  26,460 boxes, 2.6 px per box
-     Either one is four times the entire rest of the roster, and the map would draw 5,400 and
-     13,230 squares a few pixels across -- not a map, a grey wash. This is not a bug in them; it
-     is the box size meeting a different kind of dataset. A per-dataset boxUm of 100 µm would make
-     them 450 and 540 boxes with a readable map, at the cost of the premise the 20 µm cube was
-     chosen for -- "a field a user can actually judge in one look". That is Søren's call, not one
-     to make by quietly adding a field.
+     THE TWO MultiSEM HUMAN BLOCKS are millimetre-scale surveys. At 20 µm they were hopeless --
+     32,400 and 26,460 boxes, each four times the rest of the roster, drawn as squares 5.9 and
+     3.3 px across: not a map, a grey wash.
+
+     The move to 40 µm (2026-08-30) changes that arithmetic by a factor of eight:
+        H5_10_270um_L23_NH_NJ   1437.7 × 1495.0 × 116.7 µm  ->  4,104 boxes, 11.8 px per box
+        H5_10_270um_final_v1    1953.8 × 2691.1 ×  37.9 µm  ->  3,332 boxes,  6.5 px per box
+     The first now clears the 10 px floor and is about 1.4x the rest of the roster -- large, but
+     no longer absurd. The second is still under it. Neither is enabled here: the reason they were
+     held out has weakened, not vanished, and turning them on is Søren's call rather than a side
+     effect of a box-size change.
 
      MOUSE A2 has no publication. It sits in the same 2022-06-21 upload batch as the Loomba
      volumes and is named like them, but it is NOT attached to that paper's WEBKNOSSOS publication
@@ -700,9 +701,22 @@ UJ.cfg.groups = [
 
 /* ── exploration ──────────────────────────────────────────────────────────────────────────── */
 UJ.cfg.explore = {
-  /* 20 µm: a field a user can actually judge in one look, and it makes the open roster 20,800
-     boxes -- finishable. 15 µm would be 1,210 boxes for heart-1 alone. */
-  boxUm: 20,
+  /* 40 µm (2026-08-30, Søren: "in general, I think the boxes are too small"). Was 20 µm, which
+     made the open roster 20,800 boxes -- finishable in principle, tedious in practice: a 20 µm
+     cube of most of these tissues holds one or two nuclei and a lot of nothing.
+
+     Doubling the edge divides the roster by eight: 20,800 boxes -> 2,922, and the largest single
+     dataset (ppc-2) from 9,600 to 1,280. The smallest, the Meissner corpuscle at
+     57.6 x 46.1 x 36.9 µm, becomes a 1 x 2 x 2 grid of four boxes -- honest rather than a
+     problem: it IS a small volume, and four assignments is what it is worth.
+
+     THIS RENUMBERS EVERY BOX. Keys are grid indices (i,j,k), so the box called "3,4,2" at 20 µm
+     is a different piece of tissue at 40 µm. Recorded FINDS are unaffected -- "Nuclei found"
+     stores absolute x_nm/y_nm/z_nm -- but "Box visits" is keyed only by boxKey, so prior
+     coverage does not carry over. At the time of the change that was 13 visits, all Søren's own,
+     and 8 of them were already unmatchable to any real box (a separate bug: those rows have 2000
+     added to one index component, e.g. "8,7,2005" where the grid's own maximum is "8,7,6"). */
+  boxUm: 40,
   /* Serve the K farthest boxes and pick randomly among them. Deterministic farthest-point hands
      two simultaneous users the same box; K removes the collision without any locking. */
   topK: 20,
@@ -1136,7 +1150,7 @@ UJ.wjump = (function(){
   /* Inline annotations live in the URL, and a URL has a practical ceiling around 64 kB. One
      nucleus is roughly 90 bytes of JSON once encoded, so a few hundred is comfortable and a few
      thousand is a link that silently truncates or refuses to open. That was a documented
-     "someday" while one 18-box dataset was open; with 20,800 boxes across 26 datasets it is
+     "someday" while one 4-box dataset was open; with 2,922 boxes across 26 datasets it is
      a matter of time. Keep the ones NEAREST to where the viewer is being sent -- those are the
      only ones on screen anyway -- and say in the layer name that it is a subset, because a map
      that quietly omits points is worse than one that admits it. The real fix when a dataset gets
