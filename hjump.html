@@ -804,6 +804,14 @@ UJ.cfg.mesh = {
   preferAlt: true,
   preshiftBits: 6, minishardBits: 8, shardBits: 10, vertexQuantizationBits: 16,
   transform: [16,0,0,0, 0,16,0,0, 0,0,33,0],
+  /* H01's c3 is a conservative agglomeration (see loadExtraIdPanel's own comment) -- community-
+     proposed extra c3 segment IDs for the same cell are genuinely part of its mesh, unlike a
+     proposed "cell body" ID (a different ID space/bucket this mesh code cannot read at all).
+     core/mesh.js's extraImg65RootIds() defaults to qualifying segType "img65" (µJump's own
+     convention); this tells it to only fold in CUR_EXTRA_ROOTS entries tagged "c3" instead.
+     2026-08-30, Søren: "there should also be an option to calculate the cell volume on the
+     Segment IDs" (after proposing extra c3 IDs) -- see wireMeshButtons()'s .meshvol handler. */
+  extraRootSegType: "c3",
   dracoWrapper: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_wasm_wrapper.js",
   dracoWasm: "https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.wasm"
 };
@@ -1026,6 +1034,13 @@ function idRow(k, val, title, extra){
 }
 
 let CUR_IDX=null;
+/* Read by core/mesh.js's extraImg65RootIds() (typeof-guarded there, exactly like µJump's own
+   top-level `let` of the same name -- see the scope note above ORGANELLE_GROUPS) so the main
+   cell's mesh download / PowerPoint / Compute volume all fold in community-proposed c3 segment
+   IDs automatically. Repopulated by loadExtraIdPanel() every time that panel (re)loads -- i.e.
+   on every cell shown, and again after a propose/vote -- so clicking "Compute volume" always
+   uses whatever is proposed AT THAT MOMENT. 2026-08-30. */
+let CUR_EXTRA_ROOTS=[];
 function showCell(i, distNm, fromHistory){
   CUR_IDX=i;
   navGo(i,fromHistory);
@@ -1058,7 +1073,9 @@ function showCell(i, distNm, fromHistory){
   h+='<div class="ids">';
   h+=idRow("c3 segment", seg, "H01 c3 segmentation ID — click to copy",
       '<button class="idbtn meshdl" title="Download this cell’s 3D model as a .glb, decoded in your browser from H01’s Draco meshes. No sign-in needed. Shift-click to re-check the network if a previous attempt found no mesh." style="padding:1px 8px;margin-left:6px;font-size:11px;vertical-align:middle">⬇ 3D model</button>'
-     +'<button class="idbtn pptxdl" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its type, layer and coordinates. Built entirely in your browser." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>');
+     +'<button class="idbtn pptxdl" title="Download a PowerPoint slide with this cell as a live 3D model, labelled with its type, layer and coordinates. Built entirely in your browser." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">⬇ PowerPoint</button>'
+     +'<button class="idbtn meshvol" title="Computes whole-cell volume from the decoded mesh geometry — the c3 segment ID(s) above, NOT the precomputed soma figure at the top of this panel (that one is the cell_bodies ID, a different ID space; see its own tooltip). Automatically combines any community-proposed c3 IDs from the panel below, so re-running this after proposing a new one recalculates using all of them. An estimate: small gaps at fragment boundaries in the raw mesh aren’t corrected for." style="padding:1px 8px;margin-left:4px;font-size:11px;vertical-align:middle">&#8776; Compute volume</button>');
+  h+='<div id="meshvolResult" class="hint" style="margin-top:2px"></div>';
   h+=idRow("cell body", String(HSB[i]), "cell_bodies segmentation ID — a separate ID space from c3");
   h+=idRow("voxel", pos.join(", "), "Position in "+UJ_RX+"·"+UJ_RY+"·"+UJ_RZ+" nm voxels — click to copy");
   h+='</div>';
@@ -1153,6 +1170,29 @@ function wireMeshButtons(i){
     run(pb,function(){
       return UJ.mesh.downloadRootPptx(c3Id(i), longName(typeName(i))+" · "+lay,
                                       [HX[i],HY[i],HZ[i]].join(", "), prog, ev.shiftKey);
+    });
+  });
+  /* "Compute volume" -- 2026-08-30, Søren: after proposing extra c3 segment IDs for a cell, there
+     should be a way to (re)compute whole-cell volume covering all of them, distinct from the
+     precomputed soma figure (cell_bodies ID basis) shown at the top of the panel. UJ.mesh.
+     computeVolume() already folds CUR_EXTRA_ROOTS into the mesh it fetches (see extraRootSegType:
+     "c3" in UJ.cfg.mesh above), and CUR_EXTRA_ROOTS is refreshed by loadExtraIdPanel() on every
+     cell shown and every propose/vote -- so simply clicking this button again after a new ID is
+     proposed already IS the "recalculate" action; no separate control was needed. */
+  const vb=document.querySelector(".meshvol");
+  const resultEl=document.getElementById("meshvolResult");
+  if(vb) vb.addEventListener("click",function(ev){
+    run(vb,function(){
+      return UJ.mesh.computeVolume(c3Id(i),prog,ev.shiftKey).then(function(info){
+        const n=(info.rootIds&&info.rootIds.length)||1;
+        const combinedStr=n>1?" (main + "+(n-1)+" proposed segment"+(n-1===1?"":"s")+" combined)":"";
+        const fallbackStr=info.mainUnavailable?" — the main c3 ID’s mesh wasn’t found; computed from a proposed segment ID instead.":"";
+        if(resultEl){
+          resultEl.textContent="Cell volume (mesh"+combinedStr+"): ≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"+fallbackStr;
+          resultEl.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices) — small gaps at fragment boundaries aren't corrected for, so this is an estimate, not an exact figure. Recompute any time (e.g. after a new segment ID is proposed below) by clicking Compute volume again.";
+        }
+        return info;
+      });
     });
   });
 }
@@ -2263,8 +2303,15 @@ function loadIdentityVotes(bodyId,seedNames){
    (propose_root_id / vote_root_id / remove_root_id), with segType naming H01's two ID spaces. */
 function loadExtraIdPanel(bodyId){
   const el=document.getElementById("extraIdPanel");
+  CUR_EXTRA_ROOTS=[];   // stale extras from whichever cell was on screen before must never leak in
   if(!el||!REPORT_ENDPOINT||!bodyId){ if(el)el.innerHTML=""; return; }
   const render=function(list){
+    /* Only "c3" proposals are meshable extras -- "cellbody" IDs live in the separate cell_bodies
+       segmentation/bucket this mesh code never reads (see idRow("cell body", ...)'s own tooltip).
+       Unfiltered by vote tally, same as µJump's loadRootIdPanel(): a community fact worth including
+       even before it's been voted on, not a claim of certainty. */
+    CUR_EXTRA_ROOTS=(list||[]).filter(function(x){return x&&x.segType==="c3"&&x.rootId;})
+      .map(function(x){return {id:x.rootId,segType:"c3"};});
     const isOwner=OWNER_EMAIL&&REPORTER_NAME&&false;   // owner-only removal needs the email, not the name
     let body='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">'
       +'H01&rsquo;s c3 is a <i>conservative</i> agglomeration, so one cell is often split across '
