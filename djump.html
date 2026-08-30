@@ -800,14 +800,15 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 </div>
 </details>
 <details class="rv-panel filter-section" id="filterSecOrganelle">
-<summary title="Filters by whether a primary cilium and/or centriole has been ANNOTATED for this cell — not a confirmed biological absence. &quot;Neither annotated yet&quot; could just mean nobody has looked yet, not that the cell genuinely lacks one. Cilium/centriole coordinates come from Søren's own-verified dataset (including merged-nucleus breakdowns); community-reported cells and plain MICrONS predictions have no organelle data recorded, so they always count as &quot;neither&quot; here regardless of biology.">Has the cell been annotated with a primary cilium or centriole?</summary>
+<summary title="Filters by whether a SPECIFIC organelle/extracellular structure has been ANNOTATED for this cell — not a confirmed biological absence. &quot;Not annotated yet&quot; could just mean nobody has looked/reported it, not that the cell genuinely lacks it. Centriole and primary cilium read Søren's own-verified dataset (dense — every nucleus has a real yes/no, including merged-nucleus breakdowns); every other kind reads the community 'report an organelle' data only (sparse — a cell with no report is far more likely to just be unchecked than for centriole/cilium, which have full coverage). 2026-08-30, Søren: generalized from a cilium/centriole-only dropdown to any organelle/structure kind, using the same grouped list as the 'report an organelle' form.">Has the cell been annotated with a specific organelle or extracellular structure?</summary>
+<div style="margin-top:10px">
+<label style="font-size:12px">Which organelle / structure</label>
+<select id="filterOrganelleKind" style="width:100%;margin-top:4px"></select>
+</div>
 <select id="filterOrganelle" style="width:100%;margin-top:10px">
 <option value="">Not filtering by this</option>
-<option value="either">Has a cilium and/or centriole annotated</option>
-<option value="cilium">Has a cilium annotated</option>
-<option value="centriole">Has a centriole annotated</option>
-<option value="both">Has both a cilium and a centriole annotated</option>
-<option value="neither">Neither annotated yet (may just mean not yet checked)</option>
+<option value="has">Has this annotated</option>
+<option value="not">Not annotated yet (may just mean not yet checked)</option>
 </select>
 </details>
 <details class="rv-panel filter-section" id="filterSecRegion">
@@ -1237,15 +1238,53 @@ function categorizedLayout(types,extra){
    untouched. */
 const TIGHT_BOX_LAYOUT={boxgap:0.15,boxgroupgap:0.05};
 
+/* 2026-08-30, Søren: "these graphs are distorted because of the long cell names... shorten the
+   cell names or make them more compact." Every axis on this dashboard uses tickangle:-45 +
+   automargin (see baseLayout()), which grows the bottom margin without bound as the longest label
+   gets longer -- fine for "Astrocyte"/"Pericyte", badly distorting for "Layer 5 ET thick-tufted
+   pyramidal neuron (5P-ET)".
+
+   Neuron leaf names already carry their real MICrONS m-type code in trailing parentheses (see the
+   "Neuron leaf names carry their MICrONS m-type code" comment elsewhere in this file, and the same
+   pattern for inhibitory types: "Basket cell — PV / perisomatic-targeting (BC)"). shortAxisLabel()
+   extracts just that code for the axis tick -- "5P-ET", "BC" -- which is the SAME code already
+   used throughout this app (dropdowns, TYPE_RANK's short aliases, exports), not an invented
+   abbreviation. Types with no parenthetical code (glia, vascular, immune, leptomeningeal -- e.g.
+   "Astrocyte", "Endothelial cell") are returned unchanged: already short, and there's no
+   established shorthand for most of them to fall back on safely.
+
+   Also handles the "A × B" cell-type-PAIR strings the mesh-contacts chart builds (see
+   renderMeshContactStats() -- p.typeA+" × "+p.typeB), shortening each side independently rather
+   than treating the whole pair as one name (a naive trailing-parenthesis match would only catch
+   typeB's code and silently drop typeA's).
+
+   Every call site below keeps the FULL name available on hover (via an explicit hovertemplate/text
+   using the original, unshortened string, or via a box trace's `name` field which was already
+   separate from its `x0` position) -- only the visible tick label is shortened, nothing scientific
+   is lost, just no longer forced onto the axis itself. */
+function shortSingleTypeLabel(t){
+  const m=/\(([^()]+)\)\s*$/.exec(String(t||""));
+  return m?m[1]:t;
+}
+function shortAxisLabel(t){
+  const s=String(t||"");
+  return s.indexOf(" × ")>=0?s.split(" × ").map(shortSingleTypeLabel).join(" × "):shortSingleTypeLabel(s);
+}
+
 function barChart(divId,dataObj,yTitle,byCategory){
   let types=Object.keys(dataObj);
   types=byCategory?sortByCategory(types,t=>dataObj[t]):types.sort((a,b)=>dataObj[b]-dataObj[a]);
   const y=types.map(t=>dataObj[t]);
+  const shortTypes=types.map(shortAxisLabel);
   const bl=baseLayout();
   const layout=byCategory
-    ?categorizedLayout(types,{yaxis:Object.assign({},bl.yaxis,{title:yTitle})})
+    ?categorizedLayout(shortTypes,{yaxis:Object.assign({},bl.yaxis,{title:yTitle})})
     :Object.assign({},bl,{yaxis:Object.assign({},bl.yaxis,{title:yTitle})});
-  Plotly.newPlot(divId,[{type:"bar",x:types,y,marker:{color:types.map(colorFor)}}],layout,PLOTLY_CFG);
+  Plotly.newPlot(divId,[{
+    type:"bar",x:shortTypes,y,text:types,
+    hovertemplate:"%{text}<br>"+yTitle+": %{y}<extra></extra>",
+    marker:{color:types.map(colorFor)}
+  }],layout,PLOTLY_CFG);
 }
 
 /* "SuperPlot"-style dot plot: jittered individual points (grey) + a coloured horizontal
@@ -1257,7 +1296,9 @@ function dotMedianChart(divId,dataObj,yTitle,tight,useRank){
   types=(useRank?sortByCategoryAndRank:sortByCategory)(types,t=>dataObj[t].length);
   const traces=types.map(function(t){
     return {
-      type:"box", name:t, y:dataObj[t], x0:t,
+      /* name stays the FULL string (t) -- hoverinfo:"y+name" already shows it on hover, unrelated
+         to the axis tick, which is why only x0 needs shortening here (see shortAxisLabel()). */
+      type:"box", name:t, y:dataObj[t], x0:shortAxisLabel(t),
       boxpoints:"all", jitter:0.55, pointpos:0,
       marker:{color:"#8a8a8a",size:3,opacity:0.45},
       line:{color:colorFor(t),width:3},
@@ -1266,7 +1307,7 @@ function dotMedianChart(divId,dataObj,yTitle,tight,useRank){
       hoverinfo:"y+name"
     };
   });
-  Plotly.newPlot(divId,traces,categorizedLayout(types,Object.assign({
+  Plotly.newPlot(divId,traces,categorizedLayout(types.map(shortAxisLabel),Object.assign({
     yaxis:Object.assign({},baseLayout().yaxis,{title:yTitle}),
     showlegend:false
   },tight?TIGHT_BOX_LAYOUT:{})),PLOTLY_CFG);
@@ -1323,19 +1364,23 @@ function groupedDotChart(divId,seriesList,yTitle,tight,useRank){
       const arr=s.dataObj[t];
       if(!arr||arr.length<3)return;
       traces.push({
-        type:"box", name:s.name, x0:t, y:arr,
+        /* Unlike dotMedianChart, `name` here is the SERIES name (e.g. "Input (received)"), not the
+           cell type -- hoverinfo:"y+name" alone would no longer reveal which type a box belongs to
+           once x0 is shortened (see shortAxisLabel()), so this uses an explicit hovertemplate that
+           embeds the type's FULL name (t, captured from the closure) instead. */
+        type:"box", name:s.name, x0:shortAxisLabel(t), y:arr,
         boxpoints:"all", jitter:0.55, pointpos:0,
         marker:{color:"#8a8a8a",size:3,opacity:0.4},
         line:{color:s.color,width:2.5},
         fillcolor:"rgba(0,0,0,0)",
         whiskerwidth:0, quartilemethod:"linear",
         showlegend:!legendShown,
-        hoverinfo:"y+name"
+        hovertemplate:t+"<br>%{y}<br>"+s.name+"<extra></extra>"
       });
       legendShown=true;
     });
   });
-  Plotly.newPlot(divId,traces,categorizedLayout(types,Object.assign({
+  Plotly.newPlot(divId,traces,categorizedLayout(types.map(shortAxisLabel),Object.assign({
     yaxis:Object.assign({},baseLayout().yaxis,{title:yTitle}),
     boxmode:"group",
     showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
@@ -1394,11 +1439,17 @@ function renderLiveCoreCharts(live){
   const perLayer=live.cells_per_type_per_layer.data;
   const types=sortByCategory(Object.keys(perLayer),
     t=>Object.values(perLayer[t]).reduce((s,v)=>s+v,0)).slice(0,20);
+  /* 2026-08-30: axis ticks shortened via shortAxisLabel() (see its own comment) -- text/
+     hovertemplate keep the FULL type name on hover, since name here is the LAYER (shared across
+     every bar in this trace), not the cell type, so the default x+y+name hover would otherwise
+     lose type precision the moment x becomes a short code. */
+  const shortTypes=types.map(shortAxisLabel);
   const layerTraces=layerOrder.map(function(layer){
-    return {type:"bar",name:layer,x:types,y:types.map(t=>(perLayer[t]&&perLayer[t][layer])||0),
+    return {type:"bar",name:layer,x:shortTypes,y:types.map(t=>(perLayer[t]&&perLayer[t][layer])||0),
+      text:types,hovertemplate:"%{text}<br>"+layer+": %{y}<extra></extra>",
       marker:{color:LAYER_COLORS[layer]||"#999"}};
   });
-  Plotly.newPlot("plotCellsPerLayer",layerTraces,categorizedLayout(types,{
+  Plotly.newPlot("plotCellsPerLayer",layerTraces,categorizedLayout(shortTypes,{
     barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
     yaxis:Object.assign({},baseLayout().yaxis,{title:"# of cells"})
   }),PLOTLY_CFG);
@@ -1423,13 +1474,20 @@ function renderLiveCoreCharts(live){
      near 100% (Søren, from a screenshot: "not enough space in the top to show the labels"). Give
      this one chart a real top margin instead, and widen the y-axis range further above 100 so the
      tallest bars' labels have somewhere to sit rather than crowding the very top edge. */
+  /* 2026-08-30: axis shortened via shortAxisLabel(); the "n/total" labels above each bar (already
+     text/textposition:"outside", unrelated to the axis) still show as before, but the default
+     hover (which would otherwise just repeat the now-short x label) is overridden with an explicit
+     hovertemplate carrying the FULL type name + percent + n/total together. */
+  const pcShort=pcTypes.map(shortAxisLabel);
   Plotly.newPlot("plotCiliaPercent",[{
     type:"bar",
-    x:pcTypes, y:pcTypes.map(t=>pc[t].percent),
+    x:pcShort, y:pcTypes.map(t=>pc[t].percent),
     text:pcTypes.map(t=>pc[t].with_cilium+"/"+pc[t].checked),
     textposition:"outside",
+    customdata:pcTypes,
+    hovertemplate:"%{customdata}<br>%{y:.1f}% (%{text})<extra></extra>",
     marker:{color:pcTypes.map(colorFor)}
-  }],categorizedLayout(pcTypes,{
+  }],categorizedLayout(pcShort,{
     margin:Object.assign({},baseLayout().margin,{t:32}),
     yaxis:Object.assign({},baseLayout().yaxis,{title:"% with primary cilium",range:[0,118]})
   }),PLOTLY_CFG);
@@ -1452,10 +1510,12 @@ function renderLiveCoreCharts(live){
     const t=picker.value||ncTypes[0];
     const top8=sortedEntries(nc[t]||{}).slice(0,8).map(e=>e[0]);
     const ordered=sortByCategory(top8,nt=>(nc[t]||{})[nt]||0);
+    const orderedShort=ordered.map(shortAxisLabel);
     Plotly.newPlot("plotNeighborComposition",[{
-      type:"bar",x:ordered,y:ordered.map(nt=>(nc[t]||{})[nt]||0),
+      type:"bar",x:orderedShort,y:ordered.map(nt=>(nc[t]||{})[nt]||0),
+      text:ordered,hovertemplate:"%{text}<br>%{y}<extra></extra>",
       marker:{color:ordered.map(colorFor)}
-    }],categorizedLayout(ordered,{yaxis:Object.assign({},baseLayout().yaxis,{title:"neighbour occurrences (×5 per "+t+" cell)"})}),PLOTLY_CFG);
+    }],categorizedLayout(orderedShort,{yaxis:Object.assign({},baseLayout().yaxis,{title:"neighbour occurrences (×5 per "+t+" cell)"})}),PLOTLY_CFG);
   }
   if(!_neighborPickerWired){picker.addEventListener("change",renderNeighbor);_neighborPickerWired=true;}
   if(ncTypes.length){
@@ -9010,6 +9070,23 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     });
     orgBox.innerHTML=oh;
   }
+  /* 2026-08-30, Søren: generalized filterOrganelle from a cilium/centriole-only dropdown to any
+     organelle/structure kind -- this populates the new #filterOrganelleKind picker with the exact
+     same grouped optgroup markup (ORGANELLE_KIND_OPTIONS_HTML, defined in ontology.js) the "report
+     an organelle" form itself uses, so the two lists always stay in sync with zero extra
+     maintenance when a kind is added/renamed. NOT read via window.ORGANELLE_KIND_OPTIONS_HTML --
+     it's a top-level const, not explicitly exported onto window (unlike ORGANELLE_GROUPS just
+     above, which IS -- see window.ORGANELLE_GROUPS=... in ontology.js), and this codebase's own
+     established gotcha is that window.X fails for a top-level const even though the bare
+     identifier crosses <script> tag boundaries fine (see the µJump script-tag-scope-boundary
+     note) -- so the bare name is used here, deliberately, not a bug. Defaults to "centriole" --
+     same default value the report form's first row uses (see core/panel.js's addRow(), "the more
+     common starting point"). */
+  const orgKindSel=document.getElementById("filterOrganelleKind");
+  if(orgKindSel&&typeof ORGANELLE_KIND_OPTIONS_HTML!=="undefined"){
+    orgKindSel.innerHTML=ORGANELLE_KIND_OPTIONS_HTML;
+    orgKindSel.value="centriole";
+  }
   /* The "needing attention" dropdown and the cell-type checkboxes above it are mutually
      exclusive in practice -- runFilter()'s attention pass ignores the checkboxes entirely (see
      the comment there), which was confusing when someone had both set and only realised the
@@ -9251,6 +9328,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     const regionBoxesNM=getRegionBoxesNM();
     const regionValid=regionBoxesNM.length>0;
     const organelleSel=document.getElementById("filterOrganelle")?document.getElementById("filterOrganelle").value:"";
+    const organelleKind=document.getElementById("filterOrganelleKind")?document.getElementById("filterOrganelleKind").value:"";
     const v1AnyOn=document.getElementById("filterV1ColAny")?document.getElementById("filterV1ColAny").checked:false;
     const v1NeuronOn=document.getElementById("filterV1ColNeuron")?document.getElementById("filterV1ColNeuron").checked:false;
     const v1NonVascOn=document.getElementById("filterV1ColNonVasc")?document.getElementById("filterV1ColNonVasc").checked:false;
@@ -9434,13 +9512,25 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
         hasCil=!!ST_HASCIL[row.i];
         hasCent=!!ST_HASCENT[row.i];
       }
-      if(organelleSel){
-        const organelleMatch=
-          organelleSel==="either"?(hasCil||hasCent):
-          organelleSel==="cilium"?hasCil:
-          organelleSel==="centriole"?hasCent:
-          organelleSel==="both"?(hasCil&&hasCent):
-          organelleSel==="neither"?(!hasCil&&!hasCent):true;
+      /* 2026-08-30, Søren: generalized from a cilium/centriole-only dropdown to any organelle/
+         structure kind (see filterOrganelleKind, populated from the shared ORGANELLE_KIND_OPTIONS_HTML
+         -- the same grouped list the "report an organelle" form uses). Centriole and cilium keep
+         reading the dense own-verified hasCil/hasCent computed just above (unchanged data source,
+         unchanged behaviour for those two kinds specifically); every other kind reads window.ORG_MAP,
+         the sparse community-report map fetched once before this whole filtering pass starts (see
+         the filterRun click handler) -- "not annotated yet" for those kinds is far more likely to
+         mean "nobody has reported one here" than a genuine absence, since there's no dense
+         own-verified fallback the way there is for cilium/centriole. */
+      if(organelleSel&&organelleKind){
+        let hasKind;
+        if(organelleKind==="centriole")hasKind=hasCent;
+        else if(organelleKind==="cilium")hasKind=hasCil;
+        else{
+          const orgNid=String(rowNucId(row)||"");
+          const orgReports=(window.ORG_MAP&&orgNid)?window.ORG_MAP[orgNid]:null;
+          hasKind=!!(orgReports&&orgReports.some(o=>o.kind===organelleKind));
+        }
+        const organelleMatch=organelleSel==="has"?hasKind:organelleSel==="not"?!hasKind:true;
         if(!organelleMatch)return null;
       }
       /* Cross-cell-type proximity check -- see the nearGrid/nearestRefDistNm doc comment above.
@@ -10725,6 +10815,19 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       runBtn.textContent="Filtering…";
     }
     await ensureCommunityOverride();
+    /* 2026-08-30, Søren: generalized organelle filter -- any kind other than centriole/cilium reads
+       window.ORG_MAP (the sparse per-nucleus community-report map, see fetchAllOrganelles()) rather
+       than the dense own-verified arrays already resident in memory. Fetch it here, once, before the
+       synchronous filtering pass below -- same "only pay for it if actually needed" pattern as the
+       report-list fetch just above and the organelle-points fetch in the viewAllBtn handler further
+       down. fetchAllOrganelles() has no internal cache, so this always gets a fresh map. */
+    const orgSelForFetch=document.getElementById("filterOrganelle");
+    const orgKindForFetch=document.getElementById("filterOrganelleKind");
+    if(orgSelForFetch&&orgSelForFetch.value&&orgKindForFetch&&orgKindForFetch.value!=="centriole"&&orgKindForFetch.value!=="cilium"){
+      runBtn.textContent="Fetching organelle reports…";
+      window.ORG_MAP=await fetchAllOrganelles();
+      runBtn.textContent="Filtering…";
+    }
     setTimeout(()=>{
       lastResult=runFilter();
       const nMatch=lastResult.matches.length;
