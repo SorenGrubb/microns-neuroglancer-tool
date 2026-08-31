@@ -301,9 +301,9 @@ try{var _t=localStorage.getItem("ujump_theme");
        has been wrong twice: it said twenty-six volumes and 2,922 boxes while the roster was 41
        and 14,532, because prose is the one thing in this file nothing checks. Now the numbers
        come from the same array the picker reads, so they cannot drift again. -->
-  <p class="hint">41 volumes are open, listed smallest first with the number of
-  40&nbsp;&micro;m boxes each one takes &mdash; 3 for the smallest, 3,672 for the
-  largest, 11,558 across the roster. The map above sizes itself to whichever volume you pick
+  <p class="hint">46 volumes are open, listed smallest first with the number of
+  40&nbsp;&micro;m boxes each one takes &mdash; 1 for the smallest, 3,672 for the
+  largest, 11,707 across the roster. The map above sizes itself to whichever volume you pick
   and keeps one scale across its panels, so a distance in one is the same distance in another.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
@@ -412,10 +412,19 @@ UJ.cfg.dataset = {
 /* The viewer. neuroglancer-demo reads zarr:// straight off the public bucket -- the same viewer
    OpenOrganelle's own per-dataset links use, so a coordinate typed here means the same thing it
    means on their site.
-   POSITION IS IN NANOMETRES, not voxels. Verified against jrc_mus-heart-1's own published state,
-   whose dimensions are [1e-9,"m"] per axis and whose position [68480,73760,64288] lands mid-
-   volume for a 163×152×136 µm block. That is the opposite convention from every other tool in
-   this family, where position is in voxels -- get it wrong and every jump lands at the origin. */
+   POSITION IS IN VOXELS, since 2026-08-31 -- like every other tool in this family.
+
+   It was nanometres before that, because OpenOrganelle's own published states declare
+   dimensions of [1e-9,"m"] per axis and this roster was built to match them. Søren asked for
+   voxels: "If we need to let the authors of the dataset know about our cell identities, they
+   should be translatable and therefore in voxels", and nanometre dimensions also make the z axis
+   unscrollable -- one step is one nanometre, so a 40 nm section takes forty presses.
+
+   So the states this tool generates now declare each dataset's own res_nm as the dimensions, and
+   a position typed here means what WEBKNOSSOS and the viewer's own position box mean. It no
+   longer matches OpenOrganelle's published links character for character; it matches what those
+   links SHOW, which is the thing a person reads. wjump_logic.js converts at that boundary and
+   nowhere else -- see "NANOMETRES INSIDE, VOXELS AT EVERY EDGE" there. */
 UJ.cfg.viewer = { base: "https://neuroglancer-demo.appspot.com/" };
 
 /* ── the registry ──────────────────────────────────────────────────────────────────────────
@@ -537,6 +546,20 @@ UJ.cfg.datasets = [
   { id:"jrc_mus-pacinian-corpuscle", tissue:"Pacinian corpuscle", species:"mouse",
     shape:[48576,10496,9728],  res_nm:6, tier:"inf", enabled:true,
     extraLayers:[{ name:"Ab_RA", type:"image", path:"recon-1/labels/inference/Ab_RA" }] },
+  /* THE FIRST HUMAN VOLUME ON THE OpenOrganelle SIDE, and the first tumour of any kind here.
+     Søren, 2026-08-31. "ut21" gives nothing away -- the id had to be looked up to find out what
+     it is, which is why the species is stated rather than inferred from the prefix the way every
+     jrc_mus-* row can be.
+
+     tier "gt", not "inf": its labels group is `groundtruth`, i.e. hand-drawn crops, where every
+     other predicted volume here publishes `inference`. The probe suggested "inf" because it only
+     asked WHETHER labels existed; which kind they are is the whole distinction, so the tier is
+     corrected here rather than pasted. */
+  { id:"jrc_ut21-1413-003", tissue:"kidney (renal carcinoma)", species:"human",
+    shape:[16302,11403,15149], res_nm:8, tier:"gt", enabled:true,
+    /* From the dataset's own published Neuroglancer state, which Søren sent: the signal sits in
+       18-175 of a 0-254 window. */
+    em_range:[18,175], em_window:[0,254] },
   { id:"jrc_mus-kidney-2", tissue:"kidney (kidney-2)", species:"mouse",
     shape:[13817,12683,12874], res_nm:8, tier:"inf", enabled:true,
     /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
@@ -549,6 +572,13 @@ UJ.cfg.datasets = [
        pancreas (288 boxes): signal sits in 88-165 of a 69-184 data range. Without an
        em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
     em_range:[88,165] },
+  /* The whole volume is ONE search box: 20 x 20 x 30 µm is under a single 40 µm cube. That is
+     legitimate and it is stated rather than hidden -- the picker sorts smallest first and prints
+     every dataset's box count, so choosing it is the user's decision. It is also the finest EM on
+     the roster at 4 nm, alongside the two human msem blocks. */
+  { id:"jrc_mus-pancreas-2", tissue:"pancreas (pancreas-2)", species:"mouse",
+    shape:[7571,5000,5000], res_nm:4, tier:"inf", enabled:true,
+    em_range:[233,248], em_window:[0,255] },
   { id:"jrc_mus-thymus-1", tissue:"thymus", species:"mouse",
     shape:[14502,14542,18400], res_nm:8, tier:"inf", enabled:true,
     /* Søren's own window, read off the viewer's Rendering panel 2026-08-20 for
@@ -601,6 +631,41 @@ UJ.cfg.datasets = [
        skeletal muscle (48 boxes): signal sits in 58-207 of a 20-245 data range. Without an
        em_range Neuroglancer stretches the full 0-255 and the EM reads flat. */
     em_range:[58,207] },
+  /* ── the first uint16 volumes, and the first Zarr v3 ones ────────────────────────────────
+     Søren, 2026-08-31. Both are published as uint16 in Zarr v3, so both need an explicit `source`:
+     the prefix is `zarr3://` rather than `zarr://` and the leaf `fibsem-uint16` rather than the
+     default template's uint8. Both also need em_window -- the signal is a two-thousand-count band
+     inside 0-65535, and `range` without `window` leaves the contrast slider with no travel.
+
+     AXIS ORDER, because this nearly went in wrong. The first probe of these two reported "voxel
+     size NOT STATED" and fell back to assuming (z,y,x): Zarr v3 nests the OME block under an
+     "ome" key and the reader was only looking at the top level. Read properly, the metadata names
+     the axes z, y, x -- but duodenum ALSO carries a stray non-standard top-level `"axes":
+     ["x","y","z"]` that says the opposite, and lung's own published Neuroglancer link centres at
+     30860, 30892, 60516 nm, which is exactly half of its shape times 8 read as (x,y,z).
+
+     Settled against the pixels rather than by preferring one key over the other: Søren navigated
+     to 48710, 30450, 11860 nm in duodenum, so that point has data in it. Read (z,y,x) it is
+     inside the volume; read (x,y,z) it is 8 µm past the x face, which cannot be where he was
+     looking. The OME axes are right and the stray key is wrong. A transpose here would have kept
+     the box COUNT correct while putting every box in the wrong place -- the failure that looks
+     like success. */
+  { id:"jrc_mus-lung-2a", tissue:"lung", species:"mouse",
+    shape:[7715,7723,15129], res_nm:8, tier:"em", enabled:true,
+    source:"zarr3://s3://janelia-cosem-datasets/jrc_mus-lung-2a/jrc_mus-lung-2a.zarr/recon-1/em/fibsem-uint16",
+    em_range:[32643,34619], em_window:[0,65535] },
+  { id:"jrc_mus-duodenum-1a", tissue:"duodenum", species:"mouse",
+    shape:[5114,7706,13819], res_nm:8, tier:"em", enabled:true,
+    source:"zarr3://s3://janelia-cosem-datasets/jrc_mus-duodenum-1a/jrc_mus-duodenum-1a.zarr/recon-1/em/fibsem-uint16",
+    em_range:[35114,36379], em_window:[0,65535] },
+  /* Human airway epithelium, and the largest OpenOrganelle volume on the roster at 72 boxes.
+     Its labels group is `inference`, so tier "inf". */
+  { id:"jrc_hum-airway-14953vc", tissue:"airway epithelium", species:"human",
+    shape:[15093,12878,26618], res_nm:8, tier:"inf", enabled:true,
+    /* A window that is NOT the full 0-255: 39-238, from the dataset's own published state. That
+       is what em_window exists for -- with the window left to be inferred, the slider's travel
+       does not match the numbers the publisher chose. */
+    em_range:[89,188], em_window:[39,238] },
 
   /* ── not OpenOrganelle ─────────────────────────────────────────────────────────────────────
      The first dataset here from a different publisher, a different server and a different
@@ -1223,7 +1288,16 @@ UJ.cfg.groups = [
   { label: "Skeletal muscle",           match: ["skeletal muscle"] },
   { label: "Pancreas",                  match: ["pancreas"] },
   { label: "Thymus",                    match: ["thymus"] },
-  { label: "Skin",                      match: ["skin", "guard hair follicle"] }
+  { label: "Skin",                      match: ["skin", "guard hair follicle"] },
+  /* Added 2026-08-31 with jrc_hum-airway-14953vc. Every dataset must land in exactly one group --
+     wjumpcheck asserts it -- because an ungrouped volume simply does not appear in the picker,
+     which is the worst way for a dataset to be missing: it is in the config, it counts towards
+     the totals, and nobody can open it. */
+  { label: "Airway",                    match: ["airway"] },
+  { label: "Lung",                      match: ["lung"] },
+  /* Duodenum rather than "Gut": it is the only gut volume here, and a label naming the actual
+     segment is more use to someone looking for it than a category with one member. */
+  { label: "Duodenum",                  match: ["duodenum"] }
 ];
 
 /* ── exploration ──────────────────────────────────────────────────────────────────────────── */
@@ -3539,7 +3613,20 @@ UJ.wjump = (function(){
        em_range keep tab:"source" and Neuroglancer's default stretch, unchanged. */
     var emLayer = { type:"image", name:"em", tab: d.em_range ? "rendering" : "source",
                     source: d.source || (root + "recon-1/em/fibsem-uint8") };
-    if (d.em_range) emLayer.shaderControls = { normalized:{ range: d.em_range } };
+    if (d.em_range){
+      /* em_window as well as em_range, for the UINT16 volumes.
+         2026-08-31: the roster gained OpenOrganelle blocks published as uint16 in Zarr v3
+         (jrc_mus-lung-2a, jrc_mus-duodenum-1a), where the signal sits in a band a couple of
+         thousand counts wide inside a 0-65535 space -- lung is 32,643 to 34,619, three percent of
+         the range. `range` alone leaves the invlerp WINDOW at whatever neuroglancer infers, and
+         the slider then has no usable travel: every position within a hair of the ends is either
+         black or white. `window` is the outer bound the slider spans, `range` the mapped band
+         inside it, and stating both is what the published states for these volumes do.
+         Omitted on the uint8 rows, where the inferred window has always been right. */
+      emLayer.shaderControls = { normalized: d.em_window
+        ? { range: d.em_range, window: d.em_window }
+        : { range: d.em_range } };
+    }
     var layers = [emLayer];
     (d.extraLayers || []).forEach(function(L){
       layers.push({ type:L.type, name:L.name, source: L.source || (root + L.path),
