@@ -856,6 +856,7 @@ document.addEventListener("DOMContentLoaded", function(){
 
 <script src="core/mesh.js"></script>
 <script src="core/colabexport.js"></script>
+<script src="core/organellefilter.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/ontology.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
@@ -2207,15 +2208,14 @@ function buildOrganelleFilterUI(){
   fetchHjumpOrganelles().then(function(){
     const counts={};
     for(let i=0;i<N;i++){ hjumpOrganelleKindsOf(i).forEach(function(k){ counts[k]=(counts[k]||0)+1; }); }
-    box.innerHTML=ORGANELLE_GROUPS.map(function(g){
-      const inner=g.kinds.map(function(k){
-        const n=counts[k.value]||0;
-        return '<label style="font-size:12px;display:flex;align-items:center;gap:6px'+(n===0?';color:var(--mut)':'')+'">'
-          +'<input type="checkbox" class="forganelle" value="'+escHtml(k.value)+'" style="width:auto"> '
-          +escHtml(k.label)+' <span class="nsub">'+fmt(n)+'</span></label>'; }).join("");
-      return '<div style="margin-bottom:8px"><div class="nsub" style="text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'
-        +escHtml(g.label)+'</div>'+inner+'</div>';
-    }).join("");
+    /* 2026-08-31: the shared control (core/organellefilter.js). ηJump's own version was one of
+       the two this was modelled on, so the visible change here is small -- it gains the
+       has / not-annotated selector, and there is now one implementation across all seven tools
+       instead of six near-copies that drifted apart once already. */
+    UJ.organelleFilter.render(box,{
+      counts:counts, cls:"forganelle", modeId:"filterOrganelleMode",
+      onChange:function(){ if(typeof invalidateFilter==="function")invalidateFilter(); }
+    });
   }).catch(function(){
     box.innerHTML='<p class="hint" style="margin:0;color:var(--warn)">Could not load community organelle reports right now &mdash; the other filters above still work.</p>';
   });
@@ -3022,7 +3022,9 @@ function runFilter(){
   const wantTypes=[].slice.call(document.querySelectorAll(".ftype:checked")).map(function(b){ return b.value; });
   const wantLayers=[].slice.call(document.querySelectorAll(".flayer:checked")).map(function(b){ return b.value; });
   const wantIdentities=[].slice.call(document.querySelectorAll(".fidentity:checked")).map(function(b){ return b.value; });
-  const wantOrganelles=[].slice.call(document.querySelectorAll(".forganelle:checked")).map(function(b){ return b.value; });
+  const organelleBoxEl=document.getElementById("filterOrganelles");
+  const wantOrganelles=UJ.organelleFilter.checked(organelleBoxEl,"forganelle");
+  const organelleMode=UJ.organelleFilter.mode(organelleBoxEl,"filterOrganelleMode");
   const vMin=num("filterVolMin"), vMax=num("filterVolMax");
   const mKey=($("filterMorphKey")||{}).value||"", mMin=num("filterMorphMin"), mMax=num("filterMorphMax");
   let boxes=[];
@@ -3048,12 +3050,10 @@ function runFilter(){
       const key=cur||HJUMP_UNCLASSIFIED_SENTINEL;
       if(!iSet.has(key))continue;
     }
-    if(wantOrganelles.length){
-      // OR across checked kinds -- a cell matches if it has AT LEAST ONE reported structure of
-      // ANY checked kind (see the "Real filter, all 61 kinds" decision, same semantics as bJump's
-      // identical addition the same day).
-      const have=hjumpOrganelleKindsOf(i);
-      if(!wantOrganelles.some(function(k){ return have.indexOf(k)>=0; }))continue;
+    /* OR across checked kinds, and now also has / not-annotated -- one rule, in
+       core/organellefilter.js, rather than the same three lines in six files. */
+    if(organelleMode){
+      if(!UJ.organelleFilter.matches(hjumpOrganelleKindsOf(i),wantOrganelles,organelleMode))continue;
     }
     const vol=HVB[i];
     if(vMin!==null&&vol<vMin)continue;

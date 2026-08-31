@@ -554,6 +554,40 @@ recorded.</p>
 <div id="fMarkers"></div>
 </div>
 
+<!-- ORGANELLES. 2026-08-31, Søren: "bJump should have Filtering options for organelles and
+     bounding boxes and cells near other cells."
+
+     All the JS for this has existed since 2026-08-20 -- buildOrganelleFilterBox(),
+     bjumpOrganelleKindsOf(), the export column, the matching branch -- and every bit of it was
+     dead, because THIS DIV WAS NEVER ADDED. The builder opens with `if(!organellesBox)return;`
+     and the filter loop skips when nothing is checked, so the whole feature failed silently in
+     both directions: no error, no empty box, just an absent control that nobody could miss
+     because there was nothing to miss. Found by orgcheck.js comparing the rendered control across
+     all seven tools -- βJump was the one rendering zero kinds.
+
+     Which is the argument for that check existing: reading the source would have told you this
+     feature was present, and it was not. -->
+<div style="margin-top:12px">
+<label style="font-size:12px" title="Structures the community has reported inside or around each nucleus, from the same 61-kind list µJump uses. Matching is OR across every ticked kind. A count of 0 means nobody has reported that structure in this dataset — not that it is absent from the tissue.">Organelles &amp; extracellular structures</label>
+<div id="fOrganellesBox"></div>
+</div>
+
+<!-- Cells near another cell type (2026-08-31, Søren: "bJump should have Filtering options for
+     organelles and bounding boxes and cells near other cells"). µJump has had this since
+     2026-08-30 over its published classifier's types; here the reference population is the
+     COMMUNITY identities from the Master cell list, because that is the only cell-type opinion
+     this dataset has. Same shape of control, same reference-inclusion option. -->
+<div style="margin-top:12px">
+<label style="font-size:12px" title="Finds nuclei sitting within a chosen distance of a nucleus somebody has identified as a particular type. Distance is centre to centre between the two recorded nucleus positions, in micrometres, and a nucleus is never counted as its own neighbour. The reference type list is the same community identity list as the dropdown above.">Close to another cell type</label>
+<div class="row" style="margin-top:4px;align-items:center;gap:8px">
+<label style="font-size:12px"><input type="checkbox" id="fNearOn"> within</label>
+<input type="text" id="fNearUm" value="10" style="width:60px;padding:4px 6px" inputmode="decimal">
+<span style="font-size:12px;color:var(--mut)">&micro;m of a</span>
+<span id="fNearTypeBox" style="flex:1 1 180px"></span>
+</div>
+<label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-top:6px" title="Off by default: asking for cells near a microglia normally means the OTHER cells, not the microglia themselves — a reference cell is trivially 0 µm from itself. Tick this to get both populations in one result."><input type="checkbox" id="fNearIncludeRef" style="width:auto"> Also include the reference cells themselves</label>
+</div>
+
 <!-- Bounding-box limitation + per-box Colab download (2026-08-31), shared with λJump and µJump
      through core/regionbox.js. Coordinates are VOXELS in this page's own 8/8/30 nm frame -- the
      same numbers the Jump tab's search box takes, and the same ones Neuroglancer shows. -->
@@ -890,6 +924,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 
 <script src="core/colabexport.js"></script>
+<script src="core/organellefilter.js"></script>
 <script src="core/regionbox.js"></script>
 <script src="core/mesh.js"></script>
 <script src="core/synmesh.js"></script>
@@ -3099,6 +3134,40 @@ function bjumpBoxFor(i, boxes){
   return null;
 }
 
+/* ── cells near another cell type ────────────────────────────────────────────────────────────
+   2026-08-31. µJump's version of this builds a uniform grid because it searches 144,118 rows and
+   a pairwise sweep there is 20 billion comparisons. βJump has 220 nuclei: the whole reference
+   population fits in a short array and the pairwise loop is at most 220 x 220 = 48,400 distance
+   calculations, which is nothing. Copying the grid across would be importing an optimisation
+   without importing the problem that justified it, and a grid is easy to get subtly wrong (the
+   cell-size >= radius invariant is what makes it exact).
+
+   The reference cells are the ones a community identity names, which is the only cell-type
+   opinion this dataset carries -- there is no classifier here. */
+function bjumpNearRefs(typeName){
+  var refs=[];
+  if(!typeName) return refs;
+  for(var i=0;i<N;i++){
+    var cur=bjumpIdentityOf(i);
+    if(!cur) continue;
+    if(typeName==="__any__" || cur===typeName) refs.push(i);
+  }
+  return refs;
+}
+/* Nearest reference nucleus to i, or null. Never i itself -- a cell is 0 µm from itself and
+   would make every reference cell match its own query, which is the one result nobody wants. */
+function bjumpNearest(i, refs){
+  var best=null;
+  var ax=BX[i]*UJ_RX, ay=BY[i]*UJ_RY, az=BZ[i]*UJ_RZ;
+  for(var r=0;r<refs.length;r++){
+    var j=refs[r]; if(j===i) continue;
+    var dx=BX[j]*UJ_RX-ax, dy=BY[j]*UJ_RY-ay, dz=BZ[j]*UJ_RZ-az;
+    var d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+    if(best===null || d<best.distNm) best={ i:j, distNm:d, label:bjumpIdentityOf(j) };
+  }
+  return best;
+}
+
 function runFilterBjump(){
   const meshSel=document.getElementById("fMesh").value;
   const truncSel=document.getElementById("fTrunc").value;
@@ -3117,11 +3186,28 @@ function runFilterBjump(){
   // checked kind, same "match any checked option" semantics as every other multi-value filter on
   // this page (e.g. current community identity's dropdown is single-select so this doesn't come
   // up there, but it's the natural reading of a checkbox LIST specifically).
-  const organelleSel=Array.from(document.querySelectorAll(".forganelle:checked")).map(function(cb){return cb.value;});
+  const organelleBoxEl=document.getElementById("fOrganellesBox");
+  const organelleSel=UJ.organelleFilter.checked(organelleBoxEl,"forganelle");
+  const organelleMode=UJ.organelleFilter.mode(organelleBoxEl,"fOrganelleMode");
   /* [] when the checkbox is off OR when it is on but no box has all six corners filled in.
      Deliberately the same: a half-typed box must not silently exclude every nucleus while the
      user is still mid-way through entering it. */
   const regionBoxes=BJ_REGION?BJ_REGION.getBoxesNM():[];
+  /* Proximity. Built ONCE per run rather than once per candidate -- the reference set does not
+     depend on which nucleus is being tested, and rebuilding it inside the loop would also
+     re-derive every community identity 220 times. */
+  const nearOn=document.getElementById("fNearOn")&&document.getElementById("fNearOn").checked;
+  const nearTypeEl=document.getElementById("fNearType");
+  const nearType=nearTypeEl?nearTypeEl.value:"";
+  const nearIncludeRef=document.getElementById("fNearIncludeRef")
+    ? document.getElementById("fNearIncludeRef").checked : false;
+  /* A blank or unparseable distance means the field's own default of 10 µm, not 0 -- 0 would
+     match nothing and read as "no cells are near anything", which is a wrong answer that looks
+     like a real one. */
+  const nearMaxNm=((parseFloat(document.getElementById("fNearUm")
+    ? document.getElementById("fNearUm").value : "")||10))*1000;
+  const nearRefs=(nearOn&&nearType)?bjumpNearRefs(nearType):null;
+  const nearRefSet={}; if(nearRefs) nearRefs.forEach(function(j){ nearRefSet[j]=1; });
 
   const matches=[];
   for(let i=0;i<N;i++){
@@ -3138,9 +3224,10 @@ function runFilterBjump(){
       if(identSel===BJUMP_UNCLASSIFIED_SENTINEL){ if(cur)continue; }
       else if(cur!==identSel){ continue; }
     }
-    if(organelleSel.length){
-      const have=bjumpOrganelleKindsOf(i);
-      if(!organelleSel.some(function(k){return have.indexOf(k)>=0;}))continue;
+    /* One rule, in core/organellefilter.js, rather than re-derived here -- and it now honours the
+       has / not-annotated selector, which this page did not previously have. */
+    if(organelleMode){
+      if(!UJ.organelleFilter.matches(bjumpOrganelleKindsOf(i),organelleSel,organelleMode))continue;
     }
     let markersOk=true;
     for(const f of markerFilters){
@@ -3151,7 +3238,18 @@ function runFilterBjump(){
     if(!markersOk)continue;
     const box=bjumpBoxFor(i,regionBoxes);
     if(box===null)continue;                  // region filter is on and this nucleus is outside it
-    matches.push({row:{i:i},box:box||null});
+    /* A reference cell is exempt from the distance test when "include the reference cells" is
+       ticked -- it cannot be required to be near a member of its OWN population, which is what it
+       is. It still has to have passed every other filter above, same rule as µJump's. */
+    let nearHit=null;
+    if(nearRefs){
+      const isRef=!!nearRefSet[i];
+      if(!(isRef&&nearIncludeRef)){
+        nearHit=bjumpNearest(i,nearRefs);
+        if(!nearHit||nearHit.distNm>nearMaxNm)continue;
+      }
+    }
+    matches.push({row:{i:i},box:box||null,near:nearHit});
   }
   return matches;
 }
@@ -3198,7 +3296,15 @@ function buildColumnsBjump(){
     {header:"region_box",get:function(m){return m.box?("Box "+m.box.n):"";}},
     {header:"region_box_corners_voxel",get:function(m){
       return m.box?(m.box.x1+", "+m.box.y1+", "+m.box.z1+"  to  "+m.box.x2+", "+m.box.y2+", "+m.box.z2):"";
-    }}
+    }},
+    /* Blank unless the proximity filter was on, and blank for a reference cell that was included
+       by the exemption above rather than by being near something -- which is the honest reading:
+       there is no neighbour to name for it. */
+    {header:"nearest_reference_type",get:function(m){return m.near?m.near.label:"";}},
+    {header:"nearest_reference_distance_um",get:function(m){
+      return m.near?(m.near.distNm/1000).toFixed(2):"";
+    }},
+    {header:"nearest_reference_nucleus_id",get:function(m){return m.near?BID[m.near.i]:"";}}
   ];
   MARKERS.forEach(function(m){
     cols.push({header:m.key+"_shell_percentile",get:function(row){
@@ -3329,6 +3435,25 @@ function buildColumnsBjump(){
       identBox.innerHTML=h;
       const identEl=document.getElementById("fIdentity");
       if(identEl) identEl.addEventListener("change",invalidatePreview);
+      /* The proximity filter's reference list (2026-08-31). Built from the SAME counts as the
+         dropdown above -- one pass over the identities, two controls -- so the two can never
+         offer different types. Unclassified is deliberately NOT offered as a reference: "near a
+         cell nobody has identified" is not a question about tissue, and on this dataset it would
+         match almost everything. */
+      const nearBox=document.getElementById("fNearTypeBox");
+      if(nearBox){
+        let nh='<select id="fNearType" style="width:100%">';
+        nh+='<option value="">choose a cell type</option>';
+        if(named.length) nh+='<option value="__any__">any identified cell</option>';
+        named.forEach(function(name){
+          nh+='<option value="'+escHtml(name)+'">'+escHtml(name)+' ('+counts[name]+')</option>';
+        });
+        nh+='</select>';
+        nearBox.innerHTML=named.length?nh
+          :'<span class="hint">nobody has identified a cell here yet, so there is no type to be near</span>';
+        const nearEl=document.getElementById("fNearType");
+        if(nearEl) nearEl.addEventListener("change",invalidatePreview);
+      }
     }).catch(function(){
       identBox.innerHTML='<p class="hint" style="margin-top:0;color:var(--warn)">Could not load community identities right now &mdash; the other filters below still work. Try reloading the page to retry.</p>';
     });
@@ -3345,28 +3470,45 @@ function buildColumnsBjump(){
      kinds actually have any data before filtering on them -- a kind with 0 reports is still
      listed (completeness matters more than a shorter list), just visibly says so. */
   const organellesBox=document.getElementById("fOrganellesBox");
+  /* 2026-08-31: rendered by core/organellefilter.js, the same control µJump, δJump, πJump,
+     ηJump, λJump and ωJump now use. βJump's own version was one of the two this was modelled on
+     -- it already grouped and counted -- so what changes here is that there is one implementation
+     instead of six, and that this list gains the has / not-annotated selector that only µJump's
+     old dropdown had.
+
+     THE LIST NO LONGER WAITS ON THE NETWORK, which is the other thing that changed and is a fix
+     rather than a refactor. It used to render "Loading community organelle reports…", then either
+     the list or, on failure, a warning IN PLACE OF the list -- so a backend hiccup removed the
+     entire organelle filter from the page. But only the COUNTS need the backend; the 61 kinds come
+     from the bundled ontology and are known before the page has done anything. So the list is
+     drawn immediately with zeroes, the counts are filled in when the fetch lands, and a failure
+     leaves a note ABOVE a working filter instead of replacing it. Caught by orgcheck.js, which
+     blocks the backend on purpose and found βJump rendering nothing while every other tool
+     rendered its list. */
+  function renderOrganelleFilterBox(counts,note){
+    if(!organellesBox)return;
+    UJ.organelleFilter.render(organellesBox,{
+      counts:counts||{}, cls:"forganelle", modeId:"fOrganelleMode",
+      onChange:invalidatePreview
+    });
+    if(note){
+      const p=document.createElement("p");
+      p.className="hint"; p.style.cssText="margin:0 0 8px;color:var(--warn)";
+      p.innerHTML=note;
+      organellesBox.insertBefore(p,organellesBox.firstChild);
+    }
+  }
   function buildOrganelleFilterBox(){
     if(!organellesBox)return;
-    organellesBox.innerHTML='<p class="hint" style="margin-top:0">Loading community organelle reports&hellip;</p>';
+    renderOrganelleFilterBox({});                       // usable at once, counts to follow
     fetchBjumpOrganelles().then(function(){
       const counts={};
       for(let i=0;i<N;i++){
         bjumpOrganelleKindsOf(i).forEach(function(k){counts[k]=(counts[k]||0)+1;});
       }
-      let h='<div style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding:8px">';
-      ORGANELLE_GROUPS.forEach(function(g){
-        h+='<div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:8px">'+escHtml(g.label)+'</div>';
-        g.kinds.forEach(function(k){
-          const n=counts[k.value]||0;
-          h+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0'+(n===0?';color:var(--mut)':'')+'">'
-            +'<input type="checkbox" class="forganelle" value="'+escHtml(k.value)+'"> '+escHtml(k.label)+' ('+n+')</label>';
-        });
-      });
-      h+='</div>';
-      organellesBox.innerHTML=h;
-      organellesBox.querySelectorAll(".forganelle").forEach(function(cb){cb.addEventListener("change",invalidatePreview);});
+      renderOrganelleFilterBox(counts);
     }).catch(function(){
-      organellesBox.innerHTML='<p class="hint" style="margin-top:0;color:var(--warn)">Could not load community organelle reports right now &mdash; the other filters below still work. Try reloading the page to retry.</p>';
+      renderOrganelleFilterBox({},'Could not load community organelle reports right now, so every count below reads 0 &mdash; the filter itself still works. Reload to retry.');
     });
   }
   buildOrganelleFilterBox();

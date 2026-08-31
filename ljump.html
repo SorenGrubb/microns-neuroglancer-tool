@@ -894,6 +894,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 
 <script src="core/colabexport.js"></script>
+<script src="core/organellefilter.js"></script>
 <script src="core/regionbox.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/ontology.js"></script>
@@ -1680,7 +1681,9 @@ function runFilterLjump(){
   const volMax=parseFloat(document.getElementById("fVolMax").value);
   const identEl=document.getElementById("fIdentity");
   const identSel=identEl?identEl.value:"";
-  const organelleSel=Array.from(document.querySelectorAll(".forganelle:checked")).map(function(cb){return cb.value;});
+  const organelleBoxEl=document.getElementById("fOrganellesBox");
+  const organelleSel=UJ.organelleFilter.checked(organelleBoxEl,"forganelle");
+  const organelleMode=UJ.organelleFilter.mode(organelleBoxEl,"fOrganelleMode");
   /* [] when the checkbox is off OR when it is on but no box has all six corners filled in.
      Those two are deliberately the same here: a half-typed box must not silently exclude every
      nucleus, which is what "on means restrict" would do while the user is still typing. */
@@ -1711,9 +1714,9 @@ function runFilterLjump(){
       if(identSel===LJUMP_UNCLASSIFIED_SENTINEL){ if(cur)continue; }
       else if(cur!==identSel){ continue; }
     }
-    if(organelleSel.length){
-      const have=ljumpOrganelleKindsOf(i);
-      if(!organelleSel.some(function(k){return have.indexOf(k)>=0;})) continue;
+    /* One rule, in core/organellefilter.js, and it now honours the has / not-annotated selector. */
+    if(organelleMode){
+      if(!UJ.organelleFilter.matches(ljumpOrganelleKindsOf(i),organelleSel,organelleMode)) continue;
     }
     const box=ljumpBoxFor(i,regionBoxes);
     if(box===null) continue;                 // region filter is on and this nucleus is outside it
@@ -1867,18 +1870,14 @@ function buildColumnsLjump(){
       for(let i=0;i<N;i++){
         ljumpOrganelleKindsOf(i).forEach(function(k){counts[k]=(counts[k]||0)+1;});
       }
-      let h='<div style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding:8px">';
-      ORGANELLE_GROUPS.forEach(function(g){
-        h+='<div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:8px">'+escHtml(g.label)+'</div>';
-        g.kinds.forEach(function(k){
-          const n=counts[k.value]||0;
-          h+='<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0'+(n===0?';color:var(--mut)':'')+'">'
-            +'<input type="checkbox" class="forganelle" value="'+escHtml(k.value)+'"> '+escHtml(k.label)+' ('+n+')</label>';
-        });
+      /* 2026-08-31: the shared control (core/organellefilter.js), so this list, βJump's, ηJump's,
+         ωJump's and the three MICrONS-family ones are now one implementation rather than six.
+         Gains the has / not-annotated selector in the process -- previously only µJump's dropdown
+         could ask "which cells has nobody checked". */
+      UJ.organelleFilter.render(organellesBox,{
+        counts:counts, cls:"forganelle", modeId:"fOrganelleMode",
+        onChange:invalidatePreview
       });
-      h+='</div>';
-      organellesBox.innerHTML=h;
-      organellesBox.querySelectorAll(".forganelle").forEach(function(cb){cb.addEventListener("change",invalidatePreview);});
     }).catch(function(){
       organellesBox.innerHTML='<p class="hint" style="margin-top:0;color:var(--warn)">Could not load community organelle reports right now &mdash; the other filters still work. Reload to retry.</p>';
     });

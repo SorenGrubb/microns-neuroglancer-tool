@@ -447,6 +447,7 @@ document.addEventListener("DOMContentLoaded", function(){
 </script>
 <script src="core/mesh.js"></script>
 <script src="core/colabexport.js"></script>
+<script src="core/organellefilter.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/ontology.js"></script>
 <script src="core/panel.js"></script>
@@ -736,15 +737,7 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 </details>
 <details class="rv-panel filter-section" id="filterSecOrganelle">
 <summary title="Filters by whether a SPECIFIC organelle/extracellular structure has been ANNOTATED for this cell — not a confirmed biological absence. &quot;Not annotated yet&quot; could just mean nobody has looked/reported it, not that the cell genuinely lacks it. Centriole and primary cilium read Søren's own-verified dataset (dense — every nucleus has a real yes/no, including merged-nucleus breakdowns); every other kind reads the community 'report an organelle' data only (sparse — a cell with no report is far more likely to just be unchecked than for centriole/cilium, which have full coverage). 2026-08-30, Søren: generalized from a cilium/centriole-only dropdown to any organelle/structure kind, using the same grouped list as the 'report an organelle' form.">Has the cell been annotated with a specific organelle or extracellular structure?</summary>
-<div style="margin-top:10px">
-<label style="font-size:12px">Which organelle / structure</label>
-<select id="filterOrganelleKind" style="width:100%;margin-top:4px"></select>
-</div>
-<select id="filterOrganelle" style="width:100%;margin-top:10px">
-<option value="">Not filtering by this</option>
-<option value="has">Has this annotated</option>
-<option value="not">Not annotated yet (may just mean not yet checked)</option>
-</select>
+<div style="margin-top:10px" id="filterOrganelleBox"></div>
 </details>
 <details class="rv-panel filter-section" id="filterSecRegion">
 <summary title="Two diagonal corners per box, in the same voxel coordinates as the main search box above (X/Y at 4 nm/voxel, Z at 40 nm/voxel). Either diagonal works — order doesn't matter. Add as many boxes as you like; a cell matches if it falls inside any of them. Matching cells within 10 µm of a traced vessel will include the vessel type and distance in the download. You can paste x, y, z into either corner's x field — it splits automatically, just like the main coordinate field above.">Should the cells fall inside specific bounding box(es)?</summary>
@@ -8953,37 +8946,104 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      checkbox -- centriole/cilium are the only two kinds with a bespoke "draw a 3D arrow" option,
      since that arrow is anchored on a DIFFERENT point outside the kind's own data (nucleus centre
      for centriole; the kind's own two points for cilium), not something generic every kind has. */
-  const orgBox=document.getElementById("filterOrganellesBox");
-  if(orgBox&&window.ORGANELLE_GROUPS){
-    let oh="";
-    window.ORGANELLE_GROUPS.forEach(function(g){
-      oh+='<div style="margin-top:8px"><b style="font-size:12px;color:var(--mut)">'+g.label+'</b><div class="toggles" style="margin-top:4px">';
-      g.kinds.forEach(function(k){
-        oh+='<label style="font-size:12px"><input type="checkbox" class="forgpt" value="'+k.value+'"> '+k.label+'</label>';
-        if(k.value==="centriole")oh+='<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell\'s nucleus centre to its centriole, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCentVec"> Nucleus-to-centriole vector</label>';
-        if(k.value==="cilium")oh+='<label style="font-size:12px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from cilium base to tip, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCilVec"> Primary cilia base-to-tip vector</label>';
-      });
-      oh+="</div></div>";
+  /* 2026-08-31: the same shared renderer as the filter above, so the two lists on this tab agree
+     about grouping, wording and counts -- they were built by two different pieces of code and
+     looked it. Counts here answer "will ticking this layer draw anything": a kind at 0 draws an
+     empty layer, and the only way to find that out used to be to open the viewer.
+
+     The two VECTOR checkboxes keep their ids (#filterCentVec, #filterCilVec) and their exact
+     titles, and are spliced in directly after their own kind's row via extraAfter -- they belong
+     to centriole and cilium specifically, because each is anchored on a point OUTSIDE the kind's
+     own data (the nucleus centre for centriole; the kind's own two points for cilium), which is
+     not something a generic kind has. */
+  function renderOrganelleLayerBox(orgMap){
+    const orgBox=document.getElementById("filterOrganellesBox");
+    if(!orgBox||!UJ.organelleFilter)return;
+    UJ.organelleFilter.render(orgBox,{
+      counts:(typeof ujumpOrganelleCounts==="function")?ujumpOrganelleCounts(orgMap):{},
+      cls:"forgpt",
+      mode:false,
+      onChange:function(){ if(typeof invalidateFilterResult==="function")invalidateFilterResult(); },
+      extraAfter:{
+        centriole:'<label style="font-size:12px;display:flex;align-items:center;gap:6px;padding:1px 0 1px 18px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from each matching cell\'s nucleus centre to its centriole, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCentVec" style="width:auto"> Nucleus-to-centriole vector</label>',
+        cilium:'<label style="font-size:12px;display:flex;align-items:center;gap:6px;padding:1px 0 1px 18px" title="Draws a 3D arrow (line + 3D arrowhead, visible from any angle) from cilium base to tip, for cells that carry one in the verified/reported data. The arrowhead scales with the vector length and never exceeds it. Only the cell types ticked above are included."><input type="checkbox" id="filterCilVec" style="width:auto"> Primary cilia base-to-tip vector</label>'
+      }
     });
-    orgBox.innerHTML=oh;
   }
-  /* 2026-08-30, Søren: generalized filterOrganelle from a cilium/centriole-only dropdown to any
-     organelle/structure kind -- this populates the new #filterOrganelleKind picker with the exact
-     same grouped optgroup markup (ORGANELLE_KIND_OPTIONS_HTML, defined in ontology.js) the "report
-     an organelle" form itself uses, so the two lists always stay in sync with zero extra
-     maintenance when a kind is added/renamed. NOT read via window.ORGANELLE_KIND_OPTIONS_HTML --
-     it's a top-level const, not explicitly exported onto window (unlike ORGANELLE_GROUPS just
-     above, which IS -- see window.ORGANELLE_GROUPS=... in ontology.js), and this codebase's own
-     established gotcha is that window.X fails for a top-level const even though the bare
-     identifier crosses <script> tag boundaries fine (see the µJump script-tag-scope-boundary
-     note) -- so the bare name is used here, deliberately, not a bug. Defaults to "centriole" --
-     same default value the report form's first row uses (see core/panel.js's addRow(), "the more
-     common starting point"). */
-  const orgKindSel=document.getElementById("filterOrganelleKind");
-  if(orgKindSel&&typeof ORGANELLE_KIND_OPTIONS_HTML!=="undefined"){
-    orgKindSel.innerHTML=ORGANELLE_KIND_OPTIONS_HTML;
-    orgKindSel.value="centriole";
+  renderOrganelleLayerBox(window.ORG_MAP||null);
+  /* HISTORY, because the shape of this control has changed twice and the second change undid part
+     of the first. 2026-08-30 it was generalized from a cilium/centriole-only dropdown to a
+     single-select over every kind, populated from ORGANELLE_KIND_OPTIONS_HTML so it could not
+     drift from the "report an organelle" form. 2026-08-31 it became the grouped, COUNTED checkbox
+     list rendered above -- because a single-select still could not say how many cells carry the
+     kind you were about to pick, and because ηJump, βJump and λJump had independently grown a
+     different (better) control for the same job. The list is still generated from the shared
+     ontology, now through core/organellefilter.js, so the no-drift property the 2026-08-30 change
+     bought is kept rather than traded away. */
+  /* 2026-08-31: the grouped, counted checkbox list, rendered by core/organellefilter.js -- the
+     same control ηJump, βJump, λJump and ωJump use. Replaces the single-select
+     #filterOrganelleKind dropdown; the has/not selector keeps the id #filterOrganelle so every
+     existing reader of it is untouched.
+
+     COUNTS COME FROM TWO PLACES, and the difference matters enough to say on screen. Centriole
+     and cilium are DENSE: Søren's own-verified data gives every nucleus a real yes/no, so those
+     two counts are exact and available immediately from arrays already in memory. Every other
+     kind is SPARSE community-report data, which has to be fetched -- so the list renders at once
+     with those two filled in and the rest showing 0, then re-renders when the fetch lands. A
+     first render that waits for the network would leave the panel blank on open; a first render
+     that never updates would show 0 for kinds that have reports. */
+  function ujumpOrganelleCounts(orgMap){
+    const counts={};
+    /* Dense, from the own-verified + standalone arrays. HASCENT/HASCIL are byte arrays, one entry
+       per row, so this is a straight tally rather than a lookup. */
+    let cent=0,cil=0;
+    for(let i=0;i<OWN_HASCENT.length;i++){ if(OWN_HASCENT[i])cent++; }
+    for(let i=0;i<OWN_HASCIL.length;i++){ if(OWN_HASCIL[i])cil++; }
+    for(let i=0;i<ST_HASCENT.length;i++){ if(ST_HASCENT[i])cent++; }
+    for(let i=0;i<ST_HASCIL.length;i++){ if(ST_HASCIL[i])cil++; }
+    counts.centriole=cent; counts.cilium=cil;
+    /* Sparse, from the community map: one count per CELL that carries the kind, not per report,
+       so two cilia logged on one cell count once -- otherwise the number beside the checkbox
+       would not be the number of cells the filter can return, which is what a user reads it as. */
+    if(orgMap){
+      Object.keys(orgMap).forEach(function(nid){
+        const seen={};
+        (orgMap[nid]||[]).forEach(function(o){
+          const k=String(o.kind||"").toLowerCase();
+          if(!k||seen[k])return; seen[k]=1;
+          if(k==="centriole"||k==="cilium")return;   // already counted densely above
+          counts[k]=(counts[k]||0)+1;
+        });
+      });
+    }
+    return counts;
   }
+  function renderOrganelleFilterBox(orgMap){
+    const box=document.getElementById("filterOrganelleBox");
+    if(!box||!UJ.organelleFilter)return;
+    UJ.organelleFilter.render(box,{
+      counts:ujumpOrganelleCounts(orgMap),
+      cls:"forgfilter",
+      modeId:"filterOrganelle",
+      onChange:function(){ if(typeof invalidateFilterResult==="function")invalidateFilterResult(); }
+    });
+  }
+  renderOrganelleFilterBox(window.ORG_MAP||null);
+  /* Fetched ONCE, here, rather than only when a filter run needs it (which is what happened
+     before and is why there were no counts to show). The map is small -- only cells somebody has
+     reported on -- and it is what makes the numbers beside the checkboxes real. Failure is silent
+     on purpose: the dense centriole/cilium counts are still correct, every filter still works,
+     and an error banner over a panel that is working would be worse than two accurate counts and
+     a set of zeroes. */
+  (function(){
+    if(window.ORG_MAP)return;
+    if(typeof fetchAllOrganelles!=="function")return;
+    fetchAllOrganelles().then(function(m){
+      window.ORG_MAP=m||{};
+      renderOrganelleFilterBox(window.ORG_MAP);
+      if(typeof renderOrganelleLayerBox==="function")renderOrganelleLayerBox(window.ORG_MAP);
+    }).catch(function(){});
+  })();
   /* The "needing attention" dropdown and the cell-type checkboxes above it are mutually
      exclusive in practice -- runFilter()'s attention pass ignores the checkboxes entirely (see
      the comment there), which was confusing when someone had both set and only realised the
@@ -9225,7 +9285,11 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     const regionBoxesNM=getRegionBoxesNM();
     const regionValid=regionBoxesNM.length>0;
     const organelleSel=document.getElementById("filterOrganelle")?document.getElementById("filterOrganelle").value:"";
-    const organelleKind=document.getElementById("filterOrganelleKind")?document.getElementById("filterOrganelleKind").value:"";
+    /* 2026-08-31: several kinds, OR-matched, instead of one. [] now means "any kind at all",
+       which is what an empty tick list beside "Has the ticked structure(s) annotated" reads as --
+       and is the reading under which has/not partition the dataset between them. */
+    const organelleKinds=UJ.organelleFilter
+      ? UJ.organelleFilter.checked(document.getElementById("filterOrganelleBox"),"forgfilter") : [];
     const v1AnyOn=document.getElementById("filterV1ColAny")?document.getElementById("filterV1ColAny").checked:false;
     const v1NeuronOn=document.getElementById("filterV1ColNeuron")?document.getElementById("filterV1ColNeuron").checked:false;
     const v1NonVascOn=document.getElementById("filterV1ColNonVasc")?document.getElementById("filterV1ColNonVasc").checked:false;
@@ -9418,15 +9482,19 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          the filterRun click handler) -- "not annotated yet" for those kinds is far more likely to
          mean "nobody has reported one here" than a genuine absence, since there's no dense
          own-verified fallback the way there is for cilium/centriole. */
-      if(organelleSel&&organelleKind){
-        let hasKind;
-        if(organelleKind==="centriole")hasKind=hasCent;
-        else if(organelleKind==="cilium")hasKind=hasCil;
-        else{
-          const orgNid=String(rowNucId(row)||"");
-          const orgReports=(window.ORG_MAP&&orgNid)?window.ORG_MAP[orgNid]:null;
-          hasKind=!!(orgReports&&orgReports.some(o=>o.kind===organelleKind));
-        }
+      if(organelleSel){
+        /* Centriole and cilium keep reading the DENSE own-verified arrays computed just above --
+           unchanged data source, unchanged behaviour for those two. Every other kind reads the
+           sparse community map, where "not annotated" is far more likely to mean "nobody has
+           looked" than a genuine absence, which is what the control's own wording says. */
+        const orgNid=String(rowNucId(row)||"");
+        const orgReports=(window.ORG_MAP&&orgNid)?window.ORG_MAP[orgNid]:null;
+        const hasOne=k=>k==="centriole"?hasCent
+                       :k==="cilium"?hasCil
+                       :!!(orgReports&&orgReports.some(o=>o.kind===k));
+        const hasKind=organelleKinds.length
+          ? organelleKinds.some(hasOne)
+          : (hasCent||hasCil||!!(orgReports&&orgReports.length));
         const organelleMatch=organelleSel==="has"?hasKind:organelleSel==="not"?!hasKind:true;
         if(!organelleMatch)return null;
       }
@@ -10718,11 +10786,16 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
        synchronous filtering pass below -- same "only pay for it if actually needed" pattern as the
        report-list fetch just above and the organelle-points fetch in the viewAllBtn handler further
        down. fetchAllOrganelles() has no internal cache, so this always gets a fresh map. */
+    /* Still here, and still needed. The panel now fetches this map when it opens (so the counts
+       beside the checkboxes are real), but that fetch can fail or still be in flight when someone
+       clicks straight through -- and a filter that silently matched nothing because the map had
+       not arrived is exactly the kind of wrong answer that looks like a right one. So: fetch only
+       if we do not already have it. */
     const orgSelForFetch=document.getElementById("filterOrganelle");
-    const orgKindForFetch=document.getElementById("filterOrganelleKind");
-    if(orgSelForFetch&&orgSelForFetch.value&&orgKindForFetch&&orgKindForFetch.value!=="centriole"&&orgKindForFetch.value!=="cilium"){
+    if(orgSelForFetch&&orgSelForFetch.value&&!window.ORG_MAP){
       runBtn.textContent="Fetching organelle reports…";
       window.ORG_MAP=await fetchAllOrganelles();
+      if(typeof renderOrganelleFilterBox==="function")renderOrganelleFilterBox(window.ORG_MAP);
       runBtn.textContent="Filtering…";
     }
     setTimeout(()=>{

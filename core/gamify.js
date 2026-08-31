@@ -100,9 +100,31 @@ function levelName(points, levels){
   for(var i=0;i<levels.length;i++){ if(points>=levels[i][0]) name=levels[i][1]; }
   return name;
 }
+/* POINTS ARE SHOWN AS WHOLE NUMBERS -- 2026-08-31, Søren: "Please don't show such a ridiculous
+   number, limit it to whole numbers." The chip read "1786.5000000000002 pts".
+
+   Two separate things went wrong and both are fixed here rather than only the visible one.
+
+   FIRST, the points really are fractional. Code.gs awards 0.1 for a computed volume (see
+   REPORT_SHEETS_POINTS), so a total genuinely can be x.5 -- this was never an integer quantity
+   that had been corrupted. SECOND, binary floating point cannot hold 0.1, so a few hundred of
+   them accumulate an error around 1e-13, and combinedPoints() then adds a live figure to a
+   snapshot figure and subtracts a third, which is three more chances to expose it.
+
+   pointsExact() rounds the arithmetic to two decimals, which is finer than any award and kills
+   the noise at the source rather than only where it happens to be printed -- otherwise the same
+   digits would surface again in the leaderboard, the dashboard, or the next thing that prints a
+   total. pointsText() then rounds to whole numbers for DISPLAY, which is what was asked for.
+
+   The two are separate on purpose: the level thresholds and the "N pts to the next level"
+   arithmetic run on the exact value, so rounding for display can never nudge somebody over or
+   under a threshold they have not actually reached. */
+function pointsExact(n){ var v=Number(n); return isFinite(v)?Math.round(v*100)/100:0; }
+function pointsText(n){ var v=Number(n); return isFinite(v)?String(Math.round(v)):"0"; }
+
 function combinedPoints(){
   var live=(MYSTATS&&MYSTATS.points)||0, t=window.__PROFILE_TOTALS;
-  if(!t||t.combinedPoints==null) return {points:live,combined:false,per:null};
+  if(!t||t.combinedPoints==null) return {points:pointsExact(live),combined:false,per:null};
   var ds="";
   try{ ds=(UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds)||""; }catch(_c){}
   var per=perList(t), mine=0;
@@ -110,7 +132,7 @@ function combinedPoints(){
      instant you submit, the others come from the rebuild. Without a `ds` on each entry this
      subtraction never matched and the current tool was counted twice. */
   per.forEach(function(p){ if(p&&p.ds===ds) mine=p.points||0; });
-  var pts=Math.max(live,(t.combinedPoints-mine)+live);
+  var pts=pointsExact(Math.max(live,(t.combinedPoints-mine)+live));
   return {points:pts,combined:true,per:per,level:levelName(pts,t.levels)};
 }
 /* Nothing in here may throw. A chip stuck on "loading…" is indistinguishable from a backend that
@@ -124,7 +146,7 @@ function renderChipFallback(err){
   c.innerHTML='<div class="chipbtn" id="chipOpen" title="Showing this page\u2019s points only \u2014 '
     +'the combined total could not be read ('+escHtml(String(err&&err.message||err))+')."><span>'
     +escHtml(MYSTATS.handle||"you")+'</span><span class="lvl">'+escHtml(MYSTATS.level||"")
-    +'</span><span class="pts">'+((MYSTATS.points)||0)+' pts</span></div>';
+    +'</span><span class="pts">'+pointsText(MYSTATS.points)+' pts</span></div>';
   var o=document.getElementById("chipOpen");if(o)o.addEventListener("click",openDashboard);
 }
 function renderChipInner(){
@@ -133,11 +155,11 @@ function renderChipInner(){
     var cp=combinedPoints();
     var tip=cp.combined
       ? ("Points across every dataset: "
-         +cp.per.map(function(p){return (p.label||p.ds)+" "+(p.points||0);}).join(" · ")
-         +". This page's own "+((MYSTATS.points)||0)+" update immediately; the others come from the 4-hourly rebuild.")
+         +cp.per.map(function(p){return (p.label||p.ds)+" "+pointsText(p.points);}).join(" · ")
+         +". This page's own "+pointsText(MYSTATS.points)+" update immediately; the others come from the 4-hourly rebuild.")
       : "Points on this dataset only. The combined cross-tool total appears once rebuildProfileTotals() has run — see installProfileTotalsTrigger() in Datasets.gs.";
     c.innerHTML='<div class="chipbtn" id="chipOpen" title="'+escHtml(tip)+'"><span>'+escHtml(MYSTATS.handle||"you")+'</span>'
-      +'<span class="lvl">'+escHtml(cp.level||MYSTATS.level||"")+'</span><span class="pts">'+cp.points+' pts</span>'+((MYSTATS.downvoted>0)?'<span style="color:#e3b341" title="You have '+MYSTATS.downvoted+' down-voted report(s) to review">⚠ '+MYSTATS.downvoted+'</span>':'')+'</div>';
+      +'<span class="lvl">'+escHtml(cp.level||MYSTATS.level||"")+'</span><span class="pts">'+pointsText(cp.points)+' pts</span>'+((MYSTATS.downvoted>0)?'<span style="color:#e3b341" title="You have '+MYSTATS.downvoted+' down-voted report(s) to review">⚠ '+MYSTATS.downvoted+'</span>':'')+'</div>';
     var o=document.getElementById("chipOpen");if(o)o.addEventListener("click",openDashboard);
   } else if(GOOGLE_VERIFIED){
     c.innerHTML='<div class="chipbtn" id="chipOpen"><span>signed in</span><span class="pts">loading…</span></div>';
@@ -173,11 +195,11 @@ function loadProfileTotals(cb){
 function profileTotalsHtml(t){
   if(!t) return "";
   var per=perList(t).map(function(p){
-    return '<span style="display:inline-block;min-width:150px">'+escHtml(p.label||p.ds)+' <b>'+(p.points||0)+'</b></span>';
+    return '<span style="display:inline-block;min-width:150px">'+escHtml(p.label||p.ds)+' <b>'+pointsText(p.points)+'</b></span>';
   }).join("");
   var when=t.updated?new Date(t.updated):null;
   return '<h3>Across all datasets</h3>'
-    +'<div style="font-size:13px"><b>'+(t.combinedPoints||0)+'</b> points in total</div>'
+    +'<div style="font-size:13px"><b>'+pointsText(t.combinedPoints)+'</b> points in total</div>'
     +'<div style="font-size:12px;color:var(--mut,#8b949e);margin-top:4px">'+per+'</div>'
     +'<div style="font-size:11px;color:var(--mut,#8b949e);margin-top:4px">Combined total as of '
     +escHtml(when&&!isNaN(when.getTime())?when.toLocaleString("en-GB"):"the last rebuild")
@@ -239,9 +261,9 @@ function openDashboard(){
     var pct=s.totalUsers?Math.round(100*(s.rank||s.totalUsers)/s.totalUsers):0;
     var prog=(s.nextLevelAt&&s.points!=null)?Math.min(100,Math.round(100*s.points/s.nextLevelAt)):100;
     var h='<h2>'+escHtml(s.handle||"You")+'</h2>'
-      +'<div style="color:var(--mut,#8b949e);font-size:13px">'+escHtml(s.level||"")+' &middot; '+(s.points||0)+' points'
+      +'<div style="color:var(--mut,#8b949e);font-size:13px">'+escHtml(s.level||"")+' &middot; '+pointsText(s.points)+' points'
       +(s.rank?(' &middot; rank #'+s.rank+' of '+s.totalUsers+' (top '+pct+'%)'):'')+'</div>';
-    if(s.nextLevel){h+='<div class="bar"><i style="width:'+prog+'%"></i></div><div style="font-size:11px;color:var(--mut,#8b949e)">'+(s.nextLevelAt-s.points)+' pts to '+escHtml(s.nextLevel)+'</div>';}
+    if(s.nextLevel){h+='<div class="bar"><i style="width:'+prog+'%"></i></div><div style="font-size:11px;color:var(--mut,#8b949e)">'+pointsText(s.nextLevelAt-s.points)+' pts to '+escHtml(s.nextLevel)+'</div>';}
     h+='<h3>Your activity</h3><div class="grid">'
       +stat(s.reports,"total reports","Reported or confirmed cell identities only (New identification / Discrepancy / Confirmation reports, plus identified new cells and merged-nucleus sub-cell splits). Computed volumes, root ID proposals, votes, and \"not a nucleus\" flags are real contributions too, but aren't cell-identity reports — see the separate stats below for those.")+stat(s.daysActive,"days active")+stat(s.streak,"day streak")
       +stat(s.longestStreak,"longest streak")+stat(s.newCells,"new cells found")+stat(s.organelles,"organelles","Every centriole, primary cilium, microglia plug, astrocyte hole, and other logged organelle/extracellular structure counts here — cilia and centrioles just earn more points per report (see the point-system notes), they're not the only thing tallied.")
@@ -299,7 +321,7 @@ function openDashboard(){
     });
     gamifyGet("leaderboard",function(ld){
       var lb=(ld&&ld.leaderboard)||[],el=document.getElementById("lbList");if(!el)return;
-      el.innerHTML=lb.length?lb.map(function(u,i){return '<div class="lbrow"><span>'+(i+1)+'. '+escHtml(u.handle)+'</span><span>'+u.points+' pts &middot; '+u.reports+' reports</span></div>';}).join(''):'<div style="color:var(--mut,#8b949e)">No entries yet.</div>';
+      el.innerHTML=lb.length?lb.map(function(u,i){return '<div class="lbrow"><span>'+(i+1)+'. '+escHtml(u.handle)+'</span><span>'+pointsText(u.points)+' pts &middot; '+u.reports+' reports</span></div>';}).join(''):'<div style="color:var(--mut,#8b949e)">No entries yet.</div>';
     });
   });
 }
