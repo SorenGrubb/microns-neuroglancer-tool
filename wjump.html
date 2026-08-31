@@ -268,8 +268,8 @@
        and 14,532, because prose is the one thing in this file nothing checks. Now the numbers
        come from the same array the picker reads, so they cannot drift again. -->
   <p class="hint">41 volumes are open, listed smallest first with the number of
-  40&nbsp;&micro;m boxes each one takes &mdash; 3 for the smallest, 4,104 for the
-  largest, 12,424 across the roster. The map above sizes itself to whichever volume you pick
+  40&nbsp;&micro;m boxes each one takes &mdash; 3 for the smallest, 3,672 for the
+  largest, 11,558 across the roster. The map above sizes itself to whichever volume you pick
   and keeps one scale across its panels, so a distance in one is the same distance in another.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
@@ -650,7 +650,10 @@ UJ.cfg.datasets = [
   { id:"wk-ppc", tissue:"cortex (PPC)", species:"mouse",
     shape:[4864, 12032, 12032], origin:[0, 0, 0],
     res_nm:[30, 12, 12], tier:"inf", enabled:true,
-    /* 144.4 × 144.4 × 145.9 µm, 512 boxes */
+    /* Array 144.4 × 144.4 × 145.9 µm. MEASURED from the pixels 2026-08-31 (probe v2, level '64',
+       fill value 0 over 91% of the outer shell): the imagery is 77.6 × 97.5 × 145.9 µm, so 62% of
+       the array is void and 40 of its 64 boxes had nothing in them. */
+    dataBoxNm:{ xmin:9984, ymin:12288, zmin:0, xmax:87552, ymax:109824, zmax:145920 },
     source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd439010000e66f8c2786/color",
     extraLayers:[{ name:"segmentation", type:"segmentation",
                    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd439010000e66f8c2786/segmentation" }],
@@ -658,7 +661,9 @@ UJ.cfg.datasets = [
   { id:"wk-acc", tissue:"cortex L2 (ACC)", species:"mouse",
     shape:[3328, 14336, 9216], origin:[0, 0, 0],
     res_nm:[30, 12, 12], tier:"inf", enabled:true,
-    /* 110.6 × 172.0 × 99.8 µm, 270 boxes */
+    /* Array 110.6 × 172.0 × 99.8 µm. MEASURED 2026-08-31: imagery 76.8 × 145.9 × 98.9 µm,
+       45 boxes -> 24. */
+    dataBoxNm:{ xmin:20736, ymin:11136, zmin:0, xmax:97536, ymax:157056, zmax:98880 },
     source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd43801000026708c2783/color",
     extraLayers:[{ name:"segmentation", type:"segmentation",
                    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd43801000026708c2783/segmentation" }],
@@ -668,7 +673,9 @@ UJ.cfg.datasets = [
   { id:"wk-v2", tissue:"cortex L2/3 (V2)", species:"mouse",
     shape:[5120, 10240, 7168], origin:[0, 0, 0],
     res_nm:[30, 12, 12], tier:"inf", enabled:true,
-    /* 86.0 × 122.9 × 153.6 µm, 280 boxes */
+    /* Array 86.0 × 122.9 × 153.6 µm. MEASURED 2026-08-31: imagery 76.8 × 98.3 × 153.6 µm,
+       48 boxes -> 24. */
+    dataBoxNm:{ xmin:4224, ymin:13056, zmin:0, xmax:81024, ymax:111360, zmax:153600 },
     source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd4380100004f6f8c2785/color",
     extraLayers:[{ name:"segmentation", type:"segmentation",
                    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd4380100004f6f8c2785/segmentation" }],
@@ -726,11 +733,19 @@ UJ.cfg.datasets = [
   { id:"wk-h5-l23-msem", tissue:"cortex L2/3 (STG), MultiSEM", species:"human",
     shape:[3072, 373760, 359424], origin:[0, 0, 18432], res_nm:[38, 4, 4],
     tier:"em", enabled:true,
+    /* MEASURED 2026-08-31 (probe v3, level '1024-1024-128'): imagery 1409.0 × 1331.2 × 87.6 µm,
+       4,104 boxes -> 3,672. Held back one round until the probe could say how much imagery its
+       noise rule was discarding: 0.005% of the non-padding voxels, i.e. specks. The strict
+       any-voxel box would have given 3,780. */
+    dataBoxNm:{ xmin:69632, ymin:163840, zmin:0, xmax:1478656, ymax:1495040, zmax:87552 },
     source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17edd010000f70075d7ba/color",
     provider:PROV_LOOMBA },
   { id:"wk-h5-l16-msem", tissue:"cortex L1-6 (STG), MultiSEM", species:"human",
     shape:[1024, 672768, 488448], origin:[0, 18432, 18432], res_nm:[37, 4, 4],
     tier:"em", enabled:true,
+    /* MEASURED 2026-08-31: imagery 1916.9 × 2552.8 × 29.6 µm, 3,332 boxes -> 3,072. The noise
+       rule discards 0.012% of the imaged voxels; the strict box would have given 3,234. */
+    dataBoxNm:{ xmin:76800, ymin:176128, zmin:0, xmax:1993728, ymax:2728960, zmax:29600 },
     source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/62b17f91010000ef0075d7bf/color",
     provider:PROV_LOOMBA },
   { id:"wk-mouse-a2", tissue:"cortex L2/3 (A2)", species:"mouse",
@@ -762,6 +777,13 @@ UJ.cfg.datasets = [
   { id:"wk-bock11", tissue:"cortex (V1) + leptomeninges", species:"mouse",
     shape:[1244,119808,135424], origin:[2912,0,0], res_nm:[40,4,4],
     tier:"inf", enabled:true,
+    /* MEASURED 2026-08-31: imagery 540.7 × 372.7 × 49.4 µm, 336 boxes -> 280. The trim is almost
+       all in y -- the imaged strip stops at 430 µm of the array's 479 µm.
+
+       This is also the volume that proved the dataBox guard was wrong. Its data sits at z origin
+       2912 sections, so the box's zmax (166,080 nm) is far above shape*res (49,760 nm) and the
+       original guard refused it. The array is addressed from 0; the ceiling is origin + shape. */
+    dataBoxNm:{ xmin:0, ymin:57344, zmin:116640, xmax:540672, ymax:430080, zmax:166080 },
     source:"zarr://https://data-humerus.webknossos.org/data/zarr/5ca213c8010000450331c4cc/image",
     provider:{
     name: "Bock et al. 2011, via WEBKNOSSOS",
@@ -916,6 +938,9 @@ UJ.cfg.datasets = [
   { id:"wk-gour21-p7-l4", tissue:"cortex L4 (barrel, P7)", species:"mouse",
     shape:[5376,10240,7168], origin:[0,0,0], res_nm:[30,11.239999771118164,11.239999771118164],
     tier:"inf", enabled:true,
+    /* Array 80.6 × 115.1 × 161.3 µm. MEASURED 2026-08-31: imagery 77.3 × 111.1 × 161.3 µm,
+       45 boxes -> 30. A modest trim, but the trimmed strip is empty on every section. */
+    dataBoxNm:{ xmin:1079, ymin:0, zmin:0, xmax:78411, ymax:111142, zmax:161280 },
     source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5fce18c50100001900cfafec/color",
     provider:{
     name: "MPI for Brain Research (Helmstaedter lab), via WEBKNOSSOS",
@@ -935,6 +960,11 @@ UJ.cfg.datasets = [
   { id:"wk-bloss18", tissue:"hippocampus", species:"mouse",
     shape:[318,106496,81920], origin:[0,0,0], res_nm:[50,3.89,3.89],
     tier:"inf", enabled:true,
+    /* MEASURED 2026-08-31: imagery 271.9 × 393.4 × 15.9 µm, 88 boxes -> 70. The largest
+       proportional trim of the three that waited (20% of the volume), and the one where the noise
+       rule mattered most -- the strict box saves nothing at all here, 88 -> 88. It discards 0.011%
+       of the imaged voxels, so what it removed was scattered specks in the empty margin. */
+    dataBoxNm:{ xmin:17925, ymin:3983, zmin:0, xmax:289790, ymax:397341, zmax:15900 },
     source:"zarr://https://data-humerus.webknossos.org/data/zarr/5c9cbcdd010000ca0d605d6a/image",
     provider:{
     name: "Bloss et al. 2018, via WEBKNOSSOS",
@@ -2417,13 +2447,27 @@ UJ.wjump = (function(){
     var r = resVec(d);
     if (!r) return null;
     var arr = [d.shape[2] * r[2], d.shape[1] * r[1], d.shape[0] * r[0]];   // (x,y,z) nm
+    /* THE CEILING IS origin + shape, NOT shape. `shape` is the size of the DATA; the zarr array is
+       addressed from 0 and the data sits at `origin` inside it, so the array's last addressable
+       nanometre is origin + shape*res. dataBoxNm is read off Neuroglancer, which shows array
+       coordinates, so a perfectly good box on an origin-offset volume can sit above shape*res and
+       be entirely legal.
+
+       The first version of this guard used `arr` alone, and it was wrong on three of the eight
+       boxes the 2026-08-31 measurement pass produced: bock11's imagery starts at z=116,640 nm on a
+       49,760 nm-tall data block (origin z = 2912 sections), and both human msem blocks are offset
+       18,432 voxels in x. All three would have been refused and fallen back silently -- the box
+       would have been ignored, the roster would have been unchanged, and the only symptom would
+       have been a saving that never appeared. */
+    var o = d.origin || [0, 0, 0];
+    var org = [o[2] * r[2], o[1] * r[1], o[0] * r[0]];                     // (x,y,z) nm
     var lo = [b.xmin, b.ymin, b.zmin], hi = [b.xmax, b.ymax, b.zmax];
     for (var i = 0; i < 3; i++){
       /* A typo here would place the whole grid outside the volume and every box would be over
          nothing -- which looks exactly like a dataset nobody has searched yet. Refused loudly
          instead, and the dataset falls back to its declared array so the tool still works. */
       if (!(isFinite(lo[i]) && isFinite(hi[i]) && hi[i] > lo[i])) return null;
-      if (lo[i] < -1 || hi[i] > arr[i] + 1) return null;
+      if (lo[i] < -1 || hi[i] > org[i] + arr[i] + 1) return null;
     }
     return { lo: lo, hi: hi, arr: arr };
   }
