@@ -28,11 +28,15 @@
                    entirely correct, which is how it shipped past me once already. Resolved here
                    at mount time, which is after DOMContentLoaded, so the data block exists.
        unit: "voxels" (default) or "nm" -- what the six coordinate fields are in. Only wording:
-                   the conversion is `res`, passed to mount(). Every Jump tool but ωJump takes
-                   voxels, because that is the frame Neuroglancer shows and a user pastes. ωJump's
-                   whole coordinate system is nanometres (see wjump_config.js) and telling its
-                   users to type voxels would be telling them to type a number that does not exist
-                   anywhere in that tool.
+                   the conversion is `res`, passed to mount(). ALL SEVEN tools take voxels, because
+                   that is the frame Neuroglancer shows and a user pastes.
+                   ωJump was the exception until 2026-08-31: its whole coordinate system was
+                   nanometres, so it passed unit:"nm" and res [1,1,1]. Søren asked for voxels there
+                   too -- a coordinate is only useful to the lab that published the volume if it is
+                   in the frame they use -- so the "nm" branch now has no caller. It is kept
+                   because the wording is one string and a module that only works for the one unit
+                   its callers happen to use today is a module that has to be reopened the day one
+                   of them differs.
        depthCaption: string, optional -- the side view's vertical axis label. Defaults to
                    "Y - depth". µJump says "pia at top, white matter at bottom"; that is true of
                    a cortical block and false of, say, a corpuscle, so it is per-tool text.

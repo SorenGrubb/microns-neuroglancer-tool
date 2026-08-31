@@ -1028,8 +1028,15 @@ function buildState(pos){
     layers:[{type:"image",source:V.em,tab:"source",name:"lee16"}],
     selectedLayer:{visible:true,layer:"lee16"},
     /* "xy" and not µJump's "xy-3d": a 3D panel with no segmentation to render is an empty
-       black quadrant taking a quarter of the screen. */
-    layout:"xy"};
+       quadrant taking a quarter of the screen. */
+    layout:"xy",
+    /* crossSectionBackgroundColor/perspectiveViewBackgroundColor -- follows THIS page's
+     light/dark choice. Søren, 2026-08-31: "lJump does not change the background of the
+     Neuroglancer to white when in light mode, it should only be black background if in dark
+     mode. Same problem in bJump." ngBgColor() was already defined in both pages and called
+     from nowhere -- the same shape as βJump's organelle filter, whose JS existed for eleven
+     days with no div to render into. A function nothing calls is not a feature. */
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function viewerUrl(pos){
   return UJ.cfg.viewer.base + "#!" + encodeURIComponent(JSON.stringify(buildState(pos)));

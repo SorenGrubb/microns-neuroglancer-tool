@@ -4,6 +4,31 @@
 <!-- Google tag (gtag.js) --> <script async src="https://www.googletagmanager.com/gtag/js?id=G-DV02FHZ57V"></script> <script> window.dataLayer = window.dataLayer || []; function gtag(){dataLayer.push(arguments);} gtag('js', new Date()); gtag('config', 'G-DV02FHZ57V'); </script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+/* THEME, resolved before the first paint.
+
+   Søren, 2026-08-31: "The Grubblab index page should also have a light/dark mode."
+
+   This page used to be light with six @media (prefers-color-scheme:dark) blocks. Those blocks are
+   now selected by [data-theme="dark"] instead, and this script decides the attribute -- from the
+   stored choice if there is one, otherwise from the operating system. The colours were NOT
+   duplicated into a second set of rules: one copy of six palettes, kept in step by hand, is
+   exactly the kind of thing that drifts, and this project has paid for that twice already.
+
+   The trade is that with JavaScript off the page renders light rather than following the system.
+   That is this design's own default and the page's whole purpose is linking to seven JavaScript
+   tools, so it is a fair trade rather than a regression nobody thought about.
+
+   Same storage key as every tool, so choosing dark here and opening µJump does not flash. */
+(function(){
+  var t = null;
+  try { t = localStorage.getItem("ujump_theme"); } catch(e){}
+  if (t !== "light" && t !== "dark")
+    t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches)
+        ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 <title>Grubb Lab — Brain ultrastructure &amp; the neurovascular unit</title>
 <meta name="description" content="Volume electron microscopy of the brain microvasculature and neurovascular unit. Home of seven community cell-identification tools: µJump (MICrONS minnie65), δJump (Allen V1 Deep Dive), πJump (MICrONS pinky100), λJump (Lee16 mouse V1), ηJump (H01 human cortex), βJump (an Alzheimer’s model hippocampus) and ωJump (26 OpenOrganelle and WEBKNOSSOS volumes across four species).">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='none' stroke='%2327c9a3' stroke-width='9'/><circle cx='50' cy='50' r='13' fill='%2327c9a3'/></svg>">
@@ -74,13 +99,16 @@
   footer{padding:34px 0 56px;font-size:14px;color:var(--muted)}
   footer a{color:var(--muted);text-decoration:underline;text-underline-offset:2px}
   footer a:hover{color:var(--teal)}
+  .brand{display:flex;align-items:center;gap:10px}
+  #themeToggleBtn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font:inherit;
+    font-size:12px;color:var(--ink);background:var(--card);border:1px solid var(--line);
+    border-radius:20px;padding:6px 12px;cursor:pointer}
+  #themeToggleBtn:hover{border-color:var(--teal)}
 
-  @media (prefers-color-scheme:dark){
-    :root{
+      :root[data-theme="dark"]{
       --bg:#14171b;--ink:#e8e6e3;--muted:#9aa3ad;--line:#2a2f36;
       --accent:#7db3d6;--teal:#27e0b3;--teal-soft:#12271f;--card:#1a1e24;--hero:#181c21;
     }
-  }
   /* ── the ηJump card is orange ──────────────────────────────────────────────────────────
      Søren, 2026-08-17. Same two oranges the ηJump page itself uses, so the card and the tool it
      opens read as one thing. Scoped to .feature.eta, so the µJump card keeps its teal.
@@ -91,11 +119,9 @@
      one; CTA text 5.18:1 light and 10.06:1 dark. */
   .feature.eta{--teal:#c2410c;--teal-soft:#fdece2}
   .feature.eta .cta{background:#c2410c;color:#ffffff}
-  @media (prefers-color-scheme:dark){
-    .feature.eta{--teal:#ffb454;--teal-soft:#3a2408}
+      :root[data-theme="dark"] .feature.eta{--teal:#ffb454;--teal-soft:#3a2408}
     /* dark text on the light amber fill, not white — see the contrast note above */
-    .feature.eta .cta{background:#ffb454;color:#241503}
-  }
+    :root[data-theme="dark"] .feature.eta .cta{background:#ffb454;color:#241503}
 
   /* ── the βJump card is red ─────────────────────────────────────────────────────────────
      Søren, 2026-08-18. Same two reds the βJump page itself uses, so card and tool read as one
@@ -105,11 +131,9 @@
      on the dark one; CTA text 7.67:1 light and 6.67:1 dark. All well past AA. */
   .feature.beta{--teal:#a4133c;--teal-soft:#fde7ec}
   .feature.beta .cta{background:#a4133c;color:#ffffff}
-  @media (prefers-color-scheme:dark){
-    .feature.beta{--teal:#ff6b81;--teal-soft:#3a1018}
+      :root[data-theme="dark"] .feature.beta{--teal:#ff6b81;--teal-soft:#3a1018}
     /* dark text on the light rose fill, not white — same reason as above */
-    .feature.beta .cta{background:#ff6b81;color:#2a0a12}
-  }
+    :root[data-theme="dark"] .feature.beta .cta{background:#ff6b81;color:#2a0a12}
 
   /* ── the δJump card is purple ──────────────────────────────────────────────────────────
      Søren, 2026-08-20. The same two purples δJump itself uses (#6d28d9 light, #b388ff dark),
@@ -119,11 +143,9 @@
      6.28:1 on the dark one; CTA text 7.10:1 light and 6.97:1 dark. All well past AA. */
   .feature.delta{--teal:#6d28d9;--teal-soft:#f0eafe}
   .feature.delta .cta{background:#6d28d9;color:#ffffff}
-  @media (prefers-color-scheme:dark){
-    .feature.delta{--teal:#b388ff;--teal-soft:#2a1a44}
+      :root[data-theme="dark"] .feature.delta{--teal:#b388ff;--teal-soft:#2a1a44}
     /* dark text on the light violet fill, not white — same reason as above */
-    .feature.delta .cta{background:#b388ff;color:#1a0b2e}
-  }
+    :root[data-theme="dark"] .feature.delta .cta{background:#b388ff;color:#1a0b2e}
 
   /* ── the λJump card is blue ────────────────────────────────────────────────────────────
      Søren, 2026-08-21: "I think the color theme of lJump should be blue." The same two blues
@@ -145,19 +167,15 @@
   .feature.omega .cta{background:#854d0e;color:#ffffff}
   .feature.pi{--teal:#b81a8f;--teal-soft:#fbe4f5}
   .feature.pi .cta{background:#b81a8f;color:#ffffff}
-  @media (prefers-color-scheme:dark){
-    .feature.omega{--teal:#fbbf24;--teal-soft:#2b2107}
-    .feature.omega .cta{background:#fbbf24;color:#2a1f04}
-    .feature.pi{--teal:#f78ad4;--teal-soft:#2e0722}
-    .feature.pi .cta{background:#f78ad4;color:#2e0722}
-  }
+      :root[data-theme="dark"] .feature.omega{--teal:#fbbf24;--teal-soft:#2b2107}
+    :root[data-theme="dark"] .feature.omega .cta{background:#fbbf24;color:#2a1f04}
+    :root[data-theme="dark"] .feature.pi{--teal:#f78ad4;--teal-soft:#2e0722}
+    :root[data-theme="dark"] .feature.pi .cta{background:#f78ad4;color:#2e0722}
   .feature.lambda{--teal:#1d4ed8;--teal-soft:#e6edfd}
   .feature.lambda .cta{background:#1d4ed8;color:#ffffff}
-  @media (prefers-color-scheme:dark){
-    .feature.lambda{--teal:#7aa2ff;--teal-soft:#121d38}
+      :root[data-theme="dark"] .feature.lambda{--teal:#7aa2ff;--teal-soft:#121d38}
     /* dark text on the light blue fill, not white — same reason as above */
-    .feature.lambda .cta{background:#7aa2ff;color:#08122a}
-  }
+    :root[data-theme="dark"] .feature.lambda .cta{background:#7aa2ff;color:#08122a}
 
 </style>
 </head>
@@ -171,6 +189,9 @@
         <circle cx="50" cy="50" r="13" fill="var(--teal)"/>
       </svg>
       <span class="brand-name">Grubb Lab</span>
+      <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
+              aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span>
+        <span id="themeToggleLabel">Light</span></button>
     </div>
     <h1>Brain ultrastructure and the neurovascular unit</h1>
     <p class="lede">
@@ -483,5 +504,38 @@
   </div>
 </footer>
 
+<script>
+/* The same three functions the seven tools carry, on the same storage key. Kept verbatim rather
+   than shortened, so a reader moving between this page and a tool sees one thing. */
+function currentTheme(){
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+function setTheme(mode){
+  var dark = mode === "dark";
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  try { localStorage.setItem("ujump_theme", dark ? "dark" : "light"); } catch(e){}
+  var icon = document.getElementById("themeToggleIcon"),
+      label = document.getElementById("themeToggleLabel"),
+      btn = document.getElementById("themeToggleBtn");
+  /* The label names the theme you are IN, not the one you would get -- the same convention as
+     the seven tools. */
+  if (icon) icon.textContent = dark ? "🌙" : "☀️";
+  if (label) label.textContent = dark ? "Dark" : "Light";
+  if (btn) btn.setAttribute("aria-pressed", dark ? "true" : "false");
+}
+function toggleTheme(){ setTheme(currentTheme() === "dark" ? "light" : "dark"); }
+(function(){
+  var btn = document.getElementById("themeToggleBtn");
+  if (btn) btn.addEventListener("click", toggleTheme);
+  /* Sync the label to what the head guard already decided, WITHOUT writing to storage: this page
+     following the operating system must keep following it until somebody actually chooses. */
+  var dark = currentTheme() === "dark";
+  var icon = document.getElementById("themeToggleIcon"),
+      label = document.getElementById("themeToggleLabel");
+  if (icon) icon.textContent = dark ? "🌙" : "☀️";
+  if (label) label.textContent = dark ? "Dark" : "Light";
+  if (btn) btn.setAttribute("aria-pressed", dark ? "true" : "false");
+})();
+</script>
 </body>
 </html>

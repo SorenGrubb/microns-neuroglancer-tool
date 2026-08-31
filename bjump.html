@@ -1357,7 +1357,14 @@ function buildState(pos, segId, srcIdx){
     position:pos, crossSectionScale:20, projectionScale:2000,
     layers:layers,
     selectedLayer:{visible:true,layer:srcIdx===2?"Segmentation (32nm)":"Segmentation (SECGAN 16nm)"},
-    showSlices:false, layout:{type:"xy-3d",orthographicProjection:true}};
+    showSlices:false, layout:{type:"xy-3d",orthographicProjection:true},
+    /* crossSectionBackgroundColor/perspectiveViewBackgroundColor -- follows THIS page's
+     light/dark choice. Søren, 2026-08-31: "lJump does not change the background of the
+     Neuroglancer to white when in light mode, it should only be black background if in dark
+     mode. Same problem in bJump." ngBgColor() was already defined in both pages and called
+     from nowhere -- the same shape as βJump's organelle filter, whose JS existed for eleven
+     days with no div to render into. A function nothing calls is not a feature. */
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function viewerUrl(pos, segId, srcIdx){
   return UJ.cfg.viewer.base + "#!" + encodeURIComponent(JSON.stringify(buildState(pos,segId,srcIdx)));
@@ -2093,7 +2100,8 @@ function buildBjumpCellContactsAllViewerState(i,rootIdStr,cellType,rows){
     position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,7000),
     layers:layers,
     selectedLayer:firstAnnLayerName?{layer:firstAnnLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
-    layout:{type:"4panel",orthographicProjection:true},showSlices:false};
+    layout:{type:"4panel",orthographicProjection:true},showSlices:false,
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function openBjumpCellContactsAllViewer(i,rootIdStr,cellType,rows){
   const state=buildBjumpCellContactsAllViewerState(i,rootIdStr,cellType,rows);
@@ -2131,7 +2139,8 @@ function buildBjumpCellContactsSingleViewerState(i,rootIdStr,cellType,row){
     position:posVox,crossSectionScale:3.0,projectionScale:Math.max(span,4000),
     layers:layers,
     selectedLayer:firstAnnLayerName?{layer:firstAnnLayerName,visible:true,tab:"annotations"}:{layer:centerLayerName,visible:true},
-    layout:{type:"4panel",orthographicProjection:true},showSlices:false};
+    layout:{type:"4panel",orthographicProjection:true},showSlices:false,
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function openBjumpCellContactsSingleViewer(i,rootIdStr,cellType,row){
   const state=buildBjumpCellContactsSingleViewerState(i,rootIdStr,cellType,row);
@@ -2426,7 +2435,8 @@ function openBjumpSynapseViewer(i, rootIdStr, cellType, synapseIdStr){
   const state={dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
     position:posVox,crossSectionScale:2.0,projectionScale:4000,
     layers:layers,selectedLayer:{layer:synLayerName,visible:true},
-    layout:{type:"4panel",orthographicProjection:true},showSlices:false};
+    layout:{type:"4panel",orthographicProjection:true},showSlices:false,
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
   const url=UJ.cfg.viewer.base+"#!"+encodeURIComponent(JSON.stringify(state));
   window.open(url,"_blank","noopener");
 }
@@ -2460,7 +2470,8 @@ function buildBjumpSynapseAllViewerState(i,rootIdStr,cellType,synapseIds){
   return {dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
     position:posVox,crossSectionScale:2.0,projectionScale:6000,
     layers:layers,selectedLayer:synapseIds.length?{layer:synLayerName,visible:true}:{layer:centerLayerName,visible:true},
-    layout:{type:"4panel",orthographicProjection:true},showSlices:false};
+    layout:{type:"4panel",orthographicProjection:true},showSlices:false,
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function openBjumpSynapseAllViewer(i,rootIdStr,cellType,synapseIds){
   const state=buildBjumpSynapseAllViewerState(i,rootIdStr,cellType,synapseIds);

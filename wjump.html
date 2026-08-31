@@ -1,13 +1,44 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ωJump — find the cells</title>
+<script>
+/* Applied BEFORE the first paint, so a light-mode user does not get a dark flash on every load.
+   Deliberately tiny and dependency-free: nothing else on the page exists yet. It only sets the
+   attribute; the button's own icon and label are synced by setTheme() once the body has parsed.
+   Same key as the other six tools ("ujump_theme") on purpose -- one choice, made once, and the
+   whole family follows it. */
+try{var _t=localStorage.getItem("ujump_theme");
+    if(_t==="light"||_t==="dark")document.documentElement.setAttribute("data-theme",_t);}catch(_fe){}
+</script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
+/* THEME. Three blocks, and the order matters.
+
+   ωJump had only the first two until 2026-08-31: a dark palette and a prefers-color-scheme
+   override. That follows the operating system and offers no choice, which is not what the other
+   six tools do -- Søren: "wJump also lacks a dark/light theme button." A media query is also
+   unreadable from the outside, so the page could not tell Neuroglancer which background to open
+   with; it always got black, in both themes.
+
+   Now: :root is dark; the media query supplies light for anyone whose system asks for it, but
+   only while no explicit choice has been made; and [data-theme] beats both, in either direction,
+   so the button can override a light system into dark as well as the other way round. The
+   :not() is what makes that last part true -- without it a dark choice on a light system would
+   lose to the media query. */
  :root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ee;--mut:#9aa4b2;--line:#262c35;
        --accent:#fbbf24;--on-accent:#2a1f04;
-       --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444}
- @media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mut:#5b6472;
-       --line:#e3e6ea;--accent:#854d0e;--on-accent:#ffffff}}
+       --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;
+       --shadow:rgba(0,0,0,.4)}
+ @media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f7f9;--card:#fff;
+       --ink:#16181d;--mut:#5b6472;--line:#e3e6ea;--accent:#854d0e;
+       --on-accent:#ffffff;--shadow:rgba(140,149,159,.25)}}
+ :root[data-theme="light"]{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mut:#5b6472;
+       --line:#e3e6ea;--accent:#854d0e;--on-accent:#ffffff;
+       --shadow:rgba(140,149,159,.25)}
+ #themeToggleBtn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12px;
+   color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:20px;
+   padding:6px 12px;cursor:pointer;box-shadow:0 2px 8px var(--shadow);width:auto}
+ #themeToggleBtn:hover{border-color:var(--accent)}
  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);
    font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
  .wrap{max-width:960px;margin:0 auto;padding:24px 18px 70px}
@@ -84,6 +115,9 @@
     <span id="dslabel"></span></p>
   </div>
   <div style="text-align:right">
+    <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
+            aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span>
+      <span id="themeToggleLabel">Dark</span></button>
     <div id="pointsChip"></div>
     <div id="gsiButton" style="margin-top:6px"></div>
     <p class="hint" id="whoami" style="margin:6px 0 0">not signed in</p>
@@ -115,7 +149,7 @@
     <label for="jump-coord">Have a coordinate? Find the nearest nucleus</label>
     <div class="row">
       <input type="text" id="jump-coord" style="flex:1 1 240px"
-             placeholder="x, y, z in nanometres &mdash; or paste a Neuroglancer link">
+             placeholder="x, y, z in voxels &mdash; or paste a Neuroglancer link">
       <button id="jump-go" style="width:auto">Find it</button>
     </div>
     <p class="hint" id="jump-msg" style="margin:8px 0 0"></p>
@@ -211,12 +245,12 @@
   </div>
 
   <!-- Bounding-box limitation + per-box Colab download, shared with λJump/βJump/µJump through
-       core/regionbox.js. NANOMETRES here, not voxels: ωJump's whole coordinate system is nm (its
-       Neuroglancer states declare 1e-9 m per unit), so asking for voxels would be asking for a
-       number that appears nowhere in this tool. -->
+       core/regionbox.js. VOXELS, like every other tool: since 2026-08-31 ωJump's viewer states
+       declare the dataset's own voxel size, so the numbers here are the ones Neuroglancer and
+       WEBKNOSSOS both show. -->
   <div style="margin-top:12px">
     <label style="font-size:12px"
-      title="Two diagonal corners per box, in NANOMETRES — the same numbers this tool uses everywhere else, and the same ones Neuroglancer shows for these volumes. Either diagonal works. Add as many boxes as you like; a nucleus matches if it falls inside any of them. Paste x, y, z into either corner's first field and it splits automatically."><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box, nanometres)</label>
+      title="Two diagonal corners per box, in VOXELS — the same numbers Neuroglancer and WEBKNOSSOS show for these volumes. Either diagonal works. Add as many boxes as you like; a nucleus matches if it falls inside any of them. Paste x, y, z into either corner's first field and it splits automatically."><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box, voxels)</label>
     <div id="regionBoxes"></div>
     <button type="button" id="regionAddBox" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another box</button>
     <div id="regionViz"></div>
@@ -283,6 +317,55 @@
 </div>
 </div>
 
+<script>
+/* ── theme ─────────────────────────────────────────────────────────────────────────────────────
+   The same module the other six tools carry, and the same localStorage key, so a person who has
+   already chosen light in µJump gets light here without choosing again.
+
+   ngBgColor() is the reason this is a plain function declaration rather than something scoped:
+   wjump_logic.js builds Neuroglancer states from a different script tag and has to be able to
+   reach it. Neuroglancer opens in its own tab and cannot inherit this page's CSS, so the
+   background has to be stated in the state itself -- and stated from the LIVE theme rather than
+   hardcoded, which is the correction Søren asked for on λJump and βJump ("lJump does not change
+   the background of the Neuroglancer to white when in light mode, it should only be black
+   background if in dark mode"). "#000000" is Neuroglancer's own default, not an invented dark. */
+function currentTheme(){
+  return document.documentElement.getAttribute("data-theme") === "light" ? "light"
+       : document.documentElement.getAttribute("data-theme") === "dark" ? "dark"
+       : (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+          ? "light" : "dark");
+}
+function ngBgColor(){ return currentTheme() === "light" ? "#ffffff" : "#000000"; }
+function setTheme(mode){
+  var light = mode === "light";
+  document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+  try { localStorage.setItem("ujump_theme", light ? "light" : "dark"); } catch(_st){}
+  var icon = document.getElementById("themeToggleIcon"),
+      label = document.getElementById("themeToggleLabel"),
+      btn = document.getElementById("themeToggleBtn");
+  /* The label names the theme you are IN, not the one you would get. That is what the other six
+     tools do, and a family where one button means the opposite of the other six is worse than
+     either convention on its own. */
+  if (icon) icon.textContent = light ? "☀️" : "🌙";
+  if (label) label.textContent = light ? "Light" : "Dark";
+  if (btn) btn.setAttribute("aria-pressed", light ? "true" : "false");
+}
+function toggleTheme(){ setTheme(currentTheme() === "light" ? "dark" : "light"); }
+(function(){
+  var btn = document.getElementById("themeToggleBtn");
+  if (btn) btn.addEventListener("click", toggleTheme);
+  /* Sync the button to whatever the head guard (or the operating system) already decided -- it
+     set the attribute and knew nothing about a button that did not exist yet. Written WITHOUT
+     calling setTheme, so merely loading the page does not write a choice into localStorage that
+     the user never made: following the system must stay following the system. */
+  var t = currentTheme(), light = t === "light";
+  var icon = document.getElementById("themeToggleIcon"),
+      label = document.getElementById("themeToggleLabel");
+  if (icon) icon.textContent = light ? "☀️" : "🌙";
+  if (label) label.textContent = light ? "Light" : "Dark";
+  if (btn) btn.setAttribute("aria-pressed", light ? "true" : "false");
+})();
+</script>
 <script>window.WJUMP_LIVE = true;</script>
 <script>/* ── ωJump configuration ────────────────────────────────────────────────────────────────────
    Forty-two datasets, forty-one of them enabled: fifteen Janelia OpenOrganelle / COSEM FIB-SEM
@@ -1198,18 +1281,19 @@ UJ.organelleData = { source: "core/ontology.js", groups: [{"label": "Not sure wh
    over the groups generically: adding a 62nd kind in ontology.js and rebuilding is the whole
    change, here and in µJump both.
 
-   TWO differences from µJump, and only two. Both are forced by the dataset rather than chosen:
+   ONE difference from µJump, and it is forced by the dataset rather than chosen:
 
-     1. COORDINATES ARE NANOMETRES, not voxels. µJump's viewer states are in voxel units, so its
-        form says "(voxel)" and its sheet stores voxels. Every ωJump state is in nanometres --
-        see the crossSectionScale note in wjump_logic.js, which is the same trap that once made
-        the viewer open at a 300 nm field of view. The forms therefore say "(nm)", and because
-        ωJump writes to its OWN spreadsheet the two units never meet in one column.
-
-     2. THE NUCLEUS IS ωJump'S OWN. µJump reports against a published nucleus id; ωJump reports
+     THE NUCLEUS IS ωJump'S OWN. µJump reports against a published nucleus id; ωJump reports
         against a nucleusKey the community created, which carries its dataset in the string
-        ("jrc_mus-meissner-corpuscle-1:7"). That is what makes a multi-dataset tool safe to write
-        into a sheet with no dataset column.
+     ("jrc_mus-meissner-corpuscle-1:7"). That is what makes a multi-dataset tool safe to write
+     into a sheet with no dataset column.
+
+   There used to be a second difference: ωJump's coordinates were NANOMETRES where µJump's are
+   voxels, because ωJump's viewer states declared 1e-9 m per unit. That ended on 2026-08-31 --
+   Søren asked for voxels here too, since a coordinate is only useful to the lab that published
+   the volume if it is in the frame their own viewer shows. Both tools now say voxels and mean the
+   same thing by it. The units still never meet in one column, because ωJump writes to its own
+   spreadsheet, but they no longer differ either.
 
    Everything else is deliberately identical: the same `organelle_location` POST, the same
    groupId/subIndex/subCount convention for one submission covering several structures, the same
@@ -1566,11 +1650,15 @@ UJ.organelleFilter = (function(){
                    entirely correct, which is how it shipped past me once already. Resolved here
                    at mount time, which is after DOMContentLoaded, so the data block exists.
        unit: "voxels" (default) or "nm" -- what the six coordinate fields are in. Only wording:
-                   the conversion is `res`, passed to mount(). Every Jump tool but ωJump takes
-                   voxels, because that is the frame Neuroglancer shows and a user pastes. ωJump's
-                   whole coordinate system is nanometres (see wjump_config.js) and telling its
-                   users to type voxels would be telling them to type a number that does not exist
-                   anywhere in that tool.
+                   the conversion is `res`, passed to mount(). ALL SEVEN tools take voxels, because
+                   that is the frame Neuroglancer shows and a user pastes.
+                   ωJump was the exception until 2026-08-31: its whole coordinate system was
+                   nanometres, so it passed unit:"nm" and res [1,1,1]. Søren asked for voxels there
+                   too -- a coordinate is only useful to the lab that published the volume if it is
+                   in the frame they use -- so the "nm" branch now has no caller. It is kept
+                   because the wording is one string and a module that only works for the one unit
+                   its callers happen to use today is a module that has to be reopened the day one
+                   of them differs.
        depthCaption: string, optional -- the side view's vertical axis label. Defaults to
                    "Y - depth". µJump says "pia at top, white matter at bottom"; that is true of
                    a cortical block and false of, say, a corpuscle, so it is per-tool text.
@@ -2413,6 +2501,46 @@ UJ.wjump = (function(){
     return [r[0], r[1], r[2]];
   }
 
+  /* ── NANOMETRES INSIDE, VOXELS AT EVERY EDGE ───────────────────────────────────────────────
+     2026-08-31, Søren: "it seems like all the datasets have a coordinate system in nm, while the
+     rest of the tools are in voxels. I would like the wJump to have it in voxels too... If we need
+     to let the authors of the dataset know about our cell identities, they should be translatable
+     and therefore in voxels."
+
+     He is right twice over. A coordinate is only useful to the lab that published the volume if it
+     is in the frame THEY use, and WEBKNOSSOS shows voxels: his cochlea example, WK 9243, 1737,
+     1747 against NG 101690, 19130, 69862, is exactly res_nm (11, 11, 40) apart. And nanometre
+     dimensions make the z axis unusable — one scroll step is one nanometre, so stepping through a
+     40 nm section takes forty presses of forty identical screens.
+
+     WHAT DID NOT CHANGE: the physics. Distances, the dedup radius, box geometry, the map and the
+     "near another cell" test all stay in nanometres internally, because they are physical
+     questions and the voxels are anisotropic — 11 x 11 x 40 on the cochlea. A Euclidean distance
+     between voxel coordinates on an anisotropic grid is not a distance; "5 µm apart" would mean
+     one thing in x and a different thing in z, and the dedup radius would quietly become an
+     ellipsoid. So nanometres remain the internal unit and voxels are produced at the boundaries:
+     the viewer state, everything the user reads or types, and the wire format to the sheet.
+
+     That is three boundaries and therefore exactly one conversion pair, kept here beside the axis
+     flip for the same reason the axis flip is kept in one place. */
+  function resXYZ(d){
+    /* res_nm is (z,y,x) to match `shape`; positions are (x,y,z). One reversal, stated once. */
+    var r = resVec(d); return r ? [r[2], r[1], r[0]] : null;
+  }
+  function toVox(d, nm){
+    var r = resXYZ(d); if (!r || !nm) return null;
+    return [nm[0] / r[0], nm[1] / r[1], nm[2] / r[2]];
+  }
+  function toNm(d, v){
+    var r = resXYZ(d); if (!r || !v) return null;
+    return [v[0] * r[0], v[1] * r[1], v[2] * r[2]];
+  }
+  /* Whole voxels, for anything a person reads, types or sends onward. A nucleus position is
+     nowhere near precise to a voxel -- it is a click somewhere inside a 5-10 µm object -- so the
+     fractional part is false precision, and a coordinate with a decimal point in it cannot be
+     pasted into WEBKNOSSOS's position box. */
+  function voxOf(d, nm){ var v = toVox(d, nm); return v ? v.map(Math.round) : null; }
+
   /* (z,y,x) voxels -> (x,y,z) nanometres. THE ONE PLACE the axis flip happens.
      OME-Zarr reports axes z,y,x; neuroglancer states are x,y,z. Doing this conversion at each
      use site is how an axis bug gets in and then looks like "the jumps are slightly off". */
@@ -2744,11 +2872,21 @@ UJ.wjump = (function(){
     return { list: list.slice(0, cap), capped: true, of: (known || []).length };
   }
 
-  function annotationLayers(known, capped){
+  /* The coordinate space every layer in the state shares: the dataset's own voxel grid. Local
+     annotation layers must declare the SAME outputDimensions as the state, or their points land
+     scaled by the ratio between the two -- which on the cochlea would put a nucleus 11x too far
+     out in x and 40x in z, off the end of the volume, looking like a wrong coordinate rather than
+     a wrong unit. */
+  function localDims(d){
+    var r = resXYZ(d);
+    return { x:[r[0] * 1e-9, "m"], y:[r[1] * 1e-9, "m"], z:[r[2] * 1e-9, "m"] };
+  }
+
+  function annotationLayers(d, known, capped){
     var buckets = { identified:[], provisional:[], unidentified:[] };
     (known || []).forEach(function(n){
       var b = !n.identity ? "unidentified" : (n.votes >= 2 ? "identified" : "provisional");
-      buckets[b].push({ type:"point", point:n.pos, id:String(n.id) });
+      buckets[b].push({ type:"point", point: toVox(d, n.pos), id:String(n.id) });
     });
     var near = capped ? " (nearest " + capped + ")" : "";
     var spec = [
@@ -2762,7 +2900,7 @@ UJ.wjump = (function(){
        itself writes means the state we generate and the state a user copies back out of the
        viewer are the same string, so a round-trip through the viewer is a no-op. Relying on a
        shorthand another version might stop expanding is a needless bet. */
-    var dims = { x:[1e-9,"m"], y:[1e-9,"m"], z:[1e-9,"m"] };
+    var dims = localDims(d);
     return spec.filter(function(s){ return buckets[s[0]].length; }).map(function(s){
       return { type:"annotation", name:s[1],
                source:{ url:"local://annotations", transform:{ outputDimensions: dims } },
@@ -2770,23 +2908,37 @@ UJ.wjump = (function(){
     });
   }
 
-  /* crossSectionScale is nm-per-screen-pixel, and the number that means "sensibly zoomed" is
-     NOT transferable from the other tools in this family. There it is VOXELS per pixel, because
-     their state dimensions are the dataset's voxel size (4 nm for µJump/λJump), so
-     crossSectionScale 3 renders 12 nm per pixel. Here dimensions are 1 nm, so the same 3 renders
-     3 nm per pixel -- a field of view about 1.5 µm wide.
+  /* crossSectionScale is not in nanometres and it is not in voxels either: it is in CANONICAL
+     VOXELS per screen pixel, and a canonical voxel is the SMALLEST scale among the displayed
+     dimensions. That is not folklore -- it is neuroglancer/navigation_state.js:
 
-     Copying 3.0 across is exactly what happened, and it was caught by loading the URL: the
-     viewer came up with a 300 nm scale bar, asking the user "is there a nucleus in this 20 µm
-     box?" while showing them roughly one mitochondrion. A nucleus is 5-10 µm; at that zoom you
-     could sit inside one and not know.
+         canonicalVoxelPhysicalSize = Number.POSITIVE_INFINITY;
+         for (...) { const s = factors[dim] * scales[dim];
+                     canonicalVoxelPhysicalSize = Math.min(canonicalVoxelPhysicalSize, s); }
 
-     So derive it from the box instead of hardcoding a number: aim for the box to fill most of a
-     panel. 20 µm over a ~1000 px panel is 20 nm/px, which puts a whole 20 µm box on screen with
-     margin in each of the four panels. If boxUm ever changes this follows it. */
+     so nm per pixel = crossSectionScale x min(res_nm). It mattered which: before the switch to
+     voxel dimensions this file used 1 nm dimensions and therefore nm per pixel directly, and the
+     FIRST version of that number was copied across from µJump (3.0) where the dimensions are the
+     dataset's own voxels. The viewer came up with a 300 nm scale bar -- asking "is there a nucleus
+     in this 20 µm box?" while showing roughly one mitochondrion. A nucleus is 5-10 µm; at that
+     zoom you could sit inside one and not know.
+
+     So the physical target stays the thing that is stated, and the scale is derived from it: aim
+     for the box to fill most of a panel, 40 µm over a ~1000 px panel. If boxUm changes, or a
+     dataset has a different voxel size, this follows both. */
   var PANEL_PX = 1000;
-  function crossSectionScaleFor(){
-    return Math.round(EX.boxUm * 1000 / PANEL_PX);
+  function nmPerPixel(){ return EX.boxUm * 1000 / PANEL_PX; }
+  function canonicalVoxelNm(d){
+    var r = resXYZ(d); return r ? Math.min(r[0], r[1], r[2]) : 1;
+  }
+  function crossSectionScaleFor(d){
+    return nmPerPixel() / canonicalVoxelNm(d);
+  }
+  /* 30 µm of projection reads the whole of a 37-58 µm volume like the Meissner corpuscle. Stated
+     in nanometres for the same reason as above, then converted. */
+  var PROJECTION_NM = 30000;
+  function projectionScaleFor(d){
+    return PROJECTION_NM / canonicalVoxelNm(d);
   }
 
   /* The region the user is actually being asked about. Without this the only box on screen is
@@ -2794,9 +2946,9 @@ UJ.wjump = (function(){
      nucleus in this box?" has no visible box, and the honest answer to the question as posed is
      "which box?". An axis-aligned bounding-box annotation draws its intersection in every
      cross-section, so the region reads correctly in all three planes and in 3D. */
-  function searchBoxLayer(cell){
+  function searchBoxLayer(d, cell){
     if (!cell) return null;
-    var dims = { x:[1e-9,"m"], y:[1e-9,"m"], z:[1e-9,"m"] };
+    var dims = localDims(d);
     return { type:"annotation", name:"search box",
              source:{ url:"local://annotations", transform:{ outputDimensions: dims } },
              /* ωJump's accent, and it must stay ωJump's accent: this box is drawn in a
@@ -2806,7 +2958,7 @@ UJ.wjump = (function(){
                 page shipped in λJump's blue once already. */
              tab:"source", annotationColor:"#fbbf24",
              annotations:[{ type:"axis_aligned_bounding_box", id:"searchbox",
-                            pointA: cell.lo, pointB: cell.hi }] };
+                            pointA: toVox(d, cell.lo), pointB: toVox(d, cell.hi) }] };
   }
 
   /* ── clicking a nucleus instead of transcribing its coordinate ────────────────────────────
@@ -2819,8 +2971,8 @@ UJ.wjump = (function(){
      but the coordinate is produced by pointing at the thing rather than by copying digits, which
      removes the transcription error entirely and lets several nuclei be marked in one visit. */
   var MARK_LAYER = "new finds — click here";
-  function markLayer(){
-    var dims = { x:[1e-9,"m"], y:[1e-9,"m"], z:[1e-9,"m"] };
+  function markLayer(d){
+    var dims = localDims(d);
     return { type:"annotation", name:MARK_LAYER,
              source:{ url:"local://annotations", transform:{ outputDimensions: dims } },
              tab:"annotations", tool:"annotatePoint", annotationColor:"#ffffff", annotations:[] };
@@ -2832,7 +2984,15 @@ UJ.wjump = (function(){
      -- `outside` counts points that landed beyond the box they were sent to, which is legitimate
      (a nucleus spotted while panning is still a real nucleus) and worth reporting rather than
      silently keeping or silently dropping. */
-  function parseFinds(text, cell){
+  /* dsId is required and comes FIRST because the points in a pasted link are now in that dataset's
+     voxels, and turning them back into the nanometres everything else in this file speaks needs
+     its res_nm. Making it the first argument means an old two-argument call cannot silently keep
+     working with the text in the dataset slot -- it fails immediately instead of quietly recording
+     every clicked nucleus at a coordinate 11 to 40 times too small. */
+  function parseFinds(dsId, text, cell){
+    var _d = byId(dsId);
+    if (!usable(_d)) return { ok:false, error:"unknown dataset — cannot read coordinates "
+                              + "without knowing the voxel size" };
     if (!text || !String(text).trim()) return { ok:false, error:"nothing pasted" };
     var t = String(text).trim(), i = t.indexOf("#!");
     if (i >= 0) t = t.slice(i + 2);
@@ -2848,8 +3008,10 @@ UJ.wjump = (function(){
       if (st.layers[k].name === MARK_LAYER) L = st.layers[k];
     if (!L) return { ok:false, error:"that link has no \u201c" + MARK_LAYER + "\u201d layer \u2014 "
                      + "it may be from before this box was opened" };
+    /* Back to nanometres on the way in, since that is the unit everything downstream of here --
+       dedup, distance, the box test -- is written in. */
     var pts = (L.annotations || []).filter(function(a){ return a && a.point && a.point.length === 3; })
-                                   .map(function(a){ return a.point.map(Number); });
+                                   .map(function(a){ return toNm(_d, a.point.map(Number)); });
     var outside = 0;
     if (cell) pts.forEach(function(p){
       for (var d = 0; d < 3; d++) if (p[d] < cell.lo[d] || p[d] > cell.hi[d]){ outside++; return; }
@@ -3348,6 +3510,22 @@ UJ.wjump = (function(){
     return Object.keys(by).sort().map(function(k){ return { kind:k, n:by[k] }; });
   }
 
+  /* Neuroglancer's background, following THIS page's theme.
+     Søren, 2026-08-31: "it should only be black background if in dark mode".
+
+     The viewer opens in its own tab through window.open, so it inherits none of this page's CSS
+     and the colour has to be written into the state. ngBgColor() is a plain function declaration
+     in the page's own script tag, which is how the other six tools reach it from wherever they
+     build a state -- but this file also runs in node, under the check suites, where there is no
+     document at all. So it is looked up rather than called directly, and the fallback is
+     "#000000", which is neuroglancer's own default rather than an invented dark. */
+  function ngBg(){
+    try {
+      if (typeof ngBgColor === "function") return ngBgColor();
+    } catch (e){}
+    return "#000000";
+  }
+
   function buildState(dsId, posNm, known, cell, opts){
     var d = byId(dsId); if (!usable(d)) return null;
     /* Where the pixels come from. Fifteen of these are OpenOrganelle and share one template, so
@@ -3367,9 +3545,9 @@ UJ.wjump = (function(){
       layers.push({ type:L.type, name:L.name, source: L.source || (root + L.path),
                     visible:false });
     });
-    var sb = searchBoxLayer(cell); if (sb) layers.push(sb);
+    var sb = searchBoxLayer(d, cell); if (sb) layers.push(sb);
     var shown = nearestFew(known, posNm, ANNOT_MAX);
-    annotationLayers(shown.list, shown.capped ? shown.of : 0).forEach(function(a){ layers.push(a); });
+    annotationLayers(d, shown.list, shown.capped ? shown.of : 0).forEach(function(a){ layers.push(a); });
     /* Armed while a box is being SEARCHED, and now also when a caller asks for it.
        The original rule was "only when searching -- revisiting a known nucleus is not a moment to
        be dropping new points, and an armed tool there would just collect accidents." That reason
@@ -3378,20 +3556,23 @@ UJ.wjump = (function(){
        pasted link comes back with nothing to read. So it is opt-in rather than implied by `cell`,
        and plain "view this nucleus" links still carry no armed tool. */
     var mark = !!cell || !!(opts && opts.mark);
-    if (mark) layers.push(markLayer());
+    if (mark) layers.push(markLayer(d));
     return {
-      /* nanometres per unit, NOT voxels -- see the note in wjump_config.js */
-      dimensions: { x:[1e-9,"m"], y:[1e-9,"m"], z:[1e-9,"m"] },
-      position: posNm,
-      crossSectionScale: crossSectionScaleFor(),
-      /* nanometres too: 30 µm reads the whole of a 37-58 µm volume like the Meissner corpuscle. */
-      projectionScale: 30000,
+      /* THE DATASET'S OWN VOXELS, so the viewer's position box reads the same numbers WEBKNOSSOS
+         shows and the coordinate can be handed back to the lab that published the volume. See the
+         nanometres/voxels note at the top of this file. */
+      dimensions: localDims(d),
+      position: toVox(d, posNm),
+      crossSectionScale: crossSectionScaleFor(d),
+      projectionScale: projectionScaleFor(d),
       layers: layers,
       /* Select the click layer when there is one, so the armed point tool is live the moment the
          viewer opens -- otherwise the user has to find the layer and pick the tool themselves,
          which is most of what this was meant to remove. */
       selectedLayer: mark ? { visible:true, layer:MARK_LAYER } : { visible:false, layer:"em" },
-      layout: "4panel"
+      layout: "4panel",
+      crossSectionBackgroundColor: ngBg(),
+      perspectiveViewBackgroundColor: ngBg()
     };
   }
   function viewerUrl(dsId, posNm, known, cell, opts){
@@ -3401,6 +3582,7 @@ UJ.wjump = (function(){
 
   return { byId:byId, usable:usable, extentNm:extentNm, resVec:resVec, originNm:originNm,
            dataBox:dataBox,
+           resXYZ:resXYZ, toVox:toVox, toNm:toNm, voxOf:voxOf,
            groupIndex:groupIndex, groupedDatasets:groupedDatasets, smallestDataset:smallestDataset,
            defaultDataset:defaultDataset,
            speciesMark:speciesMark, speciesLegend:speciesLegend,
@@ -3462,6 +3644,18 @@ UJ.app = (function(){
   function esc(s){ return String(s == null ? "" : s)
     .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
   function el(id){ return document.getElementById(id); }
+
+  /* ── units at the surface ──────────────────────────────────────────────────────────────────
+     Every coordinate a person reads, types, exports or sends to the sheet is in the dataset's own
+     VOXELS; every coordinate this file computes with is in NANOMETRES. wjump_logic.js's
+     "NANOMETRES INSIDE, VOXELS AT EVERY EDGE" note has the reasoning; these three are the edge.
+
+     They read the CURRENT dataset, which is right because a coordinate only means anything in the
+     volume it came from -- and wrong to cache, because DS changes under the page. */
+  function vox(nm){ return W.voxOf(DS, nm) || [0, 0, 0]; }
+  function voxText(nm){ return vox(nm).join(", "); }
+  function nmOf(v){ return W.toNm(DS, v); }
+  var VOX = "voxels";
   /* Smallest first. Fourteen tissues spanning a fifty-fold range in size -- 18 boxes for the
      Meissner corpuscle, 1,936 for a liver zonation block -- so the first question a newcomer has
      is "which of these can I actually finish", and the order answers it before they read a word.
@@ -3603,9 +3797,14 @@ UJ.app = (function(){
       return this._post({ type:"wjump_box_visit", dataset:DS, boxKey:boxKey,
                           outcome:outcome, foundCount:n||0 });
     },
+    /* VOXELS on the wire and in the sheet, since 2026-08-31. `pos` arrives in nanometres like
+       everything else inside this file; the conversion happens here, at the edge, and the
+       server-side dedup converts back before measuring a distance -- a Euclidean distance
+       between anisotropic voxel coordinates is not a distance. */
     find: function(pos, boxKey){
+      var v = vox(pos);
       return this._post({ type:"wjump_nucleus_found", dataset:DS, boxKey:boxKey,
-                          x_nm:pos[0], y_nm:pos[1], z_nm:pos[2] });
+                          x_vox:v[0], y_vox:v[1], z_vox:v[2] });
     },
     name: function(key, identity, certainty, sawTally, comment){
       return this._post({ type:"wjump_nucleus_name", dataset:DS, nucleusKey:key,
@@ -3675,7 +3874,7 @@ UJ.app = (function(){
     var c = CUR.box.centre, sz = CUR.box.sizeUm.map(function(v){ return v.toFixed(1); }).join(" × ");
     var edge = CUR.box.sizeUm.some(function(v){ return v < UJ.cfg.explore.boxUm - 0.01; });
     host.innerHTML = "<span class='row' style='gap:12px'><span>box <code>" + CUR.box.key
-      + "</code> at <code>" + c.map(Math.round).join(", ") + "</code> nm &middot; <b>" + sz
+      + "</code> at <code>" + voxText(c) + "</code> " + VOX + " &middot; <b>" + sz
       + " &micro;m</b>" + (edge ? " (an edge box, so smaller)" : "") + "</span>"
       + "<label class='tick' for='showbox'><input type='checkbox' id='showbox'"
       + (SHOWBOX ? " checked" : "") + "> show on the map</label></span>"
@@ -3804,12 +4003,12 @@ UJ.app = (function(){
                "-1":"retracted by " + s.rejects + " people" }[need] || "";
     var anchored = W.walkIsAnchored(WALK.mode);
     var opts = names().map(function(x){ return "<option value=\"" + esc(x) + "\">"; }).join("");
-    var pos = n.pos.map(Math.round).join(", ");
+    var pos = voxText(n.pos);
 
     host.innerHTML = picker
       + "<datalist id='cellnames'>" + opts + "</datalist>"
       + "<div class='row' style='justify-content:space-between'>"
-      +   "<div>nucleus <code>" + esc(String(n.id)) + "</code> at <code>" + pos + "</code> nm"
+      +   "<div>nucleus <code>" + esc(String(n.id)) + "</code> at <code>" + pos + "</code> " + VOX
       +   "<br><span class='hint'>" + why + "</span></div>"
       +   "<button class='primary' id='id-open'>Open this nucleus &#8599;</button>"
       + "</div>"
@@ -3936,10 +4135,10 @@ UJ.app = (function(){
       + "<label style='margin-top:6px'>What is this?</label>"
       + "<select class='organ-kind'>" + O.optionsHtml() + "</select>"
       + "<div class='organ-a' style='margin-top:8px'>"
-      +   "<label class='organ-la'>Approx. location (nm)</label>" + coordRow("a")
+      +   "<label class='organ-la'>Approx. location (" + VOX + ")</label>" + coordRow("a")
       + "</div>"
       + "<div class='organ-b' style='margin-top:8px;display:none'>"
-      +   "<label class='organ-lb'>Point 2 (nm)</label>" + coordRow("b")
+      +   "<label class='organ-lb'>Point 2 (" + VOX + ")</label>" + coordRow("b")
       + "</div>"
       + "<p class='hint' style='margin:4px 0 0'>Paste &ldquo;x, y, z&rdquo; into an x field "
       +   "&mdash; it splits itself.</p>"
@@ -3961,8 +4160,9 @@ UJ.app = (function(){
         "<p class='hint' style='margin-top:0'>Mark where an organelle or extracellular structure "
       + "sits in this cell &mdash; the same list µJump uses, generated from the same ontology so "
       + "the two tools cannot drift apart. One row per structure; log several of the same kind if "
-      + "the cell has several. <b>Coordinates here are nanometres</b>, not voxels &mdash; every "
-      + "ωJump viewer link is in nanometres, so a coordinate copied from one drops straight in.</p>"
+      + "the cell has several. <b>Coordinates here are " + VOX + "</b> &mdash; the same frame "
+      + "WEBKNOSSOS and every ωJump viewer link show, so a coordinate copied from either drops "
+      + "straight in.</p>"
       + "<div class='callout' style='margin:0 0 10px'>"
       +   "<span class='hint'>Or point at them instead: open the nucleus, <b>Ctrl</b>+click each "
       +   "structure, and paste the link here &mdash; one row per marker, ready to label.</span>"
@@ -4022,7 +4222,7 @@ UJ.app = (function(){
       b.addEventListener("click", function(){
         var p = readCoord(row, b.dataset.g);
         if (!p){ say("organ-msg", "Fill in x, y and z first.", false); return; }
-        window.open(W.viewerUrl(DS, p, STATE.nuclei, null, { mark:true }), "_blank", "noopener");
+        window.open(W.viewerUrl(DS, nmOf(p), STATE.nuclei, null, { mark:true }), "_blank", "noopener");
       });
     });
     if (posNm) writeCoord(row, "a", posNm);
@@ -4042,21 +4242,27 @@ UJ.app = (function(){
     var v = row.querySelector(".organ-kind").value;
     var vec = O.isVector(v), lbl = O.pointLabels(v);
     row.querySelector(".organ-b").style.display = vec ? "" : "none";
-    row.querySelector(".organ-la").textContent = vec ? lbl[0] + " (nm)" : "Approx. location (nm)";
-    row.querySelector(".organ-lb").textContent = lbl[1] + " (nm)";
+    row.querySelector(".organ-la").textContent =
+      (vec ? lbl[0] : "Approx. location") + " (" + VOX + ")";
+    row.querySelector(".organ-lb").textContent = lbl[1] + " (" + VOX + ")";
   }
   function readCoord(row, g){
     var v = ["x","y","z"].map(function(ax){ return row.querySelector(".o" + g + ax).value.trim(); });
     return v.every(function(t){ return t !== "" && !isNaN(Number(t)); }) ? v.map(Number) : null;
   }
-  function writeCoord(row, g, p){
+  /* Takes NANOMETRES and writes VOXELS, because everything that feeds it -- parseFinds, a
+     nucleus position -- is internal, and everything downstream of the field is typed by a
+     person. readCoord is deliberately NOT its inverse: what comes back out of the field is
+     voxels and stays voxels, all the way to the sheet. */
+  function writeCoord(row, g, posNm){
+    var p = vox(posNm);
     ["x","y","z"].forEach(function(ax, i){
-      row.querySelector(".o" + g + ax).value = String(Math.round(p[i]));
+      row.querySelector(".o" + g + ax).value = String(p[i]);
     });
   }
 
   function rowsFromLink(){
-    var box = el("organ-paste"), r = W.parseFinds(box.value, null);
+    var box = el("organ-paste"), r = W.parseFinds(DS, box.value, null);
     if (!r.ok){ say("organ-msg", r.error, false); return; }
     if (!r.points.length){
       say("organ-msg", "That link has no markers on it. <b>Ctrl</b>+click the structures in the "
@@ -4095,7 +4301,7 @@ UJ.app = (function(){
     built.subs.reduce(function(pr, sub, i){
       return pr.then(function(){
         return STORE.organelle(CURID, {
-          coord: n.pos.map(Math.round).join(","),
+          coord: vox(n.pos).join(","),
           groupId: gid, subIndex: i + 1, subCount: total,
           kind: sub.kind, pointA: sub.pointA, pointB: sub.pointB,
           identified: n.identity || "", comment: note, path: ""
@@ -4171,7 +4377,7 @@ UJ.app = (function(){
         + esc(num) + " &#8599;</a>"
         + "<span class='chip' style='border-color:var(--bad);color:var(--bad)'>not yet named</span>"
         + "</div><div class='hint' style='margin-top:4px'>at <code>"
-        + n.pos.map(Math.round).join(", ") + "</code> nm</div>";
+        + voxText(n.pos) + "</code> " + VOX + "</div>";
     }
     return identityBlockHtml(n);
   }
@@ -4524,7 +4730,7 @@ UJ.app = (function(){
     }).join(" ");
 
     host.innerHTML = "<div class='row' style='margin-bottom:10px'>" + tabs + "</div>"
-      + (rows.length ? ("<table><tr><th></th><th>position (nm)</th><th>what people said</th>"
+      + (rows.length ? ("<table><tr><th></th><th>position (voxels)</th><th>what people said</th>"
       + "<th></th></tr>"
       + rows.map(function(n){
           var s = W.tallySummary(n);
@@ -4550,7 +4756,7 @@ UJ.app = (function(){
             + "</span>";
           return "<tr><td><span class='dot' style='background:" + col + "'></span>"
             + esc(String(n.id).split(":").pop()) + "</td>"
-            + "<td><code>" + n.pos.map(Math.round).join(", ") + "</code></td>"
+            + "<td><code>" + voxText(n.pos) + "</code></td>"
             + "<td>" + text + "</td>"
             + "<td style='white-space:nowrap'><button data-ask='" + esc(n.id) + "'>"
             + (W.identifyNeed(n) > 0 ? "answer this" : "question this") + "</button></td></tr>";
@@ -4588,15 +4794,23 @@ UJ.app = (function(){
      there" with the option to go and look. */
   function jumpToCoord(){
     var box = el("jump-coord"); if (!box) return;
-    var p = W.parseCoord(box.value);
-    if (!p){
-      say("jump-msg", "Give three numbers &mdash; <code>20475, 26080, 56539</code> &mdash; in "
-        + "nanometres, or paste a Neuroglancer link and the position is read out of it.", false);
+    /* VOXELS in, from either route, and both routes now agree: the position box in Neuroglancer
+       reads voxels because this tool sets the state's dimensions to the dataset's voxel size, and
+       a coordinate copied out of WEBKNOSSOS was always voxels. Before 2026-08-31 the first was
+       nanometres and the second was voxels, so a WEBKNOSSOS coordinate pasted here landed 11 to
+       40 times too close to the origin -- outside the volume on most datasets, and plausibly
+       inside it on a few, which is worse. */
+    var pv = W.parseCoord(box.value);
+    if (!pv){
+      say("jump-msg", "Give three numbers &mdash; <code>9243, 1737, 1747</code> &mdash; in "
+        + VOX + ", the same as WEBKNOSSOS shows, or paste a Neuroglancer link and the position "
+        + "is read out of it.", false);
       return;
     }
+    var p = nmOf(pv);
     var r = W.nearestNucleus(DS, p, STATE.nuclei);
     if (!r){ say("jump-msg", "Could not read that as a coordinate.", false); return; }
-    var where = "<code>" + p.map(Math.round).join(", ") + "</code> nm";
+    var where = "<code>" + pv.map(Math.round).join(", ") + "</code> " + VOX;
     if (!r.inside && r.extentNm){
       say("jump-msg", where + " is <b>outside this volume</b> ("
         + r.extentNm.map(function(v){ return Math.round(v/1000) + " &micro;m"; }).join(" &times; ")
@@ -4733,13 +4947,13 @@ UJ.app = (function(){
     fEl("f-csv").disabled = n === 0;
     fEl("f-open").disabled = n === 0;
     fEl("f-results").innerHTML = !n ? "" :
-      ("<table style='margin-top:10px'><tr><th>position (nm)</th><th>what people said</th>"
+      ("<table style='margin-top:10px'><tr><th>position (voxels)</th><th>what people said</th>"
        + (q.near ? "<th>nearest " + esc(q.near.label === "__any__" ? "named cell" : q.near.label) + "</th>" : "")
        + "</tr>"
        + FRESULT.slice(0, 200).map(function(m){
            var s = W.tallySummary(m.n);
            return "<tr><td><a href='" + esc(W.viewerUrl(DS, m.n.pos, STATE.nuclei, null, { mark:true }))
-             + "' target='_blank' rel='noopener'>" + m.n.pos.map(function(v){ return Math.round(v); }).join(", ")
+             + "' target='_blank' rel='noopener'>" + voxText(m.n.pos)
              + " &#8599;</a></td><td>"
              + (s.labels.length ? esc(s.leader) + " <span class='hint'>(" + s.total + " vote"
                  + (s.total === 1 ? "" : "s") + ", " + esc(s.status) + ")</span>"
@@ -4760,19 +4974,23 @@ UJ.app = (function(){
   function filterCsv(){
     if (!FRESULT || !FRESULT.length) return;
     var q = filterQuery();
-    var head = ["nucleus_id", "x_nm", "y_nm", "z_nm", "settled_identity", "leading_label",
+    /* VOXELS, and only voxels. This file is the one that gets sent to the lab that published
+       the volume, and a coordinate is only actionable to them in the frame their own viewer
+       shows. Distances stay in micrometres because a distance is physical and a micrometre means
+       the same thing on every dataset here, where a voxel does not. */
+    var head = ["nucleus_id", "x_vox", "y_vox", "z_vox", "settled_identity", "leading_label",
                 "votes_total", "agreement", "rejects", "organelles_reported",
-                "region_box", "region_box_corners_nm", "near_label", "near_distance_um"];
+                "region_box", "region_box_corners_vox", "near_label", "near_distance_um"];
     var rows = [head];
     FRESULT.forEach(function(m){
       var s = W.tallySummary(m.n);
       rows.push([
         m.n.id,
-        Math.round(m.n.pos[0]), Math.round(m.n.pos[1]), Math.round(m.n.pos[2]),
+        vox(m.n.pos)[0], vox(m.n.pos)[1], vox(m.n.pos)[2],
         W.settledLabel(m.n), s.leader, s.total, s.status, s.rejects,
         ((m.n.organelles || []).map(function(o){ return O.shortOf(o.kind); }).sort().join(" | ")),
         m.box ? ("Box " + m.box.n) : "",
-        m.box ? (m.box.x1 + ", " + m.box.y1 + ", " + m.box.z1 + " to " + m.box.x2 + ", " + m.box.y2 + ", " + m.box.z2) : "",
+        m.box ? (voxText([m.box.x1, m.box.y1, m.box.z1]) + " to " + voxText([m.box.x2, m.box.y2, m.box.z2])) : "",
         m.nearHit ? m.nearHit.label : "",
         m.nearHit ? (m.nearHit.distNm / 1000).toFixed(2) : ""
       ]);
@@ -4802,9 +5020,9 @@ UJ.app = (function(){
     window.open(W.viewerUrl(DS, c, FRESULT.map(function(m){ return m.n; })), "_blank", "noopener");
   }
 
-  /* The region box. Nanometres, so res is 1:1 -- ωJump's coordinates ARE nanometres everywhere
-     else in the tool (its Neuroglancer states declare 1e-9 m per unit), and converting to a voxel
-     frame here purely to convert back would invent a number the user never sees.
+  /* The region box. VOXELS in the six fields, like every other tool, since 2026-08-31 -- the
+     module multiplies them by `res` to get the nanometres it hands back, so the only thing that
+     changed here is that `res` is now the dataset's real voxel size instead of [1,1,1].
 
      The outline drawn behind the boxes is the SELECTED dataset's extent, so it has to be rebuilt
      on every dataset switch -- which regionbox.js does not do, because in every other tool the
@@ -4818,7 +5036,10 @@ UJ.app = (function(){
     boxesEl.innerHTML = "";                     // a remount must not stack a second set of rows
     var d = W.byId(DS);
     UJ.cfg.regionbox = {
-      unit: "nm",
+      /* Voxels, like every other tool, since 2026-08-31. `extents` stay in NANOMETRES -- the
+         module converts the typed fields with `res` and draws the outline from the extents, so
+         these two are deliberately in different units and always were. */
+      unit: "voxels",
       extents: function(){
         var ext = W.extentNm(DS), org = W.originNm(DS);
         return [{ name: (d && d.tissue) || DS, color: "#58a6ff",
@@ -4841,7 +5062,7 @@ UJ.app = (function(){
       addBtn: el("regionAddBox"),
       onEl: el("filterRegionOn"),
       vizEl: el("regionViz"),
-      res: [1, 1, 1],
+      res: W.resXYZ(DS) || [1, 1, 1],
       onChange: filterInvalidate,
       /* ωJump's volumes are OME-Zarr, which core/colabexport.js's cloud-volume template cannot
          read at all -- hence core/colabzarr.js and this hand-off. See colabzarr.js's header. */
@@ -4926,7 +5147,7 @@ UJ.app = (function(){
   function submitClicked(){
     if (!CUR || BUSY || !requireWrite()) return;
     var box = el("pasted");
-    var r = W.parseFinds(box.value, CUR.box);
+    var r = W.parseFinds(DS, box.value, CUR.box);
     if (!r.ok){ msg(r.error, false); return; }
     if (!r.points.length){
       msg("That link has no markers on it. <b>Ctrl</b>+click the nuclei in the viewer first &mdash; "
@@ -5175,6 +5396,9 @@ UJ.app = (function(){
            points: function(){ return combinedPoints(); },
            setStats: function(m, t){ MYSTATS = m; TOTALS = t; renderPoints(); },
            state: function(){ return STATE; }, cur: function(){ return CUR; },
+           /* Which dataset is open. Exposed for the checks, which have to convert coordinates the
+              same way the page does and cannot do that without knowing whose voxels they are. */
+           dataset: function(){ return DS; },
            curNucleus: function(){ return CURID; }, revealed: function(){ return REVEALED; },
            store: function(){ return STORE; }, setCredential: function(c, who){
              ApiStore.credential = c; ApiStore.who = who || ""; render();

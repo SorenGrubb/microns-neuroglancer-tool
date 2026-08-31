@@ -1010,7 +1010,12 @@ function buildState(pos, segId){
      character. Functionally identical either way, but it makes states comparable. */
   return {dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
     position:pos, crossSectionScale:1.4, projectionScale:30000,
-    layers:layers, selectedLayer:{visible:true,layer:"c3 segmentation"}, layout:"xy-3d"};
+    layers:layers, selectedLayer:{visible:true,layer:"c3 segmentation"}, layout:"xy-3d",
+    /* Follows THIS page's light/dark choice; the viewer opens in its own tab and inherits
+       no CSS. ngBgColor() was defined here and called from nowhere until 2026-08-31 -- the
+       same dead-feature shape as λJump and βJump, found by counting state builders against
+       background settings across all seven tools rather than by anyone noticing. */
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
 function viewerUrl(pos, segId){
   return UJ.cfg.viewer.base + "#!" + encodeURIComponent(JSON.stringify(buildState(pos,segId)));
@@ -2523,7 +2528,8 @@ function contactsViewerUrl(i,rows){
     position:pos, crossSectionScale:3.0, projectionScale:Math.max(span,7000), layers:layers,
     selectedLayer:firstAnn?{layer:firstAnn,visible:true,tab:"annotations"}
                           :{layer:longName(typeName(i))+" (this cell)",visible:true},
-    layout:{type:"4panel",orthographicProjection:true}, showDefaultAnnotations:false};
+    layout:{type:"4panel",orthographicProjection:true}, showDefaultAnnotations:false,
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
   return UJ.cfg.viewer.base+"#!"+encodeURIComponent(JSON.stringify(state));
 }
 
@@ -3156,7 +3162,8 @@ function filterViewerUrl(rows){
   return V.base+"#!"+encodeURIComponent(JSON.stringify({
     dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
     position:pos, crossSectionScale:3.0, projectionScale:span,
-    layers:layers, layout:{type:"4panel",orthographicProjection:true}}));
+    layers:layers, layout:{type:"4panel",orthographicProjection:true},
+    crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()}));
 }
 
 function downloadFilterExcel(){
