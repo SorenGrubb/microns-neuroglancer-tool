@@ -103,24 +103,19 @@ function levelName(points, levels){
 /* POINTS ARE SHOWN AS WHOLE NUMBERS -- 2026-08-31, Søren: "Please don't show such a ridiculous
    number, limit it to whole numbers." The chip read "1786.5000000000002 pts".
 
-   Two separate things went wrong and both are fixed here rather than only the visible one.
+   The rounding itself lives in core/points.js, NOT here, and that is the whole point of the second
+   round of this fix. This module is loaded by six of the seven tools; ωJump is the seventh and has
+   its own chip (gamify.js also carries a dashboard, leaderboard and browser storage it does not
+   want), so a fix made here reached six tools and Søren's next screenshot was the seventh still
+   showing the long tail. core/points.js is small enough for every tool to load, which is what
+   makes "all tools" mean all of them.
 
-   FIRST, the points really are fractional. Code.gs awards 0.1 for a computed volume (see
-   REPORT_SHEETS_POINTS), so a total genuinely can be x.5 -- this was never an integer quantity
-   that had been corrupted. SECOND, binary floating point cannot hold 0.1, so a few hundred of
-   them accumulate an error around 1e-13, and combinedPoints() then adds a live figure to a
-   snapshot figure and subtracts a third, which is three more chances to expose it.
-
-   pointsExact() rounds the arithmetic to two decimals, which is finer than any award and kills
-   the noise at the source rather than only where it happens to be printed -- otherwise the same
-   digits would surface again in the leaderboard, the dashboard, or the next thing that prints a
-   total. pointsText() then rounds to whole numbers for DISPLAY, which is what was asked for.
-
-   The two are separate on purpose: the level thresholds and the "N pts to the next level"
-   arithmetic run on the exact value, so rounding for display can never nudge somebody over or
-   under a threshold they have not actually reached. */
-function pointsExact(n){ var v=Number(n); return isFinite(v)?Math.round(v*100)/100:0; }
-function pointsText(n){ var v=Number(n); return isFinite(v)?String(Math.round(v)):"0"; }
+   The two names are kept as local aliases so the fifteen call sites below did not have to change.
+   A missing core/points.js is a hard failure rather than a silent fallback: a fallback would put
+   a second implementation of this back into the file the day somebody forgot the script tag,
+   which is exactly the situation being fixed. */
+var pointsExact = function(n){ return UJ.points.exact(n); };
+var pointsText  = function(n){ return UJ.points.text(n); };
 
 function combinedPoints(){
   var live=(MYSTATS&&MYSTATS.points)||0, t=window.__PROFILE_TOTALS;

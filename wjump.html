@@ -1274,6 +1274,44 @@ UJ.organelles = (function(){
            countParts:countParts, buildSubs:buildSubs, splitPaste:splitPaste, groupId:groupId };
 })();
 </script>
+<script>/* core/points.js -- how a points total is turned into something a person reads.
+
+   2026-08-31, Søren, twice. First: "Please don't show such a ridiculous number, limit it to whole
+   numbers" -- the chip read 1786.5000000000002 pts. That was fixed in core/gamify.js, which six
+   of the seven tools load, so six of the seven were fixed. Then, with a screenshot of ωJump still
+   reading 1785.5000000000002: "it should be corrected for all tools, also wJump."
+
+   He is right, and the reason is worth writing down rather than just patching: ωJump does not load
+   core/gamify.js. It has its own points chip -- its own combinedPoints(), its own levelName(), its
+   own render -- because gamify.js also carries a dashboard, a leaderboard and browser storage that
+   ωJump deliberately does not want. So "fix the shared module" fixed the module ωJump never used.
+   Putting the formatter here, in a file small enough for every tool to load, is what makes "all
+   tools" true rather than "all tools I remembered".
+
+   WHY TWO FUNCTIONS, AND WHY THEY ARE NOT THE SAME FUNCTION.
+
+   The points really are fractional. Code.gs awards 0.1 for a computed volume (REPORT_SHEETS_POINTS),
+   so a total genuinely can be x.5 -- this was never an integer that got corrupted. What produces
+   the long tail is binary floating point: 0.1 has no exact representation, a few hundred of them
+   accumulate an error around 1e-13, and combinedPoints() then adds a live figure to a snapshot and
+   subtracts a third, which is three more chances to expose it.
+
+     exact(n)  rounds the ARITHMETIC to 2 dp -- finer than any award, so no real value moves, and
+               the noise dies at the source. Without this the same digits resurface in the next
+               thing that prints a total; the first version of this fix only touched the chip, and
+               the leaderboard and dashboard would have kept showing them.
+     text(n)   rounds to whole numbers for DISPLAY, which is what was asked for.
+
+   They are separate on purpose. Level thresholds and "N pts to the next level" run on the exact
+   value, so rounding for display can never nudge somebody over or under a level they have not
+   actually reached. */
+window.UJ = window.UJ || {};
+UJ.points = (function(){
+  function exact(n){ var v = Number(n); return isFinite(v) ? Math.round(v * 100) / 100 : 0; }
+  function text(n){ var v = Number(n); return isFinite(v) ? String(Math.round(v)) : "0"; }
+  return { exact: exact, text: text };
+})();
+</script>
 <script>/* core/organellefilter.js -- 2026-08-31, Søren: "The pJump organelle filtration looks different
    from the rest. We should make it consistent across the datasets as far as makes sense." And,
    about µJump: "For the other datasets, it says how many organelles have been identified. Please
@@ -4947,10 +4985,16 @@ UJ.app = (function(){
   }
   function combinedPoints(){
     var live = (MYSTATS && MYSTATS.points) || 0;
-    if (!TOTALS || TOTALS.combinedPoints == null) return { points: live, combined: false, per: [] };
+    if (!TOTALS || TOTALS.combinedPoints == null)
+      return { points: UJ.points.exact(live), combined: false, per: [] };
     var ds = UJ.cfg.backend.ds, mine = 0, per = perList(TOTALS);
     per.forEach(function(p){ if (p && p.ds === ds) mine = p.points || 0; });
-    var pts = Math.max(live, (TOTALS.combinedPoints - mine) + live);
+    /* Rounded to 2 dp HERE, where the noise is produced, not only where it is printed. Points are
+       genuinely fractional (Code.gs awards 0.1 for a computed volume), and adding a live figure to
+       a snapshot and subtracting a third is three chances for 0.1's binary representation to show
+       its tail. The level is then computed from the exact value, so display rounding can never
+       move somebody across a threshold. */
+    var pts = UJ.points.exact(Math.max(live, (TOTALS.combinedPoints - mine) + live));
     return { points: pts, combined: true, per: per, level: levelName(pts, TOTALS.levels) };
   }
   function renderPoints(){
@@ -4958,11 +5002,12 @@ UJ.app = (function(){
     if (!LIVE || !STORE.canWrite()){ c.innerHTML = ""; return; }
     if (!MYSTATS){ c.innerHTML = "<div class='ptchip'><span class='pts'>points loading…</span></div>"; return; }
     var cp;
-    try { cp = combinedPoints(); } catch (e){ cp = { points:(MYSTATS.points||0), combined:false, per:[] }; }
+    try { cp = combinedPoints(); }
+    catch (e){ cp = { points: UJ.points.exact(MYSTATS.points), combined:false, per:[] }; }
     var tip = cp.combined
       ? "Across every Jump tool: " + cp.per.map(function(p){
-          return (p.label || p.ds) + " " + (p.points || 0); }).join(" · ")
-        + ". This tool's own " + (MYSTATS.points || 0) + " update the moment you submit; the "
+          return (p.label || p.ds) + " " + UJ.points.text(p.points); }).join(" · ")
+        + ". This tool's own " + UJ.points.text(MYSTATS.points) + " update the moment you submit; the "
         + "others come from the 4-hourly rebuild."
       : "Points in ωJump only. The combined cross-tool total appears once rebuildProfileTotals() "
         + "has run in Apps Script — see installProfileTotalsTrigger() in Datasets.gs.";
@@ -4970,7 +5015,7 @@ UJ.app = (function(){
       + "<span>" + esc(MYSTATS.handle || "you") + "</span>"
       + ((cp.level || MYSTATS.level)
           ? "<span class='lvl'>" + esc(cp.level || MYSTATS.level) + "</span>" : "")
-      + "<span class='pts'>" + cp.points + " pts</span>"
+      + "<span class='pts'>" + UJ.points.text(cp.points) + " pts</span>"
       + (cp.combined ? "" : "<span class='chip' style='border-color:var(--warn);color:var(--warn)'>"
                           + "this tool only</span>")
       + "</div>";
