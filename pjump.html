@@ -452,8 +452,14 @@ UJ.cfg.mesh = {
 };
 /* Per-dataset EM/segmentation source, consumed by core/colabexport.js (2026-08-29, Søren's
    "download a bounding box as EM/segmentation/meshes via a generated Colab notebook" feature).
-   Plain gs:// paths -- pinky100 is fully public/anonymous, same as MICrONS proper, so no CAVE
-   token or auth cell is needed in the generated notebook (no segCaveAuth flag here). */
+   Plain gs:// paths (NOT the "precomputed://..." form used by SRC.em/SRC.seg for Neuroglancer
+   below) -- the generated notebook's Python passes these straight to
+   CloudVolume(path, use_https=True), which converts gs:// to public, anonymous HTTPS access with
+   no CAVE token or Google credential lookup, confirmed working for this dataset family already
+   (see the H01 Colab notebook). Kept as its own cfg entry rather than derived from SRC{} at
+   runtime since SRC is declared much further down this file (script-tag order), and because a
+   future tool with a differently-shaped Neuroglancer source string (e.g. one that's already a
+   bare gs:// path) shouldn't have to reverse-engineer a "precomputed://" prefix strip here. */
 UJ.cfg.em = {
   emSource:"gs://microns_public_datasets/pinky100_v0/son_of_alignment_v15_rechunked",
   segSource:"gs://microns_public_datasets/pinky100_v185/seg"
@@ -2925,10 +2931,7 @@ persistDetailsOpen("rootNucSearchPanel","ujump_rootnuc_search_open");
 persistDetailsOpen("randomCellPanel","ujump_random_panel_open");
 /* 2026-08-30 Filter-and-show restructuring -- each filter dimension is now its own collapsed-by-
    default <details>, remembered independently via the same persistDetailsOpen() every other
-   collapsible panel in this file already uses (see the doc comment above the HTML block itself).
-   Prefixed "pjump_" (not "ujump_" like the two calls just above -- those predate this change and
-   are a pre-existing copy-paste artifact from µJump's own template, left alone here since fixing
-   them wasn't part of this request and they don't collide with anything real). */
+   collapsible panel in this file already uses (see the doc comment above the HTML block itself). */
 ["filterSecSelect","filterSecBorders","filterSecNear","filterSecV1Col","filterSecLayer","filterSecOrganelle","filterSecRegion","filterSecViewer"].forEach(id=>persistDetailsOpen(id,"pjump_"+id+"_open"));
 
 /* Root ID / Nucleus ID search (see the HTML comment above #rootNucSearchPanel for the request).
@@ -8937,10 +8940,9 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
   const typeBox=document.getElementById("filterTypes");
   /* Shared renderer behind BOTH the primary "Filter the data" type checkboxes (.ftype) and the
      2026-08-30 cross-cell-type proximity filter's reference-type checkboxes (.fneartype, see
-     #filterNearTypes below) -- same category grouping + "Other cell types" fallback bucket, same
-     live counts (filterTypeTally() is the same population definition either list searches over),
-     just a different container/class so the two lists' :checked state never collides in
-     activeTypeSet()/activeNearTypeSet(). */
+     #filterNearTypes below) -- same category grouping, same live counts (filterTypeTally() is the
+     same population definition either list searches over), just a different container/class so
+     the two lists' :checked state never collides in activeTypeSet()/activeNearTypeSet(). */
   window.buildTypeCheckboxesInto=function(container,cls){
     if(!container)return;
     const tally=filterTypeTally();
@@ -8950,7 +8952,12 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       for(const n of members)h+='<label style="font-size:12px" title="'+typeTitle(n)+'"><input type="checkbox" class="'+cls+'" value="'+n+'"> '+n+' <span class="nsub">'+countFor(n).toLocaleString()+'</span></label>';
       return h+"</div></div>";
     };
-    /* CATEGORY_MEMBERS is minnie65's m-type ontology. pinky100's own is three coarse classes
+    /* 2026-08-31: re-anchored on the SHARED renderer (buildTypeCheckboxesInto(container, cls),
+       introduced by patch_ujump.py), so this fix now reaches BOTH the primary type list and the
+       proximity filter's reference-type list instead of only the primary one. It previously
+       targeted a hardcoded class="ftype" / typeBox.innerHTML version that no longer exists.
+
+       CATEGORY_MEMBERS is minnie65's m-type ontology. pinky100's own is three coarse classes
        ("excitatory neuron", "inhibitory neuron", "glia"), none of which it lists -- so rendering
        ONLY the categories produced zero checkboxes and the panel's primary control did nothing.
        Anything the tally holds that no category claims is rendered too, in CT_NAMES order, so
@@ -9570,7 +9577,11 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       }
       /* Cross-cell-type proximity check -- see the nearGrid/nearestRefDistNm doc comment above.
          Placed last among the distance-style filters (after vessel/GL/WM/layer/organelle) purely
-         so a row that's already excluded by something cheaper never pays for a grid lookup. */
+         so a row that's already excluded by something cheaper never pays for a grid lookup.
+         Skipped entirely for isRefRow (2026-08-30, the "Also include the reference-type cell(s)
+         themselves in the results" checkbox, see the reference-inclusion pass below) -- a
+         reference-population row obviously can't be required to be near a member of its OWN
+         population (that's what it IS), it still has to pass every OTHER filter on this panel. */
       let nearDist=null;
       if(nearValid&&!isRefRow){
         nearDist=nearestRefDistNm(row);
@@ -9650,8 +9661,13 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         }
       }
     }
-    /* "Also include the reference-type cell(s) themselves in the results" (2026-08-30) -- see the
-       ujump.html doc comment above the same block for the full reasoning. */
+    /* "Also include the reference-type cell(s) themselves in the results" (2026-08-30) -- runs
+       AFTER both branches above (attention or normal) so it applies uniformly regardless of which
+       one produced `out`. Adds every cell of the ticked reference type(s) that passes every OTHER
+       filter on this panel (region box, layer, GL/WM, vessel, organelle, V1 column -- everything
+       evalRow() checks except the near-distance gate itself, which isRefRow=true skips), skipping
+       anything already in `out` by identity so a cell that qualifies BOTH ways (e.g. the same type
+       ticked in both the primary and reference lists) is never duplicated. */
     const nearIncludeRefActive=nearValid&&nearIncludeRef;
     if(nearIncludeRefActive){
       const seen=new Set(out.map(m=>rowIdentityKey(m.row)));
@@ -11115,14 +11131,24 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       +'&#11015; Colab notebook for this box</button>'
       +'</div>';
     row.querySelectorAll('input[type="text"]').forEach(el=>el.addEventListener("input",drawRegionViz));
-    /* 2026-08-29, ported verbatim from µJump (see core/colabexport.js's own header for the full
-       feature history) -- reads THIS row's own corners only, and searches lastResult (the current
-       Filter-and-show query, same closure scope as this function -- see its own "let lastResult"
-       a few hundred lines up) for matches whose nucleus position falls inside THIS specific box.
-       2026-08-29 (2nd round), also ported from µJump: the three EM/Segmentation/Meshes checkboxes
-       thread into opts.include, and Meshes requires a current lastResult (a Filter-and-show result
-       already run) so the notebook's mesh list always reflects what was just previewed rather than
-       a stale or empty state. */
+    /* 2026-08-29, Søren: "give the user a colab code they can upload to colab and make it download
+       the cutout... available when ticking Limit to region(s)... If more than one bounding box,
+       this should be available to each of the bounding boxes." No extra checkbox-gating needed
+       here -- updateRegionUI() already dims/pointer-events:none's the WHOLE #regionBoxes panel
+       (this button included) whenever "Limit to region(s)" is unticked, same as the coordinate
+       inputs and remove button. Reads THIS row's own corners only (not every box), and searches
+       lastResult (the current Filter-and-show query, in the same closure scope as this function --
+       see its own "let lastResult" a few hundred lines up) for matches whose nucleus position
+       falls inside THIS specific box, so a multi-box filter's meshes don't all pile into every
+       box's notebook.
+       2026-08-29 (2nd round), Søren: "we need to be able to specify whether it should download EM
+       and/or segmentation, and/or 3D meshes" -- the three checkboxes above, all default-checked,
+       thread straight into core/colabexport.js's opts.include. Also: "we should make sure that it
+       downloads the filtered cells, so the download from colab should be after the preview
+       matches" -- meshes now REQUIRE lastResult to already exist (i.e. Filter-and-show has been
+       run at least once since the page loaded or the box was last edited) rather than silently
+       shipping an empty MESH_ROOT_IDS; EM/segmentation don't depend on the filter at all (they're
+       a pure spatial cutout of the box) so they're never gated on it. */
     row.querySelector(".rbox-colab").addEventListener("click",()=>{
       const gv=cls=>{const el=row.querySelector("."+cls);return el?parseFloat(el.value):NaN;};
       const x1=gv("rx1"),y1=gv("ry1"),z1=gv("rz1"),x2=gv("rx2"),y2=gv("ry2"),z2=gv("rz2");
@@ -11364,20 +11390,10 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
 <script>
 /* πJump: filters whose data pinky100 does not have. See build_pjump.py. */
 (function(){
-  /* 2026-08-30, Søren: "The proximity to vasculature filter in pJump does not make sense, as the
-     vascular segmentation is pretty bad and therefore is not usable as it is now... remove the
-     option for now." Root cause of why he could even see a broken half of it: filterVesselDistOn/
-     filterVesselDist were missing from this list, so the section-hiding walk below (allDead()
-     climbing from each dead control up toward filterCard) could hide the "Vessel proximity" type
-     dropdown, GL row and WM row individually -- each of THOSE rows was 100% dead IDs -- but never
-     the whole filterSecBorders <details>, because the "Within [10] µm of the nearest traced vessel
-     point" row had one live (non-dead) control in it and broke the all-dead chain right there. That
-     orphaned row, with no dropdown above it and no GL/WM rows below it to give it context, is
-     exactly the "does not make sense" panel from the screenshot. Adding these two IDs completes the
-     list (all 7 filterSecBorders controls now dead) so the WHOLE section collapses correctly, same
-     as every other pinky100-doesn't-have-this-data filter below -- consistent with this file's own
-     explanatory note further down ("vessel proximity... are not shown here: pinky100... has no
-     published vasculature"), which already documented this as the intended state. */
+  /* filterVesselDistOn/filterVesselDist added 2026-08-31, folding in a hand edit that had been
+     made to pjump.html directly. They are the "within N µm of a vessel" pair, and they belong in
+     this list for exactly the reason the others do: pinky100 publishes no vasculature, so the
+     control can only ever return nothing. */
   var DEAD_IDS = ["filterLayers","filterWMOn","filterWMDist","filterVessel",
                   "filterVesselDistOn","filterVesselDist",
                   "filterGLOn","filterGLDist","filterV1ColAny","filterV1ColNeuron",

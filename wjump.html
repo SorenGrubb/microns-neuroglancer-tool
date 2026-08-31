@@ -269,7 +269,7 @@
        come from the same array the picker reads, so they cannot drift again. -->
   <p class="hint">41 volumes are open, listed smallest first with the number of
   40&nbsp;&micro;m boxes each one takes &mdash; 3 for the smallest, 4,104 for the
-  largest, 14,532 across the roster. The map above sizes itself to whichever volume you pick
+  largest, 12,424 across the roster. The map above sizes itself to whichever volume you pick
   and keeps one scale across its panels, so a distance in one is the same distance in another.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
@@ -993,6 +993,22 @@ UJ.cfg.datasets = [
      so the honest statement is "openly released through BossDB; specific licence not stated". */
   { id:"wk-morgan2020", tissue:"thalamus (dLGN)", species:"mouse",
     shape:[10000,200000,200000], origin:[0,0,0], res_nm:[30,4,4],
+    /* THE ARRAY IS 800 x 800 x 300 µm; THE IMAGERY IS NOT. Søren, 2026-08-31: "Many of the wJump
+       dataset sizes are way too large relative to the actual imaging size. Eg. I found the
+       Thalamus 3200 boxes could be limited to this size: 127196, 23407, 5235 / 570950, 533281,
+       279717" -- his own corners, read off the volume, in nanometres, pasted here unchanged.
+
+       This is the padded-coordinate-frame case, and it is the one row on the roster with the
+       signature: shape is three round numbers (200000, 200000, 10000) and origin is [0,0,0],
+       because both came from BossDB's coordinate frame rather than from an imaged extent. Two
+       independent records agreed on those numbers when this row was verified -- and they agreed
+       because they describe the same padded address space, which is a good reminder that two
+       sources agreeing is not the same as two sources being right about the question you are
+       asking.
+
+       3,200 boxes -> 1,092. The 2,100 boxes removed were over padding: black, findable by nobody,
+       and re-offered by the sampler every time somebody failed to report one as empty. */
+    dataBoxNm:{ xmin:127196, ymin:23407, zmin:5235, xmax:570950, ymax:533281, zmax:279717 },
     tier:"inf", enabled:true,
     source:"zarr://https://data-humerus.webknossos.org/data/zarr/6373490b01000026011a53f7/em",
     provider:{
@@ -2332,12 +2348,56 @@ UJ.wjump = (function(){
   /* (z,y,x) voxels -> (x,y,z) nanometres. THE ONE PLACE the axis flip happens.
      OME-Zarr reports axes z,y,x; neuroglancer states are x,y,z. Doing this conversion at each
      use site is how an axis bug gets in and then looks like "the jumps are slightly off". */
+  /* ── dataBoxNm: where the IMAGERY is, when the array is bigger ─────────────────────────────
+     2026-08-31, Søren: "Many of the wJump dataset sizes are way too large relative to the actual
+     imaging size. Eg. I found the Thalamus 3200 boxes could be limited to this size:
+     127196, 23407, 5235 / 570950, 533281, 279717".
+
+     He is right, and morgan2020 is the clearest case. Its shape and origin were taken from
+     BossDB's COORDINATE FRAME (0-200000 x 0-200000 x 0-10000 voxels), which is addressable space,
+     not imaged tissue -- so a third of every axis is padding and roughly two thirds of the 3,200
+     boxes contain nothing to find. Every box handed out over padding is a person sent to look at
+     black, and the sampler cannot tell the difference: an unreported empty box is one it hands
+     out again.
+
+     WHY A NEW FIELD RATHER THAN CORRECTING shape/origin. Those two already mean exactly this --
+     see originNm's comment about the macaque block, whose array is 18250 x 22896 x 3380 while its
+     data occupies 14942 x 19544 x 3359 starting at (3308, 3352, 21) -- so correcting them would
+     have worked. But they are in (z, y, x) VOXELS, and what anyone actually reads off Neuroglancer
+     (and what Søren sent) is (x, y, z) NANOMETRES. Converting by hand means an axis flip and a
+     unit division per number, six times, for a value nothing downstream can sanity-check. This
+     file already keeps exactly one axis-flip point for that reason. So dataBoxNm is accepted in
+     the frame the numbers arrive in, and the flip stays where it was.
+
+     {xmin,ymin,zmin,xmax,ymax,zmax} in nanometres, x/y/z -- the same frame as everything else the
+     page shows. shape and res_nm stay as they are: they still describe the array, which is what
+     the zarr reader needs, and keeping them means the guard below can check the box against it. */
+  function dataBox(d){
+    if (typeof d === "string") d = byId(d);
+    var b = d && d.dataBoxNm;
+    if (!b) return null;
+    var r = resVec(d);
+    if (!r) return null;
+    var arr = [d.shape[2] * r[2], d.shape[1] * r[1], d.shape[0] * r[0]];   // (x,y,z) nm
+    var lo = [b.xmin, b.ymin, b.zmin], hi = [b.xmax, b.ymax, b.zmax];
+    for (var i = 0; i < 3; i++){
+      /* A typo here would place the whole grid outside the volume and every box would be over
+         nothing -- which looks exactly like a dataset nobody has searched yet. Refused loudly
+         instead, and the dataset falls back to its declared array so the tool still works. */
+      if (!(isFinite(lo[i]) && isFinite(hi[i]) && hi[i] > lo[i])) return null;
+      if (lo[i] < -1 || hi[i] > arr[i] + 1) return null;
+    }
+    return { lo: lo, hi: hi, arr: arr };
+  }
+
   function extentNm(d){
     /* Accepts an id OR a dataset object. The first caller written against this passed an id and
        got a silent null, which then read as "this dataset has no resolution" -- a wrong answer
        that looks like a real one. Taking both is cheaper than the class of bug it removes. */
     if (typeof d === "string") d = byId(d);
     var r = resVec(d); if (!d || !r) return null;
+    var b = dataBox(d);
+    if (b) return [b.hi[0] - b.lo[0], b.hi[1] - b.lo[1], b.hi[2] - b.lo[2]];
     return [d.shape[2] * r[2], d.shape[1] * r[1], d.shape[0] * r[0]];
   }
 
@@ -2355,7 +2415,13 @@ UJ.wjump = (function(){
      keeps one flip point to avoid. */
   function originNm(d){
     if (typeof d === "string") d = byId(d);
-    var r = resVec(d); if (!d || !r || !d.origin) return [0, 0, 0];
+    var r = resVec(d); if (!d || !r) return [0, 0, 0];
+    /* dataBoxNm wins where it is set: it is a MEASURED or reported statement about where the
+       imagery is, and `origin` is whatever the publisher's metadata declared -- which for
+       morgan2020 is the corner of a padded coordinate frame. */
+    var b = dataBox(d);
+    if (b) return [b.lo[0], b.lo[1], b.lo[2]];
+    if (!d.origin) return [0, 0, 0];
     var o = d.origin;
     return [o[2] * r[2], o[1] * r[1], o[0] * r[0]];
   }
@@ -3252,6 +3318,7 @@ UJ.wjump = (function(){
   }
 
   return { byId:byId, usable:usable, extentNm:extentNm, resVec:resVec, originNm:originNm,
+           dataBox:dataBox,
            groupIndex:groupIndex, groupedDatasets:groupedDatasets, smallestDataset:smallestDataset,
            defaultDataset:defaultDataset,
            speciesMark:speciesMark, speciesLegend:speciesLegend,
