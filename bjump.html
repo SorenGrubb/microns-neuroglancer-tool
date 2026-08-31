@@ -554,6 +554,22 @@ recorded.</p>
 <div id="fMarkers"></div>
 </div>
 
+<!-- Bounding-box limitation + per-box Colab download (2026-08-31), shared with λJump and µJump
+     through core/regionbox.js. Coordinates are VOXELS in this page's own 8/8/30 nm frame -- the
+     same numbers the Jump tab's search box takes, and the same ones Neuroglancer shows. -->
+<div style="margin-top:12px">
+<label style="font-size:12px" title="Two diagonal corners per box, in the same voxel coordinates as the main search box on the Jump tab (8/8/30 nm). Either diagonal works — order doesn't matter. Add as many boxes as you like; a nucleus matches if it falls inside any of them. You can paste x, y, z into either corner's x field — it splits automatically."><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box)</label>
+<div id="regionBoxes"></div>
+<button type="button" class="idbtn" id="regionAddBox" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another box</button>
+<div id="regionViz"></div>
+<p class="hint" style="margin-top:6px">Each box has its own &ldquo;Colab notebook&rdquo; button, which writes a
+<code>.ipynb</code> you upload to Google&nbsp;Colab and run to download that box&rsquo;s EM imagery
+(<code>em_clahe</code>, the measured 8&nbsp;nm layer &mdash; not the GAN-enhanced one), its
+segmentation, and the meshes of the cells matched inside it. Nothing is downloaded from this page.
+Meshes need a current preview, since they are the cells the filter matched; EM and segmentation are
+a plain spatial cutout and do not.</p>
+</div>
+
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
 <button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
@@ -811,6 +827,61 @@ UJ.cfg.shader = function(colorHex, lo, hi, wlo, whi){
   };
 };
 
+/* Per-dataset EM/segmentation source for core/colabexport.js's region-download notebook
+   (2026-08-31). Bare gs:// paths, NOT the "precomputed://" forms in UJ.cfg.viewer above: the
+   generated Python hands these to CloudVolume(path, use_https=True), which turns a gs:// path
+   into public anonymous HTTPS with no Google credential lookup. The prefix is a Neuroglancer
+   convention cloud-volume does not strip, and a notebook built with it fails on its first
+   CloudVolume() -- which is why bjumpcheck asserts the bare form rather than trusting it.
+
+   WHICH EM, AND WHY IT IS NOT THE SECGAN ONE. This volume publishes two image layers:
+   em_clahe at this page's own 8/8/30 nm frame, and em_secgan_16nm, a 16 nm GAN-enhanced volume
+   built for the segmentation. em_clahe is the REAL imagery -- contrast-adjusted, but measured
+   pixels -- and it is what the Jump tab opens. secgan's pixels are partly generated, so it is
+   the right input for a segmentation network and the wrong thing to hand somebody who asked to
+   download the EM. The segmentation, in contrast, is necessarily the secgan one, because that is
+   the volume the labels were computed in and the only one whose IDs match the meshes.
+
+   The two therefore sit on DIFFERENT voxel grids (8 nm vs 16 nm), which is fine and is why
+   colabexport converts the shared physical-nm box through each volume's own .resolution, read
+   at runtime from its info file, rather than through one hardcoded nm/voxel triple.
+
+   NO vCLEM MARKER CHANNELS. Hoechst, tau, amyloid β, microglia and the synapse layer are all in
+   this bucket and all downloadable in principle. Søren's call, 2026-08-31: EM and segmentation
+   only, matching what µJump offers. The markers stay viewable in Neuroglancer. */
+UJ.cfg.em = {
+  emSource:  "gs://vclem-xh/alzheimers/em_clahe",
+  segSource: "gs://vclem-xh/alzheimers/segmentation_secgan_16nm"
+};
+
+/* The region-box control (core/regionbox.js). The outline drawn behind the boxes is the DETECTION
+   box -- the sub-volume the Hoechst blob detector was actually run over, from the same embedded
+   payload the rest of the page reads (TISSUE_BOX_VOX at BUILT_AT_RES, 256/256/240 nm, converted
+   to nm here rather than retyped at a third resolution). It is named "Detected region" and not
+   "Tissue" or "Volume" on purpose: it is where the 220 nuclei could have come from, which is the
+   question a user typing a box actually has. The served EM extends beyond it, so a box outside
+   this rectangle is still a legal cutout -- it just cannot contain any nucleus this page knows
+   about, and the preview showing it outside is the cheapest way to learn that. */
+UJ.cfg.regionbox = {
+  /* A FUNCTION, not an array: #bjumpdata is a <script type="application/json"> block further down
+     this file, so when THIS script runs the parser has not created it yet and getElementById
+     returns null. λJump made exactly that mistake and drew a silently incomplete preview.
+     regionbox.js resolves this at mount time, after DOMContentLoaded. */
+  extents: function(){
+    var d = JSON.parse(document.getElementById("bjumpdata").textContent);
+    var r = d.BUILT_AT_RES, t = d.TISSUE_BOX_VOX;
+    return [{ name:"Detected region", color:"#58a6ff",
+              xmin:t[0]*r[0], xmax:t[1]*r[0],
+              ymin:t[2]*r[1], ymax:t[3]*r[1],
+              zmin:t[4]*r[2], zmax:t[5]*r[2] }];
+  },
+  depthCaption: "Y – depth",
+  /* All three available: this volume has a real segmentation and about half its segments are
+     meshed (see UJ.cfg.mesh's notFoundKey comment for why the not-found set is large). A cell
+     whose mesh is missing is skipped by the notebook with a printed note, not a failure. */
+  colab: { em: true, seg: true, meshes: true }
+};
+
 document.addEventListener("DOMContentLoaded", function(){
   var e = document.getElementById("unitres");
   if (e) e.innerHTML = UJ_RX + "·" + UJ_RY + "·" + UJ_RZ + " nm";
@@ -818,6 +889,8 @@ document.addEventListener("DOMContentLoaded", function(){
 
 </script>
 
+<script src="core/colabexport.js"></script>
+<script src="core/regionbox.js"></script>
 <script src="core/mesh.js"></script>
 <script src="core/synmesh.js"></script>
 <script src="core/synvol.js"></script>
@@ -3008,6 +3081,24 @@ function markerFilterHtml(){
     return h;
   }).join("");
 }
+/* Set by the filter IIFE once core/regionbox.js is mounted. A module-level handle rather than a
+   parameter because runFilterBjump is called from preview, export and step-through, and threading
+   a new argument through all three is the change most likely to miss one. */
+var BJ_REGION = null;
+
+/* A nucleus matches if it falls inside ANY box -- OR, not AND, which is the only reading that
+   makes "+ Add another box" mean anything. Returns the box (so the export can name it),
+   undefined when not filtering by region, null when filtering and this nucleus is outside. */
+function bjumpBoxFor(i, boxes){
+  if(!boxes || !boxes.length) return undefined;
+  var nx=BX[i]*UJ_RX, ny=BY[i]*UJ_RY, nz=BZ[i]*UJ_RZ;
+  for(var b=0;b<boxes.length;b++){
+    var q=boxes[b];
+    if(nx>=q.xmin&&nx<=q.xmax&&ny>=q.ymin&&ny<=q.ymax&&nz>=q.zmin&&nz<=q.zmax) return q;
+  }
+  return null;
+}
+
 function runFilterBjump(){
   const meshSel=document.getElementById("fMesh").value;
   const truncSel=document.getElementById("fTrunc").value;
@@ -3027,6 +3118,10 @@ function runFilterBjump(){
   // this page (e.g. current community identity's dropdown is single-select so this doesn't come
   // up there, but it's the natural reading of a checkbox LIST specifically).
   const organelleSel=Array.from(document.querySelectorAll(".forganelle:checked")).map(function(cb){return cb.value;});
+  /* [] when the checkbox is off OR when it is on but no box has all six corners filled in.
+     Deliberately the same: a half-typed box must not silently exclude every nucleus while the
+     user is still mid-way through entering it. */
+  const regionBoxes=BJ_REGION?BJ_REGION.getBoxesNM():[];
 
   const matches=[];
   for(let i=0;i<N;i++){
@@ -3054,7 +3149,9 @@ function runFilterBjump(){
       if(pct(m,m.shellArr[i])<f.min){markersOk=false;break;}
     }
     if(!markersOk)continue;
-    matches.push({row:{i:i}});
+    const box=bjumpBoxFor(i,regionBoxes);
+    if(box===null)continue;                  // region filter is on and this nucleus is outside it
+    matches.push({row:{i:i},box:box||null});
   }
   return matches;
 }
@@ -3093,6 +3190,14 @@ function buildColumnsBjump(){
       return bjumpOrganelleKindsOf(m.row.i).map(function(k){
         const info=ORGANELLE_KIND_BY_VALUE[k]; return info?info.short:k;
       }).sort().join("; ");
+    }},
+    /* Blank unless the region filter was on -- same exception-column convention as
+       corrected_voxel above. Corners print AS TYPED (x1..z2), not as the sorted min/max the
+       matching uses: either diagonal is accepted, so corner 1 need not be the minimum corner and
+       printing the sorted pair would show numbers the user never entered. */
+    {header:"region_box",get:function(m){return m.box?("Box "+m.box.n):"";}},
+    {header:"region_box_corners_voxel",get:function(m){
+      return m.box?(m.box.x1+", "+m.box.y1+", "+m.box.z1+"  to  "+m.box.x2+", "+m.box.y2+", "+m.box.z2):"";
     }}
   ];
   MARKERS.forEach(function(m){
@@ -3112,6 +3217,40 @@ function buildColumnsBjump(){
   if(!runBtn||!dlBtn||!markersBox)return; // filter tab markup not present on this build
   markersBox.innerHTML=markerFilterHtml();
   let lastMatches=null;
+  /* The region-box control (2026-08-31). Guarded on the markup so a build without the region
+     block fails by having no region filter rather than by throwing and taking the filter tab
+     with it.
+
+     rootIdsInBox returns NULL when no preview has been run, and regionbox.js turns that into a
+     message rather than generating a notebook with an empty mesh list. That distinction is the
+     whole point: an empty MESH_ROOT_IDS produces a notebook that installs, runs, downloads
+     nothing and reports success, which is a worse failure than refusing up front. Segment ids
+     come from BSEG (0 = this nucleus has no segment), and about half this volume's segments have
+     no mesh at all -- the notebook skips those with a printed note, so a partial list is fine
+     here and a silent empty one is not. */
+  if(document.getElementById("regionBoxes")){
+    BJ_REGION=UJ.regionbox.mount({
+      boxesEl:document.getElementById("regionBoxes"),
+      addBtn:document.getElementById("regionAddBox"),
+      onEl:document.getElementById("filterRegionOn"),
+      vizEl:document.getElementById("regionViz"),
+      res:UJ.cfg.res,
+      onChange:function(){ invalidatePreview(); },
+      rootIdsInBox:function(boxNM){
+        if(!lastMatches) return null;               // no preview yet -- refuse, do not ship []
+        const ids=[];
+        for(const m of lastMatches){
+          const i=m.row.i;
+          const nx=BX[i]*UJ_RX, ny=BY[i]*UJ_RY, nz=BZ[i]*UJ_RZ;
+          if(nx>=boxNM.xmin&&nx<=boxNM.xmax&&ny>=boxNM.ymin&&ny<=boxNM.ymax&&nz>=boxNM.zmin&&nz<=boxNM.zmax){
+            const sid=BSEG[i];
+            if(sid) ids.push(String(sid));
+          }
+        }
+        return ids;
+      }
+    });
+  }
   // Shared by every filter input, including #fIdentity once it exists -- extracted so the
   // identity <select>, which is only added to the DOM after fetchBjumpIdentities() resolves
   // (below), can wire the exact same invalidate-on-change behaviour the static inputs get from

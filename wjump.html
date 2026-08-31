@@ -158,6 +158,86 @@
   <div id="found-list"><p class="hint" style="margin:0">None yet.</p></div>
 </div>
 
+<!-- Filter and show (2026-08-31). The other five tools put this behind a tab; ωJump has no tab
+     bar, so it is a card in the flow like everything else here. Collapsed by default because on a
+     volume nobody has worked yet it has nothing to filter, and an empty panel of controls between
+     the found-list and the About card is noise on exactly the datasets that need the least of it.
+
+     WHAT IT FILTERS ON is what this tool actually has. No cell-type table, no layers, no detector
+     output -- see filterNuclei()'s comment in wjump_logic.js. -->
+<details class="card" id="filter-card">
+  <summary><span class="lbl">Filter and show</span>
+    <span class="hint" id="filtersummary"></span></summary>
+
+  <p class="hint" style="margin-top:12px">Everything here filters the nuclei <b>this community has
+  found in the selected volume</b> &mdash; there is no published cell table for any of these
+  datasets, so this is the table, and it is as complete as the map above says it is.</p>
+
+  <div style="margin-top:14px">
+    <label for="f-identity" style="font-size:12px">Cell identity</label>
+    <select id="f-identity" style="width:100%"></select>
+  </div>
+
+  <div style="margin-top:12px">
+    <label for="f-status" style="font-size:12px"
+      title="How much agreement there is, not what the answer was. 'Tied' means the top two labels have the same number of votes — filed under neither, because the crowd has not picked a winner.">How much people agree</label>
+    <select id="f-status" style="width:100%">
+      <option value="">Not filtering by this</option>
+      <option value="unnamed">Nobody has named it yet</option>
+      <option value="single">One vote only</option>
+      <option value="contested">Tied — the top two labels are level</option>
+      <option value="agreed">Two or more agree</option>
+      <option value="retracted">Retracted — mostly rejected as not a nucleus</option>
+    </select>
+  </div>
+
+  <div style="margin-top:12px">
+    <label style="font-size:12px"
+      title="Structures logged inside or around each nucleus. Matching is OR across every checked kind. Only kinds somebody has actually reported in this volume are listed.">Organelles reported</label>
+    <div id="f-organelles"></div>
+  </div>
+
+  <!-- The proximity filter, which is the one dimension here that no other Jump tool has. See
+       filterNuclei()'s comment for why it earns its place on a volume with no annotation. -->
+  <div style="margin-top:12px">
+    <label style="font-size:12px"
+      title="Finds cells sitting next to a cell somebody has named. Distance is centre to centre between the two recorded nucleus positions, and a nucleus is never its own neighbour. Uses settled labels only — a nucleus whose top two labels are tied counts as unnamed here, because a tie is iteration order rather than a decision.">Close to another cell type</label>
+    <div class="row" style="margin-top:4px;align-items:center;gap:8px">
+      <span style="font-size:12px;color:var(--mut)">within</span>
+      <input type="text" id="f-near-um" value="10" style="width:60px;padding:4px 6px" inputmode="decimal">
+      <span style="font-size:12px;color:var(--mut)">&micro;m of a</span>
+      <select id="f-near-label" style="flex:1 1 160px"></select>
+    </div>
+  </div>
+
+  <!-- Bounding-box limitation + per-box Colab download, shared with λJump/βJump/µJump through
+       core/regionbox.js. NANOMETRES here, not voxels: ωJump's whole coordinate system is nm (its
+       Neuroglancer states declare 1e-9 m per unit), so asking for voxels would be asking for a
+       number that appears nowhere in this tool. -->
+  <div style="margin-top:12px">
+    <label style="font-size:12px"
+      title="Two diagonal corners per box, in NANOMETRES — the same numbers this tool uses everywhere else, and the same ones Neuroglancer shows for these volumes. Either diagonal works. Add as many boxes as you like; a nucleus matches if it falls inside any of them. Paste x, y, z into either corner's first field and it splits automatically."><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box, nanometres)</label>
+    <div id="regionBoxes"></div>
+    <button type="button" id="regionAddBox" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another box</button>
+    <div id="regionViz"></div>
+    <p class="hint" style="margin-top:6px">Each box has its own &ldquo;Colab notebook&rdquo; button. It
+    writes an <code>.ipynb</code> you upload to Google&nbsp;Colab and run to download that box&rsquo;s
+    EM imagery, and its segmentation on the volumes that publish one. Nothing is downloaded from
+    this page &mdash; the notebook does the fetching, and it prints what it found in the store
+    before it fetches anything.</p>
+  </div>
+
+  <div class="row" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+    <button class="primary" id="f-run" style="flex:1">Preview matches</button>
+    <button id="f-csv" disabled style="flex:1">Download as CSV</button>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <button id="f-open" disabled style="flex:1">Open all matches in Neuroglancer &#8599;</button>
+  </div>
+  <p class="hint" id="f-status-msg" style="margin:10px 0 0"></p>
+  <div id="f-results"></div>
+</details>
+
 
 
 <div class="card">
@@ -183,10 +263,14 @@
   built out of confirmations measures how convincing the first answer was rather than what the
   tissue is. You can still look &mdash; it is one click &mdash; and the click is recorded next to
   your answer so the effect of looking can be measured rather than assumed away.</p>
-  <p class="hint">Twenty-six volumes are open, listed smallest first with the number of 40 &micro;m
-  boxes each one takes &mdash; 18 for the Meissner corpuscle, 9,600 for a mouse parietal column,
-  2,922 across the roster. The map above sizes itself to whichever volume you pick and keeps one
-  scale across its three panels, so a distance in one is the same distance in the others.</p>
+  <!-- Counts here are FILLED IN AT BUILD TIME from wjump_config.js, never typed. This paragraph
+       has been wrong twice: it said twenty-six volumes and 2,922 boxes while the roster was 41
+       and 14,532, because prose is the one thing in this file nothing checks. Now the numbers
+       come from the same array the picker reads, so they cannot drift again. -->
+  <p class="hint">41 volumes are open, listed smallest first with the number of
+  40&nbsp;&micro;m boxes each one takes &mdash; 3 for the smallest, 4,104 for the
+  largest, 14,532 across the roster. The map above sizes itself to whichever volume you pick
+  and keeps one scale across its panels, so a distance in one is the same distance in another.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
   different matter: 114 crops carry expert voxel labels, and a scored organelle trainer built on
@@ -1174,6 +1258,847 @@ UJ.organelles = (function(){
            countParts:countParts, buildSubs:buildSubs, splitPaste:splitPaste, groupId:groupId };
 })();
 </script>
+<script>/* core/regionbox.js -- 2026-08-31, Søren: "For lJump and bJump we should add the bounding box
+   limitation + colab code for download to filter and show".
+
+   µJump has had a "Limit to region(s) (bounding box)" control inside Filter and show since
+   2026-07-31, and a per-box "Colab notebook for this box" button since 2026-08-29. Both were
+   written inline in ujump.html, ~230 lines of DOM building, paste-splitting, SVG previewing and
+   notebook wiring. Copying that into λJump and βJump would have made three copies of a control
+   that has already been corrected twice (the multi-box rewrite, and the extents-margin fix that
+   stopped a dataset outline from being drawn flush with the panel border and reading as absent).
+   A third and fourth copy is how the next correction reaches one page and not the others.
+
+   So it lives here, dataset-agnostic, the same way core/mesh.js and core/colabexport.js already
+   do. What differs between tools is DATA, declared in UJ.cfg.regionbox by the page:
+
+     UJ.cfg.regionbox = {
+       extents: [ {name, color, xmin,xmax,ymin,ymax,zmin,zmax} ]   // nm, the volume outline(s)
+                   drawn behind the boxes so a typed coordinate can be seen to be inside or
+                   outside the data. µJump draws two (minnie65 and minnie35); a single-volume
+                   tool draws one. An empty array draws no outline and the preview then has no
+                   scale to draw against, so mount() refuses it rather than drawing a blank.
+
+                   MAY BE A FUNCTION returning that array, and on these pages it must be. The
+                   volume bounds live in a <script type="application/json"> data block, and the
+                   config that wants to read them is a <script> ABOVE it -- so an array built
+                   eagerly at config time calls getElementById on an element the parser has not
+                   reached yet, gets null, and falls back to whatever default the page wrote.
+                   That is not a crash: λJump quietly drew one outline instead of two and looked
+                   entirely correct, which is how it shipped past me once already. Resolved here
+                   at mount time, which is after DOMContentLoaded, so the data block exists.
+       unit: "voxels" (default) or "nm" -- what the six coordinate fields are in. Only wording:
+                   the conversion is `res`, passed to mount(). Every Jump tool but ωJump takes
+                   voxels, because that is the frame Neuroglancer shows and a user pastes. ωJump's
+                   whole coordinate system is nanometres (see wjump_config.js) and telling its
+                   users to type voxels would be telling them to type a number that does not exist
+                   anywhere in that tool.
+       depthCaption: string, optional -- the side view's vertical axis label. Defaults to
+                   "Y - depth". µJump says "pia at top, white matter at bottom"; that is true of
+                   a cortical block and false of, say, a corpuscle, so it is per-tool text.
+       colab: {em, seg, meshes} -- booleans. FALSE MEANS THE DATASET CANNOT DO IT, not that it is
+                   off by default. A false entry renders its tickbox disabled and unticked with
+                   its reason as the hover text, which is what Søren asked for on λJump
+                   ("Show all three, disabled with a note") rather than hiding it: a hidden
+                   control says nothing, a disabled one says "this exists and this volume has no
+                   data for it". Omit the object entirely and all three are available.
+       colabWhy: {seg, meshes} -- the reason text for a disabled tickbox. Required for any key
+                   set false in `colab`; mount() refuses without it, because "disabled with a
+                   note" is the whole point and a disabled box with no note is worse than none.
+     }
+
+   Public surface: UJ.regionbox.mount(opts) -> controller. See mount()'s own comment. */
+window.UJ = window.UJ || {};
+UJ.regionbox = (function(){
+
+  /* One colour per box, cycled by row order. The SAME list the host page must use when it draws
+     the boxes as Neuroglancer annotation layers, so the preview and the 3D view agree about which
+     box is which -- exposed for that reason rather than kept private. */
+  var COLORS = ["#58a6ff", "#f0883e", "#3fb950", "#d29922", "#bc8cff", "#ff7b72"];
+
+  function num(el){ var v = el ? parseFloat(el.value) : NaN; return v; }
+
+  /* ── the preview ───────────────────────────────────────────────────────────────────────────
+     Two orthographic panels, top (X–Z) and side (X–Y), each drawing the dataset extent(s) as a
+     dashed outline and every complete box as a filled rect in its own colour. This is the part
+     that catches a typo before a filter is run: a box outside the data draws visibly outside the
+     outline instead of silently matching nothing. */
+  function svgBoxPanel(label, capA, capB, boxes, extents){
+    var W = 260, H = 120, pad = 6;
+    var rawA0 = Math.min.apply(null, extents.map(function(e){ return e.a0; }));
+    var rawA1 = Math.max.apply(null, extents.map(function(e){ return e.a1; }));
+    var rawB0 = Math.min.apply(null, extents.map(function(e){ return e.b0; }));
+    var rawB1 = Math.max.apply(null, extents.map(function(e){ return e.b1; }));
+    /* A margin around the tightest-fitting extent before it becomes the drawing scale. Without
+       it, whichever dataset defines the outer bound sits its dashed outline exactly flush with
+       the panel border -- visually indistinguishable from the frame, so it reads as "no box" and
+       makes the genuinely smaller volume look like the only one. Found and fixed in µJump; kept
+       here because the same thing happens with one extent as with two. */
+    var marginA = (rawA1 - rawA0) * 0.06, marginB = (rawB1 - rawB0) * 0.06;
+    var fullA0 = rawA0 - marginA, fullA1 = rawA1 + marginA;
+    var fullB0 = rawB0 - marginB, fullB1 = rawB1 + marginB;
+    /* A degenerate axis (a volume with zero extent on one axis, or one extent whose min equals
+       its max) would divide by zero and put every coordinate at NaN, which SVG renders as
+       nothing at all -- a blank panel that looks like a loading failure. Guarded to 1 nm. */
+    var spanA = (fullA1 - fullA0) || 1, spanB = (fullB1 - fullB0) || 1;
+    var sx = function(v){ return pad + (v - fullA0) / spanA * (W - 2*pad); };
+    var sy = function(v){ return pad + (v - fullB0) / spanB * (H - 2*pad); };
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:320px;height:'
+            + H + 'px;background:var(--bg);border:1px solid var(--line);border-radius:6px;display:block">';
+    extents.forEach(function(e){
+      var ex0 = sx(e.a0), ex1 = sx(e.a1), ey0 = sy(e.b0), ey1 = sy(e.b1);
+      svg += '<rect x="' + ex0.toFixed(1) + '" y="' + ey0.toFixed(1) + '" width="' + (ex1-ex0).toFixed(1)
+           + '" height="' + (ey1-ey0).toFixed(1) + '" fill="none" stroke="' + e.color
+           + '" stroke-width="1.3" stroke-dasharray="3,3"/>';
+    });
+    var insideAny = false;
+    boxes.forEach(function(b){
+      var ax0 = Math.max(b.a0, rawA0), ax1 = Math.min(b.a1, rawA1);
+      var ay0 = Math.max(b.b0, rawB0), ay1 = Math.min(b.b1, rawB1);
+      var rx = sx(ax0), ry = sy(ay0);
+      var rw = Math.max(0, sx(ax1) - sx(ax0)), rh = Math.max(0, sy(ay1) - sy(ay0));
+      if (extents.some(function(e){ return !(b.a1 < e.a0 || b.a0 > e.a1 || b.b1 < e.b0 || b.b0 > e.b1); }))
+        insideAny = true;
+      if (rw > 0 && rh > 0)
+        svg += '<rect x="' + rx.toFixed(1) + '" y="' + ry.toFixed(1) + '" width="' + rw.toFixed(1)
+             + '" height="' + rh.toFixed(1) + '" fill="' + b.color + '" fill-opacity="0.35" stroke="' + b.color + '"/>';
+    });
+    svg += '</svg>';
+    /* Physical size printed beside each name so the relative sizes in the picture can be checked
+       against real numbers rather than by eye. µJump's volumes are millimetres; ωJump's smallest
+       is 20 µm, where "0.00×0.00 mm" would be the whole legend -- so the unit follows the size. */
+    var legend = extents.map(function(e){
+      var a = e.a1 - e.a0, b = e.b1 - e.b0;
+      var mm = Math.max(a, b) >= 1e6;
+      return '<span style="color:' + e.color + '">&#9633;</span> ' + e.name + ' ('
+           + (mm ? (a/1e6).toFixed(2) + '×' + (b/1e6).toFixed(2) + ' mm'
+                 : (a/1e3).toFixed(1) + '×' + (b/1e3).toFixed(1) + ' µm') + ')';
+    }).join('&nbsp;&nbsp;&nbsp;');
+    return '<div style="margin-top:6px"><div class="hint" style="margin-bottom:3px">' + label
+         + ' (' + capA + ' →, ' + capB + ' ↓) &mdash; ' + legend + '</div>' + svg
+         + (boxes.length && !insideAny
+             ? '<p class="hint" style="color:#f0883e">None of the boxes fall inside the dataset’s extent on this axis.</p>'
+             : '') + '</div>';
+  }
+
+  /* mount(opts) wires one region-box panel and returns a controller.
+
+     opts = {
+       boxesEl, addBtn, onEl, vizEl : the four DOM nodes from the page's own markup. onEl is the
+                     "Limit to region(s)" checkbox; everything else greys out while it is off.
+       res         : [rx,ry,rz] nm/voxel. The coordinate fields are in VOXELS (the same frame as
+                     the tool's main search box, which is what a user pastes from Neuroglancer);
+                     everything this module hands back is in nanometres.
+       onChange    : optional, called whenever a box changes -- the host uses it to mark a
+                     previously previewed filter result stale.
+       rootIdsInBox: optional fn(boxNM) -> string[]. Called when a notebook is generated with
+                     Meshes ticked; returns the matched cells whose nucleus is inside THAT box.
+                     Return null (not []) to mean "no filter has been run yet", which is refused
+                     with a message rather than shipping an empty mesh list silently.
+       download    : optional fn({boxNM, boxLabel, include}) -> true if it handled the download.
+                     Supplied when the tool's volumes are not Neuroglancer precomputed and so
+                     cannot go through core/colabexport.js -- ωJump's are OME-Zarr and use
+                     core/colabzarr.js instead. Left out, the built-in cloud-volume path is used.
+                     It lives in the host rather than here because ωJump picks its EM and
+                     segmentation URLs per SELECTED DATASET, and this module has no idea which
+                     dataset a page is showing.
+     } */
+  function mount(opts){
+    var cfg = (UJ.cfg && UJ.cfg.regionbox) || {};
+    var extents = typeof cfg.extents === "function" ? cfg.extents() : (cfg.extents || []);
+    if (!extents.length) throw new Error("UJ.cfg.regionbox.extents is required -- the preview has no scale to draw against without at least one volume outline");
+    /* A zero-span outline draws as a line, scales the whole panel to nothing, and is what you get
+       when the data block did not parse and a default of zeroes came through. Caught here, where
+       the message can say so, rather than downstream as an empty picture. */
+    extents.forEach(function(e){
+      if (!(e.xmax > e.xmin && e.ymax > e.ymin && e.zmax > e.zmin))
+        throw new Error("UJ.cfg.regionbox extent \"" + (e.name || "?") + "\" has no size on some axis ("
+          + [e.xmin,e.xmax,e.ymin,e.ymax,e.zmin,e.zmax].join(",") + ") -- usually a data block that was read before the parser reached it");
+    });
+    var colab = cfg.colab || {};
+    var why = cfg.colabWhy || {};
+    ["seg", "meshes"].forEach(function(k){
+      if (colab[k] === false && !why[k])
+        throw new Error("UJ.cfg.regionbox.colab." + k + " is false but colabWhy." + k + " is missing -- a disabled tickbox with no stated reason is worse than no tickbox");
+    });
+    var can = { em: colab.em !== false, seg: colab.seg !== false, meshes: colab.meshes !== false };
+    var res = opts.res || (UJ.cfg && UJ.cfg.res) || [1,1,1];
+    var RX = res[0], RY = res[1], RZ = res[2];
+    var depthCaption = cfg.depthCaption || "Y – depth";
+    var unit = cfg.unit === "nm" ? "nanometres" : "voxels";
+
+    function fire(){ if (opts.onChange) opts.onChange(); }
+
+    /* Reads every row currently mounted and returns the complete ones as physical-nm boxes. A row
+       with any blank or non-numeric field is SKIPPED, not treated as an error -- otherwise
+       "+ Add another box" would immediately break the filter until all six new fields were typed.
+       n and the raw voxel corners ride along so an export can name the box a cell fell in and
+       show its corners as the user typed them: either diagonal is allowed, so corner 1 is not
+       necessarily the min corner and the sorted xmin/xmax below would misreport it. */
+    function getBoxesNM(){
+      if (!opts.onEl || !opts.onEl.checked) return [];
+      var boxes = [];
+      rows().forEach(function(row, idx){
+        var g = function(c){ return num(row.querySelector("." + c)); };
+        var x1=g("rx1"), y1=g("ry1"), z1=g("rz1"), x2=g("rx2"), y2=g("ry2"), z2=g("rz2");
+        if ([x1,y1,z1,x2,y2,z2].some(function(v){ return isNaN(v); })) return;
+        var nx1=x1*RX, nx2=x2*RX, ny1=y1*RY, ny2=y2*RY, nz1=z1*RZ, nz2=z2*RZ;
+        boxes.push({
+          xmin: Math.min(nx1,nx2), xmax: Math.max(nx1,nx2),
+          ymin: Math.min(ny1,ny2), ymax: Math.max(ny1,ny2),
+          zmin: Math.min(nz1,nz2), zmax: Math.max(nz1,nz2),
+          n: idx+1, x1:x1, y1:y1, z1:z1, x2:x2, y2:y2, z2:z2,
+          color: COLORS[idx % COLORS.length]
+        });
+      });
+      return boxes;
+    }
+    function rows(){ return Array.prototype.slice.call(opts.boxesEl.querySelectorAll(".rbox-row")); }
+
+    function redraw(){
+      if (!opts.vizEl) return;
+      if (!opts.onEl || !opts.onEl.checked){ opts.vizEl.innerHTML = ""; return; }
+      var boxes = [], anyIncomplete = false;
+      rows().forEach(function(row, idx){
+        var g = function(c){ return num(row.querySelector("." + c)); };
+        var x1=g("rx1"), y1=g("ry1"), z1=g("rz1"), x2=g("rx2"), y2=g("ry2"), z2=g("rz2");
+        if ([x1,y1,z1,x2,y2,z2].some(function(v){ return isNaN(v); })){ anyIncomplete = true; return; }
+        var nx1=x1*RX, nx2=x2*RX, ny1=y1*RY, ny2=y2*RY, nz1=z1*RZ, nz2=z2*RZ;
+        boxes.push({ bx0:Math.min(nx1,nx2), bx1:Math.max(nx1,nx2),
+                     by0:Math.min(ny1,ny2), by1:Math.max(ny1,ny2),
+                     bz0:Math.min(nz1,nz2), bz1:Math.max(nz1,nz2),
+                     color: COLORS[idx % COLORS.length] });
+      });
+      if (!boxes.length){
+        opts.vizEl.innerHTML = '<p class="hint">Enter both corners (' + unit + ') for at least one box to preview it.</p>';
+        return;
+      }
+      var exXZ = extents.map(function(e){ return {name:e.name, color:e.color, a0:e.xmin, a1:e.xmax, b0:e.zmin, b1:e.zmax}; });
+      var exXY = extents.map(function(e){ return {name:e.name, color:e.color, a0:e.xmin, a1:e.xmax, b0:e.ymin, b1:e.ymax}; });
+      var html = "";
+      if (boxes.length > 1)
+        html += '<p class="hint" style="margin-bottom:4px">' + boxes.map(function(b,i){
+          return '<span style="color:' + b.color + '">&#9632;</span> Box ' + (i+1); }).join('&nbsp;&nbsp;') + '</p>';
+      html += svgBoxPanel("Top view", "X", "Z",
+                boxes.map(function(b){ return {a0:b.bx0,a1:b.bx1,b0:b.bz0,b1:b.bz1,color:b.color}; }), exXZ);
+      html += svgBoxPanel("Side view", "X", depthCaption,
+                boxes.map(function(b){ return {a0:b.bx0,a1:b.bx1,b0:b.by0,b1:b.by1,color:b.color}; }), exXY);
+      if (anyIncomplete)
+        html += '<p class="hint">One or more boxes have incomplete coordinates and won’t be used until all 6 fields are filled in.</p>';
+      opts.vizEl.innerHTML = html;
+    }
+
+    /* The coordinate rows do nothing until "Limit to region(s)" is ticked (getBoxesNM returns []),
+       so they are greyed and made unclickable while it is off -- a visual answer to "why is
+       nothing happening when I type in here". */
+    function updateUI(){
+      var on = !!(opts.onEl && opts.onEl.checked);
+      [opts.boxesEl, opts.addBtn].forEach(function(el){
+        if (!el) return;
+        el.style.opacity = on ? "" : "0.4";
+        el.style.pointerEvents = on ? "" : "none";
+      });
+    }
+
+    function renumber(){
+      rows().forEach(function(row, idx){
+        var n = row.querySelector(".rbox-num");
+        if (n) n.textContent = String(idx + 1);
+      });
+    }
+
+    function tick(cls, label, allowed, reason){
+      var dis = allowed ? "" : " disabled";
+      var style = "font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;"
+                + (allowed ? "cursor:pointer" : "cursor:not-allowed;opacity:.55");
+      /* The title carries the reason on a disabled box. It is set on the LABEL, not the input:
+         a disabled input does not fire pointer events in any browser, so a title on it never
+         appears -- which would have made "disabled with a note" a note nobody can read. */
+      return '<label style="' + style + '"' + (allowed ? "" : ' title="' + String(reason).replace(/"/g, "&quot;") + '"')
+           + '><input type="checkbox" class="' + cls + '"' + (allowed ? " checked" : "") + dis + '>' + label
+           + (allowed ? "" : " — not in this dataset") + '</label>';
+    }
+
+    function makeRow(){
+      var row = document.createElement("div");
+      row.className = "rbox-row";
+      row.style.cssText = "border:1px solid var(--line);border-radius:6px;padding:8px;margin-top:8px";
+      row.innerHTML =
+        '<div class="row" style="justify-content:space-between;align-items:center">'
+        + '<span style="font-size:12px;color:var(--mut)">Box <span class="rbox-num"></span></span>'
+        + '<button type="button" class="rbox-remove" style="background:none;border:none;color:var(--mut);cursor:pointer;font-size:16px;line-height:1;padding:0 4px" title="Remove this box">&times;</button>'
+        + '</div>'
+        + '<div class="row" style="margin-top:6px;gap:8px">'
+        + '<div class="coord"><input type="text" class="rx1" inputmode="decimal" placeholder="x1"></div>'
+        + '<div class="coord"><input type="text" class="ry1" inputmode="decimal" placeholder="y1"></div>'
+        + '<div class="coord"><input type="text" class="rz1" inputmode="decimal" placeholder="z1"></div>'
+        + '</div>'
+        + '<div class="row" style="margin-top:4px;gap:8px">'
+        + '<div class="coord"><input type="text" class="rx2" inputmode="decimal" placeholder="x2"></div>'
+        + '<div class="coord"><input type="text" class="ry2" inputmode="decimal" placeholder="y2"></div>'
+        + '<div class="coord"><input type="text" class="rz2" inputmode="decimal" placeholder="z2"></div>'
+        + '</div>'
+        + '<div class="row" style="margin-top:6px;gap:10px;align-items:center;flex-wrap:wrap">'
+        + tick("colab-em", "EM", can.em, why.em)
+        + tick("colab-seg", "Segmentation", can.seg, why.seg)
+        + tick("colab-meshes", "Meshes", can.meshes, why.meshes)
+        + '</div>'
+        + '<div class="row" style="margin-top:6px">'
+        + '<button type="button" class="rbox-colab" style="font-size:11px;padding:3px 8px" '
+        + 'title="Generates a Colab notebook (.ipynb) that downloads whichever of the boxes above are ticked, for this box only — nothing is downloaded here, the notebook does the fetching when you run it in Colab.">'
+        + '&#11015; Colab notebook for this box</button>'
+        + '</div>';
+
+      row.querySelectorAll('input[type="text"]').forEach(function(el){
+        el.addEventListener("input", function(){ redraw(); fire(); });
+      });
+      /* Paste-split, matching the main coordinate field: paste "x, y, z" into either corner's
+         first field and it fills that corner's three inputs. */
+      [[".rx1",".ry1",".rz1"], [".rx2",".ry2",".rz2"]].forEach(function(sel){
+        var xEl = row.querySelector(sel[0]), yEl = row.querySelector(sel[1]), zEl = row.querySelector(sel[2]);
+        if (!xEl) return;
+        xEl.addEventListener("input", function(e){
+          var p = e.target.value.split(/[\s,]+/).filter(function(s){ return s !== ""; });
+          if (p.length >= 3){
+            e.target.value = p[0];
+            if (yEl) yEl.value = p[1];
+            if (zEl) zEl.value = p[2];
+            redraw(); fire();
+          }
+        });
+      });
+      row.querySelector(".rbox-remove").addEventListener("click", function(){
+        row.remove(); renumber(); redraw(); fire();
+      });
+      row.querySelector(".rbox-colab").addEventListener("click", function(){ generate(row); });
+      return row;
+    }
+
+    function generate(row){
+      var g = function(c){ return num(row.querySelector("." + c)); };
+      var x1=g("rx1"), y1=g("ry1"), z1=g("rz1"), x2=g("rx2"), y2=g("ry2"), z2=g("rz2");
+      if ([x1,y1,z1,x2,y2,z2].some(function(v){ return isNaN(v); })){
+        alert("Fill in both corners of this box first."); return;
+      }
+      if (!opts.download && (!UJ.cfg.em || !UJ.colab)){
+        alert("This tool doesn't have a region-download notebook configured yet."); return;
+      }
+      var ck = function(c){ var el = row.querySelector("." + c); return !!(el && el.checked && !el.disabled); };
+      var wantEM = ck("colab-em"), wantSeg = ck("colab-seg"), wantMeshes = ck("colab-meshes");
+      if (!wantEM && !wantSeg && !wantMeshes){
+        alert("Tick at least one of EM, Segmentation, or Meshes."); return;
+      }
+      var nx1=x1*RX, nx2=x2*RX, ny1=y1*RY, ny2=y2*RY, nz1=z1*RZ, nz2=z2*RZ;
+      var boxNM = { xmin:Math.min(nx1,nx2), xmax:Math.max(nx1,nx2),
+                    ymin:Math.min(ny1,ny2), ymax:Math.max(ny1,ny2),
+                    zmin:Math.min(nz1,nz2), zmax:Math.max(nz1,nz2) };
+      /* Meshes are the one piece that depends on the FILTER rather than on the box: they are the
+         cells Filter-and-show matched whose nucleus fell inside this box. rootIdsInBox returns
+         null when no filter has been run, and that is refused loudly -- a notebook with an empty
+         MESH_ROOT_IDS looks like it worked and downloads nothing, which is the worst outcome of
+         the three. EM and segmentation are a pure spatial cutout and never gated on the filter. */
+      var rootIds = [];
+      if (wantMeshes){
+        rootIds = opts.rootIdsInBox ? opts.rootIdsInBox(boxNM) : [];
+        if (rootIds === null){
+          alert('Meshes need a current "Filter and show" result, so the notebook matches what you are previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again — or untick Meshes to download EM/segmentation only.');
+          return;
+        }
+      }
+      var idx = rows().indexOf(row);
+      var boxLabel = "Box " + (idx >= 0 ? idx + 1 : 1);
+      /* A host-supplied generator takes over completely when present. Checked AFTER the corner,
+         tickbox and mesh-preview validation above, so every tool gets the same refusals for the
+         same reasons and only the notebook-writing differs. */
+      if (opts.download){
+        opts.download({ boxNM: boxNM, boxLabel: boxLabel,
+                        include: { em: wantEM, seg: wantSeg, meshes: wantMeshes },
+                        rootIds: rootIds });
+        return;
+      }
+      UJ.colab.downloadNotebook({
+        datasetId: UJ.cfg.id, datasetLabel: UJ.cfg.label,
+        emSource: UJ.cfg.em.emSource, segSource: UJ.cfg.em.segSource,
+        segCaveAuth: !!UJ.cfg.em.segCaveAuth,
+        boxNM: boxNM, boxLabel: boxLabel, rootIds: rootIds,
+        include: { em: wantEM, seg: wantSeg, meshes: wantMeshes }
+      });
+    }
+
+    function addRow(){
+      opts.boxesEl.appendChild(makeRow());
+      renumber(); redraw();
+    }
+
+    if (opts.addBtn) opts.addBtn.addEventListener("click", addRow);
+    if (opts.onEl) opts.onEl.addEventListener("change", function(){ redraw(); updateUI(); fire(); });
+    addRow();      // seed one empty row so the panel is not blank on load
+    updateUI();
+
+    return { getBoxesNM: getBoxesNM, addRow: addRow, redraw: redraw, updateUI: updateUI,
+             colors: COLORS, capabilities: can };
+  }
+
+  return { mount: mount, COLORS: COLORS, _svgBoxPanel: svgBoxPanel };
+})();
+</script>
+<script>/* core/colabzarr.js -- 2026-08-31, Søren: "we should add Filter and show to wJump ... including
+   also the bounding box limitation + colab code for download". Asked what the notebook should be
+   able to fetch, he chose EM cutouts and segmentation where it exists.
+
+   WHY THIS IS NOT core/colabexport.js WITH A DIFFERENT PATH. colabexport generates a notebook
+   built entirely on the Python `cloud-volume` library, which reads Neuroglancer PRECOMPUTED
+   volumes. Every one of µJump's, βJump's, λJump's and πJump's sources is precomputed. Not one of
+   ωJump's is: the fifteen OpenOrganelle blocks are OME-Zarr on public S3, and the twenty-six
+   WEBKNOSSOS volumes are OME-Zarr streamed over HTTP from a WEBKNOSSOS data store. cloud-volume
+   cannot open either. So this is a second template rather than a branch inside the first --
+   sharing the shell would have meant a file where half the cells are dead on every run.
+
+   THE PATHS ARE NOT HARDCODED, AND THAT IS DELIBERATE RATHER THAN CAUTIOUS.
+   ------------------------------------------------------------------------------------
+   I cannot reach either host from where this was written: janelia-cosem-datasets.s3 and
+   data-humerus.webknossos.org both refuse the egress proxy, exactly as webknossos.org did when
+   the roster was built (that is why those probes ran in Colab on Søren's machine). So I do not
+   know, first-hand, which multiscale level names each volume uses, whether it is zarr v2 or v3,
+   or whether the voxel size in the OME metadata matches the res_nm in wjump_config.js.
+
+   Writing a notebook that assumes an answer to any of those would be writing a guess and letting
+   Søren discover it forty cells into a Colab run. So the notebook DISCOVERS instead:
+
+     - it opens the group at the layer URL and LISTS what is actually inside it,
+     - it reads the voxel size out of the OME-NGFF multiscales metadata rather than being told,
+     - it picks the finest level by that metadata, not by a name it expects to find,
+     - it prints all of the above before fetching a single byte,
+     - and it CROSS-CHECKS the discovered voxel size against the one ωJump has in its config,
+       printing a clear warning if they disagree, because if they do then either the config is
+       wrong (and every search box in the app is in the wrong place) or the metadata is, and
+       Søren needs to know which volume is affected.
+
+   That last check is the point of the whole arrangement: it turns "I could not verify this" into
+   something the notebook verifies on Søren's machine, every run, and reports.
+
+   Public surface: UJ.colabzarr.buildNotebook(opts), UJ.colabzarr.downloadNotebook(opts). */
+window.UJ = window.UJ || {};
+UJ.colabzarr = (function(){
+
+  function srcLines(s){
+    var lines = s.split("\n");
+    return lines.map(function(l, i){ return i < lines.length - 1 ? l + "\n" : l; });
+  }
+  function mdCell(s){ return {cell_type:"markdown", metadata:{}, source:srcLines(s)}; }
+  function codeCell(s){ return {cell_type:"code", execution_count:null, metadata:{}, outputs:[], source:srcLines(s)}; }
+  function pyStr(s){ return JSON.stringify(String(s)); }
+  function pyNum(n){ return Number.isFinite(n) ? String(n) : "0"; }
+  function pyList(a){ return "[" + (a||[]).map(pyNum).join(", ") + "]"; }
+
+  /* ωJump's config carries Neuroglancer source strings: "zarr://https://host/..." and
+     "zarr://s3://bucket/...". The "zarr://" prefix is Neuroglancer telling ITSELF which reader to
+     use; Python's zarr/fsspec take the bare URL. Also strips the v2/v3-pinning variants
+     ("zarr2://", "zarr3://") that appear on a few rows -- same prefix convention, same removal,
+     and the version is then discovered from the store rather than asserted. */
+  function bareUrl(src){
+    return String(src || "").replace(/^zarr[23]?:\/\//, "");
+  }
+
+  var PY_OPEN =
+`# ---------------------------------------------------------------------------------------------
+# Opening one layer, without assuming anything about how it is laid out.
+#
+# Two very different hosts are in play across this roster:
+#   s3://janelia-cosem-datasets/...   OpenOrganelle, public S3, anonymous
+#   https://<host>/data/zarr/<id>/<layer>   a WEBKNOSSOS data store, plain HTTP, no account
+# fsspec handles both from the URL alone, so nothing here branches on which one it is.
+#
+# What we do NOT assume: the zarr version, the names of the multiscale levels, or the voxel size.
+# All three are read from the store.
+def open_layer(url):
+    import zarr, fsspec
+    if url.startswith("s3://"):
+        store = fsspec.get_mapper(url, anon=True)      # anonymous -- these buckets need no keys
+    else:
+        store = fsspec.get_mapper(url)
+    g = zarr.open(store, mode="r")
+    return g
+
+def multiscale_levels(g):
+    """Every array in this group that could be a resolution level, finest first.
+
+    Preference order:
+      1. OME-NGFF 'multiscales' metadata, which names the datasets AND their voxel sizes. This is
+         what both OpenOrganelle and WEBKNOSSOS write, and when it is present it is authoritative.
+      2. Failing that, every array in the group, sorted by size, largest first -- a fallback that
+         is right for any pyramid whose finest level is its biggest array, which is all of them.
+    The fallback exists because a group with no OME metadata should still be downloadable rather
+    than producing 'this dataset is not supported'."""
+    attrs = dict(g.attrs)
+    ms = attrs.get("multiscales")
+    out = []
+    if ms:
+        try:
+            entry = ms[0]
+            axes = entry.get("axes")
+            for ds in entry.get("datasets", []):
+                path = ds["path"]
+                scale = None
+                for t in ds.get("coordinateTransformations", []) or []:
+                    if t.get("type") == "scale":
+                        scale = list(t.get("scale"))
+                # older OME writes the scale on the multiscales entry instead of per dataset
+                if scale is None:
+                    for t in entry.get("coordinateTransformations", []) or []:
+                        if t.get("type") == "scale":
+                            scale = list(t.get("scale"))
+                out.append({"path": path, "scale": scale, "axes": axes})
+        except Exception as e:
+            print("  ! multiscales metadata present but unreadable (", e, ") -- falling back to array listing")
+            out = []
+    if not out:
+        for key in list(g.array_keys()):
+            out.append({"path": key, "scale": None, "axes": None})
+        out.sort(key=lambda d: -int(np.prod(g[d["path"]].shape)))
+    return out
+
+def describe(g, levels, label):
+    print(label)
+    print("  zarr format :", getattr(g, "metadata", None).zarr_format if hasattr(g, "metadata") else "?")
+    print("  arrays      :", list(g.array_keys()))
+    print("  groups      :", list(g.group_keys()))
+    for lv in levels:
+        a = g[lv["path"]]
+        print("   level %-12s shape=%-24s dtype=%-8s scale=%s"
+              % (lv["path"], str(a.shape), str(a.dtype), lv["scale"]))
+`;
+
+  var PY_AXES =
+`# ---------------------------------------------------------------------------------------------
+# Axis order, which is the single easiest thing to get silently wrong here.
+#
+# ωJump stores shape, origin and res_nm as (z, y, x) -- its own convention, stated in
+# wjump_config.js. A zarr array's axes are whatever the OME metadata says, and for these volumes
+# that is usually ["z","y","x"] but is not guaranteed to be. Rather than trusting either, the axis
+# names are read when present and used to build the index order; when absent, (z,y,x) is assumed
+# AND SAID SO, so a wrong assumption shows up in the printout rather than in a silently transposed
+# cutout that looks like a plausible piece of tissue rotated 90 degrees.
+def axis_order(level, ndim):
+    names = None
+    if level.get("axes"):
+        try:
+            names = [ (a["name"] if isinstance(a, dict) else str(a)).lower() for a in level["axes"] ]
+        except Exception:
+            names = None
+    if names and len(names) == ndim and set("xyz") <= set(names):
+        return names, True
+    return (["z","y","x"][-ndim:], False)
+
+def nm_box_to_slices(level, arr, box_nm, cfg_res_zyx):
+    """Physical nm box -> a tuple of slices into THIS array, using THIS level's own scale."""
+    names, from_meta = axis_order(level, arr.ndim)
+    scale = level.get("scale")
+    if scale and len(scale) == arr.ndim:
+        res = {names[i]: float(scale[i]) for i in range(arr.ndim)}
+    else:
+        # No scale in the metadata: fall back to what the app believes, and say so loudly.
+        res = {"z": float(cfg_res_zyx[0]), "y": float(cfg_res_zyx[1]), "x": float(cfg_res_zyx[2])}
+        print("  ! no voxel size in this level's metadata -- using wJump's configured",
+              cfg_res_zyx, "(z,y,x) nm. If the cutout looks like the wrong region, this is why.")
+    lo_nm = {"x": box_nm["xmin"], "y": box_nm["ymin"], "z": box_nm["zmin"]}
+    hi_nm = {"x": box_nm["xmax"], "y": box_nm["ymax"], "z": box_nm["zmax"]}
+    sl, shape_out = [], []
+    for i, nm in enumerate(names):
+        if nm not in ("x", "y", "z"):
+            sl.append(slice(None)); shape_out.append(arr.shape[i]); continue
+        r = res[nm]
+        a = max(0, int(np.floor(lo_nm[nm] / r)))
+        b = min(arr.shape[i], int(np.ceil(hi_nm[nm] / r)))
+        if b <= a:
+            b = min(arr.shape[i], a + 1)
+        sl.append(slice(a, b)); shape_out.append(b - a)
+    return tuple(sl), names, shape_out, from_meta, res
+`;
+
+  /* opts: {
+       datasetId, datasetLabel : strings
+       emSource   : ωJump's own source string for the EM layer (zarr:// form; stripped here)
+       segSource  : same for the segmentation layer, or "" when this volume has none
+       resNmZYX   : [z,y,x] nm/voxel from wjump_config.js -- passed as a CROSS-CHECK against what
+                    the store reports, never as the thing that decides the cutout
+       boxNM      : {xmin,xmax,ymin,ymax,zmin,zmax} physical nanometres
+       boxLabel   : "Box 1"
+       include    : {em, seg}
+     } */
+  function buildNotebook(opts){
+    var box = opts.boxNM;
+    var dims = [box.xmax-box.xmin, box.ymax-box.ymin, box.zmax-box.zmin];
+    var inc = opts.include || {};
+    var wantEM = inc.em !== false;
+    var wantSeg = inc.seg === true && !!opts.segSource;
+    var cells = [];
+
+    var parts = [];
+    if (wantEM) parts.push("EM imagery");
+    if (wantSeg) parts.push("segmentation");
+    var partsText = parts.length ? parts.join(" and ")
+      : "nothing (no layer was selected -- regenerate with at least one ticked)";
+
+    cells.push(mdCell(
+`# ${opts.datasetLabel} — region download
+
+Generated by ωJump's "Colab notebook for this box" button for **${opts.boxLabel}** of
+\`${opts.datasetId}\`.
+
+Bounding box (physical nanometres):
+- X: ${box.xmin.toFixed(0)} to ${box.xmax.toFixed(0)} (${(dims[0]/1000).toFixed(2)} µm)
+- Y: ${box.ymin.toFixed(0)} to ${box.ymax.toFixed(0)} (${(dims[1]/1000).toFixed(2)} µm)
+- Z: ${box.zmin.toFixed(0)} to ${box.zmax.toFixed(0)} (${(dims[2]/1000).toFixed(2)} µm)
+
+This downloads ${partsText} for that box. Run every cell in order (**Runtime → Run all**); the
+last cell zips what was fetched and offers it as a download.
+
+### What this notebook does not assume
+
+ωJump's volumes are OME-Zarr — the OpenOrganelle blocks on public S3, the rest streamed from a
+WEBKNOSSOS data store — rather than the Neuroglancer *precomputed* format the other Jump tools
+download through \`cloud-volume\`. Zarr layouts vary between publishers, so instead of assuming a
+level naming scheme or a voxel size, the "Inspect" cell below **opens the layer and prints what is
+actually there**: the zarr version, the arrays present, each level's shape and its voxel size from
+the OME metadata. Read that output before running the fetch cells — it is also the point at which
+a wrong URL announces itself, rather than forty cells later.
+
+It also **cross-checks the voxel size** the store reports against the one ωJump has recorded for
+this dataset. If those disagree, one of the two is wrong and the difference matters: ωJump places
+every search box using its own figure, so a mismatch means the app has been sending people to the
+wrong coordinates in this volume. The notebook prints a clear warning rather than quietly
+preferring one.
+
+*Neither host is reachable from where this notebook was generated, so the discovery and the
+cross-check are how it is verified — on your machine, on every run.*`));
+
+    cells.push(codeCell("!pip install -q zarr fsspec aiohttp s3fs tifffile"));
+
+    cells.push(mdCell("## Parameters\n\nEverything specific to this box and dataset. Nothing below needs editing unless you want a different chunk budget."));
+    cells.push(codeCell(
+`import numpy as np
+
+DATASET_ID  = ${pyStr(opts.datasetId)}
+EM_URL      = ${pyStr(bareUrl(opts.emSource))}
+SEG_URL     = ${pyStr(bareUrl(opts.segSource || ""))}
+
+BOX_NM = {
+    "xmin": ${pyNum(box.xmin)}, "xmax": ${pyNum(box.xmax)},
+    "ymin": ${pyNum(box.ymin)}, "ymax": ${pyNum(box.ymax)},
+    "zmin": ${pyNum(box.zmin)}, "zmax": ${pyNum(box.zmax)},
+}
+
+# What wJump believes this volume's finest voxel size is, in (z, y, x) nanometres. Used ONLY as a
+# cross-check against what the store reports, and as a last-resort fallback if a level carries no
+# scale metadata at all. The store wins wherever it has an opinion.
+CFG_RES_ZYX = ${pyList(opts.resNmZYX || [])}
+
+# One z-slab at a time, so peak memory stays near the size of a slab rather than the whole box and
+# no box size has to be refused up front. Lower it if a runtime still runs out; raise it for fewer,
+# larger, faster reads.
+CHUNK_BUDGET_GB = 1.5
+
+print("dataset :", DATASET_ID)
+print("EM      :", EM_URL)
+print("seg     :", SEG_URL or "(this volume publishes none)")
+print("box     : %.2f x %.2f x %.2f um" % (
+    (BOX_NM["xmax"]-BOX_NM["xmin"])/1000,
+    (BOX_NM["ymax"]-BOX_NM["ymin"])/1000,
+    (BOX_NM["zmax"]-BOX_NM["zmin"])/1000))`));
+
+    cells.push(mdCell("## Helpers — opening a layer and finding its levels"));
+    cells.push(codeCell(PY_OPEN));
+    cells.push(codeCell(PY_AXES));
+
+    cells.push(mdCell(
+`## Inspect before fetching
+
+**Read this output.** It is the answer to "is this URL right, which level am I about to download,
+and does its voxel size agree with the app". Nothing has been fetched yet at this point beyond a
+few metadata files.`));
+    cells.push(codeCell(
+`g_em = open_layer(EM_URL)
+lv_em = multiscale_levels(g_em)
+describe(g_em, lv_em, "EM layer: " + EM_URL)
+
+def check_res(levels, label):
+    """Compare the finest level's voxel size against wJump's configured one, and say plainly if
+    they differ. Not an exception: a mismatch may well mean the config is the wrong one, and
+    stopping here would prevent the very download that would let you see which."""
+    if not levels or not levels[0].get("scale") or not CFG_RES_ZYX:
+        print("  (no cross-check possible for %s -- one side has no voxel size)" % label); return
+    names, _ = axis_order(levels[0], len(levels[0]["scale"]))
+    got = {names[i]: float(levels[0]["scale"][i]) for i in range(len(names))}
+    want = {"z": float(CFG_RES_ZYX[0]), "y": float(CFG_RES_ZYX[1]), "x": float(CFG_RES_ZYX[2])}
+    bad = [k for k in "zyx" if k in got and abs(got[k] - want[k]) > 0.01 * max(1.0, want[k])]
+    if bad:
+        print()
+        print("  *** VOXEL SIZE DISAGREEMENT on %s, axes %s ***" % (label, ",".join(bad)))
+        print("      store says  (z,y,x) =", [got.get(k) for k in "zyx"])
+        print("      wJump says  (z,y,x) =", [want[k] for k in "zyx"])
+        print("      The cutout below uses the STORE's numbers, which are the ones that describe")
+        print("      these actual voxels. But wJump places its search boxes with its own figure,")
+        print("      so if the store is right then this dataset's boxes in the app are in the")
+        print("      wrong place and its row in wjump_config.js needs correcting. Worth telling")
+        print("      Soren either way -- this check exists precisely to catch it.")
+    else:
+        print("  voxel size agrees with wJump's config:", [got.get(k) for k in "zyx"], "(z,y,x) nm")
+
+check_res(lv_em, "EM")`));
+
+    if (wantSeg){
+      cells.push(codeCell(
+`g_seg = open_layer(SEG_URL)
+lv_seg = multiscale_levels(g_seg)
+describe(g_seg, lv_seg, "Segmentation layer: " + SEG_URL)
+check_res(lv_seg, "segmentation")`));
+    }
+
+    cells.push(mdCell(
+`## Slab-wise fetch
+
+Chunked along z so that peak memory is the size of one slab rather than of the whole box — the
+same approach the other Jump tools' notebooks settled on after two attempts at predicting whole-box
+memory in advance both got it wrong in opposite directions.
+
+Every TIFF is written with \`bigtiff=True\`. Classic TIFF carries 32-bit offsets and dies with
+\`'I' format requires 0 <= number <= 4294967295\` once the *file* passes ~4 GB, which is unrelated
+to how carefully memory is managed. BigTIFF is read by FIJI/ImageJ exactly like any other .tif, so
+there is no reason to use it only where it is known in advance to be needed.`));
+    cells.push(codeCell(
+`import tifffile, os
+
+def fetch_to_tiff(g, levels, out_path, box_nm, bytes_per_voxel, label):
+    lv = levels[0]
+    arr = g[lv["path"]]
+    sl, names, out_shape, from_meta, res = nm_box_to_slices(lv, arr, box_nm, CFG_RES_ZYX)
+    print("%s: level %s, axes %s%s" % (label, lv["path"], names,
+          "" if from_meta else " (assumed -- not stated in the metadata)"))
+    print("   slices", sl, "-> shape", out_shape, "dtype", arr.dtype)
+    if any(s == 0 for s in out_shape):
+        print("   !! the box does not overlap this volume -- nothing to write."); return None
+    zi = names.index("z") if "z" in names else 0
+    plane = max(1, int(np.prod([s for i, s in enumerate(out_shape) if i != zi])))
+    zchunk = max(1, int(CHUNK_BUDGET_GB * 1e9 / (plane * bytes_per_voxel)))
+    z0, z1 = sl[zi].start, sl[zi].stop
+    print("   %d z-slices, %d per chunk" % (z1 - z0, zchunk))
+    with tifffile.TiffWriter(out_path, bigtiff=True) as tw:
+        for a in range(z0, z1, zchunk):
+            b = min(z1, a + zchunk)
+            s = list(sl); s[zi] = slice(a, b)
+            block = np.asarray(arr[tuple(s)])
+            tw.write(block, contiguous=True)
+            print("   ...%d/%d" % (b - z0, z1 - z0))
+    print("   wrote", out_path, "(%.1f MB)" % (os.path.getsize(out_path) / 1e6))
+    return out_path
+
+written = []`));
+
+    if (wantEM){
+      cells.push(mdCell("## EM cutout"));
+      cells.push(codeCell(
+`p = fetch_to_tiff(g_em, lv_em, "em_cutout.tif", BOX_NM, 2, "EM")
+if p: written.append(p)`));
+    }
+
+    if (wantSeg){
+      cells.push(mdCell(
+`## Segmentation cutout
+
+Segment IDs in these volumes are large integers that FIJI/ImageJ cannot show as a label image, so
+the saved TIFF uses small sequential label numbers and \`segmentation_label_lookup.csv\` maps each
+one back to its real ID. The remap is built in a first pass over the whole box before writing, so
+the same cell keeps the same label number in every slab — a per-slab numbering would give one cell
+several different labels down the stack, which looks like a segmentation error and is not one.`));
+      cells.push(codeCell(
+`import csv
+
+def fetch_segmentation(g, levels, out_path, lookup_path, box_nm):
+    lv = levels[0]; arr = g[lv["path"]]
+    sl, names, out_shape, from_meta, res = nm_box_to_slices(lv, arr, box_nm, CFG_RES_ZYX)
+    print("segmentation: level %s, axes %s -> shape %s, dtype %s" % (lv["path"], names, out_shape, arr.dtype))
+    if any(s == 0 for s in out_shape):
+        print("   !! the box does not overlap this volume -- nothing to write."); return None
+    zi = names.index("z") if "z" in names else 0
+    plane = max(1, int(np.prod([s for i, s in enumerate(out_shape) if i != zi])))
+    zchunk = max(1, int(CHUNK_BUDGET_GB * 1e9 / (plane * 20)))
+    z0, z1 = sl[zi].start, sl[zi].stop
+
+    print("   pass 1/2 -- collecting the distinct ids in this box")
+    ids = set()
+    for a in range(z0, z1, zchunk):
+        b = min(z1, a + zchunk)
+        s = list(sl); s[zi] = slice(a, b)
+        ids.update(np.unique(np.asarray(arr[tuple(s)])).tolist())
+    ids.discard(0)
+    ordered = sorted(ids)
+    remap = {v: i + 1 for i, v in enumerate(ordered)}     # 0 stays 0 = background
+    print("   %d distinct segments in this box" % len(ordered))
+    with open(lookup_path, "w", newline="") as f:
+        w = csv.writer(f); w.writerow(["label_in_tiff", "segment_id"])
+        for v in ordered: w.writerow([remap[v], v])
+
+    dtype = np.uint16 if len(ordered) < 65535 else np.uint32
+    print("   pass 2/2 -- remapping and writing as", dtype.__name__)
+    with tifffile.TiffWriter(out_path, bigtiff=True) as tw:
+        for a in range(z0, z1, zchunk):
+            b = min(z1, a + zchunk)
+            s = list(sl); s[zi] = slice(a, b)
+            block = np.asarray(arr[tuple(s)])
+            out = np.zeros(block.shape, dtype=dtype)
+            for v, lab in remap.items():
+                out[block == v] = lab
+            tw.write(out, contiguous=True)
+            print("   ...%d/%d" % (b - z0, z1 - z0))
+    print("   wrote", out_path, "and", lookup_path)
+    return out_path
+
+p = fetch_segmentation(g_seg, lv_seg, "segmentation_cutout.tif", "segmentation_label_lookup.csv", BOX_NM)
+if p: written.extend([p, "segmentation_label_lookup.csv"])`));
+    }
+
+    cells.push(mdCell("## Zip and download"));
+    cells.push(codeCell(
+`import zipfile
+name = "%s_%s.zip" % (DATASET_ID, ${pyStr((opts.boxLabel || "box").replace(/\s+/g, "_"))})
+if not written:
+    print("Nothing was written -- see the messages above.")
+else:
+    with zipfile.ZipFile(name, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in written:
+            z.write(f)
+    print("zipped:", written, "->", name)
+    try:
+        from google.colab import files; files.download(name)
+    except Exception:
+        print("(not on Colab -- take", name, "from the file browser)")`));
+
+    return {
+      cells: cells,
+      metadata: {
+        kernelspec: {name:"python3", display_name:"Python 3"},
+        language_info: {name:"python"},
+        colab: {name: (opts.datasetId || "region") + "_" + (opts.boxLabel || "box").replace(/\s+/g, "_") + ".ipynb", provenance: []}
+      },
+      nbformat: 4, nbformat_minor: 0
+    };
+  }
+
+  function downloadNotebook(opts){
+    var nb = buildNotebook(opts);
+    var filename = (opts.datasetId || "region") + "_" + (opts.boxLabel || "box").replace(/\s+/g, "_") + ".ipynb";
+    var blob = new Blob([JSON.stringify(nb, null, 1)], {type:"application/json"});
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  return { buildNotebook: buildNotebook, downloadNotebook: downloadNotebook, _bareUrl: bareUrl };
+})();
+</script>
 <script>/* ── ωJump logic ───────────────────────────────────────────────────────────────────────────
    The novel part of this tool, and the only part with real design risk: deciding WHERE to send
    the next user. Everything here is deliberately DOM-free and pure so it can be tested directly
@@ -1941,6 +2866,137 @@ UJ.wjump = (function(){
      given inside a type walk is anchored by construction, and must be recorded as such. */
   function walkIsAnchored(mode){ return String(mode).indexOf("type:") === 0; }
 
+  /* ── Filter and show ───────────────────────────────────────────────────────────────────────
+     2026-08-31, Søren: "we should add Filter and show to wJump with relevance for each dataset".
+
+     WHAT IS RELEVANT HERE IS NOT WHAT IS RELEVANT IN THE OTHER TOOLS, and that is the whole
+     design question. µJump filters a published table: cell type, cortical layer, vessel
+     proximity, m-type -- 144,118 rows of somebody else's classifier output. λJump and βJump
+     filter their own embedded detections: depth, diameter, volume, detector pass, marker
+     percentile. ωJump has NONE of that. There is no nucleus table, no layer model, no detector
+     and no published type for any of its forty-one volumes -- that absence is the tool's entire
+     premise. Its only data is what the community has put there.
+
+     So the dimensions are the ones that exist:
+       identity   what people have called it, and whether they agree (tallySummary's status)
+       organelles what has been logged inside it
+       region     a bounding box, same control as the other tools (core/regionbox.js)
+       near       within D µm of a cell someone has named something else
+     Søren chose these four directly when asked; box-coverage state and cross-volume roster
+     filtering were offered and not chosen, and are deliberately absent rather than built anyway.
+
+     `near` is the one that is new to this family. It exists because on a volume with no
+     annotation at all, "which cells sit next to a named X" is the question that turns a scatter
+     of independent guesses into an observation about tissue -- a lamellar cell beside a Schwann
+     cell means something a lamellar cell alone does not. It is deliberately a distance to ANOTHER
+     nucleus, never to itself, and it uses settledLabel rather than n.identity: identity is
+     whichever label sorted first and on a 2-2 tie that is iteration order, so a proximity result
+     built on it would report relationships nobody voted for. */
+
+  function dist3(a, b){
+    var dx = a[0]-b[0], dy = a[1]-b[1], dz = a[2]-b[2];
+    return Math.sqrt(dx*dx + dy*dy + dz*dz);
+  }
+
+  /* q = { identity, status, organelles:[kind], boxes:[nmBox], near:{label, umMax} }
+     Every field is optional and an omitted one does not filter. Returns
+     [{ n, box, nearHit }] -- box is the first region box the nucleus fell in (for the export),
+     nearHit is the neighbour that satisfied `near` (so the export can name it, which is the
+     answer as often as the match is). */
+  function filterNuclei(nuclei, q){
+    var ns = nuclei || [];
+    q = q || {};
+    var boxes = q.boxes || [];
+    var organelles = q.organelles || [];
+    var near = q.near && q.near.label ? q.near : null;
+    /* Precomputed once rather than per candidate: the neighbour set does not depend on which
+       nucleus is being tested, and rebuilding it inside the loop turns an O(n²) filter into an
+       O(n²) filter that also re-derives every settled label n times. */
+    var neighbours = null, nearMaxNm = 0;
+    if (near){
+      nearMaxNm = (near.umMax || 0) * 1000;
+      var want = String(near.label).toLowerCase();
+      neighbours = ns.filter(function(n){
+        var lab = settledLabel(n);
+        /* "__any__" -- next to anything anybody has settled on a name for. Useful on a volume
+           where five people have named five different things and no single label has enough
+           members to ask about on its own. */
+        return lab && (want === "__any__" || lab.toLowerCase() === want);
+      });
+    }
+
+    var out = [];
+    ns.forEach(function(n){
+      var s = tallySummary(n);
+
+      if (q.identity){
+        if (q.identity === "__unnamed__"){ if (s.labels.length) return; }
+        else if (settledLabel(n).toLowerCase() !== String(q.identity).toLowerCase()) return;
+      }
+      if (q.status && s.status !== q.status) return;
+
+      if (organelles.length){
+        var have = ((n && n.organelles) || []).map(function(o){ return o.kind; });
+        /* OR across checked kinds -- the natural reading of a checkbox list, and the same
+           semantics λJump and βJump use for their organelle filters. */
+        if (!organelles.some(function(k){ return have.indexOf(k) >= 0; })) return;
+      }
+
+      var box;
+      if (boxes.length){
+        box = null;
+        for (var b = 0; b < boxes.length; b++){
+          var r = boxes[b], p = n.pos;
+          if (p && p[0] >= r.xmin && p[0] <= r.xmax && p[1] >= r.ymin && p[1] <= r.ymax
+                && p[2] >= r.zmin && p[2] <= r.zmax){ box = r; break; }
+        }
+        if (!box) return;
+      }
+
+      var nearHit = null;
+      if (near){
+        for (var i = 0; i < neighbours.length; i++){
+          var m = neighbours[i];
+          if (m === n || m.id === n.id) continue;      // never its own neighbour
+          if (!m.pos || !n.pos) continue;
+          var d = dist3(n.pos, m.pos);
+          if (d <= nearMaxNm && (!nearHit || d < nearHit.distNm))
+            nearHit = { n:m, distNm:d, label:settledLabel(m) };
+        }
+        if (!nearHit) return;
+      }
+
+      out.push({ n:n, box:box || null, nearHit:nearHit });
+    });
+    return out;
+  }
+
+  /* The identity choices to offer, with counts, built from what is actually in this dataset --
+     there is no list to hardcode, which is the same reason walkModes builds its own. */
+  function filterLabels(nuclei){
+    var by = {};
+    (nuclei || []).forEach(function(n){
+      var lab = settledLabel(n); if (!lab) return;
+      var k = lab.toLowerCase();
+      if (!by[k]) by[k] = { label:lab, n:0 };
+      by[k].n++;
+    });
+    return Object.keys(by).sort().map(function(k){ return by[k]; });
+  }
+
+  /* Which organelle kinds have actually been logged in this dataset, with counts. Offering all
+     61 on a volume where two have ever been reported is a menu of 59 dead ends. */
+  function filterOrganelleKinds(nuclei){
+    var by = {};
+    (nuclei || []).forEach(function(n){
+      ((n && n.organelles) || []).forEach(function(o){
+        if (!o || !o.kind) return;
+        by[o.kind] = (by[o.kind] || 0) + 1;
+      });
+    });
+    return Object.keys(by).sort().map(function(k){ return { kind:k, n:by[k] }; });
+  }
+
   function buildState(dsId, posNm, known, cell, opts){
     var d = byId(dsId); if (!usable(d)) return null;
     /* Where the pixels come from. Fifteen of these are OpenOrganelle and share one template, so
@@ -2009,6 +3065,8 @@ UJ.wjump = (function(){
            nearestFew:nearestFew, ANNOT_MAX:ANNOT_MAX,
            walkIds:walkIds, walkModes:walkModes, walkIsAnchored:walkIsAnchored,
            settledLabel:settledLabel,
+           filterNuclei:filterNuclei, filterLabels:filterLabels,
+           filterOrganelleKinds:filterOrganelleKinds,
            buildState:buildState, viewerUrl:viewerUrl };
 })();
 </script>
@@ -3219,6 +4277,265 @@ UJ.app = (function(){
       + "&#8599;</a> and add it if there is one.";
   }
 
+  /* ── Filter and show ─────────────────────────────────────────────────────────────────────────
+     2026-08-31. The panel; the matching itself is W.filterNuclei in wjump_logic.js, where it can
+     be tested without a browser. See that function's comment for why these four dimensions and
+     not the ones the other tools have.
+
+     PER-DATASET IS THE WHOLE POINT. Søren asked for Filter and show "with relevance for each
+     dataset", and on this tool that cannot mean one fixed set of controls: the identity list, the
+     organelle list and the neighbour list are all built from what the community has actually put
+     into the SELECTED volume, and they are rebuilt on every dataset switch. A menu offering all
+     61 organelle kinds on a volume where two have ever been logged is 59 dead ends, and a menu
+     offering cell types nobody has named here is worse -- it implies this dataset has them. */
+  var FRESULT = null;              // last preview, or null when the controls have changed since
+
+  function fEl(id){ return el(id); }
+
+  function filterInvalidate(){
+    FRESULT = null;
+    if (fEl("f-csv")) fEl("f-csv").disabled = true;
+    if (fEl("f-open")) fEl("f-open").disabled = true;
+    if (fEl("f-status-msg")) fEl("f-status-msg").textContent = "";
+    if (fEl("f-results")) fEl("f-results").innerHTML = "";
+  }
+
+  /* Rebuilt on every dataset switch and after every save, because both change what is in here.
+     Selections are PRESERVED across a rebuild when the option still exists -- switching dataset
+     and back should not silently clear what you had chosen, and an option that has genuinely
+     disappeared cannot be kept. */
+  function renderFilterControls(){
+    if (!fEl("f-identity")) return;
+    var labels = W.filterLabels(STATE.nuclei);
+    var kinds  = W.filterOrganelleKinds(STATE.nuclei);
+
+    var keepId = fEl("f-identity").value, keepNear = fEl("f-near-label").value;
+    var checked = {};
+    document.querySelectorAll("#f-organelles input:checked").forEach(function(cb){ checked[cb.value] = 1; });
+
+    fEl("f-identity").innerHTML =
+      "<option value=''>Not filtering by this</option>"
+      + "<option value='__unnamed__'>Nobody has named it yet</option>"
+      + labels.map(function(l){
+          return "<option value='" + esc(l.label) + "'>" + esc(l.label) + " (" + l.n + ")</option>";
+        }).join("");
+    fEl("f-identity").value = keepId;
+    if (fEl("f-identity").selectedIndex < 0) fEl("f-identity").value = "";
+
+    fEl("f-near-label").innerHTML =
+      "<option value=''>Not filtering by this</option>"
+      + (labels.length ? "<option value='__any__'>any named cell</option>" : "")
+      + labels.map(function(l){
+          return "<option value='" + esc(l.label) + "'>" + esc(l.label) + " (" + l.n + ")</option>";
+        }).join("");
+    fEl("f-near-label").value = keepNear;
+    if (fEl("f-near-label").selectedIndex < 0) fEl("f-near-label").value = "";
+
+    fEl("f-organelles").innerHTML = kinds.length
+      ? ("<div style='display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:4px'>" + kinds.map(function(k){
+          return "<label style='font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer'>"
+            + "<input type='checkbox' value='" + esc(k.kind) + "' style='width:auto'"
+            + (checked[k.kind] ? " checked" : "") + ">"
+            + esc(O.shortOf(k.kind)) + " (" + k.n + ")</label>";
+        }).join("") + "</div>")
+      /* Not an empty box. "Nothing has been logged here" is a fact about this dataset and worth
+         saying; a blank space reads as a control that failed to render. */
+      : "<p class='hint' style='margin:4px 0 0'>Nobody has logged an organelle in this volume yet, "
+        + "so there is nothing to filter by.</p>";
+    document.querySelectorAll("#f-organelles input").forEach(function(cb){
+      cb.addEventListener("change", filterInvalidate);
+    });
+
+    if (fEl("filtersummary"))
+      fEl("filtersummary").textContent = STATE.nuclei.length
+        ? (STATE.nuclei.length + (STATE.nuclei.length === 1 ? " nucleus" : " nuclei") + " to filter")
+        : "nothing found in this volume yet";
+  }
+
+  function filterQuery(){
+    return {
+      identity: fEl("f-identity") ? fEl("f-identity").value : "",
+      status:   fEl("f-status") ? fEl("f-status").value : "",
+      organelles: Array.prototype.map.call(
+        document.querySelectorAll("#f-organelles input:checked"), function(cb){ return cb.value; }),
+      boxes: REGION ? REGION.getBoxesNM() : [],
+      near: (fEl("f-near-label") && fEl("f-near-label").value)
+        ? { label: fEl("f-near-label").value,
+            /* A blank or unparseable distance means 10 µm, the field's own default, rather than
+               0 -- which would silently match nothing and look like "no cells are near anything". */
+            umMax: (parseFloat(fEl("f-near-um").value) || 10) }
+        : null
+    };
+  }
+
+  function runFilter(){
+    var q = filterQuery();
+    FRESULT = W.filterNuclei(STATE.nuclei, q);
+    var n = FRESULT.length;
+    fEl("f-status-msg").innerHTML = !STATE.nuclei.length
+      ? "Nothing has been found in this volume yet — explore a box first."
+      : (n === 0 ? "No nuclei match — loosen a filter."
+                 : "<b>" + n + "</b> of " + STATE.nuclei.length + " nuclei match.");
+    fEl("f-csv").disabled = n === 0;
+    fEl("f-open").disabled = n === 0;
+    fEl("f-results").innerHTML = !n ? "" :
+      ("<table style='margin-top:10px'><tr><th>position (nm)</th><th>what people said</th>"
+       + (q.near ? "<th>nearest " + esc(q.near.label === "__any__" ? "named cell" : q.near.label) + "</th>" : "")
+       + "</tr>"
+       + FRESULT.slice(0, 200).map(function(m){
+           var s = W.tallySummary(m.n);
+           return "<tr><td><a href='" + esc(W.viewerUrl(DS, m.n.pos, STATE.nuclei, null, { mark:true }))
+             + "' target='_blank' rel='noopener'>" + m.n.pos.map(function(v){ return Math.round(v); }).join(", ")
+             + " &#8599;</a></td><td>"
+             + (s.labels.length ? esc(s.leader) + " <span class='hint'>(" + s.total + " vote"
+                 + (s.total === 1 ? "" : "s") + ", " + esc(s.status) + ")</span>"
+                 : "<span class='hint'>not named yet</span>")
+             + "</td>"
+             + (q.near ? "<td>" + (m.nearHit ? esc(m.nearHit.label) + " <span class='hint'>at "
+                 + (m.nearHit.distNm / 1000).toFixed(1) + " µm</span>" : "") + "</td>" : "")
+             + "</tr>";
+         }).join("")
+       + "</table>"
+       + (n > 200 ? "<p class='hint'>Showing the first 200; the CSV has all " + n + ".</p>" : ""));
+  }
+
+  /* CSV, not XLSX. The other tools link SheetJS for their Excel export; ωJump ships as a single
+     self-contained file with no external script at all, and adding a CDN dependency for one
+     button would trade that for a convenience. Semicolon-separated, because Søren's Excel uses
+     the comma as a decimal separator and a comma-separated file opens there as one column. */
+  function filterCsv(){
+    if (!FRESULT || !FRESULT.length) return;
+    var q = filterQuery();
+    var head = ["nucleus_id", "x_nm", "y_nm", "z_nm", "settled_identity", "leading_label",
+                "votes_total", "agreement", "rejects", "organelles_reported",
+                "region_box", "region_box_corners_nm", "near_label", "near_distance_um"];
+    var rows = [head];
+    FRESULT.forEach(function(m){
+      var s = W.tallySummary(m.n);
+      rows.push([
+        m.n.id,
+        Math.round(m.n.pos[0]), Math.round(m.n.pos[1]), Math.round(m.n.pos[2]),
+        W.settledLabel(m.n), s.leader, s.total, s.status, s.rejects,
+        ((m.n.organelles || []).map(function(o){ return O.shortOf(o.kind); }).sort().join(" | ")),
+        m.box ? ("Box " + m.box.n) : "",
+        m.box ? (m.box.x1 + ", " + m.box.y1 + ", " + m.box.z1 + " to " + m.box.x2 + ", " + m.box.y2 + ", " + m.box.z2) : "",
+        m.nearHit ? m.nearHit.label : "",
+        m.nearHit ? (m.nearHit.distNm / 1000).toFixed(2) : ""
+      ]);
+    });
+    var csv = rows.map(function(r){
+      return r.map(function(v){
+        var s = String(v == null ? "" : v);
+        return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(";");
+    }).join("\n");
+    var blob = new Blob(["﻿" + csv], { type:"text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = DS + "_filtered_nuclei.csv";
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  /* One link centred on the matches, with only the matched nuclei annotated. Centred on their
+     centroid rather than on the first one: a link that opens at whichever match happened to sort
+     first is a link that opens somewhere arbitrary. */
+  function filterOpenAll(){
+    if (!FRESULT || !FRESULT.length) return;
+    var c = [0,0,0];
+    FRESULT.forEach(function(m){ c[0]+=m.n.pos[0]; c[1]+=m.n.pos[1]; c[2]+=m.n.pos[2]; });
+    c = c.map(function(v){ return v / FRESULT.length; });
+    window.open(W.viewerUrl(DS, c, FRESULT.map(function(m){ return m.n; })), "_blank", "noopener");
+  }
+
+  /* The region box. Nanometres, so res is 1:1 -- ωJump's coordinates ARE nanometres everywhere
+     else in the tool (its Neuroglancer states declare 1e-9 m per unit), and converting to a voxel
+     frame here purely to convert back would invent a number the user never sees.
+
+     The outline drawn behind the boxes is the SELECTED dataset's extent, so it has to be rebuilt
+     on every dataset switch -- which regionbox.js does not do, because in every other tool the
+     volume never changes. Rather than teach it to, the extents callback reads DS at call time and
+     the panel is remounted on switch (see selectDataset). */
+  var REGION = null;
+
+  function mountRegionBox(){
+    var boxesEl = el("regionBoxes");
+    if (!boxesEl || !UJ.regionbox) return;
+    boxesEl.innerHTML = "";                     // a remount must not stack a second set of rows
+    var d = W.byId(DS);
+    UJ.cfg.regionbox = {
+      unit: "nm",
+      extents: function(){
+        var ext = W.extentNm(DS), org = W.originNm(DS);
+        return [{ name: (d && d.tissue) || DS, color: "#58a6ff",
+                  xmin: org[0], xmax: org[0] + ext[0],
+                  ymin: org[1], ymax: org[1] + ext[1],
+                  zmin: org[2], zmax: org[2] + ext[2] }];
+      },
+      depthCaption: "Y",
+      /* Meshes are never offered here and that is the dataset, not an omission: none of these
+         forty-one volumes publishes a mesh, which is the same reason ωJump has no 3D viewer.
+         Segmentation is offered only on the eleven that actually carry a segmentation layer. */
+      colab: { em: true, seg: !!segLayerOf(d), meshes: false },
+      colabWhy: {
+        seg: "This volume publishes image data only — no segmentation layer is served for it, so there is nothing to cut out. Eleven of ωJump's volumes do have one; this is not among them.",
+        meshes: "None of ωJump's volumes publishes meshes — that is why this tool has no 3D viewer. A segmentation cutout is the nearest equivalent, on the volumes that have one."
+      }
+    };
+    REGION = UJ.regionbox.mount({
+      boxesEl: boxesEl,
+      addBtn: el("regionAddBox"),
+      onEl: el("filterRegionOn"),
+      vizEl: el("regionViz"),
+      res: [1, 1, 1],
+      onChange: filterInvalidate,
+      /* ωJump's volumes are OME-Zarr, which core/colabexport.js's cloud-volume template cannot
+         read at all -- hence core/colabzarr.js and this hand-off. See colabzarr.js's header. */
+      download: function(req){
+        var dd = W.byId(DS);
+        var seg = segLayerOf(dd);
+        UJ.colabzarr.downloadNotebook({
+          datasetId: DS,
+          datasetLabel: (UJ.cfg.label || "ωJump") + " — " + ((dd && dd.tissue) || DS),
+          emSource: emSourceOf(dd),
+          segSource: (req.include.seg && seg) ? seg.source : "",
+          resNmZYX: dd ? (Array.isArray(dd.res_nm) ? dd.res_nm : [dd.res_nm, dd.res_nm, dd.res_nm]) : [],
+          boxNM: req.boxNM, boxLabel: req.boxLabel,
+          include: { em: req.include.em, seg: req.include.seg && !!seg }
+        });
+      }
+    });
+  }
+
+  /* The EM and segmentation sources for one dataset, derived exactly the way buildState derives
+     them for the viewer -- same default template for the OpenOrganelle rows, same explicit
+     `source` for everything else. Kept as two small functions rather than duplicated inline so
+     the notebook can never point at a different volume than the viewer does. */
+  function emSourceOf(d){
+    if (!d) return "";
+    if (d.source) return d.source;
+    return "zarr://s3://" + UJ.cfg.dataset.bucket + "/" + d.id + "/" + d.id + ".zarr/recon-1/em/fibsem-uint8";
+  }
+  function segLayerOf(d){
+    if (!d) return null;
+    var hit = null;
+    (d.extraLayers || []).forEach(function(L){
+      if (!hit && L.type === "segmentation") hit = L;
+    });
+    return hit;
+  }
+
+  function wireFilter(){
+    if (!el("f-run")) return;
+    ["f-identity", "f-status", "f-near-label", "f-near-um"].forEach(function(id){
+      if (el(id)) el(id).addEventListener("change", filterInvalidate);
+    });
+    if (el("f-near-um")) el("f-near-um").addEventListener("input", filterInvalidate);
+    el("f-run").addEventListener("click", runFilter);
+    el("f-csv").addEventListener("click", filterCsv);
+    el("f-open").addEventListener("click", filterOpenAll);
+  }
+
   function render(){
     var p = W.progress(DS, STATE.visited, STATE.nuclei);
     var needs = STATE.nuclei.filter(function(n){ return W.identifyNeed(n) > 0; }).length;
@@ -3235,6 +4552,13 @@ UJ.app = (function(){
     renderIdentify();
     renderMap();
     renderList();
+    /* The identity, organelle and neighbour menus are built from what is in this volume, so they
+       are rebuilt whenever anything is saved -- naming a nucleus can add a cell type nobody had
+       used here before, and a menu that only refreshed on dataset switch would not offer it until
+       the page was reloaded. A live preview is invalidated at the same time rather than left
+       showing a count that no longer matches the data behind it. */
+    renderFilterControls();
+    if (FRESULT) filterInvalidate();
   }
 
   /* ── actions ─────────────────────────────────────────────────────────────────────────────── */
@@ -3417,6 +4741,14 @@ UJ.app = (function(){
       + ({ gt:  "expert organelle ground truth exists for this dataset",
            inf: "machine organelle predictions only — no ground truth here",
            em:  "image only — no labels of any kind" }[d.tier] || "");
+    /* Remounted per dataset, not once at init, because the region box draws the SELECTED volume's
+       outline behind the coordinates and the volumes here differ by four orders of magnitude --
+       a 20 µm corpuscle and a 2.7 mm cortical sheet cannot share one drawing scale. Any boxes
+       already typed are dropped with the remount, which is the right behaviour: a coordinate that
+       meant something in the choroid plexus means somewhere else entirely in the thalamus, and
+       carrying it across would silently filter the new volume by the old one's geometry. */
+    mountRegionBox();
+    filterInvalidate();
     return STORE.load().then(function(){ pickBox(); render(); })
       .catch(function(e){ msg("could not load the map: " + e.message, false); pickBox(); render(); });
   }
@@ -3465,6 +4797,9 @@ UJ.app = (function(){
     });
     if (el("found")) el("found").addEventListener("click", submitClicked);
     if (el("empty")) el("empty").addEventListener("click", submitEmpty);
+    /* Wired once; the CONTROLS inside are rebuilt per dataset (renderFilterControls) and the
+       region box remounted per dataset (mountRegionBox), both from selectDataset below. */
+    wireFilter();
     /* THE one decision about which dataset the page opens on -- previously made twice, once here
        as enabled()[0] (the smallest) and once above as W.defaultDataset() (the first of the first
        group). They agreed by accident until the default changed. */

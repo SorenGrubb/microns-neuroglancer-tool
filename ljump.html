@@ -590,6 +590,21 @@ Identity and organelles read the community backend, since neither can live in a 
 <div id="fOrganellesBox"></div>
 </div>
 
+<!-- Bounding-box limitation + per-box Colab download (2026-08-31). Same control µJump has had
+     since 2026-07-31, now shared through core/regionbox.js rather than pasted; see that file's
+     header for why. Coordinates are VOXELS, the frame a user pastes out of Neuroglancer, at this
+     dataset's 4/4/40 nm. -->
+<div style="margin-top:12px">
+<label style="font-size:12px" title="Two diagonal corners per box, in the same voxel coordinates as the main search box on the Jump tab (X/Y at 4 nm/voxel, Z at 40 nm/voxel). Either diagonal works — order doesn't matter. Add as many boxes as you like; a nucleus matches if it falls inside any of them. You can paste x, y, z into either corner's x field — it splits automatically."><input type="checkbox" id="filterRegionOn"> Limit to region(s) (bounding box)</label>
+<div id="regionBoxes"></div>
+<button type="button" class="idbtn" id="regionAddBox" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another box</button>
+<div id="regionViz"></div>
+<p class="hint" style="margin-top:6px">Each box has its own &ldquo;Colab notebook&rdquo; button, which
+writes a <code>.ipynb</code> you upload to Google&nbsp;Colab and run to download that box&rsquo;s EM
+imagery. Nothing is downloaded from this page &mdash; the notebook does the fetching.
+Lee16 publishes no segmentation, so those two tickboxes are shown but disabled.</p>
+</div>
+
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
 <button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
@@ -795,6 +810,60 @@ UJ.cfg.viewer = {
   em:   "precomputed://s3://open-neurodata/lee/lee16/image"
 };
 
+/* Per-dataset EM/segmentation source for core/colabexport.js's region-download notebook
+   (2026-08-31). Bare s3:// path, NOT the "precomputed://" form above: the generated Python
+   hands this straight to CloudVolume(path, use_https=True), which resolves open-neurodata's
+   public bucket anonymously -- the same way the Neuroglancer source resolves without a token.
+
+   segSource IS EMPTY, AND THAT IS THE DATASET, NOT AN OMISSION. Lee16's public release is
+   image only: no segmentation, no meshes, no root IDs, which is why this whole page has no 3D
+   viewer, no mesh volume and no connectivity panel (see the "NO UJ.cfg.mesh" comment above --
+   the same statement, made once more where the notebook would otherwise look for a segmentation
+   path and find an empty string). Søren asked (2026-08-31) that the notebook's Segmentation and
+   Meshes tickboxes still be SHOWN, disabled, with the reason on them, rather than hidden: a
+   hidden control says nothing, a disabled one says the feature exists and this volume has no
+   data for it. UJ.cfg.regionbox.colab below is what does that. */
+UJ.cfg.em = {
+  emSource:  "s3://open-neurodata/lee/lee16/image",
+  segSource: ""
+};
+
+/* The region-box control (core/regionbox.js). Two outlines are drawn behind the boxes, and the
+   difference between them is the single most useful thing this preview can show for Lee16:
+   the SERVED volume is 163,840 x 163,840 x 822 voxels (655 x 655 x 32.9 µm), but only about
+   454 x 447 µm of that is tissue -- the rest is black padding. A box typed into the padding is
+   a valid cutout that downloads nothing but black, and the only way to know before waiting for
+   a Colab run is to see it drawn outside the inner outline. Both rectangles come from the same
+   embedded ljumpdata payload the rest of the page reads (size_vox and tissue_box), converted
+   to nm here rather than retyped. */
+UJ.cfg.regionbox = {
+  /* A FUNCTION, not an array, and that is load order rather than style: #ljumpdata is a
+     <script type="application/json"> block further down this file, so at the moment THIS script
+     runs the parser has not created it yet. Built eagerly, getElementById returned null, the
+     catch below swallowed it, and the defaults drew one outline instead of two -- a preview that
+     looked completely fine and was quietly missing the tissue box. regionbox.js calls this at
+     mount time, after DOMContentLoaded, when the element exists. No defaults are supplied any
+     more either: if the payload cannot be read that is a fault worth seeing, and regionbox.js
+     refuses a zero-span extent with a message naming this exact cause. */
+  extents: function(){
+    var d = JSON.parse(document.getElementById("ljumpdata").textContent);
+    var r = d.res_nm, s = d.size_vox, t = d.tissue_box;
+    var out = [{ name:"Served volume", color:"#58a6ff",
+                 xmin:0, xmax:s[0]*r[0], ymin:0, ymax:s[1]*r[1], zmin:0, zmax:s[2]*r[2] }];
+    if (t) out.push({ name:"Tissue", color:"#3fb950",
+                      xmin:t.x0*r[0], xmax:t.x1*r[0],
+                      ymin:t.y0*r[1], ymax:t.y1*r[1],
+                      zmin:t.z0*r[2], zmax:t.z1*r[2] });
+    return out;
+  },
+  depthCaption: "Y – depth (pia at top)",
+  colab: { em: true, seg: false, meshes: false },
+  colabWhy: {
+    seg:    "Lee16's public release is image only — there is no segmentation volume to cut out. Nothing to enable here; this is the dataset, not a missing feature.",
+    meshes: "Meshes need a segmentation, and Lee16 publishes none — so there are no segment IDs, no root IDs and no meshes for any cell in this volume."
+  }
+};
+
 /* Dataset provenance, rendered into the About and References panels and into every export.
    ODC-By, NOT CC-BY -- the Open Data Commons Attribution Licence. It carries an attribution
    requirement of its own and is a different instrument from Creative Commons; do not
@@ -824,6 +893,8 @@ document.addEventListener("DOMContentLoaded", function(){
 
 </script>
 
+<script src="core/colabexport.js"></script>
+<script src="core/regionbox.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/ontology.js"></script>
 <script src="core/panel.js"></script>
@@ -1574,6 +1645,26 @@ function layerFilterHtml(){
     + '</div>';
 }
 
+/* Set by the filter IIFE below once core/regionbox.js is mounted; read by runFilterLjump and by
+   the Excel export. A plain module-level handle rather than a parameter because runFilterLjump is
+   called from three places (preview, export, step-through) and threading a fourth argument
+   through all of them would have been the change most likely to miss one. */
+var LJ_REGION = null;
+
+/* A nucleus matches the region filter if it falls inside ANY box -- OR, not AND, which is the
+   only reading that makes "+ Add another box" mean anything. Returns the box it landed in so the
+   export can name it; null when the filter is off (everything passes) is distinguished from
+   "boxes are on and this nucleus is in none of them" by the caller, not here. */
+function ljumpBoxFor(i, boxes){
+  if(!boxes || !boxes.length) return undefined;      // not filtering by region
+  var nx=BX[i]*UJ_RX, ny=BY[i]*UJ_RY, nz=BZ[i]*UJ_RZ;
+  for(var b=0;b<boxes.length;b++){
+    var q=boxes[b];
+    if(nx>=q.xmin&&nx<=q.xmax&&ny>=q.ymin&&ny<=q.ymax&&nz>=q.zmin&&nz<=q.zmax) return q;
+  }
+  return null;                                        // on, but this nucleus is outside every box
+}
+
 function runFilterLjump(){
   /* [] means "not filtering by this" -- every nucleus passes. Any number checked means OR,
      the natural reading of a checkbox list and the same semantics the organelle list uses. */
@@ -1590,6 +1681,10 @@ function runFilterLjump(){
   const identEl=document.getElementById("fIdentity");
   const identSel=identEl?identEl.value:"";
   const organelleSel=Array.from(document.querySelectorAll(".forganelle:checked")).map(function(cb){return cb.value;});
+  /* [] when the checkbox is off OR when it is on but no box has all six corners filled in.
+     Those two are deliberately the same here: a half-typed box must not silently exclude every
+     nucleus, which is what "on means restrict" would do while the user is still typing. */
+  const regionBoxes=LJ_REGION?LJ_REGION.getBoxesNM():[];
 
   const matches=[];
   for(let i=0;i<N;i++){
@@ -1620,7 +1715,9 @@ function runFilterLjump(){
       const have=ljumpOrganelleKindsOf(i);
       if(!organelleSel.some(function(k){return have.indexOf(k)>=0;})) continue;
     }
-    matches.push({row:{i:i}});
+    const box=ljumpBoxFor(i,regionBoxes);
+    if(box===null) continue;                 // region filter is on and this nucleus is outside it
+    matches.push({row:{i:i},box:box||null});
   }
   return matches;
 }
@@ -1651,7 +1748,15 @@ function buildColumnsLjump(){
         const info=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined")&&ORGANELLE_KIND_BY_VALUE[k];
         return info?info.short:k;
       }).sort().join("; ");     // semicolon, not comma: Søren's Excel uses comma as the
-    }}                          // decimal separator and a comma-joined list misreads there
+    }},                         // decimal separator and a comma-joined list misreads there
+    /* Blank unless the region filter was on. Corners are printed AS TYPED (x1..z2), not as the
+       sorted xmin/xmax the matching uses: either diagonal is accepted, so corner 1 is not
+       necessarily the minimum corner, and printing the sorted pair would show the user numbers
+       they never entered. */
+    {header:"region_box",get:function(m){return m.box?("Box "+m.box.n):"";}},
+    {header:"region_box_corners_voxel",get:function(m){
+      return m.box?(m.box.x1+", "+m.box.y1+", "+m.box.z1+"  to  "+m.box.x2+", "+m.box.y2+", "+m.box.z2):"";
+    }}
   ];
 }
 
@@ -1665,6 +1770,26 @@ function buildColumnsLjump(){
   if(!runBtn||!dlBtn||!layersBox) return;   // filter tab markup not present on this build
   layersBox.innerHTML=layerFilterHtml();
   let lastMatches=null;
+  /* The region-box control. Mounted before anything else in this IIFE reads LJ_REGION, and
+     guarded on the markup being present so a build without the region block (or a check harness
+     that stubs the tab out) fails by having no region filter rather than by throwing here and
+     taking the whole filter tab with it.
+
+     rootIdsInBox returns [] unconditionally, and that is correct rather than lazy: Lee16 has no
+     segmentation and therefore no root IDs at all, so the Meshes tickbox is disabled and
+     regionbox.js never calls this. It is supplied anyway so that the day this dataset gains a
+     segmentation, the only change needed is the cfg. */
+  if(document.getElementById("regionBoxes")){
+    LJ_REGION=UJ.regionbox.mount({
+      boxesEl:document.getElementById("regionBoxes"),
+      addBtn:document.getElementById("regionAddBox"),
+      onEl:document.getElementById("filterRegionOn"),
+      vizEl:document.getElementById("regionViz"),
+      res:UJ.cfg.res,
+      onChange:function(){ invalidatePreview(); },
+      rootIdsInBox:function(){ return []; }
+    });
+  }
   function invalidatePreview(){
     lastMatches=null;
     dlBtn.disabled=true;
