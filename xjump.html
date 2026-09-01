@@ -221,6 +221,12 @@ try{var _t=localStorage.getItem("ujump_theme");
  /* One class per layer, worn by both the band in the SVG and its swatch in the key. The opacities
     differ per theme on purpose: the accent at 20% reads on the dark ground and is nearly invisible
     on white, so a single number could not serve both. */
+ /* The two unsampled bands are HATCHED, not tinted. A flat tint would read as a fourth layer;
+    diagonal lines read as "nothing was measured here", which is what they mean. The key's swatch
+    uses a CSS gradient rather than the SVG pattern, since one cannot be referenced from the other. */
+ .lay-un{fill:url(#m3d-hatch)} .lay-un-line{stroke:var(--mut);stroke-width:1.2;opacity:.22}
+ .lkey-swatch.lay-un{background:repeating-linear-gradient(45deg,var(--mut) 0 1px,
+   transparent 1px 4px);opacity:.6}
  .lay-ml{fill:var(--mut);fill-opacity:.16} .lkey-swatch.lay-ml{background:var(--mut);opacity:.4}
  .lay-pcl{fill:var(--warn);fill-opacity:.6} .lkey-swatch.lay-pcl{background:var(--warn)}
  .lay-gl{fill:var(--accent);fill-opacity:.2} .lkey-swatch.lay-gl{background:var(--accent);opacity:.45}
@@ -1361,6 +1367,16 @@ UJ.xjump = (function(){
     var rows = seedList().filter(function(r){ return r.pos && r.whole; });
     var pcs = rows.filter(function(r){
       return r.type === "pc" && !seedZSuspect(r.pos, "pc"); });
+    /* The other Purkinje records -- the ones whose z is the stand-in. Their x and y are real, and
+       plotted they turn out to be something better than junk: they sit as a 190 µm cloud
+       SUPERFICIAL to the soma band, which is the molecular layer's thickness and where a Purkinje
+       cell's dendrites are. So they are not a second Purkinje layer -- a layer is one soma thick,
+       and no fit could smear one over 190 µm -- they are Purkinje-cell points inside the molecular
+       layer, and their outer envelope is the one measurement this database offers of how far the
+       molecular layer reaches. Used for that and nothing else: never for a soma, never for a
+       depth. */
+    var pcOuter = rows.filter(function(r){
+      return r.type === "pc" && seedZSuspect(r.pos, "pc"); });
     var grcs = rows.filter(function(r){
       return r.type === "grc" && !/^ml_grc|^grc_ml/.test(r.name); });
 
@@ -1375,6 +1391,7 @@ UJ.xjump = (function(){
       var inBin = function(r){ return r.pos[0] >= x0 && r.pos[0] < x1; };
       var py = pcs.filter(inBin).map(function(r){ return r.pos[1]; });
       var gy = grcs.filter(inBin).map(function(r){ return r.pos[1]; });
+      var oy = pcOuter.filter(inBin).map(function(r){ return r.pos[1]; });
       band.push({ x0:x0, x1:x1, nPc:py.length, nGrc:gy.length,
                   /* Both populations present in this bin: the only place the drawing may claim to
                      be showing a measured boundary rather than an interpolation. */
@@ -1387,12 +1404,16 @@ UJ.xjump = (function(){
                   pcMid: py.length ? pct(py, 0.5) : null,
                   /* The granular layer's far edge. The 95th percentile rather than the maximum:
                      one stray reconstruction should not stretch a layer boundary by 100 µm. */
-                  glHi: gy.length >= 10 ? pct(gy, 0.95) : null });
+                  glHi: gy.length >= 10 ? pct(gy, 0.95) : null,
+                  /* How far out the molecular layer is known to reach, from the Purkinje points
+                     above the soma band. 5th percentile, same reasoning as glHi's 95th. */
+                  nOut: oy.length,
+                  mlLo: oy.length >= 5 ? pct(oy, 0.05) : null });
     }
     /* Bins with nothing in them -- the block's two ends have no proofread cells at all -- take the
        nearest measured value rather than collapsing to zero, and are MARKED so the drawing can
        show them as unmeasured rather than as fact. */
-    ["pcMid", "pcLo", "pcHi", "glHi"].forEach(function(k){
+    ["pcMid", "pcLo", "pcHi", "glHi", "mlLo"].forEach(function(k){
       var last = null, j;
       for (j = 0; j < band.length; j++){
         if (band[j][k] == null){ band[j][k + "Est"] = true; band[j][k] = last; }
@@ -1416,9 +1437,24 @@ UJ.xjump = (function(){
       }
     });
     LAYERS = { bins: bins, band: band, ext: ext,
-               nPc: pcs.length, nGrc: grcs.length,
-               pcDropped: rows.filter(function(rr){
-                 return rr.type === "pc" && seedZSuspect(rr.pos, "pc"); }).length };
+               nPc: pcs.length, nGrc: grcs.length, nOuter: pcOuter.length,
+               pcDropped: pcOuter.length };
+    /* HOW MUCH OF THE BLOCK THIS ACCOUNTS FOR, and it is not most of it. Søren, 2026-09-01, looking
+       at the paper's own ROI figure: "We should have a Purkinje cell layer going both up and down
+       and separated by a white matter layer". He is describing a folium -- the fold the ROI box is
+       drawn across -- and a folium has cortex on both limbs with white matter down its core
+       (Univ. of Minnesota veterinary neuroanatomy, cerebellar folium).
+       The proofread cells do not show that. Every one of the 5,318 lies between y = 118 µm and
+       y = 522 µm; below that the block continues for another 400 µm with nothing in it at all, and
+       that is exactly where a second Purkinje layer and the white matter core would be. So the
+       diagram states the extent it covers and marks the rest as unsampled, rather than either
+       drawing a second layer nobody measured or implying the block ends where the cells do. */
+    var lo = Infinity, hi = -Infinity;
+    rows.forEach(function(r){
+      if (r.pos[1] < lo) lo = r.pos[1];
+      if (r.pos[1] > hi) hi = r.pos[1];
+    });
+    LAYERS.sampledY = isFinite(lo) ? [lo, hi] : null;
     return LAYERS;
   }
 
@@ -1432,10 +1468,16 @@ UJ.xjump = (function(){
                      Math.max(0, Math.floor(posVox[0] / ext[0] * L.band.length)));
     var b = L.band[i], y = posVox[1], r = resXYZ();
     if (b.pcLo == null || b.glHi == null) return null;
-    var name = y < b.pcLo ? "molecular layer"
+    /* Five outcomes, not three. The two "not sampled" ones matter more than the layers: outside the
+       range the proofread cells cover, this page knows nothing, and the deep one is where Søren's
+       second Purkinje layer and the folium's white matter would be. Calling that "molecular layer"
+       or "granular layer" because it is on that side of a boundary would be the fit answering a
+       question it was never given data for. */
+    var name = (b.mlLo != null && y < b.mlLo) ? "unsampled — outside the proofread cells"
+             : y < b.pcLo ? "molecular layer"
              : y <= b.pcHi ? "Purkinje cell layer"
              : y <= b.glHi ? "granular layer"
-             : "below the proofread granule cells";
+             : "unsampled — deeper than any proofread cell";
     var mid = b.pcMid == null ? (b.pcLo + b.pcHi) / 2 : b.pcMid;
     return { layer: name, bin: i, nominal: !!b.pcNominal,
              /* Signed, in nanometres: negative is superficial to the Purkinje layer (towards the
@@ -2740,9 +2782,12 @@ UJ.app = (function(){
   function barsHtml(rows, total){
     var max = rows.reduce(function(m, r){ return Math.max(m, r.n); }, 0) || 1;
     return "<div class='bars'>" + rows.map(function(r){
+      /* Floored at 0.4% so a category with one cell in it draws a sliver rather than nothing: a
+         bar of zero width beside a count of 1 reads as "none", which is a different claim. The
+         count is printed beside every bar, so the floor cannot mislead about size. */
       return "<div class='bar'><span>" + esc(r.label) + "</span>"
         + "<span class='track'><span class='fill' style='width:"
-        + (r.n / max * 100).toFixed(1) + "%'></span></span>"
+        + Math.max(0.4, r.n / max * 100).toFixed(1) + "%'></span></span>"
         + "<span class='n'>" + r.n.toLocaleString()
         + (total ? " · " + (r.n / total * 100).toFixed(1) + "%" : "") + "</span></div>";
     }).join("") + "</div>";
@@ -3158,9 +3203,11 @@ UJ.app = (function(){
      invisible on white; a single number cannot serve both. The legend swatches wear the same
      classes, so a colour can never drift between the drawing and the key. */
   var LAYER_STYLE = [
-    { cls:"lay-ml",  label:"molecular layer" },
-    { cls:"lay-pcl", label:"Purkinje cell layer" },
-    { cls:"lay-gl",  label:"granular layer" }
+    { cls:"lay-un",  label:"not sampled",           top:null,    bot:"mlLo" },
+    { cls:"lay-ml",  label:"molecular layer",       top:"mlLo",  bot:"pcLo" },
+    { cls:"lay-pcl", label:"Purkinje cell layer",   top:"pcLo",  bot:"pcHi" },
+    { cls:"lay-gl",  label:"granular layer",        top:"pcHi",  bot:"glHi" },
+    { cls:"lay-un",  label:"not sampled",           top:"glHi",  bot:null }
   ];
 
   /* One band as a polygon: the top edge across the measured bins, then the bottom edge back. Bin
@@ -3185,11 +3232,9 @@ UJ.app = (function(){
     var L = X.layerBands();
     var used = L.band.filter(function(b){ return b.measured; });
     if (used.length < 2) return { svg:"", from:null, to:null, L:L };
-    var g = "<g>"
-      + "<g class='" + LAYER_STYLE[0].cls + "'>" + bandPath(used, null, "pcLo", f, extVox) + "</g>"
-      + "<g class='" + LAYER_STYLE[1].cls + "'>" + bandPath(used, "pcLo", "pcHi", f, extVox) + "</g>"
-      + "<g class='" + LAYER_STYLE[2].cls + "'>" + bandPath(used, "pcHi", "glHi", f, extVox) + "</g>"
-      + "</g>";
+    var g = "<g>" + LAYER_STYLE.map(function(st){
+      return "<g class='" + st.cls + "'>" + bandPath(used, st.top, st.bot, f, extVox) + "</g>";
+    }).join("") + "</g>";
     return { svg:g, from:used[0].x0, to:used[used.length - 1].x1, L:L, bins:used.length };
   }
 
@@ -3222,14 +3267,27 @@ UJ.app = (function(){
       + "role='img' aria-label='cb2 seen along " + labX + " and " + labY
       + (withLayers ? ", divided into the cerebellar layers measured from the proofread somata" : "")
       + (pt ? ", with your coordinate marked" : "") + "'>"
+      /* Diagonal hatching for the two unsampled bands. A flat tint would read as a fourth layer;
+         hatching reads as "nothing was measured here", which is what it means. The pattern is
+         defined per svg with its own id so two drawings on one page cannot collide. */
+      + (withLayers
+          ? "<defs><pattern id='m3d-hatch' width='6' height='6' patternUnits='userSpaceOnUse' "
+            + "patternTransform='rotate(45)'>"
+            + "<line x1='0' y1='0' x2='0' y2='6' class='lay-un-line'/></pattern></defs>"
+          : "")
       + layers
       + "<rect x='" + PAD + "' y='" + PAD + "' width='" + W + "' height='" + H.toFixed(1)
       +   "' fill='none' stroke='var(--line)' stroke-width='1'/>"
       + dots + mark + "</svg>";
   }
 
+  /* One entry per DISTINCT style -- the two unsampled bands share a class and a meaning, so they
+     share a key entry rather than appearing twice. */
   function layerKeyHtml(){
-    return "<div class='lkey'>" + LAYER_STYLE.map(function(s){
+    var seen = {};
+    return "<div class='lkey'>" + LAYER_STYLE.filter(function(s){
+      if (seen[s.cls]) return false; seen[s.cls] = 1; return true;
+    }).map(function(s){
       return "<span class='lkey-item'><span class='lkey-swatch " + s.cls + "'></span>"
         + esc(s.label) + "</span>"; }).join("")
       + "<span class='lkey-item'><span class='lkey-dot'></span>Purkinje somata</span></div>";
@@ -3258,6 +3316,8 @@ UJ.app = (function(){
     var L = info.L;
     var covered = info.from == null ? null
       : [Math.round(info.from * X.resXYZ()[0] / 1000), Math.round(info.to * X.resXYZ()[0] / 1000)];
+    var sampled = L.sampledY
+      ? L.sampledY.map(function(v){ return Math.round(v * X.resXYZ()[1] / 1000); }) : null;
     /* The side view is a twentieth the height of the top view at the same scale, so it goes in a
        column with the explanation beneath it rather than beside it. Two figures side by side would
        leave the right-hand one floating over a hand's width of nothing. */
@@ -3276,13 +3336,29 @@ UJ.app = (function(){
                 : "Enter a coordinate above to place it in a layer. ")
       +   "The boundaries are percentiles of the proofread somata themselves &mdash; the granular "
       +   "layer is where " + L.nGrc.toLocaleString() + " granule cell somata are, the Purkinje "
-      +   "layer is the middle half of " + L.nPc + " Purkinje somata &mdash; not a published layer "
-      +   "volume, which cb2 does not have."
+      +   "layer is the middle half of " + L.nPc + " Purkinje somata, and the molecular layer "
+      +   "reaches as far out as the " + L.nOuter + " Purkinje points that lie above them. Not a "
+      +   "published layer volume: cb2 has none."
       +   (covered ? " Coloured only across x " + covered[0] + "&ndash;" + covered[1]
                      + "&nbsp;&micro;m, where cells were actually proofread." : "")
-      +   (L.pcDropped ? " " + L.pcDropped + " further Purkinje records are left out of the fit: "
-                         + "they share one z value and so carry no usable depth." : "")
-      +   "</p></div>";
+      +   "</p>"
+      /* THE HONEST ANSWER TO "WHERE IS THE SECOND PURKINJE LAYER". Søren, reading the paper's own
+         ROI figure, is describing a folium: cortex on both limbs, white matter down the core. The
+         proofread cells do not reach it -- every one of the 5,318 lies in the upper 40% of the
+         block -- so the diagram marks that space rather than filling it with a layer nobody
+         measured or leaving it looking like the edge of the volume. */
+      +   (sampled
+            ? "<p class='hint' style='margin:8px 0 0'>Every proofread cell lies between "
+              + sampled[0] + " and " + sampled[1] + "&nbsp;&micro;m in y, of a block "
+              + Math.round(ext[1] / 1000) + "&nbsp;&micro;m deep. The hatched band below them is "
+              + (Math.round(ext[1] / 1000) - sampled[1]) + "&nbsp;&micro;m of volume with no "
+              + "proofread cell in it &mdash; and the ROI in the paper's own figure is drawn "
+              + "across a folium, so that is where its <b>white matter</b> core and the opposite "
+              + "limb&rsquo;s Purkinje and granular layers should be. This page cannot draw them: "
+              + "nobody has reconstructed a cell there yet. Build one and it will."
+              + "</p>"
+            : "")
+      +   "</div>";
   }
 
   /* ── the cells somebody has already proofread ──────────────────────────────────────────────
