@@ -61,6 +61,11 @@ try{var _t=localStorage.getItem("ujump_theme");
  a.logolink{text-decoration:none;color:inherit;display:inline-block}
  a.logolink:hover{text-decoration:none}
  .sub{color:var(--mut);font-size:13px;margin:4px 0 14px}
+ /* WHEN THIS FILE WAS BUILT, on the page. 2026-09-01: Søren asked "why is it not saving in the
+    folder?" about a file that was on his disk, current, and byte-identical to the one built here.
+    There was no way to tell a stale browser cache from a stale file by looking, and checking meant
+    a checksum. A build stamp turns that into a glance. */
+ .build{font-family:var(--mono);font-size:11.5px;opacity:.75}
  /* TABS. The same four every other tool in the family carries, in the same order. */
  .tabbar{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 16px}
  .tabbtn{display:inline-block;font:inherit;font-size:12px;color:var(--mut);background:transparent;
@@ -308,7 +313,10 @@ try{var _t=localStorage.getItem("ujump_theme");
       <span id="themeToggleLabel">Dark</span></button>
   </div>
 </div>
-<p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span></p>
+<p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
+&middot; <span class="build" title="When this file was built. If it does not match the file you
+think you are looking at, your browser is showing you a cached copy — reload with
+ctrl-shift-R.">build 2026-09-01 18:48</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -2641,9 +2649,20 @@ UJ.app = (function(){
   function renderTargetBanner(){
     var n = el("target-note"); if (!n) return;
     if (!TARGET){ n.innerHTML = ""; return; }
-    n.innerHTML = "<div class='callout aiming'><b>Adding to " + esc(targetLabel(TARGET))
-      + "</b><br><span class='hint'>Everything you paste below goes onto that cell, not into a new "
-      + "one. </span><button class='linkbtn' id='target-off'>Cancel &mdash; build a new cell "
+    /* AND WHETHER IT CAN. A backend without the adopt capability will quietly make a new cell
+       instead of adding to a proofread one, so that is said here -- next to the box, before the
+       work -- rather than discovered afterwards from a key that came back different. Same rule the
+       file:// banner follows: anything the page can know before somebody does the work belongs
+       before it. */
+    var cannot = LIVE && X.isSeedKey(TARGET) && STATE.can && STATE.can.adopt === false;
+    n.innerHTML = "<div class='callout " + (cannot ? "warn" : "aiming") + "'><b>Adding to "
+      + esc(targetLabel(TARGET)) + "</b><br><span class='hint'>"
+      + (cannot
+          ? "<b>This will not work yet.</b> The backend is still the older XJumpCells.gs, which "
+            + "ignores a request to add to a proofread cell and makes a new one instead. Re-paste "
+            + "XJumpCells.gs and Deploy → New version first."
+          : "Everything you paste below goes onto that cell, not into a new one. ")
+      + "</span><button class='linkbtn' id='target-off'>Cancel &mdash; build a new cell "
       + "instead</button></div>";
     el("target-off").addEventListener("click", function(){
       TARGET = null; say("paste-msg", ""); render();
@@ -2803,14 +2822,38 @@ UJ.app = (function(){
     var ids = LAST.ids, position = LAST.position;
     say("paste-msg", "saving…");
     STORE.build(ids, position, key).then(function(d){
-      var c = X.newCell(d.cellKey || key, d.segments || ids, whoami());
-      c.position = position;
+      var got = d.cellKey || key;
+      var c = X.newCell(got, d.segments || ids, whoami());
+      /* The soma, not the crosshair. An adopted cell IS the proofread cell, and the proofread cell
+         has a soma -- opening it at wherever your viewer happened to be pointing when you pasted
+         puts you on the last dendrite you clicked. */
+      c.position = row.pos || position;
       STATE.cells.push(c);
       var seedN = X.seedSegments(row).length;
-      say("paste-msg", "Added " + ids.length + " fragment" + (ids.length === 1 ? "" : "s")
-        + " to <code>" + esc(row.name) + "</code>, the first anybody has added to it. It now reads "
-        + "as " + seedN + " proofread + " + ids.length + " added here."
-        + conflictNote(d.conflicts), !(d.conflicts || []).length);
+
+      /* THE SERVER DID NOT DO WHAT IT WAS ASKED. Søren, 2026-09-01: "instead of updating the
+         proofread pc_0 with the fragments I suggested, it made a new unnamed cell."
+
+         An older deployment of XJumpCells.gs ignores a supplied cellKey and returns a freshly
+         numbered cb2:N, which is indistinguishable from success unless you compare the key you
+         asked for with the key you got. This page did not compare, so it printed "added to pc_0"
+         over fragments that had gone into a new anonymous cell. Reporting a write as landing
+         somewhere it did not is the worst thing a shared record can do, so the mismatch is now
+         the loudest thing on the page -- and it says where the fragments actually are, because
+         they are not lost, they are one Move away from where they belong. */
+      if (got !== key){
+        say("paste-msg", "<b>Those " + ids.length + " fragments did NOT go onto "
+          + esc(row.name) + ".</b> The backend is still the older XJumpCells.gs, which ignores a "
+          + "request to add to a proofread cell and makes a new one instead — they are in "
+          + "<code>" + esc(got) + "</code>. Nothing is lost: re-paste XJumpCells.gs and "
+          + "Deploy → New version, then use that cell's <b>Move</b> box to put them on "
+          + esc(row.name) + ".", false);
+      } else {
+        say("paste-msg", "Added " + ids.length + " fragment" + (ids.length === 1 ? "" : "s")
+          + " to <code>" + esc(row.name) + "</code>, the first anybody has added to it. It now "
+          + "reads as " + seedN + " proofread + " + ids.length + " added here."
+          + conflictNote(d.conflicts), !(d.conflicts || []).length);
+      }
       LAST = null; TARGET = null; el("paste").value = "";
       pushUndo({ kind:"adopt", cellKey:c.id, ids:ids.slice(), name:row.name });
       render(); focusCell(c.id); joinAll(c);
@@ -2995,12 +3038,27 @@ UJ.app = (function(){
         + "viewer, paste the address above, and press <b>Build cell</b>.</p>";
       renderStats(); return;
     }
-    var names = X.nameSuggestions(STATE.cells);
+    /* AN EMPTIED CELL IS NOT A CELL. Søren, 2026-09-01: "now you added some more unnamed cells".
+       They were not new: they were the husks of cells he had built by mistake and then MOVED the
+       fragments out of. The move drops the source from the page, but the sheet keeps its row --
+       correctly, because "somebody created this and then withdrew it" is a true thing to have
+       recorded -- and on the next reload the row came back as a cell with nothing in it.
+
+       So the page filters them out and says how many, rather than either hiding the fact or
+       showing five identical empty cards. `allSegs` and not `.segments`, so an adopted cell that
+       has had its own additions removed still shows: it still has the proofread reconstruction. */
+    var live = STATE.cells.filter(function(c){ return allSegs(c).length > 0; });
+    var empty = STATE.cells.length - live.length;
+    var names = X.nameSuggestions(live);
     host.innerHTML = "<datalist id='cellnames'>"
       + names.map(function(n){ return "<option value=\"" + esc(n) + "\">"; }).join("")
       + "</datalist>"
-      + STATE.cells.slice().reverse().map(cellHtml).join("");
-    STATE.cells.forEach(wireCell);
+      + (empty ? "<p class='hint' style='margin:0 0 10px'>" + empty + " cell"
+                 + (empty === 1 ? " was" : "s were") + " emptied and withdrawn — their fragments "
+                 + "were moved or taken off. The record of them stays in the sheet; they are not "
+                 + "shown here because a cell with no fragments is not a cell.</p>" : "")
+      + live.slice().reverse().map(cellHtml).join("");
+    live.forEach(wireCell);
     renderStats();
   }
 
@@ -3013,7 +3071,21 @@ UJ.app = (function(){
      `position` is the fallback and is what a cell built before nuclei existed carries: the
      crosshair at the moment it was pasted. Neither is guessed -- if there is no nucleus and no
      recorded position, the viewer frames the assembly and the page says the nucleus is unknown. */
-  function nucleusOf(c){ return (c && (c.nucleus || c.position)) || null; }
+  /* Where the viewer should land. Søren, 2026-09-01: a cell "has the center in neuroglancer at the
+     last segment added instead of the nucleus center".
+
+     In order of how much it is worth trusting: a nucleus this page JOINED to the cell by testing
+     which one is geometrically inside it; the soma of the proofread cell this one extends, which
+     the Lee lab recorded; and only then `position`, which is merely wherever the viewer's
+     crosshair happened to be at the moment somebody pasted -- i.e. on the last fragment they
+     clicked, which is nowhere in particular. */
+  function nucleusOf(c){
+    if (!c) return null;
+    if (c.nucleus) return c.nucleus;
+    var row = seedOf(c);
+    if (row && row.pos) return row.pos;
+    return c.position || null;
+  }
 
   function cellUrl(c){ return X.viewerUrl(allSegs(c), nucleusOf(c)); }
 
@@ -4545,6 +4617,13 @@ UJ.app = (function(){
                      unsure: c.unsure || 0, builtBy: c.builtBy || "", position: c.position || null };
           });
           STATE.claimed = d.claimed || {};
+          /* WHAT THIS DEPLOYMENT CAN DO. An older XJumpCells.gs has no `can` field at all, and the
+             absence IS the answer -- see its own comment. Read as a map so the page asks
+             `can.adopt === false` and a future capability needs no change here. */
+          STATE.can = {};
+          ["adopt"].forEach(function(k){
+            STATE.can[k] = (d.can || []).indexOf(k) >= 0;
+          });
           /* Cleared HERE rather than at the call site: a load that succeeded is the definition of
              "the backend is reachable", and there is more than one caller. Clearing it only in
              init() left the banner standing after a later load had proved it wrong. */
