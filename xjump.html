@@ -108,6 +108,10 @@ try{var _t=localStorage.getItem("ujump_theme");
  .aim-note{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);
    font-weight:600;margin-bottom:6px}
  .cell select,.cell input{max-width:100%}
+ /* The matches for "move these into…", offered as you type. See moveTargets(): a dropdown of five
+    thousand cells is not a control, and one truncated to two hundred is a trap. */
+ .movehits{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}
+ .movehit{font-family:var(--mono);font-size:11.5px}
  .callout{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;
    padding:10px 12px;margin:10px 0;background:var(--bg)}
  .callout.warn{border-left-color:var(--warn)}
@@ -2864,6 +2868,45 @@ UJ.app = (function(){
      page shows the union everywhere -- the viewer link, the 3D view, the .glb, the volume -- and
      says which part came from where, because a reconstruction from the paper and one assembled
      this afternoon are different kinds of evidence. */
+  /* Everywhere you can send fragments: the cells this community has built, and every proofread cell
+     in the paper's list. Matched on NAME rather than on key, because `pc_5` is what a person knows
+     and `cb2/htem/pc_5` is what the machine calls it. */
+  function moveTargets(exclude, q){
+    var t = String(q || "").trim().toLowerCase(), out = [], total = 0;
+    function push(key, name, what){
+      if (key === exclude) return;
+      if (t && name.toLowerCase().indexOf(t) < 0 && key.toLowerCase().indexOf(t) < 0) return;
+      total++;
+      if (out.length < 8) out.push({ key:key, name:name, what:what });
+    }
+    STATE.cells.forEach(function(o){
+      push(o.id, o.id, (X.settledLabel(o) || "unnamed") + ", " + o.segments.length); });
+    seeds().forEach(function(r){
+      if (byId(r.key)) return;                       // already offered above, as a built cell
+      push(r.key, r.name, r.label + ", proofread"); });
+    return { list: out, total: total };
+  }
+  /* What the person typed, turned into one key or one reason it could not be. Never a guess: two
+     cells matching is reported as two, because moving a whole assembly into the wrong one is the
+     mistake this control exists to fix. */
+  function resolveTarget(exclude, typed){
+    var t = typed.trim();
+    if (byId(t) && t !== exclude) return { key: t };
+    var byName = seeds().filter(function(r){ return r.name === t || r.key === t; });
+    if (byName.length === 1) return { key: byName[0].key };
+    /* EXACT ONLY. A partial name that happens to match one cell is not the same as meaning that
+       cell -- "grc_10" matching only grc_100 would move a whole assembly somewhere nobody asked
+       for, which is precisely the mistake this control exists to undo. A partial name offers the
+       matches instead; clicking one fills in its full key, and that is exact. */
+    var m = moveTargets(exclude, t);
+    if (!m.total) return { key:null, why:"There is no cell called “" + t + "”." };
+    if (m.total === 1)
+      return { key:null, why:"Did you mean “" + m.list[0].name + "”? Click it below, or type the "
+                            + "name in full — a partial name is not a choice." };
+    return { key:null, why: m.total + " cells match “" + t + "” — click the one you mean, or type "
+                          + "its name in full." };
+  }
+
   function seedOf(c){
     if (!c || !X.isSeedKey(c.id)) return null;
     return seeds().filter(function(r){ return r.key === c.id; })[0] || null;
@@ -3020,21 +3063,22 @@ UJ.app = (function(){
       +   "<button class='rej' data-id='" + esc(c.id) + "' title='This is not one cell'>Not one cell</button>"
       + "</div>"
       /* PUT THESE SOMEWHERE ELSE. The correction for the mistake that started this: fragments
-         built as a new cell that belonged on one that already existed. */
+         built as a new cell that belonged on one that already existed.
+
+         A SEARCH BOX, NOT A DROPDOWN. It shipped as a <select> holding the community's cells plus
+         the first 200 proofread ones, and Søren went looking for pc_5 -- which sits at index 5,155
+         of 5,318, so it was not there, and neither was any other Purkinje cell. That truncation
+         was invisible: a list that silently stops is worse than one that refuses, because it looks
+         complete. Five thousand <option> elements on every cell card is not the answer either, so
+         it is a box you type into, with the matches offered as you type. */
       + "<div class='row' style='margin-top:8px;gap:8px;flex-wrap:wrap'>"
-      +   "<span class='hint'>Wrong cell?</span>"
-      +   "<select class='move-to' style='width:auto;max-width:100%'>"
-      +     "<option value=''>Move all " + c.segments.length + " fragment"
-      +       (c.segments.length === 1 ? "" : "s") + " into&hellip;</option>"
-      +     STATE.cells.filter(function(o){ return o.id !== c.id; }).map(function(o){
-            return "<option value='" + esc(o.id) + "'>" + esc(o.id) + " &mdash; "
-                 + esc(X.settledLabel(o) || "unnamed") + " (" + o.segments.length + ")</option>";
-          }).join("")
-      +     seeds().filter(function(r){ return !byId(r.key); }).slice(0, 200).map(function(r){
-            return "<option value='" + esc(r.key) + "'>" + esc(r.name) + " &mdash; "
-                 + esc(r.label) + " (proofread)</option>"; }).join("")
-      +   "</select><button class='move-go'>Move</button>"
+      +   "<span class='hint'>Wrong cell? Move all " + c.segments.length + " fragment"
+      +     (c.segments.length === 1 ? "" : "s") + " into</span>"
+      +   "<input class='move-to' data-id='" + esc(c.id) + "' style='flex:1 1 200px' "
+      +     "placeholder='a cell name or id — pc_5, grc_100, cb2:3' autocomplete='off'>"
+      +   "<button class='move-go'>Move</button>"
       + "</div>"
+      + "<div class='movehits'></div>"
       /* The same four mesh actions the identity panel offers, on the same cell. A cell you
          assembled yourself is exactly the one you want in Blender and in a slide. */
       + "<div class='row' style='margin-top:8px;gap:8px;flex-wrap:wrap'>"
@@ -3102,10 +3146,37 @@ UJ.app = (function(){
        fragments built as a new cell that belonged on an existing one. Add-then-remove rather than
        a "move" call, so the sheet records what actually happened and either half failing leaves
        the fragments somewhere rather than nowhere. */
+    /* The matches, offered as you type. Eight, because a list you scan is a list that fits; the
+       count of everything that matched is printed beside them so a narrow search never looks like
+       the whole answer -- which is exactly how the 200-option dropdown misled. */
+    var box = root.querySelector(".move-to"), hits = root.querySelector(".movehits");
+    function suggest(){
+      var q = box.value.trim();
+      if (!q){ hits.innerHTML = ""; return; }
+      var all = moveTargets(c.id, q);
+      hits.innerHTML = all.list.length
+        ? all.list.map(function(t){
+            return "<button class='hist-chip movehit' data-k='" + esc(t.key) + "'>"
+                 + esc(t.name) + " <span class='hint'>" + esc(t.what) + "</span></button>"; }).join("")
+          + (all.total > all.list.length
+              ? "<span class='hint'> and " + (all.total - all.list.length) + " more — type more"
+                + " of the name</span>" : "")
+        : "<span class='hint'>Nothing matches “" + esc(q) + "”.</span>";
+      Array.prototype.forEach.call(hits.querySelectorAll(".movehit"), function(b){
+        b.addEventListener("click", function(){
+          box.value = b.getAttribute("data-k"); suggest();
+        });
+      });
+    }
+    if (box) box.addEventListener("input", suggest);
     if (root.querySelector(".move-go"))
       root.querySelector(".move-go").addEventListener("click", function(){
-        var to = root.querySelector(".move-to").value;
-        if (!to){ note("Pick where they should go.", false); return; }
+        var typed = box.value.trim();
+        if (!typed){ note("Type the name of the cell they belong to — pc_5, or cb2:3.", false);
+          return; }
+        var r = resolveTarget(c.id, typed);
+        if (!r.key){ note(esc(r.why), false); return; }
+        var to = r.key;
         if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
         if (BUSY) return; BUSY = true;
         var moving = c.segments.slice();
