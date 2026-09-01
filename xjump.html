@@ -316,7 +316,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-01 19:25</span></p>
+ctrl-shift-R.">build 2026-09-01 19:57</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -2415,7 +2415,16 @@ UJ.mesh3d = (function(){
         + "<br><span class='hint'>"
         + umSpan.map(function(v){ return v.toFixed(1); }).join(" × ") + " µm "
         + "(from the viewer's own mesh transform — worth checking against neuroglancer once) · "
-        + geo.triangles.toLocaleString() + " triangles · drag to turn, scroll to zoom</span>";
+        + geo.triangles.toLocaleString() + " triangles · drag to turn, scroll to zoom</span>"
+        /* WHICH WAY UP, SAID RATHER THAN LEFT TO BE JUDGED. Søren reported the models upside down,
+           it was fixed, and he reported it again from a cached page -- and neither of us could
+           settle it from a picture without first agreeing what "up" ought to mean for a cerebellar
+           cell. A line under the panel makes the drawing answer that itself: if the tree is not on
+           the side this line says it should be, the picture is wrong and there is nothing to
+           debate. The orientation only holds while the view has not been turned, so it says so. */
+        + "<br><span class='hint'>Before you turn it: <b>up</b> is towards the pia (molecular "
+        + "layer), <b>down</b> is deeper (granular layer, then white matter). A Purkinje cell's "
+        + "dendritic tree should be above its soma.</span>";
       if (geo.oversize)
         note.innerHTML += "<br><b style='color:var(--bad)'>This cannot be right.</b> "
           + "<span class='hint'>The assembly measures "
