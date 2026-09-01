@@ -316,7 +316,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-01 19:57</span></p>
+ctrl-shift-R.">build 2026-09-01 20:31</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -419,8 +419,9 @@ ctrl-shift-R.">build 2026-09-01 19:57</span></p>
   <p class="hint" style="margin-top:0">The page sends you to a 40&nbsp;&micro;m column nobody has
   searched yet. The link opens with an empty annotation layer already selected, so
   <b>ctrl-click every nucleus you can see</b>, then copy the address bar and paste it below.
-  Fifty nuclei in one paste. Nuclei already recorded are drawn in grey so you can see where not
-  to mark again.</p>
+  Fifty nuclei in one paste. Everything already recorded in or <b>near</b> that column is drawn in
+  grey, so you can see at a glance where not to mark again &mdash; including the ones just over the
+  boundary, which are the ones you would otherwise record twice.</p>
   <div class="row" style="margin-bottom:10px">
     <button class="primary" id="next-box">Send me somewhere</button>
     <span class="hint" id="box-msg"></span>
@@ -788,7 +789,23 @@ UJ.cfg.nuclei = {
      denser than that -- which is why this is the one dataset in the family where the dedup radius
      had to be argued rather than copied.
      https://doi.org/10.3389/fninf.2018.00084 */
-  dedupNm: 2500
+  dedupNm: 2500,
+  /* HOW FAR BEYOND THE COLUMN TO SHOW WHAT IS ALREADY MARKED. Søren, 2026-09-01: "it would be
+     helpful if the nuclei that are already marked are shown."
+
+     They were being shown -- but only the ones strictly inside the 40 µm column the sampler sends
+     you to, and the sampler only ever sends you to a column NOBODY HAS SEARCHED. Such a column has
+     no recorded nuclei in it by definition, so the grey markers were never actually there.
+
+     What matters is what is visible while you are marking, and that is a neighbourhood: a nucleus
+     five micrometres the other side of a boundary is one you are about to record twice. Half a
+     column each way covers the field of view at the zoom the link opens at without pulling in a
+     whole region's worth. */
+  showMarginNm: 20000,
+  /* Each point is about ninety bytes of URL and browsers give up near 64 kB. Past the cap the
+     state would be silently truncated -- so it is capped deliberately, nearest first, and the page
+     says how many it could not fit rather than quietly showing fewer. */
+  maxShown: 400
 };
 
 /* ── where to look next ──────────────────────────────────────────────────────────────────────
@@ -1791,6 +1808,48 @@ UJ.xjump = (function(){
              loVox: toVox(loNm).map(Math.round), hiVox: toVox(hiNm).map(Math.round),
              centreVox: toVox([0,1,2].map(function(i){ return (loNm[i]+hiNm[i])/2; })).map(Math.round) };
   }
+  /* ── the nuclei already marked NEAR a column ─────────────────────────────────────────────
+     Søren, 2026-09-01: "When we need to mark the new nuclei, it would be helpful if the nuclei
+     that are already marked are shown."
+
+     The link already carried them -- but only the ones strictly INSIDE the column it sends you to,
+     and the sampler only ever sends you to a column nobody has searched. A column nobody has
+     searched has no recorded nuclei in it, so the grey markers were, in practice, never there. The
+     feature existed and could not fire.
+
+     What is actually useful is what you can SEE while marking, which is a neighbourhood rather
+     than a box: a nucleus five micrometres over the boundary is one you are about to mark for a
+     second time. So this takes everything within the column grown by a margin, nearest first.
+
+     CAPPED, and the cap is not caution. Each point costs about ninety bytes of URL and a browser
+     gives up somewhere near 64 kB -- past that the state is silently truncated and you would be
+     marking on top of nuclei the page knew about but could not fit. Nearest-first means the cap
+     drops the least useful ones, and the caller is told the number so it can say so. */
+  function nucleiNear(boxIx, nuclei, marginNm, limit){
+    var b = boxBounds(boxIx);
+    var m = marginNm == null ? UJ.cfg.nuclei.showMarginNm : marginNm;
+    var cap = limit == null ? UJ.cfg.nuclei.maxShown : limit;
+    var lo = b.loNm.map(function(v){ return v - m; });
+    var hi = b.hiNm.map(function(v){ return v + m; });
+    var mid = [0,1,2].map(function(i){ return (b.loNm[i] + b.hiNm[i]) / 2; });
+    var inBox = [], near = [];
+    (nuclei || []).forEach(function(n){
+      if (!n || !n.pos) return;
+      var p = toNm(n.pos);
+      if (p.some(function(v, i){ return v < lo[i] || v > hi[i]; })) return;
+      var dx = p[0]-mid[0], dy = p[1]-mid[1], dz = p[2]-mid[2];
+      var rec = { n: n, d2: dx*dx + dy*dy + dz*dz,
+                  inside: !p.some(function(v, i){
+                    return v < b.loNm[i] || v > b.hiNm[i]; }) };
+      (rec.inside ? inBox : near).push(rec);
+    });
+    var all = inBox.concat(near).sort(function(a, c){ return a.d2 - c.d2; });
+    var shown = all.slice(0, cap);
+    return { points: shown.map(function(r){ return r.n.pos; }),
+             inside: inBox.length, near: near.length,
+             total: all.length, dropped: all.length - shown.length };
+  }
+
   function boxOfPointVox(v){
     var b = UJ.cfg.explore.boxNm, nm = toNm(v), g = boxGrid();
     return [0,1,2].map(function(i){
@@ -1855,6 +1914,7 @@ UJ.xjump = (function(){
            seedZSuspect:seedZSuspect, layerBands:layerBands, layerAt:layerAt,
            boxGrid:boxGrid, boxCount:boxCount, boxKeyOf:boxKeyOf, boxOf:boxOf,
            boxBounds:boxBounds, boxOfPointVox:boxOfPointVox, nextBox:nextBox,
+           nucleiNear:nucleiNear,
            meshManifestUrl:meshManifestUrl, meshFragmentUrl:meshFragmentUrl };
 })();
 </script>
@@ -4376,21 +4436,25 @@ UJ.app = (function(){
   function renderBox(){
     var host = el("box-body"); if (!host) return;
     if (!BOX){ host.innerHTML = ""; return; }
-    /* Only the nuclei INSIDE this column are drawn in the link. Sending every nucleus in the
-       volume would put 10^4-10^5 inline annotations in a URL, and a URL has a practical ceiling
-       around 64 kB -- the state would be silently truncated by the browser and the person would
-       be marking on top of nuclei the page knew about but could not fit. */
-    var here = ((STATE.explore && STATE.explore.nuclei) || []).filter(function(n){
-      return X.boxKeyOf(X.boxOfPointVox(n.pos)) === BOX.key; });
+    /* Everything already marked in or NEAR this column -- see nucleiNear() for why "near" and not
+       "in". The margin and the cap are config, and the cap is announced rather than silent. */
+    var here = X.nucleiNear(X.boxOf(BOX.key), (STATE.explore && STATE.explore.nuclei) || []);
     var url = X.viewerUrl([], BOX.bounds.centreVox,
-      { box: BOX.bounds, knownNuclei: here.map(function(n){ return n.pos; }),
+      { box: BOX.bounds, knownNuclei: here.points,
         crossSectionScale: 8, projectionScale: 12000 });
     host.innerHTML = "<div class='row' style='gap:8px;flex-wrap:wrap;margin-bottom:10px'>"
       + "<a class='cell-open' href='" + esc(url) + "' target='_blank' rel='noopener'>"
       + "Open column " + esc(BOX.key) + " &#8599;</a>"
       + "<button id='box-empty'>Nothing here</button>"
-      + "<span class='hint'>" + (here.length ? here.length + " already marked in this column"
-                                             : "nothing marked here yet") + "</span></div>";
+      + "<span class='hint'>"
+      + (here.total
+          ? here.points.length + " already-marked nucle"
+            + (here.points.length === 1 ? "us is" : "i are") + " drawn in grey &mdash; "
+            + here.inside + " inside this column, " + here.near + " just outside it"
+            + (here.dropped ? ". " + here.dropped + " more were left out to keep the link inside "
+                              + "the browser's URL limit; they are the furthest away." : "")
+          : "nothing marked here or nearby yet")
+      + "</span></div>";
     if (el("box-empty")) el("box-empty").addEventListener("click", function(){
       if (!STORE.canWrite()){ say("box-msg", "Sign in with Google first.", false); return; }
       var k = BOX.key;
@@ -4876,7 +4940,7 @@ UJ.app = (function(){
 
   return { init:init, state:function(){ return STATE; }, last:function(){ return LAST; },
            readPaste:readPaste, render:render, store:function(){ return STORE; },
-           nextBox:nextBox, readNuclei:readNuclei, joinAll:joinAll,
+           nextBox:nextBox, renderBox:renderBox, readNuclei:readNuclei, joinAll:joinAll,
            seeds:seeds, renderSeeds:renderSeeds,
            findByCoord:findByCoord, renderRandomButtons:renderRandomButtons,
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
