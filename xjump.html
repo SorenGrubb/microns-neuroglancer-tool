@@ -360,38 +360,30 @@ UJ.cfg.volume = {
   /* Where the page fetches manifests and fragments directly -- to find out which fragments HAVE a
      mesh, and to draw them in the page. */
   meshBase: "https://bossdb-open-data.s3.amazonaws.com/mesh/nguyen_thomas2022/cb2/mesh/",
-  /* The same statement as meshTransform above, resolved into nanometres, for the page's OWN
-     renderer -- which has no neuroglancer to apply a layer transform for it.
+  /* Mesh vertex -> nanometres, for the page's OWN renderer, which has no neuroglancer to apply a
+     layer transform for it.
 
-     Composed rather than re-derived: neuroglancer's matrix maps a mesh vertex to the viewer's
-     output space, and that space's units are the volume's own voxels (4, 4, 40 nm). So
+     ISOTROPIC. One mesh unit is 4 nm along every axis, and the axes are reversed -- the mesh is
+     (z,y,x) where the viewer is (x,y,z), which is what the anti-diagonal in meshTransform above
+     is saying.
 
-         nm_x = 4  * 1e9 * v[2]      nm_y = 4  * 1e9 * v[1]      nm_z = 40 * 1e9 * v[0]
+     THIS WAS WRONG ONCE, BY A FACTOR OF TEN IN Z, AND THE WAY IT WAS WRONG IS WORTH KEEPING.
+     The first version reasoned it out from neuroglancer's own numbers: the mesh layer's matrix
+     carries 1e9, the output dimensions declare z as 4e-8 m, so -- the argument went -- a mesh unit
+     must be 40 nm in z and 4 nm across. It was a clean derivation from real values in a file the
+     authors wrote, and it was false. The composition neuroglancer actually performs already
+     accounts for the source's own dimensions, so the per-axis scale does not reappear here.
 
-     which is the anti-diagonal below. Every factor in it comes from the working state; none of it
-     is a guess about what the mesh's native unit "should" be, because that question does not have
-     to be answered to place the vertices correctly.
+     What caught it was not a better derivation. It was Søren looking at a cell and saying it was
+     stretched, and the panel printing "98.3 x 60.5 x 444.0 µm" underneath -- 444 µm of z in a
+     block that is 48 µm deep. The number was on screen because the panel prints the extent and
+     labels it as derived; that label was written precisely so this could be checked in one glance,
+     and it is the only reason a ten-fold error in a matrix nobody can see got found at all.
 
-     WHAT THE MESH'S NATIVE UNIT ACTUALLY IS, worked out from this matrix rather than assumed --
-     and worth writing down, because the 1e9 looks like a mistake until it is.
-
-     Take a vertex 100,000 voxels along x and 600 sections deep, which is a real place in cb2. If
-     the stored triple is (z, y, x) VOXEL INDICES scaled by 1e-9, it is (6e-7, 1e-4, 1e-4), and
-     the matrix gives
-
-         x: 4e9  × 1e-4 = 400,000 nm = 400 µm   =  100,000 voxels × 4 nm   ✓
-         z: 40e9 × 6e-7 =  24,000 nm =  24 µm   =      600 sections × 40 nm ✓
-
-     Both land exactly where that voxel is. So the meshes are in voxel indices, in (z,y,x) order,
-     written as if metres -- which is why the axis order reverses and why the two scale factors
-     are the volume's own 4 and 40 rather than one number. Nothing here is isotropic-in-disguise:
-     a mesh that looked isotropic in its own units would be a genuinely 10:1 object.
-
-     That is a DERIVATION, not a measurement. It is the only reading under which the numbers come
-     out at the right physical scale, but the way to settle it is one glance: the 3D panel prints
-     the assembly's extent in µm, and neuroglancer will say the same thing for the same cell. The
-     panel labels that figure as derived from this transform for exactly that reason. */
-  meshVertexToNm: [[0, 0, 4e9], [0, 4e9, 0], [40e9, 0, 0]],
+     So the rule the renderer now enforces: NO ASSEMBLY CAN BE LARGER THAN THE VOLUME. It is a
+     fact about the data that no transform can be right and violate, it costs three comparisons,
+     and it turns this class of mistake from "the picture looks a bit odd" into a sentence. */
+  meshVertexToNm: [[0, 0, 4e9], [0, 4e9, 0], [4e9, 0, 0]],
 
   /* ── NOT EVERY FRAGMENT HAS A MESH ────────────────────────────────────────────────────────
      Established 2026-08-31 by listing the bucket for three ids taken from a real assembly in
@@ -1404,8 +1396,30 @@ UJ.mesh3d = (function(){
       pos[i3+1] -= mid[1];
       pos[i3+2] -= mid[2];
     }
+    /* ── NO ASSEMBLY CAN BE LARGER THAN THE VOLUME ────────────────────────────────────────
+       A fact about the data that no transform can be right and violate, and the cheapest possible
+       guard on meshVertexToNm -- three comparisons against numbers the config already states.
+
+       It exists because a ten-fold error in that matrix shipped. The z factor was 40e9 where it
+       should have been 4e9, derived cleanly from real numbers in the authors' own template and
+       wrong anyway, and what it produced was a cell 444 µm deep in a block 48 µm deep. Every
+       suite passed: the fixtures were cubes built with the same wrong matrix, so they agreed with
+       it perfectly. Only the DATA disagreed, and only because Søren looked at a picture and said
+       it was stretched.
+
+       So this compares against the volume rather than against a fixture. A fixture can share a
+       mistake with the code it tests; the block's own depth cannot. */
+    var extent = UJ.xjump.extentNm(), oversize = null;
+    for (var a = 0; a < 3; a++){
+      var got = hi[a] - lo[a];
+      if (got > extent[a] * 1.02){
+        oversize = { axis: "xyz".charAt(a), got: got, max: extent[a] };
+        break;
+      }
+    }
     return { pos: pos, idx: idx, nrm: nrm, lo: lo, hi: hi, mid: mid, centred: true,
              span: Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) || 1,
+             oversize: oversize,
              vertices: nV/3, triangles: idx.length/3 };
   }
 
@@ -1725,10 +1739,19 @@ UJ.mesh3d = (function(){
           + " no published mesh, so the cell is larger than what you see here"
           + (unk.length ? "; " + unk.length + " could not be checked" : "");
       note.innerHTML = cov
+        /* The size is printed and labelled as derived, and that label is not throat-clearing: it
+           is what let a ten-fold error in the mesh transform be caught by reading one line. */
         + "<br><span class='hint'>"
         + umSpan.map(function(v){ return v.toFixed(1); }).join(" × ") + " µm "
         + "(from the viewer's own mesh transform — worth checking against neuroglancer once) · "
         + geo.triangles.toLocaleString() + " triangles · drag to turn, scroll to zoom</span>";
+      if (geo.oversize)
+        note.innerHTML += "<br><b style='color:var(--bad)'>This cannot be right.</b> "
+          + "<span class='hint'>The assembly measures "
+          + (geo.oversize.got / 1000).toFixed(1) + " µm along " + geo.oversize.axis
+          + ", and the whole block is only " + (geo.oversize.max / 1000).toFixed(1)
+          + " µm. Something is wrong with the mesh transform rather than with your assembly — the "
+          + "shape above is stretched by whatever that factor is.</span>";
 
       /* The page's own --accent, as floats: #166534 light, #4ade80 dark. Written as numbers
          because a shader cannot read a CSS variable -- so if the accent ever changes, this is the
