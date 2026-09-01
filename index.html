@@ -117,8 +117,13 @@
      why .cta is given its own colours here rather than inheriting: white on a light amber is
      1.76:1, unreadable. Measured — kicker/logo 5.18:1 on the light card and 9.49:1 on the dark
      one; CTA text 5.18:1 light and 10.06:1 dark. */
-  .feature.eta{--teal:#c2410c;--teal-soft:#fdece2}
-  .feature.eta .cta{background:#c2410c;color:#ffffff}
+  /* 2026-08-31: was #c2410c here while ηJump's own page uses #9a3412 -- a mismatch nothing caught
+     until themecheck started comparing each card against its tool, because every check before it
+     asked about one file at a time and this disagreement lives BETWEEN two files.
+     Moved to the tool's value rather than the other way round: the page is live, and #9a3412 is
+     also the better of the two, at 7.31:1 on white against #c2410c's 5.18:1. */
+  .feature.eta{--teal:#9a3412;--teal-soft:#fdece2}
+  .feature.eta .cta{background:#9a3412;color:#ffffff}
       :root[data-theme="dark"] .feature.eta{--teal:#ffb454;--teal-soft:#3a2408}
     /* dark text on the light amber fill, not white — see the contrast note above */
     :root[data-theme="dark"] .feature.eta .cta{background:#ffb454;color:#241503}

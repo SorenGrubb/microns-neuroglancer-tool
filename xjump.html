@@ -14,14 +14,24 @@ try{var _t=localStorage.getItem("ujump_theme");
    while no explicit choice has been made; and [data-theme] beats both, in either direction, so
    the button can override a light system into dark as well as the other way round. Without the
    :not(), a dark choice on a light machine would lose to the media query. */
+ /* GREEN, and it is the SAME green as this tool's card on the index page -- #166534 light,
+    #4ade80 dark. Every tool in this family wears its card's colour: λJump's card comment puts it
+    as "card and tool read as one thing", and λJump, βJump and ηJump each define the family teal
+    and then override it with their own. χJump shipped with the teal still showing, which is how
+    Søren found it: the card was green and the page it opened was not.
+    Measured, not eyeballed, and measured after choosing: #166534 on white is 7.13:1, #4ade80 on
+    #1a1e24 is 9.60:1, and #04240f ink on that green fill is 9.53:1.
+    --ok stays green too, and that collision is deliberate rather than overlooked -- ωJump's amber
+    accent sits beside an amber --warn for the same reason. A semantic colour that changes meaning
+    per tool would be worse than one that occasionally rhymes with the accent. */
  :root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ee;--mut:#9aa4b2;--line:#262c35;
-       --accent:#22d3ee;--on-accent:#04252a;
+       --accent:#4ade80;--on-accent:#04240f;
        --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--shadow:rgba(0,0,0,.4)}
  @media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f7f9;--card:#fff;
-       --ink:#16181d;--mut:#5b6472;--line:#e3e6ea;--accent:#0e7490;--on-accent:#ffffff;
+       --ink:#16181d;--mut:#5b6472;--line:#e3e6ea;--accent:#166534;--on-accent:#ffffff;
        --shadow:rgba(140,149,159,.25)}}
  :root[data-theme="light"]{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mut:#5b6472;
-       --line:#e3e6ea;--accent:#0e7490;--on-accent:#ffffff;--shadow:rgba(140,149,159,.25)}
+       --line:#e3e6ea;--accent:#166534;--on-accent:#ffffff;--shadow:rgba(140,149,159,.25)}
  #themeToggleBtn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12px;
    color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:20px;
    padding:6px 12px;cursor:pointer;width:auto;box-shadow:0 2px 8px var(--shadow)}
@@ -1244,8 +1254,11 @@ UJ.mesh3d = (function(){
         + "(from the viewer's own mesh transform — worth checking against neuroglancer once) · "
         + geo.triangles.toLocaleString() + " triangles · drag to turn, scroll to zoom</span>";
 
+      /* The page's own --accent, as floats: #166534 light, #4ade80 dark. Written as numbers
+         because a shader cannot read a CSS variable -- so if the accent ever changes, this is the
+         second place it has to change, and xjumpcheck asserts the two agree. */
       var tint = (typeof currentTheme === "function" && currentTheme() === "light")
-               ? [0.05, 0.45, 0.55] : [0.13, 0.83, 0.93];
+               ? [0.086, 0.396, 0.204] : [0.290, 0.871, 0.502];
       try { draw(canvas, geo, tint); }
       catch (e){
         /* The canvas goes; the coverage line stays. A DIFFERENT class, deliberately: with both
