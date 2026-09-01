@@ -181,6 +181,9 @@ try{var _t=localStorage.getItem("ujump_theme");
  .tag.warn{color:var(--warn);border-color:var(--warn)}
  .celltype{font-size:22px;font-weight:600;margin:8px 0 2px}
  .celltype small{font-size:14px;font-weight:400;color:var(--mut)}
+ /* The record's own identifier, beside the type rather than instead of it. Monospace because it is
+    a database key you may need to copy exactly, grey because it is not what the cell IS. */
+ .celltype small.cellref{font-family:var(--mono);font-size:13px;color:var(--mut)}
  .celltype a{color:inherit;text-decoration:none;border-bottom:1px dashed var(--accent)}
  .celltype a:hover{border-bottom-style:solid}
  .celltype a .ext{font-size:14px;color:var(--accent);border-bottom:none}
@@ -2407,6 +2410,10 @@ UJ.app = (function(){
      place, and NOT with thousands separators, because a copied id has to paste back into
      Neuroglancer unchanged. */
   function idHtml(id){ return "<code class='frag'>" + esc(id) + "</code>"; }
+  /* Sentence case for a label used as a headline. Only the first letter, and only when it is not
+     already a capital -- "Purkinje cell" is a proper name and must not become "PURKINJE" or
+     "purkinje". */
+  function cap(s){ var t = String(s || ""); return t.charAt(0).toUpperCase() + t.slice(1); }
 
   /* ── the paste ───────────────────────────────────────────────────────────────────────────── */
   function readPaste(){
@@ -3053,21 +3060,29 @@ UJ.app = (function(){
        page has already flagged as having no usable depth invites exactly the wrong inference. */
     var lay = (pos && !row.zOdd) ? layerLine(pos) : "";
     return "<div class='nuc' id='found-panel'>"
+      /* The kicker no longer repeats the cell type: it is the headline now, and saying "granule
+         cell" three times in four lines is three chances to read it as three different claims. */
       + "<div class='row' style='gap:6px'>"
-      +   "<span class='tag " + (row.odd ? "warn" : "on") + "'>" + esc(row.label) + "</span>"
-      +   (row.whole ? "<span class='tag'>whole cell</span>"
+      +   (row.whole ? "<span class='tag on'>whole cell</span>"
                      : "<span class='tag warn'>a piece, not a whole cell</span>")
       +   "<span class='tag'>proofread</span>"
       +   (row.odd ? "<span class='tag warn' title='" + esc(ODD_TITLE)
                      + "'>type and name disagree</span>" : "")
       + "</div>"
-      /* THE NAME IS THE LINK, as it is on the built cells: what you want to click is the cell, and
-         what identifies a cell to a person is what it is called. A real <a>, so it can be
-         middle-clicked, copied and dragged into a message. */
+      /* THE CELL TYPE IS THE HEADLINE AND THE LINK. Søren, 2026-09-01: "Instead of the cell number
+         being the main thing with link, I think it should be the cell type, and then the cell
+         number can be written next to it in grey."
+
+         He is right, and it brings χJump into line with the rest of the family: µJump's headline is
+         "Pyramidal neuron", not a nucleus id. `grc_1610` is a label from somebody's database — it
+         identifies the record, it does not tell you what you are looking at. The identifier stays
+         beside it in grey, because you still need it to cite the cell or find it again.
+
+         A real <a>, so it can be middle-clicked, copied and dragged into a message. */
       + "<div class='celltype'><a href='" + esc(url) + "' target='_blank' rel='noopener'"
       +   " title='Open in Neuroglancer, centred on the soma, all fragments merged into one object'>"
-      +   esc(row.name) + " <span class='ext'>&#8599;</span></a> <small>"
-      +   esc(row.label) + "</small></div>"
+      +   esc(cap(row.label)) + " <span class='ext'>&#8599;</span></a> "
+      +   "<small class='cellref'>" + esc(row.name) + "</small></div>"
       + "<div class='meta'>" + segs.length + " fragment" + (segs.length === 1 ? "" : "s")
       +   (nm ? " &middot; " + (nm / 1000).toFixed(1) + " &micro;m from your coordinate" : "")
       +   " &middot; proofread by " + esc(row.annotator || "—") + "</div>"
