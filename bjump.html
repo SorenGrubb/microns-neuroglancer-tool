@@ -927,6 +927,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/organellefilter.js"></script>
 <script src="core/regionbox.js"></script>
 <script src="core/mesh.js"></script>
+<script src="core/mesh3d.js"></script>
 <script src="core/synmesh.js"></script>
 <script src="core/synvol.js"></script>
 <script src="core/points.js"></script>
@@ -1547,7 +1548,7 @@ function showCell(i, distNm){
      Disable rather than let the download fail with a 404 the user cannot act on. */
   const dis=hasMesh(i)?"":" disabled";
   h+='<div class="row" style="margin-top:14px">'
-    +'<button class="idbtn" id="meshbtn" style="flex:1;min-width:150px"'+dis+'>&#8681; 3D model</button>'
+    +'<button class="idbtn meshdl" id="meshbtn" data-root="'+BSEG[i]+'" style="flex:1;min-width:150px"'+dis+'>&#8681; 3D model</button>'
     +'<button class="idbtn" id="pptxbtn" style="flex:1;min-width:150px"'+dis+'>&#8681; PowerPoint</button>'
     +'<button class="idbtn" id="volbtn"  style="flex:1;min-width:150px"'+dis+'>Compute volume</button></div>';
   h+='<p class="hint" id="meshmsg">'
