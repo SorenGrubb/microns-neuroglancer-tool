@@ -165,6 +165,33 @@ UJ.mesh3d = (function(){
   function translate(x,y,z){ var o=new Float32Array(16);
     o[0]=o[5]=o[10]=o[15]=1;o[12]=x;o[13]=y;o[14]=z;return o; }
   function scale(s){ var o=new Float32Array(16); o[0]=o[5]=o[10]=s; o[15]=1; return o; }
+  /* Y IS DOWN IN THE DATA AND UP ON THE SCREEN, and that is the whole of this.
+
+     Søren, 2026-09-01: "When showing the 3D models in xJump they are upside down." They were --
+     and so were the ones in µJump, δJump, πJump, ηJump and βJump, which share the other copy of
+     this renderer. Neuroglancer and every volume in this family use the image-row convention:
+     y increases DOWNWARD, towards the ventral side. WebGL's clip space is the opposite, +y up. So
+     geometry handed straight to the GPU is drawn mirrored top-to-bottom, and a Purkinje cell
+     appears with its dendritic tree underneath its soma.
+
+     core/mesh.js has corrected for exactly this since it started writing .glb files -- see
+     flipYForGLTF() -- and neither in-page renderer ever did. Nobody noticed because a granule cell
+     looks much the same either way up; a Purkinje cell does not.
+
+     Corrected in the MODEL MATRIX rather than in the buffers, deliberately. The buffers are also
+     what the point-in-mesh nucleus test compares against and what the .glb exporter is handed, and
+     both of those want the real frame -- the exporter applies its own flip. Flipping the geometry
+     would silently break the join and double-flip every download.
+
+     Safe here for two reasons that are properties of this renderer, not luck: there is no
+     CULL_FACE, so reversing the handedness cannot turn faces into holes; and the fragment shader
+     is two-sided, so the normals -- which this same matrix transforms, correctly, since
+     diag(1,-1,1) is its own inverse-transpose -- stay right. */
+  function modelScale(s){
+    var o = new Float32Array(16);
+    o[0] = s; o[5] = -s; o[10] = s; o[15] = 1;
+    return o;
+  }
 
   var VS = [
     "attribute vec3 p; attribute vec3 n;",
@@ -228,7 +255,7 @@ UJ.mesh3d = (function(){
         uTint = gl.getUniformLocation(prog, "tint");
     gl.enable(gl.DEPTH_TEST);
 
-    var norm = scale(1 / (geo.span || 1));
+    var norm = modelScale(1 / (geo.span || 1));
     var view = { yaw: 0.6, pitch: 0.3, dist: 1.9 };
     var tint = o.tint || themeTint();
     var bg = o.bg || themeBg();
