@@ -96,6 +96,18 @@ try{var _t=localStorage.getItem("ujump_theme");
  /* A fragment already claimed by another cell. Marked rather than hidden or refused: it is a
     disagreement about where a cell ends, and the person pasting is entitled to see it and decide. */
  .frag-chip.taken{border-color:var(--warn);color:var(--warn)}
+ /* A fragment THIS community added, with the control to take it back off. The proofread ones next
+    to it have no ×: removing one is a claim about the paper, not a correction of your own paste. */
+ .frag-chip.mine{display:inline-flex;align-items:center;gap:4px;border-color:var(--accent)}
+ .frag-x{background:none;border:none;color:var(--mut);cursor:pointer;padding:0 2px;font-size:14px;
+   line-height:1;width:auto}
+ .frag-x:hover{color:var(--bad);border-color:transparent}
+ /* WHERE THE NEXT PASTE LANDS, said in both places you might be looking. */
+ .callout.aiming{border-left-color:var(--accent);background:var(--accent-dim)}
+ .cell.aimed{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-dim)}
+ .aim-note{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);
+   font-weight:600;margin-bottom:6px}
+ .cell select,.cell input{max-width:100%}
  .callout{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;
    padding:10px 12px;margin:10px 0;background:var(--bg)}
  .callout.warn{border-left-color:var(--warn)}
@@ -371,6 +383,12 @@ try{var _t=localStorage.getItem("ujump_theme");
 
 <div class="card">
   <div id="backend-note"></div>
+  <!-- Where the next paste is going, stated where the pasting happens. Søren, 2026-09-01: "The
+       system for adding fragments to existing structures is confusing." The aim used to be
+       invisible between pressing "Add fragments" at the top of the page and pasting at the bottom,
+       which is the whole span in which a person decides what they are doing. -->
+  <div id="target-note"></div>
+  <div class="row" id="undo-row" style="margin-bottom:8px"></div>
   <label for="paste">Build a cell &mdash; paste a Neuroglancer link</label>
   <p class="hint" style="margin-top:0">Click the fragments you want in the viewer &mdash; as many
   as you like &mdash; then copy the whole address bar and paste it here. Deselected fragments
@@ -2594,7 +2612,43 @@ UJ.app = (function(){
     return out;
   }
 
+  /* ── WHERE THE NEXT PASTE IS GOING ────────────────────────────────────────────────────────
+     Søren, 2026-09-01: "The system for adding fragments to existing structures is confusing."
+
+     It was, and the reason is that the aim was invisible until you had already pasted. You press
+     "Add fragments" at the top of the page, scroll to the box at the bottom, paste, and only THEN
+     does a button appear saying which cell it is for. Everything between those two moments looks
+     identical to building a new cell.
+
+     So the aim is now stated where the work happens -- a banner above the paste box, present from
+     the moment you press the button, naming the cell and offering one click to cancel -- and the
+     cell you are aiming at is ringed in its own card. Two places, so whichever one you are looking
+     at tells you. */
+  function targetLabel(key){
+    if (X.isSeedKey(key)){
+      var row = seeds().filter(function(r){ return r.key === key; })[0];
+      return row ? row.name + " (" + row.label + ", " + X.seedSegments(row).length
+                   + " proofread fragments)" : X.seedName(key);
+    }
+    var c = byId(key);
+    return c ? key + " (" + (X.settledLabel(c) || "unnamed") + ", " + c.segments.length
+               + " fragments)" : key;
+  }
+  function renderTargetBanner(){
+    var n = el("target-note"); if (!n) return;
+    if (!TARGET){ n.innerHTML = ""; return; }
+    n.innerHTML = "<div class='callout aiming'><b>Adding to " + esc(targetLabel(TARGET))
+      + "</b><br><span class='hint'>Everything you paste below goes onto that cell, not into a new "
+      + "one. </span><button class='linkbtn' id='target-off'>Cancel &mdash; build a new cell "
+      + "instead</button></div>";
+    el("target-off").addEventListener("click", function(){
+      TARGET = null; say("paste-msg", ""); render();
+    });
+  }
+
   function renderPaste(){
+    renderTargetBanner();
+    renderUndo();
     var host = el("paste-body"); if (!host) return;
     if (!LAST){ host.innerHTML = ""; return; }
     var claims = allClaims(LAST.ids);
@@ -2708,19 +2762,75 @@ UJ.app = (function(){
       say("paste-msg", "Built <code>" + esc(c.id) + "</code> from " + c.segments.length
         + " fragments. Name it below." + conflictNote(d.conflicts), !(d.conflicts || []).length);
       LAST = null; TARGET = null; el("paste").value = "";
+      pushUndo({ kind:"build", cellKey:c.id, ids:c.segments.slice() });
       render(); focusCell(c.id);
       /* The join, straight away: the fragments have just changed, so which nucleus is inside them
          may have changed too. Silent when it finds nothing, which is most of the time. */
       joinAll(c);
     }).catch(failed("paste-msg", "Building the cell")).then(function(){ BUSY = false; });
   }
+  /* ── adding to a cell that already exists ──────────────────────────────────────────────────
+     THE BUG SØREN HIT, 2026-09-01: "I accidentally added a lot of fragments to a new cell, where I
+     was trying to add it to an already existing cell."
+
+     He had pressed "Add fragments" on a PROOFREAD cell, so TARGET was `cb2/htem/pc_5`. This
+     function then did `byId(which); if (!c) return;` -- and byId only searches the cells the
+     COMMUNITY has built. A proofread cell nobody has extended is not one of those, so the primary
+     green button, reading "Add these 1 to cb2/htem/pc_5", did nothing at all. No message, no
+     error, no change. The only button that visibly worked was "Build a new cell instead".
+
+     Two things were wrong and both are fixed. A proofread target is now ADOPTED -- built under its
+     own key, holding what you added, with the page showing the union -- and no path out of this
+     function is silent any more. A click that cannot do what its own label says has to say so. */
+  /* Extending a cell the Lee lab proofread. The first person to do it creates the community record
+     under that cell's own key; everybody after that adds to it like any other cell.
+
+     WHAT IS STORED IS THE DELTA. The published reconstruction stays where it is -- 174 fragments
+     for pc_5, already in this page and in the paper's database -- and the sheet records only what
+     this community contributed. Copying the reconstruction in would make the sheet a second-best
+     copy of something that already exists, and would make "who assembled this" unanswerable. */
+  function adoptSeed(key){
+    var row = seeds().filter(function(r){ return r.key === key; })[0];
+    if (!row){
+      say("paste-msg", "That proofread cell is not in this page's list.", false); return;
+    }
+    if (needSignIn("paste-msg")) return;
+    BUSY = true;
+    var ids = LAST.ids, position = LAST.position;
+    say("paste-msg", "saving…");
+    STORE.build(ids, position, key).then(function(d){
+      var c = X.newCell(d.cellKey || key, d.segments || ids, whoami());
+      c.position = position;
+      STATE.cells.push(c);
+      var seedN = X.seedSegments(row).length;
+      say("paste-msg", "Added " + ids.length + " fragment" + (ids.length === 1 ? "" : "s")
+        + " to <code>" + esc(row.name) + "</code>, the first anybody has added to it. It now reads "
+        + "as " + seedN + " proofread + " + ids.length + " added here."
+        + conflictNote(d.conflicts), !(d.conflicts || []).length);
+      LAST = null; TARGET = null; el("paste").value = "";
+      pushUndo({ kind:"adopt", cellKey:c.id, ids:ids.slice(), name:row.name });
+      render(); focusCell(c.id); joinAll(c);
+    }).catch(failed("paste-msg", "Adding to " + X.seedName(key)))
+      .then(function(){ BUSY = false; });
+  }
+
   function addToExisting(){
     /* TARGET (a cell's own button) wins over the dropdown; only one of the two is ever on the
        page at a time, so this is which one is showing rather than a precedence rule. */
     var sel = el("addto");
     var which = TARGET || (sel && sel.value);
-    if (!which || !LAST || BUSY) return;
-    var c = byId(which); if (!c) return;
+    if (BUSY) return;
+    if (!LAST){ say("paste-msg", "Nothing pasted yet.", false); return; }
+    if (!which){
+      say("paste-msg", "Pick which cell to add to first.", false); return;
+    }
+    var c = byId(which);
+    if (!c && X.isSeedKey(which)) return adoptSeed(which);
+    if (!c){
+      say("paste-msg", "There is no cell <code>" + esc(which) + "</code> on this page any more — "
+        + "it may have been removed. Build a new cell, or aim at another one.", false);
+      return;
+    }
     if (needSignIn("paste-msg")) return;
     BUSY = true;
     var ids = LAST.ids;
@@ -2741,11 +2851,78 @@ UJ.app = (function(){
         + ". It now has " + c.segments.length + "." + conflictNote(d.conflicts),
         !(d.conflicts || []).length);
       LAST = null; TARGET = null; el("paste").value = "";
+      pushUndo({ kind:"add", cellKey:c.id, ids:added.slice() });
       render(); focusCell(c.id);
       /* The join, straight away: the fragments have just changed, so which nucleus is inside them
          may have changed too. Silent when it finds nothing, which is most of the time. */
       joinAll(c);
     }).catch(failed("paste-msg", "Adding to " + c.id)).then(function(){ BUSY = false; });
+  }
+
+  /* ── a cell that extends a proofread one ──────────────────────────────────────────────────
+     Its key IS the proofread cell's key, and what the store holds is only what people added. The
+     page shows the union everywhere -- the viewer link, the 3D view, the .glb, the volume -- and
+     says which part came from where, because a reconstruction from the paper and one assembled
+     this afternoon are different kinds of evidence. */
+  function seedOf(c){
+    if (!c || !X.isSeedKey(c.id)) return null;
+    return seeds().filter(function(r){ return r.key === c.id; })[0] || null;
+  }
+  function allSegs(c){
+    var row = seedOf(c);
+    if (!row) return c.segments;
+    var out = X.seedSegments(row).slice(), seen = {};
+    out.forEach(function(s){ seen[s] = 1; });
+    c.segments.forEach(function(s){ if (!seen[s]){ seen[s] = 1; out.push(s); } });
+    return out;
+  }
+
+  /* ── undoing the last thing you did ───────────────────────────────────────────────────────
+     Søren, 2026-09-01: "if you make a mistake, you should be able to correct it for yourself
+     afterwards."
+
+     One step, in memory, for this sitting. Not a history: the durable record of what a cell is
+     lives in the sheet, and a page that quietly rewrote it from a local stack would be a second
+     source of truth. This undoes the thing you just did, by making the OPPOSITE call -- an add is
+     undone by a remove, an adopt by removing everything it put there. The sheet sees a correction,
+     not a deletion of history, which is the right shape for a record several people are writing. */
+  var UNDO = null;
+  function pushUndo(u){ UNDO = u; renderUndo(); }
+  function renderUndo(){
+    var n = el("undo-row"); if (!n) return;
+    if (!UNDO){ n.innerHTML = ""; return; }
+    n.innerHTML = "<span class='hint'>" + esc(UNDO.what || describeUndo(UNDO)) + "</span>"
+      + "<button class='idbtn' id='undo-btn'>Undo that</button>";
+    el("undo-btn").addEventListener("click", doUndo);
+  }
+  function describeUndo(u){
+    var n = u.ids.length + " fragment" + (u.ids.length === 1 ? "" : "s");
+    if (u.kind === "build") return "Just built " + u.cellKey + " from " + n + ".";
+    if (u.kind === "adopt") return "Just added " + n + " to " + u.name + ".";
+    return "Just added " + n + " to " + u.cellKey + ".";
+  }
+  function doUndo(){
+    if (!UNDO || BUSY) return;
+    var u = UNDO;
+    if (!STORE.canWrite()){ say("paste-msg", "Sign in with Google first.", false); return; }
+    BUSY = true;
+    say("paste-msg", "undoing…");
+    STORE.remove(u.cellKey, u.ids).then(function(){
+      var c = byId(u.cellKey);
+      if (c){
+        var drop = {}; u.ids.forEach(function(s){ drop[s] = 1; });
+        c.segments = c.segments.filter(function(s){ return !drop[s]; });
+        /* A cell that built and then lost everything it had is not a cell. It is dropped from the
+           page; the sheet keeps its row with a count of zero, which is a true record of somebody
+           having created and then withdrawn it. */
+        if (!c.segments.length && u.kind !== "add")
+          STATE.cells = STATE.cells.filter(function(x){ return x !== c; });
+      }
+      say("paste-msg", "Undone — " + u.ids.length + " fragment"
+        + (u.ids.length === 1 ? "" : "s") + " taken back off <code>"
+        + esc(X.isSeedKey(u.cellKey) ? X.seedName(u.cellKey) : u.cellKey) + "</code>.", true);
+      UNDO = null; render();
+    }).catch(failed("paste-msg", "Undoing")).then(function(){ BUSY = false; });
   }
 
   function byId(id){
@@ -2791,7 +2968,7 @@ UJ.app = (function(){
      recorded position, the viewer frames the assembly and the page says the nucleus is unknown. */
   function nucleusOf(c){ return (c && (c.nucleus || c.position)) || null; }
 
-  function cellUrl(c){ return X.viewerUrl(c.segments, nucleusOf(c)); }
+  function cellUrl(c){ return X.viewerUrl(allSegs(c), nucleusOf(c)); }
 
   function cellHtml(c){
     var t = X.tallySummary(c);
@@ -2801,14 +2978,23 @@ UJ.app = (function(){
     /* THE NAME IS THE LINK. Søren's ask, and it is the right shape: what you want to click is the
        cell, and the thing that identifies a cell to a person is what it is called. "Unnamed" is
        still a link -- an unnamed cell is exactly the one worth opening and looking at. */
-    return "<div class='cell' id='cell-" + cssId(c.id) + "'>"
+    return "<div class='cell" + (TARGET === c.id ? " aimed" : "") + "' id='cell-"
+      + cssId(c.id) + "'>"
+      + (TARGET === c.id
+          ? "<div class='aim-note'>The next paste lands here</div>" : "")
       + "<div class='row' style='justify-content:space-between;align-items:baseline'>"
       +   "<div><a class='cell-open' href='" + esc(cellUrl(c)) + "' target='_blank' rel='noopener'"
       +     " title='Open this cell in Neuroglancer, centred on its nucleus'>"
       +     esc(t.leader || "Unnamed") + " &#8599;</a> "
-      +     "<code class='cellid'>" + esc(c.id) + "</code> "
-      +     "<span class='chip'>" + c.segments.length + " fragment"
-      +     (c.segments.length === 1 ? "" : "s") + "</span> "
+      +     "<code class='cellid'>" + esc(seedOf(c) ? X.seedName(c.id) : c.id) + "</code> "
+      /* An adopted cell counts BOTH halves and says which is which -- a reconstruction from the
+         paper and one assembled this afternoon are different kinds of evidence, and one total
+         would quietly average them. */
+      +     (seedOf(c)
+              ? "<span class='chip'>" + X.seedSegments(seedOf(c)).length + " proofread + "
+                + c.segments.length + " added here</span> "
+              : "<span class='chip'>" + c.segments.length + " fragment"
+                + (c.segments.length === 1 ? "" : "s") + "</span> ")
       +     "<span class='chip st-" + t.status + "'>" + esc(status) + "</span> "
       +     (nucleusOf(c)
            ? "<span class='hint' title='the viewer opens here'>"
@@ -2833,6 +3019,22 @@ UJ.app = (function(){
       +   "<button class='save-nm' data-id='" + esc(c.id) + "'>Save name</button>"
       +   "<button class='rej' data-id='" + esc(c.id) + "' title='This is not one cell'>Not one cell</button>"
       + "</div>"
+      /* PUT THESE SOMEWHERE ELSE. The correction for the mistake that started this: fragments
+         built as a new cell that belonged on one that already existed. */
+      + "<div class='row' style='margin-top:8px;gap:8px;flex-wrap:wrap'>"
+      +   "<span class='hint'>Wrong cell?</span>"
+      +   "<select class='move-to' style='width:auto;max-width:100%'>"
+      +     "<option value=''>Move all " + c.segments.length + " fragment"
+      +       (c.segments.length === 1 ? "" : "s") + " into&hellip;</option>"
+      +     STATE.cells.filter(function(o){ return o.id !== c.id; }).map(function(o){
+            return "<option value='" + esc(o.id) + "'>" + esc(o.id) + " &mdash; "
+                 + esc(X.settledLabel(o) || "unnamed") + " (" + o.segments.length + ")</option>";
+          }).join("")
+      +     seeds().filter(function(r){ return !byId(r.key); }).slice(0, 200).map(function(r){
+            return "<option value='" + esc(r.key) + "'>" + esc(r.name) + " &mdash; "
+                 + esc(r.label) + " (proofread)</option>"; }).join("")
+      +   "</select><button class='move-go'>Move</button>"
+      + "</div>"
       /* The same four mesh actions the identity panel offers, on the same cell. A cell you
          assembled yourself is exactly the one you want in Blender and in a slide. */
       + "<div class='row' style='margin-top:8px;gap:8px;flex-wrap:wrap'>"
@@ -2850,9 +3052,21 @@ UJ.app = (function(){
       + "<div class='mesh3d-host'></div>"
       + "<div class='hint mesh-out' style='margin-top:6px'>"
       +   (c.meshTotal ? c.meshHave + " of " + c.meshTotal + " fragments have a mesh" : "") + "</div>"
-      + "<details style='margin-top:8px'><summary class='hint'>the " + c.segments.length
-      +   " fragment ids</summary><div class='frags' style='margin-top:6px'>"
-      +   c.segments.map(function(s){ return "<span class='frag-chip'>" + idHtml(s) + "</span>"; }).join("")
+      /* EVERY FRAGMENT CAN BE TAKEN BACK OFF. Søren: "if you make a mistake, you should be able
+         to correct it for yourself afterwards." A cell you assembled wrongly is not a thing to
+         report to somebody; it is a thing to fix. The ones from the proofread reconstruction are
+         shown but not removable here -- taking a fragment off a published cell is a claim about
+         the paper, not a correction of your own paste, and it belongs in the comment. */
+      + "<details style='margin-top:8px'><summary class='hint'>the " + allSegs(c).length
+      +   " fragment ids" + (seedOf(c) ? " — the proofread ones cannot be removed here" : "")
+      +   "</summary><div class='frags' style='margin-top:6px'>"
+      +   (seedOf(c) ? X.seedSegments(seedOf(c)).map(function(s){
+            return "<span class='frag-chip' title='from the published reconstruction'>"
+                 + idHtml(s) + "</span>"; }).join("") : "")
+      +   c.segments.map(function(s){
+            return "<span class='frag-chip mine'>" + idHtml(s)
+                 + "<button class='frag-x' data-seg='" + esc(s) + "' data-id='" + esc(c.id)
+                 + "' title='Take this fragment off this cell'>&times;</button></span>"; }).join("")
       +   "</div></details>"
       + "</div>";
   }
@@ -2868,15 +3082,63 @@ UJ.app = (function(){
     /* Growing a cell used to mean scrolling back to the top and finding it in a dropdown, which
        is fine with three cells and unusable with thirty. The button is on the cell itself and
        aims the paste box at it; renderPaste then offers "Add to cb2:7" as the primary action. */
+    /* Taking one fragment back off. Reported per fragment rather than as a batch, because you
+       press it having spotted one specific wrong piece. */
+    Array.prototype.forEach.call(root.querySelectorAll(".frag-x"), function(b){
+      b.addEventListener("click", function(){
+        var seg = b.getAttribute("data-seg");
+        if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
+        if (BUSY) return; BUSY = true;
+        note("removing…");
+        STORE.remove(c.id, [seg]).then(function(){
+          c.segments = c.segments.filter(function(x){ return x !== seg; });
+          UNDO = null;                       // the undo stack described a state that is now gone
+          render();
+        }).catch(function(e){ note(esc("Removing it failed: " + e.message), false); })
+          .then(function(){ BUSY = false; });
+      });
+    });
+    /* Moving a whole assembly into another cell -- the fix for exactly the mistake Søren made:
+       fragments built as a new cell that belonged on an existing one. Add-then-remove rather than
+       a "move" call, so the sheet records what actually happened and either half failing leaves
+       the fragments somewhere rather than nowhere. */
+    if (root.querySelector(".move-go"))
+      root.querySelector(".move-go").addEventListener("click", function(){
+        var to = root.querySelector(".move-to").value;
+        if (!to){ note("Pick where they should go.", false); return; }
+        if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
+        if (BUSY) return; BUSY = true;
+        var moving = c.segments.slice();
+        note("moving " + moving.length + "…");
+        var dest = byId(to);
+        var send = dest ? STORE.add(to, moving) : STORE.build(moving, c.position, to);
+        send.then(function(){
+          return STORE.remove(c.id, moving);
+        }).then(function(){
+          if (dest) dest.segments = X.addToCell(dest, moving).segments;
+          else {
+            var nc = X.newCell(to, moving, whoami()); nc.position = c.position;
+            STATE.cells.push(nc);
+          }
+          STATE.cells = STATE.cells.filter(function(x){ return x !== c; });
+          UNDO = null;
+          say("paste-msg", "Moved " + moving.length + " fragment"
+            + (moving.length === 1 ? "" : "s") + " from <code>" + esc(c.id) + "</code> to <code>"
+            + esc(X.isSeedKey(to) ? X.seedName(to) : to) + "</code>, and <code>" + esc(c.id)
+            + "</code> is gone.", true);
+          render(); focusCell(to);
+        }).catch(function(e){ note(esc("Moving them failed: " + e.message), false); })
+          .then(function(){ BUSY = false; });
+      });
     root.querySelector(".addto-cell").addEventListener("click", function(){
       TARGET = c.id;
       var box = el("paste");
       if (box){ box.value = ""; box.focus();
         if (box.scrollIntoView) box.scrollIntoView({ behavior:"smooth", block:"center" }); }
       LAST = null;
-      say("paste-msg", "Adding to <code>" + esc(c.id) + "</code> — click the extra fragments in "
-        + "the viewer and paste the link.", true);
-      renderPaste();
+      say("paste-msg", "Aiming at <code>" + esc(c.id) + "</code> — click the extra fragments in "
+        + "the viewer and paste the link below.", true);
+      render();
     });
     root.querySelector(".save-nm").addEventListener("click", function(){
       var v = root.querySelector(".nm").value.trim();
@@ -2893,13 +3155,20 @@ UJ.app = (function(){
     });
     if (root.querySelector(".view3d"))
       root.querySelector(".view3d").addEventListener("click", function(){
-        UJ.mesh3d.show(c, root.querySelector(".mesh3d-host"));
+        /* The cell itself for an ordinary assembly -- show() writes its coverage counts back onto
+           whatever it is given, and those counts are read again when the panel re-renders. An
+           adopted cell needs the UNION drawn, so it gets a stand-in, and the counts are copied
+           back by hand rather than left on an object nothing else can see. */
+        var view = seedOf(c) ? { id:c.id, segments:allSegs(c) } : c;
+        UJ.mesh3d.show(view, root.querySelector(".mesh3d-host")).then(function(){
+          if (view !== c){ c.meshHave = view.meshHave; c.meshTotal = view.meshTotal; }
+        });
       });
     /* Named for the cell, not for a database key: a file called `cb2_7_um.glb` on your desktop in
        a fortnight is a file you have to open to identify. `cb2_granule_cell_cb2-7_um.glb` is not. */
     var fileName = (X.settledLabel(c) || "unnamed").replace(/[^a-zA-Z0-9]+/g, "_")
                  + "_" + String(c.id).replace(/[^a-zA-Z0-9]+/g, "-");
-    meshActions(root, c.segments, fileName, X.settledLabel(c) || "cb2 cell",
+    meshActions(root, allSegs(c), fileName, X.settledLabel(c) || "cb2 cell",
                 nucleusOf(c), note);
     root.querySelector(".rej").addEventListener("click", function(){
       if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
@@ -3526,9 +3795,9 @@ UJ.app = (function(){
       if (box){ box.value = ""; box.focus();
         if (box.scrollIntoView) box.scrollIntoView({ behavior:"smooth", block:"center" }); }
       LAST = null;
-      say("paste-msg", "Adding to <code>" + esc(row.name) + "</code> — click the extra fragments "
-        + "in the viewer and paste the link.", true);
-      renderPaste();
+      say("paste-msg", "Aiming at <code>" + esc(row.name) + "</code> — click the extra fragments "
+        + "in the viewer and paste the link below.", true);
+      render();
     });
     Array.prototype.forEach.call(root.querySelectorAll(".idval[data-c]"), function(v){
       v.addEventListener("click", function(){
@@ -3693,18 +3962,18 @@ UJ.app = (function(){
       : [Math.round(info.from * X.resXYZ()[0] / 1000), Math.round(info.to * X.resXYZ()[0] / 1000)];
     var sampled = L.sampledY
       ? L.sampledY.map(function(v){ return Math.round(v * X.resXYZ()[1] / 1000); }) : null;
-    /* The side view is a twentieth the height of the top view at the same scale, so it goes in a
-       column with the explanation beneath it rather than beside it. Two figures side by side would
-       leave the right-hand one floating over a hand's width of nothing. */
+    /* ONE VIEW. The side view went on 2026-09-01 -- Søren: "We can remove the from the side view
+       from the model. It does not add much." He is right, and the reason is worth keeping: it
+       carried exactly one fact, that z is 48 µm against 998, and the caption below says that in
+       eight words. A second drawing to make one number vivid is a second drawing to look at, and
+       the layers -- which is what the model is for -- are only in this one. */
     host.innerHTML =
         "<figure>" + mapSvg(ext, 0, 1, ptNm, "x", "y", true)
       +   "<figcaption>from above &middot; x " + Math.round(ext[0] / 1000)
-      +   " &times; y " + Math.round(ext[1] / 1000) + " &micro;m</figcaption></figure>"
+      +   " &times; y " + Math.round(ext[1] / 1000) + " &micro;m &middot; the block is only "
+      +   Math.round(ext[2] / 1000) + " &micro;m deep, and the layers run across it, not through "
+      +   "its depth</figcaption></figure>"
       + "<div style='flex:1 1 220px;min-width:200px'>"
-      +   "<figure>" + mapSvg(ext, 0, 2, ptNm, "x", "z", false)
-      +     "<figcaption>from the side &middot; z is only "
-      +     Math.round(ext[2] / 1000) + " &micro;m &mdash; same scale, no layers: the slab cuts "
-      +     "across them</figcaption></figure>"
       +   layerKeyHtml()
       +   "<p class='hint' style='margin:8px 0 0'>"
       +   (pt ? "Your coordinate is in the " + layerLine(pt) + ". "
@@ -3841,9 +4110,9 @@ UJ.app = (function(){
       if (box){ box.value = ""; box.focus();
         if (box.scrollIntoView) box.scrollIntoView({ behavior:"smooth", block:"center" }); }
       LAST = null;
-      say("paste-msg", "Adding to <code>" + esc(r.name) + "</code> — click the extra fragments "
-        + "in the viewer and paste the link.", true);
-      renderPaste();
+      say("paste-msg", "Aiming at <code>" + esc(r.name) + "</code> — click the extra fragments "
+        + "in the viewer and paste the link below.", true);
+      render();
     });
   }
 
@@ -4030,11 +4299,11 @@ UJ.app = (function(){
     who: "you (harness)",
     canWrite: function(){ return true; },
     load: function(){ return Promise.resolve({ cells: STATE.cells }); },
-    build: function(ids){
+    build: function(ids, position, key){
       /* Local numbering is correct HERE and only here: the harness has exactly one user. */
       var n = 0;
       STATE.cells.forEach(function(c){ var m = /:(\d+)$/.exec(c.id); if (m && +m[1] > n) n = +m[1]; });
-      return Promise.resolve({ ok:true, cellKey: UJ.cfg.volume.id + ":" + (n + 1),
+      return Promise.resolve({ ok:true, cellKey: key || (UJ.cfg.volume.id + ":" + (n + 1)),
                                segments: ids, conflicts: X.claimsFor(STATE.cells, ids) });
     },
     add: function(cellKey, ids){
@@ -4162,8 +4431,12 @@ UJ.app = (function(){
           return STATE;
         });
     },
-    build: function(ids, position){
+    build: function(ids, position, key){
       var p = { type:"xjump_cell_build", segments: ids };
+      /* An explicit key ADOPTS a proofread cell -- see xjumpCellBuild's own comment. The server
+         refuses a key from another volume and refuses to adopt twice, so this cannot be used to
+         write over an existing assembly. */
+      if (key) p.cellKey = key;
       if (position){ p.x_vox = position[0]; p.y_vox = position[1]; p.z_vox = position[2]; }
       return this._post(p).then(function(d){
         /* A cell with no key is not a cell. This is not defensive politeness: doPost's if/else
