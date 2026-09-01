@@ -199,6 +199,9 @@ try{var _t=localStorage.getItem("ujump_theme");
    border-radius:7px;padding:1px 8px;font-size:11px;vertical-align:middle;cursor:pointer;
    white-space:nowrap;width:auto}
  .idbtn:disabled{opacity:.45;cursor:not-allowed}
+ /* µJump's full-width action buttons, for the two jobs in that panel worth a whole line each. */
+ .idbtn.wide{display:block;width:100%;margin:8px 0;padding:9px 13px;font-size:13px;
+   text-align:center}
  .neigh{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
  .neigh h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);
    margin:0 0 6px}
@@ -297,9 +300,25 @@ try{var _t=localStorage.getItem("ujump_theme");
   the x field; it splits automatically.
   <button type="button" id="rand" class="linkbtn">Show me a random cell</button></p>
   <p class="hint" id="find-msg" style="margin:6px 0 0"></p>
+  <!-- Søren, 2026-09-01: "I would like this part in xJump to be more like this part in uJump."
+       µJump's shape: two full-width buttons for the two jobs worth doing, a counts line under the
+       first, then a type dropdown with a Random example button. χJump had a row of pills instead,
+       which offered only the third of those three things. -->
   <details class="rv-panel" id="randomPanel">
-    <summary>Or browse a random cell of a particular kind</summary>
-    <div class="row" style="margin-top:8px" id="find-random"></div>
+    <summary>Or browse a random cell</summary>
+    <div id="find-random">
+      <button type="button" class="idbtn wide" id="randomUntouched"
+        title="A cell the Lee lab proofread that nobody here has extended or corrected yet — these are where your work is worth most">Random cell nobody has worked on &mdash; extend or correct it</button>
+      <p class="hint" id="randomCounts" style="margin:-2px 0 8px"></p>
+      <button type="button" class="idbtn wide" id="randomBuilt"
+        title="Jump to a cell somebody assembled in this page — useful for reviewing, confirming or challenging another person's assembly">Random community-built cell &mdash; review someone&rsquo;s assembly</button>
+      <div class="row" style="gap:8px">
+        <select id="randomTypeSelect" style="flex:1 1 auto"></select>
+        <button type="button" class="idbtn" id="randomOfType">Random example</button>
+      </div>
+      <p class="hint">Good for learning what a cell type looks like &mdash; a new random example
+      loads each click.</p>
+    </div>
   </details>
   <div class="row" style="margin-top:12px">
     <button id="open-empty">Open cb2 in the viewer &#8599;</button>
@@ -2632,6 +2651,10 @@ UJ.app = (function(){
   /* ── the cells ───────────────────────────────────────────────────────────────────────────── */
   function render(){
     renderPaste();
+    /* The random panel's counts are counts of the store, so they are re-read whenever the store
+       changes rather than once at load. Otherwise "0 cells built in this page" stays on screen
+       after you have built three. */
+    renderRandomButtons();
     var host = el("cells"); if (!host) return;
     if (!STATE.cells.length){
       host.innerHTML = "<p class='hint' style='margin:0'>No cells yet. Click fragments in the "
@@ -2959,19 +2982,55 @@ UJ.app = (function(){
      Both are one lookup now that every proofread cell carries a soma. Neither was possible an hour
      ago -- the database's soma_loc looked like it belonged to a different volume, because it was
      read as nanometres when its x and y are in a 16 nm grid. */
+  /* ── the random panel, in µJump's shape ────────────────────────────────────────────────────
+     Søren, 2026-09-01: "I would like this part in xJump to be more like this part in uJump."
+
+     µJump's panel is two full-width buttons for the two jobs worth doing -- help identify an
+     unassigned cell, review somebody else's call -- with a counts line under the first, then a type
+     dropdown and "Random example". χJump had a row of pills, which offered only the third of those
+     three things: pick a type. The two jobs were missing entirely.
+
+     What "the two jobs" MEAN differs here, and that difference is the honest part. µJump's cells
+     come pre-classified and the work is naming them. χJump's come pre-NAMED -- the Lee lab typed
+     every one -- and the work is assembling them: extending a reconstruction, correcting where it
+     ends, deciding whether two pieces are one cell. So the buttons are "nobody has worked on this
+     one" and "somebody has; check them". Same shape, this tool's work. */
+
+  /* Which proofread cells the community has already touched. A built cell keyed `cb2/htem/grc_100`
+     IS that seed, extended -- see wireSeedRow's "Add fragments", which aims the paste box at the
+     seed's own key. So the set of touched seeds is read off the store rather than tracked
+     separately, and cannot drift from it. */
+  function touchedSeeds(){
+    var t = {};
+    STATE.cells.forEach(function(c){ if (X.isSeedKey(c.id)) t[c.id] = 1; });
+    return t;
+  }
+
   function renderRandomButtons(){
     var host = el("find-random"); if (!host || !window.UJ.seeds) return;
-    var types = X.seedTypes();
-    host.innerHTML = "<span class='hint'>or a random&nbsp;</span>"
-      + types.map(function(t){
-          return "<button class='rand' data-t='" + esc(t.type) + "'>" + esc(t.label)
-               + " <span class='hint'>(" + t.n.toLocaleString() + ")</span></button>"; }).join("")
-      + "<button class='rand' data-t=''>any cell</button>";
-    Array.prototype.forEach.call(host.querySelectorAll(".rand"), function(b){
-      b.addEventListener("click", function(){
-        showRandom(b.getAttribute("data-t") || null);
-      });
-    });
+    var sel = el("randomTypeSelect");
+    if (sel && !sel.options.length){
+      var types = X.seedTypes();
+      sel.innerHTML = "<option value=''>any kind ("
+        + seeds().filter(function(r){ return r.whole; }).length.toLocaleString() + ")</option>"
+        + types.map(function(t){
+            return "<option value='" + esc(t.type) + "'>" + esc(cap(t.label))
+                 + " (" + t.n.toLocaleString() + ")</option>"; }).join("");
+    }
+    var rows = seeds(), touched = touchedSeeds();
+    var nTouched = Object.keys(touched).length;
+    var untouched = rows.filter(function(r){ return r.whole && !touched[r.key]; }).length;
+    var built = STATE.cells.length;
+    if (el("randomCounts"))
+      el("randomCounts").innerHTML =
+          "<b>" + untouched.toLocaleString() + "</b> nobody has worked on &middot; "
+        + "<b>" + nTouched.toLocaleString() + "</b> extended here &middot; "
+        + "<b>" + built.toLocaleString() + "</b> cell" + (built === 1 ? "" : "s")
+        + " built in this page &middot; " + rows.length.toLocaleString()
+        + " proofread by Nguyen <i>et al.</i>";
+    /* Disabled rather than hidden when there is nothing to review: a button that vanishes teaches
+       nobody what it would have done, and this one explains itself in its own label. */
+    if (el("randomBuilt")) el("randomBuilt").disabled = built === 0;
   }
 
   /* Landing on a random cell fills the coordinate fields in as well as showing the panel. Without
@@ -2979,10 +3038,43 @@ UJ.app = (function(){
      itself about where you are -- and it makes the obvious next move, nudging z to look around,
      impossible without retyping. */
   function showRandom(type){
-    var r = X.randomSeed(type || null);
+    landOn(X.randomSeed(type || null), "a random " + (type ? "" : "cell"));
+  }
+
+  /* A proofread cell nobody here has extended yet. Drawn from the whole-cell seeds the store has
+     never seen a key for -- so it answers "where is my work worth most" with a fact rather than a
+     guess. */
+  function showRandomUntouched(){
+    var touched = touchedSeeds();
+    var pool = seeds().filter(function(r){ return r.whole && !touched[r.key]; });
+    if (!pool.length){
+      say("find-msg", "Every proofread cell has been worked on. That is a first.", true); return;
+    }
+    landOn(pool[Math.floor(Math.random() * pool.length)], "nobody has worked on this one");
+  }
+
+  /* Somebody else's assembly. Not a seed, so there is no identity panel to show -- the cell's own
+     card down the page is where it can be reviewed, extended and named, so that is where this
+     goes. */
+  function showRandomBuilt(){
+    if (!STATE.cells.length){
+      say("find-msg", "No cells have been built here yet — build the first one.", false); return;
+    }
+    var c = STATE.cells[Math.floor(Math.random() * STATE.cells.length)];
+    var seed = X.isSeedKey(c.id)
+      ? seeds().filter(function(r){ return r.key === c.id; })[0] : null;
+    if (seed) landOn(seed, "built on by somebody here");
+    focusCell(c.id);
+  }
+
+  /* Landing on a cell fills the coordinate fields in as well as showing the panel. Without that the
+     boxes still say wherever you were last, which is a page quietly disagreeing with itself about
+     where you are -- and it makes the obvious next move, nudging z to look around, impossible
+     without retyping. */
+  function landOn(r, why){
     if (!r){ say("find-msg", "no cells of that kind", false); return; }
     if (r.pos){ writeCoord(r.pos.map(function(v){ return Math.round(v); })); drawMap(r.pos); }
-    showFound([{ row: r, nm: 0 }], "a random " + r.label);
+    showFound([{ row: r, nm: 0 }], why + " — " + r.label);
   }
 
   /* ── the coordinate box ───────────────────────────────────────────────────────────────────
@@ -3935,6 +4027,12 @@ UJ.app = (function(){
     });
     if (el("go")) el("go").addEventListener("click", findByCoord);
     if (el("rand")) el("rand").addEventListener("click", function(){ showRandom(null); });
+    if (el("randomUntouched"))
+      el("randomUntouched").addEventListener("click", showRandomUntouched);
+    if (el("randomBuilt")) el("randomBuilt").addEventListener("click", showRandomBuilt);
+    if (el("randomOfType")) el("randomOfType").addEventListener("click", function(){
+      showRandom(el("randomTypeSelect") ? el("randomTypeSelect").value : null);
+    });
     coordFields().forEach(function(f){
       if (!f) return;
       f.addEventListener("keydown", function(e){ if (e.key === "Enter") findByCoord(); });
@@ -3998,6 +4096,7 @@ UJ.app = (function(){
            seeds:seeds, renderSeeds:renderSeeds,
            findByCoord:findByCoord, renderRandomButtons:renderRandomButtons,
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
+           showRandomUntouched:showRandomUntouched, showRandomBuilt:showRandomBuilt,
            showFound:showFound, layerLine:layerLine, showPlaceholder:showPlaceholder,
            box:function(){ return BOX; },
            setCredential: function(c, who){
