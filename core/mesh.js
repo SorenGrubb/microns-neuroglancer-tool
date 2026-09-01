@@ -755,21 +755,59 @@ UJ.mesh=(()=>{
     });
     return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:meshes.length,rootIds:usedIds,mainUnavailable};
   }
+  /* ---------- the EXPORT half, split out from the FETCH half (2026-09-01) ----------
+     Søren asked for χJump's cb2 cells to get the same three buttons these tools have: a .glb, a
+     PowerPoint and a computed volume. χJump cannot use downloadRoot() to get them -- cb2 publishes
+     unsharded legacy meshes with their own manifest format, decoded by xjump_mesh.js, not by the
+     graphene/Draco pipeline above.
+
+     What it CAN use is everything that happens after the geometry exists: the Y-flip, the GLB
+     writer, the scale bar, the PowerPoint skeleton, the thumbnail, the volume sum. So those are
+     now three functions that take geometry and know nothing about where it came from, and the
+     three entry points below are fetch + call. One implementation of the .glb format, one of the
+     .pptx, one of the volume -- reached from two different fetchers.
+
+     Geometry in, here and everywhere in this file, is MICROMETRES: {positions, indices}. */
+  function saveBlob(blob,filename){
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+  }
+  function saveGlb(geo,opts){
+    const o=opts||{};
+    const {positions,indices}=flipYForGLTF(geo.positions,geo.indices);
+    const glb=buildGLB(positions,indices,o.name||"mesh");
+    const filename=(o.filename||o.name||"mesh")+".glb";
+    saveBlob(new Blob([glb],{type:"model/gltf-binary"}),filename);
+    return {filename,vertices:positions.length/3};
+  }
+  /* Signed-tetrahedron sum (divergence theorem) -- see computeVolume()'s own comment below for why
+     this is reported as an estimate rather than an exact figure. Translation-invariant, so it does
+     not care whether the caller's geometry is centred. */
+  function volumeOf(geo){
+    const positions=geo.positions,indices=geo.indices;
+    let vol6=0;
+    for(let t=0;t<indices.length;t+=3){
+      const ia=indices[t]*3,ib=indices[t+1]*3,ic=indices[t+2]*3;
+      const ax=positions[ia],ay=positions[ia+1],az=positions[ia+2];
+      const bx=positions[ib],by=positions[ib+1],bz=positions[ib+2];
+      const cx=positions[ic],cy=positions[ic+1],cz=positions[ic+2];
+      vol6+=ax*(by*cz-bz*cy)-ay*(bx*cz-bz*cx)+az*(bx*cy-by*cx);
+    }
+    return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3};
+  }
   async function downloadRoot(rootIdStr,onProgress,forceRecheck){
     const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount,rootIds,mainUnavailable}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
-    const {positions,indices}=flipYForGLTF(rawPositions,rawIndices);
     /* When there's no main root ID (community-only combine), fall back to the first combined ID
        so the filename is still a real, traceable segmentation ID rather than a blank/underscore. */
     const idForName=rootIdStr||rootIds[0];
     const tag=fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod;
-    const glb=buildGLB(positions,indices,"microns_"+idForName+tag);
     onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+idForName+tag+"_um.glb";
-    const url=URL.createObjectURL(new Blob([glb],{type:"model/gltf-binary"}));
-    const a=document.createElement("a");
-    a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {lod,numLods,bytes,vertices:positions.length/3,filename,fragmentCount,rootIds,mainUnavailable};
+    const saved=saveGlb({positions:rawPositions,indices:rawIndices},
+      {name:"microns_"+idForName+tag,filename:"microns_"+idForName+tag+"_um"});
+    return {lod,numLods,bytes,vertices:saved.vertices,filename:saved.filename,
+            fragmentCount,rootIds,mainUnavailable};
   }
   /* ---------- Mesh volume (on-demand, per Søren's request 2026-07-30) ----------
      Nucleus volume (see NV/nucVolumeStr near the top of the file) is precomputed and free to
@@ -790,15 +828,8 @@ UJ.mesh=(()=>{
   async function computeVolume(rootIdStr,onProgress,forceRecheck){
     const {positions,indices,fragmentCount,rootIds,mainUnavailable}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
     onProgress&&onProgress(0.98,"computing volume…");
-    let vol6=0;
-    for(let t=0;t<indices.length;t+=3){
-      const ia=indices[t]*3,ib=indices[t+1]*3,ic=indices[t+2]*3;
-      const ax=positions[ia],ay=positions[ia+1],az=positions[ia+2];
-      const bx=positions[ib],by=positions[ib+1],bz=positions[ib+2];
-      const cx=positions[ic],cy=positions[ic+1],cz=positions[ic+2];
-      vol6+=ax*(by*cz-bz*cy)-ay*(bx*cz-bz*cx)+az*(bx*cy-by*cx);
-    }
-    return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3,fragmentCount,rootIds,mainUnavailable};
+    const v=volumeOf({positions,indices});
+    return {volumeUm3:v.volumeUm3,vertices:v.vertices,fragmentCount,rootIds,mainUnavailable};
   }
   /* ---------- PowerPoint (.pptx) with a live, auto-spinning 3D model ----------
      PPTXSK is a ~32KB skeleton .pptx -- ONE slide holding a 3D-model placeholder with the
@@ -974,10 +1005,15 @@ UJ.mesh=(()=>{
     const idx=[0,1,3,0,3,2,4,6,7,4,7,5,0,4,5,0,5,1,2,3,7,2,7,6,0,2,6,0,6,4,1,5,7,1,7,3];
     return {positions,indices:new Uint32Array(idx),barLenUm};
   }
-  async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress,forceRecheck){
-    const [{positions:cellRawPositions,indices:cellRawIndices,fragmentCount,rootIds,mainUnavailable},JSZip]=await Promise.all([fetchCombinedMesh(rootIdStr,onProgress,forceRecheck),loadJSZip()]);
-    /* Same "no main root ID -- community-only combine" fallback as downloadRoot() above. */
-    const idForName=rootIdStr||rootIds[0];
+  /* The PowerPoint, from geometry alone (2026-09-01 -- see the "EXPORT half" comment above). Takes
+     {positions,indices} in µm plus the three strings that appear on the slide, and knows nothing
+     about root IDs, CAVE or which volume this came from. downloadRootPptx() below is now this plus
+     a fetch and MICrONS' own naming. */
+  async function savePptx(geo,opts){
+    const o=opts||{};
+    const JSZip=await loadJSZip();
+    const cellRawPositions=geo.positions,cellRawIndices=geo.indices;
+    const onProgress=o.onProgress;
     onProgress&&onProgress(0.96,"building PowerPoint…");
     /* Cell-only raw bbox -- used to size the scale bar ITSELF (its length stays 28% of the CELL's
        own longest span, not the whole assembly's, so it stays a sensible, comparable size). The
@@ -1030,7 +1066,7 @@ UJ.mesh=(()=>{
     const cx=(minX+maxX)/2,cy=(minY+maxY)/2,cz=(minZ+maxZ)/2;
     const n=Math.round(PPTX_FILL_BOOST*1000000/longest),d=1000000;
     const pre=[Math.round(-cx*n*36),Math.round(-cy*n*36),Math.round(-cz*n*36)];
-    const glb=buildGLB(positions,indices,"microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:""));
+    const glb=buildGLB(positions,indices,o.name||"cell");
     const zip=await JSZip.loadAsync(PPTXSK_B64,{base64:true});
     zip.file("ppt/media/model3d1.glb",glb);
     const pngB64=renderThumbnailPNG(positions,minX,maxX,minY,maxY);
@@ -1044,18 +1080,31 @@ UJ.mesh=(()=>{
        for a quick check before opening the file). Reuses the SUBTITLE_PLACEHOLDER text box rather
        than adding a new one to the skeleton, since that box already sits right under the model. */
     const barDisplay=barLen>=1000?(barLen/1000)+" mm":barLen+" µm";
-    const subtitle="Root ID "+rootIdStr+(fragmentCount>1?" (+"+(fragmentCount-1)+" more, combined)":"")+(coordStr?"   ·   voxel "+coordStr:"")+"   ·   scale bar "+barDisplay;
-    slideXml=slideXml.replace("CELL_TYPE_PLACEHOLDER",escXmlText(cellTypeName||"Unclassified cell"));
+    /* The caller supplies the subtitle's own text; the scale bar is appended here because only
+       this function knows how long it decided to make it. */
+    const subtitle=(o.subtitle||"")+(o.subtitle?"   ·   ":"")+"scale bar "+barDisplay;
+    slideXml=slideXml.replace("CELL_TYPE_PLACEHOLDER",escXmlText(o.title||"Unclassified cell"));
     slideXml=slideXml.replace("SUBTITLE_PLACEHOLDER",escXmlText(subtitle));
     zip.file("ppt/slides/slide2.xml",slideXml);
     const blob=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation"});
     onProgress&&onProgress(1,"saving…");
-    const filename="microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:"")+"_turntable.pptx";
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");
-    a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),30000);
-    return {filename,vertices:positions.length/3,fragmentCount,barLenUm:barLen,rootIds,mainUnavailable};
+    const filename=(o.filename||o.name||"cell")+"_turntable.pptx";
+    saveBlob(blob,filename);
+    return {filename,vertices:positions.length/3,barLenUm:barLen};
+  }
+  async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress,forceRecheck){
+    const geo=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+    const {fragmentCount,rootIds,mainUnavailable}=geo;
+    /* Same "no main root ID -- community-only combine" fallback as downloadRoot() above. */
+    const idForName=rootIdStr||rootIds[0];
+    const base="microns_"+idForName+(fragmentCount>1?"_combined"+fragmentCount:"");
+    const out=await savePptx(geo,{
+      name:base, filename:base, onProgress:onProgress,
+      title:cellTypeName||"Unclassified cell",
+      subtitle:"Root ID "+rootIdStr+(fragmentCount>1?" (+"+(fragmentCount-1)+" more, combined)":"")
+               +(coordStr?"   ·   voxel "+coordStr:"")});
+    return {filename:out.filename,vertices:out.vertices,fragmentCount,
+            barLenUm:out.barLenUm,rootIds,mainUnavailable};
   }
   /* 2026-08-05 (Sören: recalculate should only be offered once MORE root IDs exist than the
      saved computation used) -- exposes the exact "main + qualifying extras" count
@@ -1146,5 +1195,7 @@ UJ.mesh=(()=>{
   }
 
   return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache,currentFragmentCount,
-          fetchCombinedMesh,buildContactGrid,nearestInContactGrid,allContactPointsWithinThreshold};
+          fetchCombinedMesh,buildContactGrid,nearestInContactGrid,allContactPointsWithinThreshold,
+          /* The export half, for a tool that fetches its own geometry -- see its comment above. */
+          saveGlb,savePptx,volumeOf,buildGLB};
 })();
