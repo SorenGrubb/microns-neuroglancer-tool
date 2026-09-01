@@ -150,6 +150,11 @@ try{var _t=localStorage.getItem("ujump_theme");
  .seedrow{display:grid;grid-template-columns:minmax(90px,auto) minmax(90px,auto) 1fr auto auto;
    gap:10px;align-items:center;padding:5px 8px;border-radius:8px}
  .seedrow:nth-child(odd){background:var(--bg)}
+ /* The second column holds the published type AND, when the two disagree, what this community has
+    settled on. A WRAPPER rather than a second grid child: an extra top-level element in a
+    five-column grid pushes the annotator and the button out of their columns on exactly the rows
+    that have something extra to say, which is the worst possible time to lose the alignment. */
+ .seedrow>.chips{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-width:0}
  .seed-open{font-weight:600;text-decoration:none;color:var(--accent)}
  .seed-open:hover{text-decoration:underline}
  .seedrow button{padding:4px 9px;font-size:12.5px}
@@ -159,6 +164,19 @@ try{var _t=localStorage.getItem("ujump_theme");
  /* Sign-in, top right with the theme button. Reading is public, so this is deliberately quiet. */
  .who{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
  #whoami{font-size:12px;color:var(--mut)}
+ /* The points chip, ωJump's shape. It is EMPTY until somebody signs in and the first ?myStats=
+    lands, so it must not reserve space or draw a border of its own -- an empty pill next to the
+    theme button reads as something that failed to load. */
+ .ptchip{display:inline-flex;align-items:center;gap:8px;background:var(--bg);
+   border:1px solid var(--accent);border-radius:20px;padding:6px 13px;font-size:13px}
+ .ptchip .lvl{font-weight:650;color:var(--accent)}
+ .ptchip .pts{color:var(--mut)}
+ /* This community's rows in the annotator ranking, told apart from the paper's proofreaders by
+    the bar rather than by being moved into a list of their own -- being ON the same list next to
+    them is the whole point of the chart. */
+ .bar.b-here .fill{background:var(--accent)}
+ .bar.b-here>span:first-child{font-weight:600}
+ .bar.b-you>span:first-child::after{content:" — you";color:var(--accent);font-weight:600}
 
  /* ── COORDINATE FIRST ─────────────────────────────────────────────────────────────────────
     Søren, 2026-09-01: "the coordinates should be the first thing". Three separate fields and an
@@ -307,7 +325,7 @@ try{var _t=localStorage.getItem("ujump_theme");
       class="mu">&chi;</span><span class="jm">Jump</span></h1></a>
   </div>
   <div class="who">
-    <span id="whoami">not signed in</span><div id="gsiButton"></div>
+    <span id="pointsChip"></span><span id="whoami">not signed in</span><div id="gsiButton"></div>
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
             aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span>
       <span id="themeToggleLabel">Dark</span></button>
@@ -316,7 +334,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-01 20:31</span></p>
+ctrl-shift-R.">build 2026-09-01 20:52</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -438,15 +456,20 @@ ctrl-shift-R.">build 2026-09-01 20:31</span></p>
 
 <div class="tabpanel" data-tabpanel="filter">
 <div class="card" id="seed-card">
-  <label>Filter and show &mdash; <span id="seed-count"></span></label>
-  <p class="hint" style="margin-top:0">Every cell somebody has already proofread, searchable by
-  name, kind or annotator. Applied entirely in your browser &mdash; the list is embedded in this
-  page. <b>Add fragments</b> aims the paste box at that cell, so you extend or correct somebody
-  else&rsquo;s reconstruction rather than starting a rival one.</p>
+  <label>The cell list &mdash; <span id="seed-count"></span></label>
+  <p class="hint" style="margin-top:0">Every cell in cb2 this tool knows about: the ones proofread
+  for the paper, and the ones assembled here. Searchable by name, kind or annotator, and applied
+  entirely in your browser &mdash; the list is embedded in this page. Each row shows the cell
+  <b>as it stands now</b>, so a reconstruction somebody has extended here says so and opens with
+  the extra fragments in it. <b>Add fragments</b> aims the paste box at that cell, so you extend
+  or correct an existing reconstruction rather than starting a rival one.</p>
   <p class="hint" style="margin-top:6px"><span id="seed-breakdown"></span></p>
   <div class="row" style="margin:10px 0">
     <input id="seed-q" placeholder="grc_100, purkinje, mf&hellip;" style="flex:1 1 240px">
     <span class="hint" id="seed-msg"></span>
+    <button type="button" id="seed-csv" title="The whole list, not just what is on screen &mdash;
+every cell, its kind, its soma position, how many fragments it has now and who worked on it.">Download
+the whole list (CSV)</button>
   </div>
   <div id="seed-list"></div>
 </div>
@@ -850,6 +873,11 @@ UJ.cfg.mesh = {};
      of them. NOT core/mesh3d.js -- that file also defines UJ.mesh3d and would silently replace
      χJump's own renderer, which knows cb2's coordinate frame; the build refuses it. -->
 <script src="core/mesh.js"></script>
+<!-- core/points.js -- how a points total is turned into something a person reads. Small enough
+     that every tool in the family carries it, which is what makes "whole numbers everywhere"
+     mean everywhere: the same fix made in one tool's own chip reached that tool only, and
+     Søren's next screenshot was the next tool still showing 1786.5000000000002. -->
+<script src="core/points.js"></script>
 <script>/* ── χJump seed cells ────────────────────────────────────────────────────────────────────────
    GENERATED by build_xjump_seeds.py from the cb2 proofreading database. Do not edit by hand.
 
@@ -2642,7 +2670,7 @@ UJ.app = (function(){
   "use strict";
   var X = UJ.xjump;
   var LIVE = !!window.XJUMP_LIVE;
-  var STATE = { cells: [], claimed: {} };
+  var STATE = { cells: [], claimed: {}, contributors: [] };
   var LAST = null;            // the most recent paste: { ids, groups, position, … }
   /* Which cell the next paste is FOR, set by a cell's own "Add fragments" button. null means
      "build a new one". Kept as page state rather than as a dropdown value because the choice is
@@ -3063,6 +3091,25 @@ UJ.app = (function(){
     return out;
   }
 
+  /* THE COMMUNITY RECORD FOR A PROOFREAD CELL, if there is one.
+
+     Søren, 2026-09-01: "if I search for pc under Filter and show, I get the version of the
+     Purkinje cell without my added fragments. I want to have one registration of the cell, and
+     when I update that, it will be what is shown."
+
+     There has only ever been one registration -- adopting a seed writes the DELTA under the
+     seed's own key, `cb2/htem/pc_0`, precisely so that a cell cannot fork into a proofread copy
+     and a community copy. What was wrong was the LIST: renderSeeds() read the embedded seed table
+     and nothing else, so it showed the published fragment count and opened the published segment
+     set however much had since been added. The seed table is baked into the page and the deltas
+     arrive from the sheet, so the two have to be joined at render time; this is that join, and
+     everything the list shows now goes through it. */
+  function builtOn(key){
+    for (var i = 0; i < STATE.cells.length; i++)
+      if (STATE.cells[i].id === key) return STATE.cells[i];
+    return null;
+  }
+
   /* ── undoing the last thing you did ───────────────────────────────────────────────────────
      Søren, 2026-09-01: "if you make a mistake, you should be able to correct it for yourself
      afterwards."
@@ -3132,6 +3179,11 @@ UJ.app = (function(){
        changes rather than once at load. Otherwise "0 cells built in this page" stays on screen
        after you have built three. */
     renderRandomButtons();
+    /* And the Filter-and-show list, for the same reason: its rows now carry each cell's merged
+       fragment count, so leaving it drawn from the load-time store would show the published
+       figure again the moment you added to a cell. It reads the search box, so redrawing it
+       keeps whatever was typed. */
+    renderSeeds();
     var host = el("cells"); if (!host) return;
     if (!STATE.cells.length){
       host.innerHTML = "<p class='hint' style='margin:0'>No cells yet. Click fragments in the "
@@ -3466,7 +3518,11 @@ UJ.app = (function(){
       /* Floored at 0.4% so a category with one cell in it draws a sliver rather than nothing: a
          bar of zero width beside a count of 1 reads as "none", which is a different claim. The
          count is printed beside every bar, so the floor cannot mislead about size. */
-      return "<div class='bar'><span>" + esc(r.label) + "</span>"
+      /* r.cls / r.title are optional and used by one chart only: the annotator ranking, where the
+         paper's proofreaders and this community's contributors stand in the same list and have to
+         be told apart on sight. Everywhere else they are absent and the bar is as it was. */
+      return "<div class='bar" + (r.cls ? " " + r.cls : "") + "'"
+        + (r.title ? " title='" + esc(r.title) + "'" : "") + "><span>" + esc(r.label) + "</span>"
         + "<span class='track'><span class='fill' style='width:"
         + Math.max(0.4, r.n / max * 100).toFixed(1) + "%'></span></span>"
         + "<span class='n'>" + r.n.toLocaleString()
@@ -3487,6 +3543,35 @@ UJ.app = (function(){
     });
     return Object.keys(by).map(function(k){ return { label:k, n:by[k] }; })
                  .sort(function(a, b){ return b.n - a.n; });
+  }
+
+  /* ONE RANKING, TWO KINDS OF ANNOTATOR. Søren, 2026-09-01: "in the statistics, users should
+     compete with the previous annotators."
+
+     Competing means being on the same axis. The paper's nine are counted in reconstructions, so
+     this community is counted in CELLS as well -- a cell you built out of loose fragments and a
+     cell you extended both count once, however many pieces went in. The alternative, fragments,
+     would be a ranking of the segmentation rather than of the people: cb2 splits a granule cell
+     into a median hundred-odd pieces and a mossy fibre terminal into a handful.
+
+     Nobody is going to pass ir53's 2,000 cells this year, and the chart does not pretend
+     otherwise -- it is a list you appear on and climb, next to the people whose work you are
+     extending. The two groups are marked rather than separated for exactly that reason. */
+  function rankedAnnotators(whoRows){
+    var mine = whoami().toLowerCase();
+    var here = (STATE.contributors || []).filter(function(c){ return c.cells > 0; })
+      .map(function(c){
+        return { label: c.name + " · here", n: c.cells, cls: "b-here"
+                 + (mine && c.name.toLowerCase() === mine ? " b-you" : ""),
+                 title: c.name + " has worked on " + c.cells + " cell"
+                        + (c.cells === 1 ? "" : "s") + " in this page — " + c.built
+                        + " built from loose fragments, " + (c.cells - c.built)
+                        + " extended from the published reconstructions — with "
+                        + c.fragments + " fragment" + (c.fragments === 1 ? "" : "s")
+                        + " added in total, " + c.nuclei + " nuclei marked and "
+                        + c.names + " names given." };
+      });
+    return whoRows.concat(here).sort(function(a, b){ return b.n - a.n; });
   }
 
   function bigHtml(items){
@@ -3571,11 +3656,21 @@ UJ.app = (function(){
       + "Granule cells landing in the molecular layer are mostly the " + mlNamed + " the source "
       + "names <code>ml_grc_*</code>, which is what that name means.</p>"
 
-      + "<div class='statlab' style='margin:18px 0 0'>Reconstructions by annotator</div>"
-      + barsHtml(whoRows, rows.length)
-      + "<p class='hint'>Credit where it is owed: every one of these was proofread by hand for "
-      + "<a href='https://doi.org/10.1038/s41586-022-05471-w' target='_blank' rel='noopener'>"
-      + "Nguyen <i>et al.</i> (2023)</a>.</p>"
+      + "<div class='statlab' style='margin:18px 0 0'>Cells by annotator</div>"
+      + "<div id='annotBars'>" + barsHtml(rankedAnnotators(whoRows), rows.length) + "</div>"
+      + "<p class='hint'>Credit where it is owed: the unmarked names proofread these cells by hand "
+      + "for <a href='https://doi.org/10.1038/s41586-022-05471-w' target='_blank' rel='noopener'>"
+      + "Nguyen <i>et al.</i> (2023)</a>. The ones marked <b>here</b> are this community, on the "
+      + "same axis and in the same unit &mdash; <b>cells</b>, not fragments. A cell counts for you "
+      + "whether you built it out of loose pieces or added to somebody else's; it counts once "
+      + "however many fragments you put in it. "
+      + (STATE.can && STATE.can.contributors === false
+          ? "<b>This deployment does not send the community ranking yet</b> — paste XJumpCells.gs "
+            + "and Deploy → New version."
+          : "Fragments are deliberately not the unit: a granule cell is a median " + med + " pieces "
+            + "and a mossy fibre a handful, so a fragment ranking would rank people by which cell "
+            + "type they happened to pick.")
+      + "</p>"
 
       + "<div class='statlab' style='margin:22px 0 6px'>Built here &mdash; by this community</div>"
       + bigHtml([{ n: built.length, label: "cells assembled" },
@@ -3592,6 +3687,120 @@ UJ.app = (function(){
   }
 
   function whoami(){ return (STORE.who || "").trim(); }
+
+  /* ── points ───────────────────────────────────────────────────────────────────────────────
+     Søren, 2026-09-01: "xJump does not have a point system."
+
+     The BACKEND has had one since the χJump handlers shipped -- Code.gs's FLAT_RATE map pays 8 a
+     cell built, 2 a name, 3 a box looked at, 5 a nucleus found, and pays NOTHING per fragment,
+     for the same reason the leaderboard above ranks in cells. What was missing was the page: this
+     tool never asked for the number, so a person could assemble twenty cells and see nothing.
+
+     Two calls, and the split matters:
+       ?myStats=       this dataset, live, correct the instant you submit
+       ?profileTotals= every dataset, from the sheet the four-hourly job rebuilds
+
+     The chip shows the OTHER tools from the snapshot plus THIS one live, which is the only
+     arrangement that is both continuous across the family and immediately right after a
+     submission. Ported from ωJump rather than taken from core/gamify.js on purpose: that file
+     also carries a dashboard, a favourites store and a leaderboard modal, none of which χJump has
+     a surface for -- its leaderboard is the annotator chart above, where the competition Søren
+     asked for actually belongs.
+
+     NOTHING IN HERE MAY THROW. A chip stuck on "loading…" is indistinguishable from a backend
+     that never answered, and that is exactly how the perDataset shape mismatch presented across
+     this family for weeks -- as a performance problem rather than as a bug. */
+  var MYSTATS = null, TOTALS = null;
+
+  /* perDataset arrives as an ARRAY from a current Datasets.gs and as an OBJECT from an older one.
+     Accepting both keeps the page correct on either side of a redeploy, which this family has
+     been bitten by twice. */
+  function perList(t){
+    var p = t && t.perDataset;
+    if (!p) return [];
+    if (Object.prototype.toString.call(p) === "[object Array]")
+      return p.filter(function(e){ return !!e; });
+    var out = [];
+    for (var k in p) if (p.hasOwnProperty(k) && p[k]){ var e = p[k]; if (e.ds == null) e.ds = k; out.push(e); }
+    return out;
+  }
+  /* Name the level for the number actually on screen. The server's myStats level is computed from
+     THIS tool's points alone, which is why βJump once read "Contributor" while every other tool
+     read "Novice" for the same account. Pool the points and the ladder has to be pooled too. */
+  function levelName(points, levels){
+    if (!levels || !levels.length) return null;
+    var name = null;
+    for (var i = 0; i < levels.length; i++) if (points >= levels[i][0]) name = levels[i][1];
+    return name;
+  }
+  function combinedPoints(){
+    var live = (MYSTATS && MYSTATS.points) || 0;
+    if (!TOTALS || TOTALS.combinedPoints == null)
+      return { points: UJ.points.exact(live), combined: false, per: [] };
+    var ds = UJ.cfg.backend.ds, mine = 0, per = perList(TOTALS);
+    per.forEach(function(p){ if (p && p.ds === ds) mine = p.points || 0; });
+    /* Rounded where the noise is PRODUCED, not only where it is printed: points are genuinely
+       fractional (0.1 for a computed volume), and adding a live figure to a snapshot and
+       subtracting a third is three chances for 0.1's binary tail to surface. The level is then
+       taken from the exact value, so display rounding can never move somebody across a rung. */
+    var pts = UJ.points.exact(Math.max(live, (TOTALS.combinedPoints - mine) + live));
+    return { points: pts, combined: true, per: per, level: levelName(pts, TOTALS.levels) };
+  }
+  function renderPoints(){
+    var c = el("pointsChip"); if (!c) return;
+    if (!LIVE || !STORE.canWrite()){ c.innerHTML = ""; return; }
+    if (!MYSTATS){
+      c.innerHTML = "<div class='ptchip'><span class='pts'>points loading…</span></div>"; return;
+    }
+    var cp;
+    try { cp = combinedPoints(); }
+    catch (e){ cp = { points: UJ.points.exact(MYSTATS.points), combined:false, per:[] }; }
+    var tip = cp.combined
+      ? "Across every Jump tool: " + cp.per.map(function(p){
+          return (p.label || p.ds) + " " + UJ.points.text(p.points); }).join(" · ")
+        + ". χJump's own " + UJ.points.text(MYSTATS.points) + " update the moment you submit; the "
+        + "others come from the four-hourly rebuild. Here: 8 for a cell, 5 for a nucleus found, "
+        + "3 for a column looked at even when it is empty, 2 for a name — and nothing per "
+        + "fragment, because a fragment is a property of the segmentation, not of your work."
+      : "Points in χJump only. The combined cross-tool total appears once rebuildProfileTotals() "
+        + "has run in Apps Script — see installProfileTotalsTrigger() in Datasets.gs.";
+    c.innerHTML = "<div class='ptchip' title='" + esc(tip) + "'>"
+      + "<span>" + esc(MYSTATS.handle || "you") + "</span>"
+      + ((cp.level || MYSTATS.level)
+          ? "<span class='lvl'>" + esc(cp.level || MYSTATS.level) + "</span>" : "")
+      + "<span class='pts'>" + UJ.points.text(cp.points) + " pts</span>"
+      + (cp.combined ? "" : "<span class='chip' style='border-color:var(--warn);color:var(--warn)'>"
+                          + "this tool only</span>")
+      + "</div>";
+  }
+  /* One recompute for a burst of writes. A paste of fifty nuclei is one action to the person and
+     fifty posts to the sheet; asking the server to re-total the workbook fifty times would cost
+     more than the writes did. */
+  var PTS_T = null;
+  function pointsSoon(){
+    if (PTS_T) clearTimeout(PTS_T);
+    PTS_T = setTimeout(function(){ PTS_T = null; loadPoints(); }, 1500);
+  }
+  function loadPoints(){
+    if (!LIVE || !ApiStore.credential) return;
+    var base = UJ.cfg.backend.endpoint, ds = encodeURIComponent(UJ.cfg.backend.ds),
+        tok = encodeURIComponent(ApiStore.credential);
+    /* Fired together and each rendered as it lands: the combined total is one cheap sheet read,
+       myStats is a full recompute, and making the fast one wait for the slow one is how a page
+       ends up looking as though it never loads. */
+    /* d.points != null, not just !d.error: doPost's if/else chain ends with a catch-all
+       `return {ok:true,status:"ok"}`, so a deployment older than these handlers answers ANY
+       request with a cheerful success carrying nothing. Accepting that as a stats object puts
+       "you · 0 pts" on the chip -- which is not "loading", it is a wrong number, and a wrong
+       number is the one thing a points display must never show. */
+    fetch(base + "?myStats=" + tok + "&ds=" + ds).then(function(r){ return readJson(r, "your points"); })
+      .then(function(d){ if (d && !d.error && d.points != null) MYSTATS = d; renderPoints(); })
+      .catch(function(){ renderPoints(); });
+    fetch(base + "?profileTotals=" + tok + "&ds=" + ds)
+      .then(function(r){ return readJson(r, "your points across the family"); })
+      .then(function(d){ if (d && d.ok) TOTALS = d; renderPoints(); })
+      .catch(function(){ renderPoints(); });
+  }
 
   /* ── which fragments actually have a mesh ────────────────────────────────────────────────
      Established 2026-08-31: they do not all have one. Of three ids taken from a real assembly,
@@ -4324,12 +4533,20 @@ UJ.app = (function(){
     /* The label carries the total and nothing else. The full breakdown used to go here too, and in
        the label's uppercase letter-spacing eleven counts became a five-line wall above the search
        box you were trying to reach. It reads as a sentence below instead. */
-    if (el("seed-count")) el("seed-count").textContent = rows.length.toLocaleString() + " cells";
+    /* The count says how many cells the list HOLDS, which since it became the master list is the
+       published ones plus whatever has been assembled here that is not an extension of one. An
+       extension is not a new cell -- that is the whole point of adopting a key rather than
+       forking one -- so it is not counted twice. */
+    var own = STATE.cells.filter(function(c){
+      return !X.isSeedKey(c.id) && allSegs(c).length > 0; }).length;
+    if (el("seed-count"))
+      el("seed-count").textContent = (rows.length + own).toLocaleString() + " cells";
     if (el("seed-breakdown"))
       el("seed-breakdown").textContent =
         Object.keys(byType).sort(function(a, b){ return byType[b] - byType[a]; })
           .map(function(k){ return byType[k].toLocaleString() + " " + k
-            + (byType[k] === 1 ? "" : "s"); }).join(", ") + ".";
+            + (byType[k] === 1 ? "" : "s"); }).join(", ")
+        + (own ? ", and " + own + " assembled here from loose fragments" : "") + ".";
     if (el("seed-prov") && !el("seed-prov").innerHTML)
       el("seed-prov").innerHTML =
         "Proofread by the Lee lab for "
@@ -4372,16 +4589,100 @@ UJ.app = (function(){
                    + "'>named " + esc(r.name) + "</span>" : "";
   }
 
+  /* One row, one cell -- the published reconstruction and everything added to it here, together.
+     The two numbers are kept VISIBLY separate rather than summed into a single figure: what the
+     Lee lab proofread and what this community has since attached are different kinds of evidence,
+     and a row reading "191 fragments" would quietly present the second as the first. The total is
+     the one the link opens. */
   function seedRowHtml(r, extra){
+    var b = builtOn(r.key);
+    var n = b ? allSegs(b).length : r.count;
+    var added = n - r.count;
+    var mine = b ? X.settledLabel(b) : "";
     return "<div class='seedrow' id='seed-" + cssId(r.key) + "'>"
       + "<a class='seed-open' href='#' data-key='" + esc(r.key) + "'>" + esc(r.name) + " &#8599;</a>"
-      + "<span class='chip" + (r.odd ? " st-contested' title='" + esc(ODD_TITLE) : "")
+      + "<span class='chips'><span class='chip"
+      + (r.odd ? " st-contested' title='" + esc(ODD_TITLE) : "")
       + "'>" + esc(r.label) + "</span>"
+      /* A community identity is shown only when it DISAGREES with the published type. Repeating
+         the same word twice on every touched row would say nothing and cost the width the
+         fragment counts need. */
+      + (mine && mine.toLowerCase() !== String(r.label || "").toLowerCase()
+          ? "<span class='chip st-contested' title='" + esc("Called “" + mine + "” here; the "
+              + "published table types it “" + r.label + "”.") + "'>" + esc(mine) + "</span>"
+          : "")
+      + "</span>"
       + "<span class='hint'>" + (extra ? esc(extra) + " · " : "")
-      + r.count + " fragment" + (r.count === 1 ? "" : "s") + "</span>"
-      + "<span class='hint'>" + esc(r.annotator || "—") + "</span>"
+      + r.count + " proofread"
+      + (added > 0
+          ? " <b title='" + esc("Added here on top of the published reconstruction. Opening this "
+              + "row shows all " + n + ".") + "'>+ " + added + " added</b>"
+          : "")
+      + " fragment" + (n === 1 ? "" : "s") + "</span>"
+      + "<span class='hint'>" + esc(r.annotator || "—")
+      + (b && b.builtBy && added > 0 ? " · " + esc(b.builtBy) : "") + "</span>"
       + "<button class='seed-add' data-key='" + esc(r.key) + "'>Add fragments</button>"
       + "</div>";
+  }
+
+  /* ── the whole list, as a file ─────────────────────────────────────────────────────────────
+     Søren, 2026-09-01: χJump has no "master cell list". The tab above is one -- 5,318 published
+     cells joined to everything assembled here -- but a list you can only scroll is not a list you
+     can work with, and this is a person who does his data handling in Excel.
+
+     SEMICOLON-SEPARATED, and that is not a preference. Danish Excel uses ; as the field separator
+     and , as the decimal mark, so a comma-separated file opens as one column per row on his
+     machine. The `sep=;` first line is Excel's own directive and makes the file open correctly in
+     any locale; every other reader treats it as a stray first row, which is why the header still
+     follows it. There are NO decimal numbers in the file at all -- positions are voxels and counts
+     are counts -- so the decimal-mark half of the problem is designed out rather than handled.
+
+     The whole list, never the search results: a file that silently contained whatever happened to
+     be typed in the box is a file you cannot cite. */
+  function seedCsv(){
+    var rows = seeds(), extra = {};
+    /* Cells built here that are NOT extensions of a published one still belong in a list that
+       calls itself complete. */
+    STATE.cells.forEach(function(c){ if (!X.isSeedKey(c.id)) extra[c.id] = c; });
+    var head = ["name","key","kind","layer","x_vox","y_vox","z_vox",
+                "proofread_fragments","added_here","fragments_now",
+                "proofread_by","extended_here_by","identity_given_here"];
+    function cell(v){
+      var s = String(v == null ? "" : v);
+      return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+    var out = ["sep=;", head.join(";")];
+    rows.forEach(function(r){
+      var b = builtOn(r.key), n = b ? allSegs(b).length : r.count;
+      var L = r.pos ? X.layerAt(r.pos) : null;
+      out.push([r.name, r.key, r.label, L ? L.layer : "", r.pos ? r.pos[0] : "",
+                r.pos ? r.pos[1] : "", r.pos ? r.pos[2] : "",
+                r.count, n - r.count, n, r.annotator || "",
+                b ? (b.builtBy || "") : "", b ? X.settledLabel(b) : ""].map(cell).join(";"));
+    });
+    Object.keys(extra).forEach(function(k){
+      var c = extra[k], p = c.position, L = p ? X.layerAt(p) : null;
+      out.push([X.seedName ? k : k, k, "", L ? L.layer : "",
+                p ? p[0] : "", p ? p[1] : "", p ? p[2] : "",
+                0, c.segments.length, c.segments.length, "",
+                c.builtBy || "", X.settledLabel(c)].map(cell).join(";"));
+    });
+    /* \r\n: Excel on Windows is the reader this is for. */
+    return out.join("\r\n") + "\r\n";
+  }
+
+  function downloadSeedCsv(){
+    var name = "cb2_cells_" + new Date().toISOString().slice(0, 10) + ".csv";
+    /* A BOM, so Excel reads it as UTF-8 rather than as the local code page -- the annotator names
+       and the layer labels are plain ASCII today, but “µm” in a future column would arrive as
+       µm without it, and that is the kind of thing nobody notices until a file is already out. */
+    var blob = new Blob(["﻿" + seedCsv()], { type:"text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    if (el("seed-msg"))
+      el("seed-msg").textContent = seeds().length.toLocaleString() + " cells written to " + name;
   }
 
   /* The href is built ON CLICK rather than in the markup. A granule cell is a median 116
@@ -4394,8 +4695,14 @@ UJ.app = (function(){
       e.preventDefault();
       /* Centred on the SOMA, which is the whole point of having resolved the coordinate frame:
          a granule cell is a median 116 fragments spread over tens of micrometres, and arriving at
-         the middle of its bounding box is arriving at a dendrite. */
-      window.open(X.viewerUrl(X.seedSegments(r), r.pos || null), "_blank", "noopener");
+         the middle of its bounding box is arriving at a dendrite.
+
+         The SEGMENTS are the merged set -- published plus whatever has been added here. Opening
+         the published set alone was the bug Søren hit: the row he had extended still sent him to
+         the reconstruction as it stood before he touched it. */
+      var b = builtOn(r.key);
+      window.open(X.viewerUrl(b ? allSegs(b) : X.seedSegments(r),
+                              (b && nucleusOf(b)) || r.pos || null), "_blank", "noopener");
     });
     root.querySelector(".seed-add").addEventListener("click", function(){
       TARGET = r.key;
@@ -4703,6 +5010,12 @@ UJ.app = (function(){
           /* An ok:false is a REFUSAL with a reason, and the reason is the useful part. Resolving
              it as though it had worked is how a write that never happened gets a green message. */
           if (!d || !d.ok) throw new Error((d && d.error) || (what + " was refused"));
+          /* THE NUMBER MOVES WHEN YOU EARN IT. myStats is a full recompute over the sheets, so it
+             is asked for after a write rather than polled -- and only after one that SUCCEEDED,
+             which is why this sits below the ok check rather than beside it. Coalesced because a
+             batch of nuclei is one paste and fifty posts, and fifty recomputes for one action
+             would make the tool feel broken while it was working. */
+          pointsSoon();
           return d;
         });
     },
@@ -4725,8 +5038,16 @@ UJ.app = (function(){
              absence IS the answer -- see its own comment. Read as a map so the page asks
              `can.adopt === false` and a future capability needs no change here. */
           STATE.can = {};
-          ["adopt"].forEach(function(k){
+          ["adopt", "contributors"].forEach(function(k){
             STATE.can[k] = (d.can || []).indexOf(k) >= 0;
+          });
+          /* Who has assembled what, HERE -- ranked in cells, the same currency the published
+             annotator chart uses, so the two can stand in one list. See xjumpState's own comment
+             for why it is not fragments. An older deployment sends nothing and the chart simply
+             shows the paper's nine, which is what it showed before. */
+          STATE.contributors = (d.contributors || []).map(function(c){
+            return { name: c.name || "", cells: c.cells || 0, built: c.built || 0,
+                     fragments: c.fragments || 0, nuclei: c.nuclei || 0, names: c.names || 0 };
           });
           /* Cleared HERE rather than at the call site: a load that succeeded is the definition of
              "the backend is reachable", and there is more than one caller. Clearing it only in
@@ -4866,6 +5187,7 @@ UJ.app = (function(){
     if (el("paste-go")) el("paste-go").addEventListener("click", readPaste);
     if (el("paste")) el("paste").addEventListener("paste", function(){ setTimeout(readPaste, 0); });
     if (el("seed-q")) el("seed-q").addEventListener("input", renderSeeds);
+    if (el("seed-csv")) el("seed-csv").addEventListener("click", downloadSeedCsv);
     if (el("find-go")) el("find-go").addEventListener("click", findByCoord);
     if (el("find-coord")) el("find-coord").addEventListener("keydown", function(e){
       if (e.key === "Enter") findByCoord();
@@ -4941,7 +5263,7 @@ UJ.app = (function(){
   return { init:init, state:function(){ return STATE; }, last:function(){ return LAST; },
            readPaste:readPaste, render:render, store:function(){ return STORE; },
            nextBox:nextBox, renderBox:renderBox, readNuclei:readNuclei, joinAll:joinAll,
-           seeds:seeds, renderSeeds:renderSeeds,
+           seeds:seeds, renderSeeds:renderSeeds, seedCsv:seedCsv,
            findByCoord:findByCoord, renderRandomButtons:renderRandomButtons,
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
            showRandomUntouched:showRandomUntouched, showRandomBuilt:showRandomBuilt,
@@ -4950,7 +5272,15 @@ UJ.app = (function(){
            box:function(){ return BOX; },
            setCredential: function(c, who){
              ApiStore.credential = c; ApiStore.who = who || ""; render();
-           } };
+             /* The points are per-account, so they cannot be asked for before there is one. This
+                is the moment there is. */
+             loadPoints();
+             /* And the leaderboard marks YOUR row, which it could not do a moment ago. */
+             renderDashboard();
+           },
+           points: function(){ return { my: MYSTATS, totals: TOTALS,
+                                        combined: combinedPoints() }; },
+           loadPoints: loadPoints, renderPoints: renderPoints };
 })();
 </script>
 <script>UJ.app.init();</script>
