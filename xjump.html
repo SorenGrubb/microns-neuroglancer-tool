@@ -120,6 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 </div>
 
 <div class="card">
+  <div id="backend-note"></div>
   <label for="paste">1 &middot; Paste a Neuroglancer link</label>
   <p class="hint" style="margin-top:0">Click the fragments you want in the viewer &mdash; as many
   as you like &mdash; then copy the whole address bar and paste it here. Deselected fragments
@@ -1762,13 +1763,28 @@ UJ.app = (function(){
                      unsure: c.unsure || 0, builtBy: c.builtBy || "", position: c.position || null };
           });
           STATE.claimed = d.claimed || {};
+          /* Cleared HERE rather than at the call site: a load that succeeded is the definition of
+             "the backend is reachable", and there is more than one caller. Clearing it only in
+             init() left the banner standing after a later load had proved it wrong. */
+          backendNote("");
           return STATE;
         });
     },
     build: function(ids, position){
       var p = { type:"xjump_cell_build", segments: ids };
       if (position){ p.x_vox = position[0]; p.y_vox = position[1]; p.z_vox = position[2]; }
-      return this._post(p);
+      return this._post(p).then(function(d){
+        /* A cell with no key is not a cell. This is not defensive politeness: doPost's if/else
+           chain ENDS with a catch-all `return {ok:true,status:"ok"}`, so a deployment that does
+           not yet know xjump_cell_build answers a build with a cheerful success and no cellKey.
+           Without this the page would create a cell called "undefined", show it, and let somebody
+           name it -- and nothing would have been written anywhere. */
+        if (!d.cellKey)
+          throw new Error("the backend accepted the request but returned no cell key, which means "
+            + "it does not have χJump's handlers yet. Paste XJumpCells.gs, Datasets.gs and Code.gs "
+            + "into the Apps Script project and Deploy → New version (APPLY-XJUMP.md).");
+        return d;
+      });
     },
     add:    function(k, ids){ return this._post({ type:"xjump_cell_add", cellKey:k, segments:ids }); },
     remove: function(k, ids){ return this._post({ type:"xjump_cell_remove", cellKey:k, segments:ids }); },
@@ -1790,9 +1806,61 @@ UJ.app = (function(){
         false);
     return true;
   }
+  /* "Failed to fetch" is the whole message a browser gives when a request never completed, and on
+     its own it is useless: it names the symptom, blames nothing, and sends you looking at the
+     page. readJson() exists to explain the responses Apps Script gives, but it never runs for
+     these -- the browser rejected the response before any JavaScript saw it.
+
+     There are three causes, and the first one can be DETECTED rather than listed. A page opened
+     from a file on disk has origin "null"; Apps Script answers /exec with a redirect to
+     script.googleusercontent.com, and a cross-origin redirect from a null origin is refused. So
+     the live page simply cannot talk to its backend from file://, ever, and saying so outright is
+     worth more than three maybes. (The harness is the file you open that way. That is what it is
+     for.) */
+  function isFileUrl(){
+    try { return window.location.protocol === "file:"; } catch (e){ return false; }
+  }
+  function netHint(){
+    if (isFileUrl())
+      return "this page is open from a file on your computer. The live page cannot reach its "
+           + "backend that way — a page loaded from file:// has no origin, and Apps Script's "
+           + "redirect is refused. Open it from grubblab.dk instead, or use "
+           + "<code>xjump_demo.html</code>, which is the copy meant to run from a file and saves "
+           + "nothing.";
+    return "the backend could not be reached at all. Either the deployment is not published to "
+         + "“Anyone” (Deploy → Manage deployments → edit → Who has access), or the deployed "
+         + "code threw before it could answer — Apps Script puts no CORS headers on its error "
+         + "pages, so the browser discards them and this is all that is left. Re-paste the .gs "
+         + "files and Deploy → New version.";
+  }
+  /* A fetch that never completed rejects with a TypeError and no status. Anything readJson threw
+     already carries a written explanation and is passed through unchanged. */
+  function isNetworkError(e){
+    return !!e && !e.notJson && (e instanceof TypeError || /failed to fetch|networkerror|load failed/i
+      .test(String(e && e.message)));
+  }
+  /* One banner, at the top of the paste card, saying whether anything built here can be saved.
+     Empty string clears it -- a warning that stays after the thing it warned about is fixed is a
+     warning people learn to ignore. */
+  function backendNote(html){
+    var n = el("backend-note"); if (!n) return;
+    n.innerHTML = html
+      ? "<div class='callout warn'><b>Nothing built here will be saved.</b><br>"
+        + "<span class='hint'>" + html + "</span></div>"
+      : "";
+  }
+  function loadFailed(e){
+    /* On file:// the protocol IS the cause, whatever the error text happens to say -- the request
+       could not have succeeded from there. Letting a less informative message overwrite that
+       diagnosis is how a page ends up reporting "fetch is not defined" to somebody whose actual
+       problem is that they double-clicked the file. */
+    backendNote(isFileUrl() || isNetworkError(e) ? netHint()
+      : esc((e && e.message) ? e.message : String(e)));
+  }
   function failed(where, what){
     return function(e){
-      say(where, esc(what + " failed: " + (e && e.message ? e.message : e)), false);
+      say(where, esc(what + " failed: ")
+        + (isNetworkError(e) ? netHint() : esc((e && e.message) ? e.message : String(e))), false);
     };
   }
 
@@ -1813,6 +1881,15 @@ UJ.app = (function(){
     /* Reading is public; only writing needs a credential. So the load happens immediately rather
        than waiting for sign-in -- somebody who just wants to see what has been assembled should
        not have to identify themselves first. */
+    /* The backend banner, and the reason it exists is a specific failure Søren hit: he assembled
+       seven fragments, pressed Build cell, and got "Failed to fetch". The work came first and the
+       bad news came second. Anything the page can know BEFORE somebody does the work should be
+       said before they do it -- so a page that cannot save says so at the top, next to the box
+       they are about to paste into, rather than after.
+
+       file:// is known without asking anyone; the rest needs the load to be tried. */
+    if (LIVE && isFileUrl()) backendNote(netHint());
+
     /* try/catch as well as .catch: a store whose load() throws SYNCHRONOUSLY -- no fetch in the
        environment, a config that is not there yet -- never returns a promise, so .catch is never
        attached and the exception escapes init() itself. Everything after this line would then
@@ -1820,11 +1897,8 @@ UJ.app = (function(){
        when the backend is unreachable, so this failure is reported and stepped over rather than
        allowed to take the page down. */
     if (LIVE) try {
-      STORE.load().then(render).catch(function(e){
-        say("stats", esc("Could not read the cells: " + e.message), false); });
-    } catch (e){
-      say("stats", esc("Could not read the cells: " + e.message), false);
-    }
+      STORE.load().then(render).catch(loadFailed);
+    } catch (e){ loadFailed(e); }
   }
 
   return { init:init, state:function(){ return STATE; }, last:function(){ return LAST; },
