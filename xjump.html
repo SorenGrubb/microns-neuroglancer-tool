@@ -2981,6 +2981,10 @@ UJ.app = (function(){
   /* ── the cells ───────────────────────────────────────────────────────────────────────────── */
   function render(){
     renderPaste();
+    /* The identity panel reads the same store these cards do, so it is redrawn whenever they are.
+       Two views of one cell disagreeing about how many fragments it has is the bug that started
+       this. */
+    refreshFound();
     /* The random panel's counts are counts of the store, so they are re-read whenever the store
        changes rather than once at load. Otherwise "0 cells built in this page" stays on screen
        after you have built three. */
@@ -3020,7 +3024,19 @@ UJ.app = (function(){
                    retracted:"retracted" }[t.status] || "";
     /* THE NAME IS THE LINK. Søren's ask, and it is the right shape: what you want to click is the
        cell, and the thing that identifies a cell to a person is what it is called. "Unnamed" is
-       still a link -- an unnamed cell is exactly the one worth opening and looking at. */
+       still a link -- an unnamed cell is exactly the one worth opening and looking at.
+
+       AN ADOPTED CELL IS NOT UNNAMED. Søren, 2026-09-01: "Now I have added fragments to this cell,
+       but they don't show up on the cell, they show up in the cells built so far in an unnamed
+       cell." They HAD gone onto pc_0 -- the card even said "174 proofread + 90 added here" -- but
+       it was headed "Unnamed", so it read as a stray anonymous cell rather than as the Purkinje
+       cell he had just extended. The Lee lab named it; what nobody has done is confirm that name
+       HERE, and those are different sentences. The headline is now the published type, with the
+       community's own tally saying separately whether anyone has agreed with it. */
+    var seedRow = seedOf(c);
+    var headline = t.leader || (seedRow ? cap(seedRow.label) : "Unnamed");
+    if (seedRow && t.status === "unnamed")
+      status = "the paper calls it this; nobody here has confirmed";
     return "<div class='cell" + (TARGET === c.id ? " aimed" : "") + "' id='cell-"
       + cssId(c.id) + "'>"
       + (TARGET === c.id
@@ -3028,7 +3044,7 @@ UJ.app = (function(){
       + "<div class='row' style='justify-content:space-between;align-items:baseline'>"
       +   "<div><a class='cell-open' href='" + esc(cellUrl(c)) + "' target='_blank' rel='noopener'"
       +     " title='Open this cell in Neuroglancer, centred on its nucleus'>"
-      +     esc(t.leader || "Unnamed") + " &#8599;</a> "
+      +     esc(headline) + " &#8599;</a> "
       +     "<code class='cellid'>" + esc(seedOf(c) ? X.seedName(c.id) : c.id) + "</code> "
       /* An adopted cell counts BOTH halves and says which is which -- a reconstruction from the
          paper and one assembled this afternoon are different kinds of evidence, and one total
@@ -3607,7 +3623,17 @@ UJ.app = (function(){
      published classification, χJump's states who proofread this reconstruction and whether it is a
      whole cell or a piece of one. Same shape, honest content. */
   function foundPanelHtml(row, nm){
+    /* THE UNION, when somebody has extended this cell. Søren, 2026-09-01, on adding 90 fragments
+       to pc_0: "they don't show up on the cell". They had -- the card in "the cells built so far"
+       said "174 proofread + 90 added here" -- but this panel went on reading 174, because it drew
+       the seed straight from the embedded list and knew nothing about the store.
+
+       Two views of one cell disagreeing about how many pieces it has is worse than either being
+       wrong on its own: it makes the whole page untrustworthy. Both now read the same union, and
+       both print the split. */
+    var extra = byId(row.key);
     var segs = X.seedSegments(row);
+    if (extra) segs = allSegs(extra);
     var url = X.viewerUrl(segs, row.pos || null);
     var pos = row.pos ? row.pos.map(function(v){ return Math.round(v); }) : null;
     /* Not for a cell whose recorded z is the stand-in value: the layer bands are fitted in x and
@@ -3621,6 +3647,7 @@ UJ.app = (function(){
       +   (row.whole ? "<span class='tag on'>whole cell</span>"
                      : "<span class='tag warn'>a piece, not a whole cell</span>")
       +   "<span class='tag'>proofread</span>"
+      +   (extra ? "<span class='tag on'>extended here</span>" : "")
       +   (row.odd ? "<span class='tag warn' title='" + esc(ODD_TITLE)
                      + "'>type and name disagree</span>" : "")
       + "</div>"
@@ -3638,7 +3665,10 @@ UJ.app = (function(){
       +   " title='Open in Neuroglancer, centred on the soma, all fragments merged into one object'>"
       +   esc(cap(row.label)) + " <span class='ext'>&#8599;</span></a> "
       +   "<small class='cellref'>" + esc(row.name) + "</small></div>"
-      + "<div class='meta'>" + segs.length + " fragment" + (segs.length === 1 ? "" : "s")
+      + "<div class='meta'>"
+      +   (extra
+            ? X.seedSegments(row).length + " proofread + " + extra.segments.length + " added here"
+            : segs.length + " fragment" + (segs.length === 1 ? "" : "s"))
       +   (nm ? " &middot; " + (nm / 1000).toFixed(1) + " &micro;m from your coordinate" : "")
       +   " &middot; proofread by " + esc(row.annotator || "—") + "</div>"
       /* Which layer this cell's soma is in, by the same bands the diagram below draws. Not a
@@ -3777,6 +3807,7 @@ UJ.app = (function(){
       return;
     }
     var top = hits[0], rest = hits.slice(1);
+    SHOWN = { row: top.row, nm: top.nm };
     host.innerHTML = foundPanelHtml(top.row, top.nm)
       + (rest.length
           ? "<div class='neigh'><h4>" + rest.length + " nearest neighbouring cells</h4>"
@@ -3846,9 +3877,28 @@ UJ.app = (function(){
     });
   }
 
+  /* WHICH CELL THE PANEL IS SHOWING, so it can be redrawn when the store changes underneath it.
+     Without this, adding 90 fragments to pc_0 updated its card in "the cells built so far" and left
+     the panel above still reading 174 -- which is what made Søren think the fragments had gone
+     somewhere else. The panel is redrawn in place: no history entry, no scroll, because nobody
+     navigated anywhere. */
+  var SHOWN = null;
+  function refreshFound(){
+    if (!SHOWN) return;
+    var panel = el("found-panel"); if (!panel) return;
+    var wrap = panel.parentNode;
+    var neigh = wrap.querySelector(".neigh");
+    panel.outerHTML = foundPanelHtml(SHOWN.row, SHOWN.nm);
+    if (neigh) wrap.appendChild(neigh);   // outerHTML on a child does not disturb its siblings
+    wireFoundPanel(SHOWN.row);
+  }
+
   function wireFoundPanel(row){
     var root = el("found-panel"); if (!root) return;
-    var segs = X.seedSegments(row);
+    /* The same union the panel printed. Drawing, downloading and measuring a different set of
+       fragments from the one the panel counted is the same disagreement in a subtler place. */
+    var extra = byId(row.key);
+    var segs = extra ? allSegs(extra) : X.seedSegments(row);
     /* A plain object standing in for a cell. UJ.mesh3d.show only ever reads .segments and writes
        the coverage counts back, so a proofread reconstruction and an assembled one can share one
        renderer without either knowing about the other. */
