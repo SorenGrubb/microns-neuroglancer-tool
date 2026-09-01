@@ -23,15 +23,21 @@ try{var _t=localStorage.getItem("ujump_theme");
     #1a1e24 is 9.60:1, and #04240f ink on that green fill is 9.53:1.
     --ok stays green too, and that collision is deliberate rather than overlooked -- ωJump's amber
     accent sits beside an amber --warn for the same reason. A semantic colour that changes meaning
-    per tool would be worse than one that occasionally rhymes with the accent. */
+    per tool would be worse than one that occasionally rhymes with the accent.
+    --accent-dim is the accent's own quiet fill, used behind the active tab and the id buttons. Both
+   pairs were measured rather than eyeballed: #4ade80 on #14532d is 5.23:1, #166534 on #dcfce7 is
+   6.49:1. --inset is the recessed surface inputs and the cell panel sit on, one step BELOW --card
+   in dark and one step above it in light, which is what makes a panel read as inset in both. */
  :root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ee;--mut:#9aa4b2;--line:#262c35;
-       --accent:#4ade80;--on-accent:#04240f;
-       --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--shadow:rgba(0,0,0,.4)}
+       --accent:#4ade80;--on-accent:#04240f;--accent-dim:#14532d;--inset:#0b0f14;
+       --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--shadow:rgba(0,0,0,.4);
+       --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
  @media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f7f9;--card:#fff;
        --ink:#16181d;--mut:#5b6472;--line:#e3e6ea;--accent:#166534;--on-accent:#ffffff;
-       --shadow:rgba(140,149,159,.25)}}
+       --accent-dim:#dcfce7;--inset:#ffffff;--shadow:rgba(140,149,159,.25)}}
  :root[data-theme="light"]{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mut:#5b6472;
-       --line:#e3e6ea;--accent:#166534;--on-accent:#ffffff;--shadow:rgba(140,149,159,.25)}
+       --line:#e3e6ea;--accent:#166534;--on-accent:#ffffff;--accent-dim:#dcfce7;
+       --inset:#ffffff;--shadow:rgba(140,149,159,.25)}
  #themeToggleBtn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12px;
    color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:20px;
    padding:6px 12px;cursor:pointer;width:auto;box-shadow:0 2px 8px var(--shadow)}
@@ -40,8 +46,28 @@ try{var _t=localStorage.getItem("ujump_theme");
    font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
  .wrap{max-width:960px;margin:0 auto;padding:24px 18px 70px}
  .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
- h1{font-size:21px;margin:0} .logo .mu{color:var(--accent);font-weight:700}
- .sub{color:var(--mut);font-size:13px;margin:4px 0 18px}
+ /* THE LOGO, at the family's size and as a link. Søren, 2026-09-01: "The logo is smaller in xJump,
+    and it is not a link to refresh the page". Both were real differences: χJump's was a 21px <h1>
+    with no anchor round it, against 36px-and-clickable everywhere else. The href is set from
+    location.pathname in script rather than written as "#", so it drops the query string and the
+    hash and genuinely reloads the tool rather than scrolling to the top of the page you are on. */
+ h1{font-size:21px;margin:0}
+ .logo{font:800 36px/1 "Segoe UI",system-ui,-apple-system,sans-serif;letter-spacing:-.03em;
+   margin:0 0 6px;display:inline-flex;align-items:baseline}
+ .logo .mu{color:var(--accent);font-style:italic;transform:translateY(1px)}
+ .logo .jm{color:var(--ink)}
+ .logo::after{content:"\2197";font-size:18px;font-weight:700;color:var(--accent);
+   margin-left:4px;transform:translateY(-8px)}
+ a.logolink{text-decoration:none;color:inherit;display:inline-block}
+ a.logolink:hover{text-decoration:none}
+ .sub{color:var(--mut);font-size:13px;margin:4px 0 14px}
+ /* TABS. The same four every other tool in the family carries, in the same order. */
+ .tabbar{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 16px}
+ .tabbtn{display:inline-block;font:inherit;font-size:12px;color:var(--mut);background:transparent;
+   border:1px solid var(--line);border-radius:6px;padding:5px 11px;cursor:pointer;width:auto}
+ .tabbtn:hover{color:var(--ink);border-color:var(--accent)}
+ .tabbtn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+ .tabpanel{display:none} .tabpanel.active{display:block}
  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
  label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);
    font-weight:600;display:block;margin-bottom:6px}
@@ -112,13 +138,100 @@ try{var _t=localStorage.getItem("ujump_theme");
  /* Sign-in, top right with the theme button. Reading is public, so this is deliberately quiet. */
  .who{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
  #whoami{font-size:12px;color:var(--mut)}
+
+ /* ── COORDINATE FIRST ─────────────────────────────────────────────────────────────────────
+    Søren, 2026-09-01: "the coordinates should be the first thing". Three separate fields and an
+    arrow, exactly as µJump and ηJump: one box you paste a comma-separated triple into is quicker
+    to build and worse to use, because you cannot nudge z without re-reading the whole string. The
+    x field still splits a pasted triple across all three, so pasting keeps working. */
+ .coord{flex:1 1 90px}
+ .coord input{font-family:var(--mono);font-size:15px}
+ .go{width:100%;margin-top:4px;background:var(--accent);color:var(--on-accent);border:none;
+   padding:13px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;letter-spacing:.02em}
+ .go:hover{filter:brightness(1.08)}
+ .go.inline{width:44px;flex:0 0 44px;margin-top:0;padding:0;font-size:19px;line-height:1}
+ .linkbtn{background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font:inherit;
+   width:auto}
+ .linkbtn:hover{text-decoration:underline;border-color:transparent}
+ .lab-note{font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px}
+ details.rv-panel{margin-top:10px}
+ details.rv-panel summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;
+   color:var(--mut);font-size:13px}
+ details.rv-panel summary::-webkit-details-marker{display:none}
+ details.rv-panel summary::before{content:"\25B6";display:inline-block;flex:none;font-size:10px;
+   color:var(--mut);transition:transform .15s ease}
+ details.rv-panel[open]>summary::before{transform:rotate(90deg)}
+
+ /* ── THE CELL, in the family's identity-panel shape ───────────────────────────────────────
+    Søren: "The cell identity should also look like the uJump". That panel is a fixed grammar --
+    kicker chips, then the name at 22px as the link out, then a monospace meta line, then labelled
+    id rows with their buttons -- and it is worth copying as a grammar rather than as a picture,
+    because it is what makes a person able to read any of these nine pages having learned one. */
+ #cellPanelCard{display:none} #cellPanelCard.show{display:block}
+ .nuc{border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--inset)}
+ .nuc.oob{border-color:var(--warn)}
+ .tag{display:inline-block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+   padding:3px 9px;border-radius:20px;font-weight:600;border:1px solid var(--line);color:var(--mut)}
+ .tag.on{background:var(--accent-dim);color:var(--accent);border-color:var(--accent)}
+ .tag.warn{color:var(--warn);border-color:var(--warn)}
+ .celltype{font-size:22px;font-weight:600;margin:8px 0 2px}
+ .celltype small{font-size:14px;font-weight:400;color:var(--mut)}
+ .celltype a{color:inherit;text-decoration:none;border-bottom:1px dashed var(--accent)}
+ .celltype a:hover{border-bottom-style:solid}
+ .celltype a .ext{font-size:14px;color:var(--accent);border-bottom:none}
+ .meta{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:8px}
+ .ids{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+ .idrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+ .idrow span.k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);
+   min-width:84px}
+ .idval{font-family:var(--mono);font-size:12px;background:var(--card);border:1px solid var(--line);
+   padding:3px 8px;border-radius:5px;word-break:break-all;cursor:pointer}
+ .idval:hover{border-color:var(--accent)}
+ .idbtn{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent);
+   border-radius:7px;padding:1px 8px;font-size:11px;vertical-align:middle;cursor:pointer;
+   white-space:nowrap;width:auto}
+ .idbtn:disabled{opacity:.45;cursor:not-allowed}
+ .neigh{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+ .neigh h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);
+   margin:0 0 6px}
+
+ /* ── THE VOLUME, drawn ────────────────────────────────────────────────────────────────────
+    Søren: "if possible we should have a model of the dataset so we can see the location of the
+    coordinate". ηJump answers that with a cortical-layer wedge; cb2 has no layer volume to sample,
+    so this draws the block itself to scale from two sides and marks the point. That is not a
+    lesser diagram: cb2 is 998 x 922 x 48 µm, and the fact that the third number is twenty times
+    smaller than the other two is the single most useful thing to know about why its cells arrive
+    as fragments. A drawing to scale says it without a sentence. */
+ .dsmap{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px}
+ .dsmap figure{margin:0;flex:1 1 220px;min-width:200px}
+ .dsmap figcaption{font-size:11px;color:var(--mut);margin-top:4px;font-family:var(--mono)}
+ .dsmap svg{display:block;width:100%;height:auto;background:var(--inset);
+   border:1px solid var(--line);border-radius:8px}
+
+ /* ── STATISTICS ──────────────────────────────────────────────────────────────────────────
+    Bars in plain CSS rather than a charting library. χJump already carries 4.5 MB of seed data;
+    a megabyte of Plotly to draw eleven horizontal bars would be the wrong trade, and these are
+    readable by a screen reader in a way a canvas is not. */
+ .statgrid{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:4px}
+ .statbig{font-size:26px;font-weight:700;color:var(--ink);line-height:1.1}
+ .statlab{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
+ .bars{display:flex;flex-direction:column;gap:5px;margin-top:10px}
+ .bar{display:grid;grid-template-columns:minmax(120px,32%) 1fr auto;gap:10px;align-items:center;
+   font-size:13px}
+ /* display:block on both, and it is not cosmetic: a <span> is inline, width does nothing to it,
+    and every bar drew at full width regardless of its number -- eleven identical bars claiming to
+    be a chart. Caught in a screenshot; the check below now compares two fills' widths. */
+ .bar .track{display:block;background:var(--bg);border-radius:5px;height:14px;overflow:hidden}
+ .bar .fill{display:block;background:var(--accent);height:100%;border-radius:5px;min-width:2px}
+ .bar .n{font-family:var(--mono);font-size:12px;color:var(--mut)}
+ @media(max-width:640px){.bar{grid-template-columns:1fr auto}.bar .track{display:none}}
 </style></head><body>
 
 <div class="wrap">
 <div class="top">
   <div>
-    <h1 class="logo"><span class="mu">&chi;</span>Jump</h1>
-    <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span></p>
+    <a href="#" class="logolink" id="logoHome" title="Reload &chi;Jump"><h1 class="logo"><span
+      class="mu">&chi;</span><span class="jm">Jump</span></h1></a>
   </div>
   <div class="who">
     <span id="whoami">not signed in</span><div id="gsiButton"></div>
@@ -127,19 +240,45 @@ try{var _t=localStorage.getItem("ujump_theme");
       <span id="themeToggleLabel">Dark</span></button>
   </div>
 </div>
+<p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span></p>
+
+<div class="tabbar" id="mainTabs" role="tablist">
+<button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
+<button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">&#128229; Filter and show</button>
+<button type="button" class="tabbtn" data-tab="refs" role="tab" aria-selected="false">&#128218; References</button>
+<button type="button" class="tabbtn" data-tab="dash" role="tab" aria-selected="false">&#128202; Statistics</button>
+</div>
+
+<div class="tabpanel active" data-tabpanel="jump">
 
 <div class="card">
-  <label>The volume</label>
-  <p class="hint" style="margin:0" id="dsfacts"></p>
-  <p class="hint" style="margin:8px 0 0">Nguyen, Thomas, Rhoades, Ricchi, Yuan, Sheridan, Hildebrand, Funke, Regehr &amp; Lee, &ldquo;Structured cerebellar connectivity supports resilient pattern separation&rdquo;, <a href='https://doi.org/10.1038/s41586-022-05471-w' target='_blank' rel='noopener'><i>Nature</i> 613, 543&ndash;549 (2023)</a>, served by <a href='https://bossdb.org/project/nguyen_thomas2022' target='_blank' rel='noopener'>BossDB</a>. <b>Access, not a reuse licence:</b> BossDB reports this data public and the paper names the repository, but no reuse terms are stated on the project page. Cite the paper, and check the terms before redistributing pixels.</p>
-  <div class="row" style="margin-top:10px">
+  <label for="x">Coordinate <span class="lab-note">&mdash; in <span id="unitres"></span> voxels;
+  jump to it in cb2 and find the proofread cells whose somata are nearest</span></label>
+  <div class="row">
+    <div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div>
+    <div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div>
+    <div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div>
+    <button class="go inline" id="go" title="Find the nearest proofread cell">&#8594;</button>
+  </div>
+  <p class="hint">Or paste <code>x, y, z</code> &mdash; or a whole Neuroglancer link &mdash; into
+  the x field; it splits automatically.
+  <button type="button" id="rand" class="linkbtn">Show me a random cell</button></p>
+  <p class="hint" id="find-msg" style="margin:6px 0 0"></p>
+  <div class="dsmap" id="dsmap"></div>
+  <details class="rv-panel" id="randomPanel">
+    <summary>Or browse a random cell of a particular kind</summary>
+    <div class="row" style="margin-top:8px" id="find-random"></div>
+  </details>
+  <div class="row" style="margin-top:12px">
     <button id="open-empty">Open cb2 in the viewer &#8599;</button>
   </div>
 </div>
 
+<div class="card" id="cellPanelCard"><div id="find-body"></div></div>
+
 <div class="card">
   <div id="backend-note"></div>
-  <label for="paste">1 &middot; Paste a Neuroglancer link</label>
+  <label for="paste">Build a cell &mdash; paste a Neuroglancer link</label>
   <p class="hint" style="margin-top:0">Click the fragments you want in the viewer &mdash; as many
   as you like &mdash; then copy the whole address bar and paste it here. Deselected fragments
   (the ones neuroglancer keeps with a <code>!</code>) are left out, and so is anything in a layer
@@ -153,37 +292,13 @@ try{var _t=localStorage.getItem("ujump_theme");
 </div>
 
 <div class="card">
-  <label>2 &middot; The cells built so far</label>
+  <label>The cells built so far</label>
   <div id="stats" style="margin-bottom:10px"></div>
   <div id="cells"></div>
 </div>
 
-<div class="card" id="find-card">
-  <label>Find a cell</label>
-  <p class="hint" style="margin-top:0">Paste a coordinate the way you would in &micro;Jump &mdash;
-  <code>133268, 105880, 619</code>, or a whole Neuroglancer link &mdash; and this finds the
-  proofread cells whose somata are nearest to it. Or jump to a random one of a kind.</p>
-  <div class="row">
-    <input id="find-coord" placeholder="133268, 105880, 619" style="flex:1 1 240px">
-    <button class="primary" id="find-go">Find nearest &#8594;</button>
-  </div>
-  <div class="row" style="margin-top:8px" id="find-random"></div>
-  <p class="hint" id="find-msg" style="margin:8px 0 0"></p>
-  <div id="find-body" style="margin-top:8px"></div>
-</div>
-
-<div class="card" id="seed-card">
-  <label>Already proofread &mdash; <span id="seed-count"></span></label>
-  <p class="hint" style="margin-top:0" id="seed-prov"></p>
-  <div class="row" style="margin:10px 0">
-    <input id="seed-q" placeholder="grc_100, purkinje, mf&hellip;" style="flex:1 1 240px">
-    <span class="hint" id="seed-msg"></span>
-  </div>
-  <div id="seed-list"></div>
-</div>
-
 <div class="card">
-  <label>3 &middot; Nuclei &mdash; mark them in bulk</label>
+  <label>Nuclei &mdash; mark them in bulk</label>
   <p class="hint" style="margin-top:0">The page sends you to a 40&nbsp;&micro;m column nobody has
   searched yet. The link opens with an empty annotation layer already selected, so
   <b>ctrl-click every nucleus you can see</b>, then copy the address bar and paste it below.
@@ -201,7 +316,34 @@ try{var _t=localStorage.getItem("ujump_theme");
   </div>
   <div id="explore-stats" style="margin-top:12px"></div>
 </div>
+</div><!-- /jump -->
 
+<div class="tabpanel" data-tabpanel="filter">
+<div class="card" id="seed-card">
+  <label>Filter and show &mdash; <span id="seed-count"></span></label>
+  <p class="hint" style="margin-top:0">Every cell somebody has already proofread, searchable by
+  name, kind or annotator. Applied entirely in your browser &mdash; the list is embedded in this
+  page. <b>Add fragments</b> aims the paste box at that cell, so you extend or correct somebody
+  else&rsquo;s reconstruction rather than starting a rival one.</p>
+  <p class="hint" style="margin-top:6px"><span id="seed-breakdown"></span></p>
+  <div class="row" style="margin:10px 0">
+    <input id="seed-q" placeholder="grc_100, purkinje, mf&hellip;" style="flex:1 1 240px">
+    <span class="hint" id="seed-msg"></span>
+  </div>
+  <div id="seed-list"></div>
+</div>
+</div><!-- /filter -->
+
+<div class="tabpanel" data-tabpanel="refs">
+<div class="card">
+  <label>The volume</label>
+  <p class="hint" style="margin:0" id="dsfacts"></p>
+  <p class="hint" style="margin:8px 0 0">Nguyen, Thomas, Rhoades, Ricchi, Yuan, Sheridan, Hildebrand, Funke, Regehr &amp; Lee, &ldquo;Structured cerebellar connectivity supports resilient pattern separation&rdquo;, <a href='https://doi.org/10.1038/s41586-022-05471-w' target='_blank' rel='noopener'><i>Nature</i> 613, 543&ndash;549 (2023)</a>, served by <a href='https://bossdb.org/project/nguyen_thomas2022' target='_blank' rel='noopener'>BossDB</a>. <b>Access, not a reuse licence:</b> BossDB reports this data public and the paper names the repository, but no reuse terms are stated on the project page. Cite the paper, and check the terms before redistributing pixels.</p>
+</div>
+<div class="card">
+  <label>The proofread cells</label>
+  <p class="hint" style="margin-top:0" id="seed-prov"></p>
+</div>
 <div class="card">
   <label>What this is</label>
   <p class="hint" style="margin-top:0">Every other tool in this family classifies cells somebody
@@ -214,6 +356,17 @@ try{var _t=localStorage.getItem("ujump_theme");
   pieces &mdash; without needing this page at all.</p>
   
 </div>
+</div><!-- /refs -->
+
+<div class="tabpanel" data-tabpanel="dash">
+<div class="card">
+  <label>Statistics</label>
+  <p class="hint" style="margin-top:0">Everything here is counted from this page's own data when
+  you open the tab &mdash; the proofread list embedded in the file, plus whatever the community
+  backend has returned this session. Nothing is fetched to draw it.</p>
+  <div id="xstats" style="margin-top:12px"></div>
+</div>
+</div><!-- /dash -->
 </div>
 
 <script>window.XJUMP_LIVE = true;</script>
@@ -253,6 +406,47 @@ function toggleTheme(){ setTheme(currentTheme() === "light" ? "dark" : "light");
   /* Sync the button WITHOUT writing to storage: following the system must stay following the
      system until somebody actually chooses. */
   paintToggle(currentTheme() === "light");
+})();
+</script>
+<script>
+/* The same tab machinery the other tools carry, on χJump's own storage key so the two pages never
+   fight over one another's last-open tab.
+
+   Deferred to DOMContentLoaded for the reason it is deferred there: this script runs immediately
+   after the tab bar and BEFORE any .tabpanel has parsed, so calling activate() synchronously would
+   find zero panels and silently toggle nothing. */
+(function(){
+  var bar = document.getElementById("mainTabs"); if (!bar) return;
+  var btns = Array.prototype.slice.call(bar.querySelectorAll(".tabbtn[data-tab]"));
+  function activate(name){
+    btns.forEach(function(b){
+      var on = b.getAttribute("data-tab") === name;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".tabpanel"), function(p){
+      p.classList.toggle("active", p.getAttribute("data-tabpanel") === name);
+    });
+    try { localStorage.setItem("xjump_active_tab", name); } catch(e){}
+    /* Counted on open rather than on load: five thousand cells is a fast pass, but it is a pass
+       nobody browsing the Jump tab should pay for. */
+    if (name === "dash" && window.UJ && UJ.app && UJ.app.renderDashboard) UJ.app.renderDashboard();
+  }
+  btns.forEach(function(b){
+    b.addEventListener("click", function(){ activate(b.getAttribute("data-tab")); });
+  });
+  window.__xjumpActivateTab = activate;
+  document.addEventListener("DOMContentLoaded", function(){
+    var fromUrl = null; try { fromUrl = new URLSearchParams(location.search).get("tab"); } catch(e){}
+    var saved = null;   try { saved = localStorage.getItem("xjump_active_tab"); } catch(e){}
+    var pick = [fromUrl, saved].filter(function(t){
+      return t && btns.some(function(b){ return b.getAttribute("data-tab") === t; }); })[0];
+    activate(pick || "jump");
+  });
+  /* location.pathname, not "#": the logo must RELOAD the tool -- dropping ?tab= and any hash --
+     rather than scroll to the top of the page you are already on. */
+  var home = document.getElementById("logoHome");
+  if (home) home.href = location.pathname;
 })();
 </script>
 <script>/* ── χJump ──────────────────────────────────────────────────────────────────────────────────
@@ -1041,11 +1235,34 @@ UJ.xjump = (function(){
   /* Whole cells only, for "give me a random one". A person asking to see a granule cell wants a
      granule cell. */
   function isWholeCell(name){ return !/_dendrite|_axon|_fragment/.test(String(name)); }
+
+  /* ── where the source disagrees with itself ──────────────────────────────────────────────
+     The Lee lab's table types six cells as `grc` whose own names are `interneuron_31`,
+     `interneuron_50`, and so on. Both fields come from the same database; one of them is wrong,
+     and this page has no standing to decide which.
+
+     So it decides neither. The row keeps the source's type -- that is what the table says -- and
+     is MARKED as disagreeing, with the name quoted, so anybody using it as a granule cell knows to
+     look before they do. Quietly relabelling six cells to match their names would be inventing a
+     correction nobody made; quietly showing them as granule cells would be passing on a claim the
+     source itself contradicts. Neither is ours to do.
+
+     The patterns are per type and deliberately generous: `ml_grc_7` (molecular layer) and
+     `grc_dendrite_2` are granule cells under other descriptions, `purkinje_1` is a pc, `mf_like_0`
+     is a mossy fibre. Only a name from a different cell class entirely trips this. */
+  var SEED_NAME_SHAPE = { grc: /^(grc|ml_grc|grc_ml)/, pc: /^(pc|purkinje)/, mf: /^mf/ };
+  function seedNameDisagrees(name, type){
+    var re = SEED_NAME_SHAPE[type];
+    return !!re && !re.test(String(name));
+  }
   function seedList(){
     var s = (window.UJ.seeds && window.UJ.seeds.cells) || [];
     return s.map(function(c){
       return { key: seedKey(c.n), name: c.n, type: c.t,
                label: seedLabelFor(c.n, c.t), whole: isWholeCell(c.n),
+               /* The source's own type and the source's own name, disagreeing. Carried on the row
+                  rather than resolved: see seedNameDisagrees(). */
+               odd: seedNameDisagrees(c.n, c.t),
                annotator: c.a, enc: c.s,
                /* The soma, in the viewer's own voxels. See build_xjump_seeds.py for how the
                   database's (16,16,40) grid was worked out; it is what makes "go to a coordinate"
@@ -1312,6 +1529,7 @@ UJ.xjump = (function(){
            seedIndex:seedIndex, seedOwnerOf:seedOwnerOf, seedClaimsFor:seedClaimsFor,
            parseCoord:parseCoord, seedsNear:seedsNear, randomSeed:randomSeed,
            seedTypes:seedTypes, seedLabelFor:seedLabelFor, isWholeCell:isWholeCell,
+           seedNameDisagrees:seedNameDisagrees,
            boxGrid:boxGrid, boxCount:boxCount, boxKeyOf:boxKeyOf, boxOf:boxOf,
            boxBounds:boxBounds, boxOfPointVox:boxOfPointVox, nextBox:nextBox,
            meshManifestUrl:meshManifestUrl, meshFragmentUrl:meshFragmentUrl };
@@ -1938,8 +2156,14 @@ UJ.app = (function(){
   var TARGET = null;
   var BUSY = false;
 
+  /* The apostrophe is escaped too, and that is not fussiness: every attribute this file writes is
+     delimited with SINGLE quotes (the whole file is inside double-quoted JavaScript strings), so
+     an unescaped ' in a title ends the attribute early. It shipped that way in one tooltip whose
+     text contained "the source's own" — the attribute closed at "source" and the rest of the
+     sentence became stray markup. */
   function esc(s){ return String(s == null ? "" : s)
-    .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+    .replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",
+                                              '"':"&quot;","'":"&#39;"}[c]; }); }
   function el(id){ return document.getElementById(id); }
   function say(id, html, good){
     var n = el(id); if (!n) return;
@@ -2312,6 +2536,112 @@ UJ.app = (function(){
       + "<span><b>" + named + "</b> named</span>";
   }
 
+  /* ── the statistics tab ───────────────────────────────────────────────────────────────────
+     Counted here, on open, from what the page already has: the proofread list embedded in the
+     file, plus whatever the backend returned this session. Nothing is fetched to draw it, and
+     nothing is drawn with a charting library -- eleven horizontal bars do not justify a megabyte
+     of Plotly on a page that is already 4.5 MB of seed data, and CSS bars can be read aloud by a
+     screen reader in a way a canvas cannot.
+
+     The split that matters is PROOFREAD versus BUILT HERE, kept apart everywhere on this tab. A
+     reconstruction from the Lee lab's published database and one somebody assembled in this page
+     this afternoon are different kinds of evidence, and a dashboard that adds them into one total
+     is quietly averaging the two. */
+  function barsHtml(rows, total){
+    var max = rows.reduce(function(m, r){ return Math.max(m, r.n); }, 0) || 1;
+    return "<div class='bars'>" + rows.map(function(r){
+      return "<div class='bar'><span>" + esc(r.label) + "</span>"
+        + "<span class='track'><span class='fill' style='width:"
+        + (r.n / max * 100).toFixed(1) + "%'></span></span>"
+        + "<span class='n'>" + r.n.toLocaleString()
+        + (total ? " · " + (r.n / total * 100).toFixed(1) + "%" : "") + "</span></div>";
+    }).join("") + "</div>";
+  }
+
+  function bigHtml(items){
+    return "<div class='statgrid'>" + items.map(function(i){
+      return "<div><div class='statbig'>" + i.n.toLocaleString() + "</div>"
+        + "<div class='statlab'>" + esc(i.label) + "</div></div>"; }).join("") + "</div>";
+  }
+
+  function renderDashboard(){
+    var host = el("xstats"); if (!host) return;
+    var rows = seeds();
+    var whole = rows.filter(function(r){ return r.whole; });
+    var frags = rows.reduce(function(a, r){ return a + r.count; }, 0);
+    var withSoma = rows.filter(function(r){ return r.pos; }).length;
+
+    /* Median rather than mean, and stated as the median: fragment counts per cell are heavily
+       skewed -- a granule cell is a median 116 pieces and a mossy fibre terminal a handful -- so a
+       mean would describe no cell in the list. */
+    var counts = whole.map(function(r){ return r.count; }).sort(function(a, b){ return a - b; });
+    var med = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
+
+    var byLabel = {};
+    whole.forEach(function(r){ byLabel[r.label] = (byLabel[r.label] || 0) + 1; });
+    var typeRows = Object.keys(byLabel).map(function(k){ return { label:k, n:byLabel[k] }; })
+                         .sort(function(a, b){ return b.n - a.n; });
+
+    var odd = rows.filter(function(r){ return r.odd; });
+
+    var byWho = {};
+    rows.forEach(function(r){ if (r.annotator) byWho[r.annotator] = (byWho[r.annotator] || 0) + 1; });
+    var whoRows = Object.keys(byWho).map(function(k){ return { label:k, n:byWho[k] }; })
+                        .sort(function(a, b){ return b.n - a.n; });
+
+    var built = STATE.cells, builtFrags = 0, named = 0;
+    built.forEach(function(c){
+      builtFrags += c.segments.length;
+      if (X.settledLabel(c)) named++;
+    });
+    var ex = STATE.explore || { visited:{}, nuclei:[] };
+    var boxes = X.boxCount ? X.boxCount() : 0;
+    var visited = Object.keys(ex.visited || {}).length;
+
+    host.innerHTML =
+        "<div class='statlab' style='margin-bottom:6px'>Proofread &mdash; from the published database</div>"
+      + bigHtml([{ n: rows.length, label: "reconstructions" },
+                 { n: whole.length, label: "whole cells" },
+                 { n: frags, label: "fragments in them" },
+                 { n: med, label: "median fragments per cell" }])
+      + "<p class='hint'>" + (withSoma === rows.length
+          ? "Every one carries a soma position, which is what &ldquo;nearest to a "
+            + "coordinate&rdquo; and every random cell rely on."
+          : withSoma.toLocaleString() + " of " + rows.length.toLocaleString()
+            + " carry a soma position, which is what &ldquo;nearest to a coordinate&rdquo; and "
+            + "every random cell rely on. The rest can still be opened; they simply centre on "
+            + "their first fragment.") + "</p>"
+      + "<div class='statlab' style='margin:18px 0 0'>Whole cells by kind</div>"
+      + barsHtml(typeRows, whole.length)
+      + (odd.length
+          ? "<p class='hint'>" + odd.length + " of these are typed one way by the published table "
+            + "and named another — " + odd.slice(0, 6).map(function(r){
+                return "<code>" + esc(r.name) + "</code> is typed <b>" + esc(r.label) + "</b>"; })
+              .join(", ")
+            + (odd.length > 6 ? ", and " + (odd.length - 6) + " more" : "")
+            + ". Both fields are the source's own, so the page shows its type and marks the "
+            + "disagreement rather than choosing for you.</p>"
+          : "")
+      + "<div class='statlab' style='margin:18px 0 0'>Reconstructions by annotator</div>"
+      + barsHtml(whoRows, rows.length)
+      + "<p class='hint'>Credit where it is owed: every one of these was proofread by hand for "
+      + "<a href='https://doi.org/10.1038/s41586-022-05471-w' target='_blank' rel='noopener'>"
+      + "Nguyen <i>et al.</i> (2023)</a>.</p>"
+
+      + "<div class='statlab' style='margin:22px 0 6px'>Built here &mdash; by this community</div>"
+      + bigHtml([{ n: built.length, label: "cells assembled" },
+                 { n: builtFrags, label: "fragments assembled" },
+                 { n: named, label: "with a settled name" },
+                 { n: (ex.nuclei || []).length, label: "nuclei marked" }])
+      + (boxes
+          ? "<p class='hint'>" + visited.toLocaleString() + " of " + boxes.toLocaleString()
+            + " sampling columns have been opened &mdash; "
+            + (visited / boxes * 100).toFixed(1) + "% of the volume searched for nuclei.</p>"
+          : "")
+      + (LIVE ? "" : "<p class='hint'><b>This is the harness</b>, so the community numbers are "
+                   + "whatever you have done in this tab and nothing else.</p>");
+  }
+
   function whoami(){ return (STORE.who || "").trim(); }
 
   /* ── which fragments actually have a mesh ────────────────────────────────────────────────
@@ -2364,36 +2694,257 @@ UJ.app = (function(){
       + "<button class='rand' data-t=''>any cell</button>";
     Array.prototype.forEach.call(host.querySelectorAll(".rand"), function(b){
       b.addEventListener("click", function(){
-        var r = X.randomSeed(b.getAttribute("data-t") || null);
-        if (!r){ say("find-msg", "no cells of that kind", false); return; }
-        showFound([{ row: r, nm: 0 }], "a random " + r.label);
+        showRandom(b.getAttribute("data-t") || null);
       });
     });
   }
 
+  /* Landing on a random cell fills the coordinate fields in as well as showing the panel. Without
+     that the boxes still say wherever you were last, which is a page quietly disagreeing with
+     itself about where you are -- and it makes the obvious next move, nudging z to look around,
+     impossible without retyping. */
+  function showRandom(type){
+    var r = X.randomSeed(type || null);
+    if (!r){ say("find-msg", "no cells of that kind", false); return; }
+    if (r.pos){ writeCoord(r.pos.map(function(v){ return Math.round(v); })); drawMap(r.pos); }
+    showFound([{ row: r, nm: 0 }], "a random " + r.label);
+  }
+
+  /* ── the coordinate box ───────────────────────────────────────────────────────────────────
+     Three fields and an arrow, the way µJump and ηJump do it (Søren, 2026-09-01: "the coordinates
+     should be the first thing"). Three fields rather than one box because you nudge z far more
+     often than you retype the whole triple, and editing one number inside a comma-separated string
+     means reading the whole string first.
+
+     The x field still absorbs a pasted triple -- or a whole viewer URL -- and splits it across all
+     three, so the fastest way in (copy the address bar, paste, enter) is unchanged. */
+  function coordFields(){ return [el("x"), el("y"), el("z")]; }
+
+  function splitPaste(){
+    var f = coordFields(); if (!f[0]) return;
+    var raw = f[0].value.trim();
+    /* Only when the x field holds something that is NOT a bare number: a person typing "133268"
+       into x and tabbing on must not have y and z rewritten under them. */
+    if (!raw || /^-?[0-9]+(\.[0-9]+)?$/.test(raw)) return;
+    var p = X.parseCoord(raw);
+    if (!p || !f[1] || !f[2]) return;
+    f[0].value = p[0]; f[1].value = p[1]; f[2].value = p[2];
+  }
+
+  function readCoord(){
+    var f = coordFields();
+    if (f[0] && f[1] && f[2] && f[1].value.trim() !== "" && f[2].value.trim() !== "")
+      return X.parseCoord(f[0].value + "," + f[1].value + "," + f[2].value);
+    if (f[0] && f[0].value.trim() !== "") return X.parseCoord(f[0].value);
+    /* The old single box. Kept as a fallback rather than deleted so a saved link, a check, or
+       anything else still holding the previous shape keeps working. */
+    var box = el("find-coord");
+    return box ? X.parseCoord(box.value) : null;
+  }
+
+  function writeCoord(p){
+    var f = coordFields();
+    if (f[0] && f[1] && f[2]){ f[0].value = p[0]; f[1].value = p[1]; f[2].value = p[2]; }
+  }
+
   function findByCoord(){
-    var box = el("find-coord"); if (!box) return;
-    var p = X.parseCoord(box.value);
+    splitPaste();
+    var p = readCoord();
     if (!p){
       say("find-msg", "That is not a coordinate. Three numbers, or a whole Neuroglancer link.", false);
-      el("find-body").innerHTML = ""; return;
+      if (el("find-body")) el("find-body").innerHTML = "";
+      if (el("cellPanelCard")) el("cellPanelCard").classList.remove("show");
+      return;
     }
     var ext = X.extentVox();
-    if (p.some(function(v, i){ return v < 0 || v > ext[i]; }))
+    var oob = p.some(function(v, i){ return v < 0 || v > ext[i]; });
+    if (oob)
       say("find-msg", "<b>" + p.join(", ") + "</b> is outside the volume ("
         + ext.join(" × ") + " voxels) — showing the nearest cells anyway.", false);
     else say("find-msg", "");
-    showFound(X.seedsNear(p, 6), "nearest to " + p.join(", "));
+    drawMap(p);
+    /* The out-of-volume warning wins the line. showFound would otherwise overwrite it with
+       "nearest to …", which is true and much less useful than being told your coordinate is not
+       in this dataset. */
+    showFound(X.seedsNear(p, 6), oob ? null : "nearest to " + p.join(", "));
+  }
+
+  /* ── the cell, in the family's identity-panel shape ───────────────────────────────────────
+     Søren: "The cell identity should also look like the uJump". Same grammar as every other tool
+     in the family -- kicker chips, the name at 22px as the link out, a monospace meta line, then
+     labelled id rows with their buttons -- so somebody who has learned one page can read this one.
+
+     What differs is what the chips SAY, and that difference is the point: µJump's kicker states a
+     published classification, χJump's states who proofread this reconstruction and whether it is a
+     whole cell or a piece of one. Same shape, honest content. */
+  function foundPanelHtml(row, nm){
+    var segs = X.seedSegments(row);
+    var url = X.viewerUrl(segs, row.pos || null);
+    var pos = row.pos ? row.pos.map(function(v){ return Math.round(v); }) : null;
+    return "<div class='nuc' id='found-panel'>"
+      + "<div class='row' style='gap:6px'>"
+      +   "<span class='tag " + (row.odd ? "warn" : "on") + "'>" + esc(row.label) + "</span>"
+      +   (row.whole ? "<span class='tag'>whole cell</span>"
+                     : "<span class='tag warn'>a piece, not a whole cell</span>")
+      +   "<span class='tag'>proofread</span>"
+      +   (row.odd ? "<span class='tag warn' title='" + esc(ODD_TITLE)
+                     + "'>type and name disagree</span>" : "")
+      + "</div>"
+      /* THE NAME IS THE LINK, as it is on the built cells: what you want to click is the cell, and
+         what identifies a cell to a person is what it is called. A real <a>, so it can be
+         middle-clicked, copied and dragged into a message. */
+      + "<div class='celltype'><a href='" + esc(url) + "' target='_blank' rel='noopener'"
+      +   " title='Open in Neuroglancer, centred on the soma, all fragments merged into one object'>"
+      +   esc(row.name) + " <span class='ext'>&#8599;</span></a> <small>"
+      +   esc(row.label) + "</small></div>"
+      + "<div class='meta'>" + segs.length + " fragment" + (segs.length === 1 ? "" : "s")
+      +   (nm ? " &middot; " + (nm / 1000).toFixed(1) + " &micro;m from your coordinate" : "")
+      +   " &middot; proofread by " + esc(row.annotator || "—") + "</div>"
+      + "<div class='ids'>"
+      +   "<div class='idrow'><span class='k'>soma</span>"
+      +     (pos ? "<span class='idval' title='click to copy' data-c='" + esc(pos.join(", "))
+                   + "'>" + esc(pos.join(", ")) + "</span>"
+                 : "<span class='hint'>not recorded</span>")
+      +     "<button class='idbtn' id='found-3d' title='Draw the fragments here, without leaving "
+      +       "the page'>Show in 3D</button>"
+      +     "<button class='idbtn' id='found-cov' title='Not every cb2 fragment has published "
+      +       "geometry'>Coverage only</button>"
+      +     "<button class='idbtn' id='found-add' title='Aim the paste box at this cell, to extend "
+      +       "or correct it'>Add fragments</button>"
+      +   "</div>"
+      +   "<div class='idrow'><span class='k'>first fragment</span>"
+      +     "<span class='idval' title='click to copy' data-c='" + esc(segs[0] || "")
+      +     "'>" + esc(segs[0] || "—") + "</span>"
+      +     "<span class='hint'>" + (segs.length > 1 ? "and " + (segs.length - 1) + " more" : "")
+      +     "</span></div>"
+      + "</div>"
+      + "<div class='mesh3d-host'></div>"
+      + "<div class='hint mesh-out' style='margin-top:6px'></div>"
+      + "</div>";
   }
 
   function showFound(hits, why){
-    var host = el("find-body"); if (!host) return;
-    if (!hits.length){ host.innerHTML = "<p class='hint'>nothing found</p>"; return; }
-    host.innerHTML = "<p class='hint' style='margin:0 0 6px'>" + esc(why) + "</p>"
-      + "<div class='seedrows'>" + hits.map(function(h){
-          return seedRowHtml(h.row, h.nm ? (h.nm / 1000).toFixed(1) + " µm away" : "");
-        }).join("") + "</div>";
-    hits.forEach(function(h){ wireSeedRow(h.row); });
+    var host = el("find-body"), card = el("cellPanelCard");
+    if (!host) return;
+    if (!hits.length){
+      host.innerHTML = "<p class='hint'>nothing found</p>";
+      if (card) card.classList.add("show");
+      return;
+    }
+    var top = hits[0], rest = hits.slice(1);
+    host.innerHTML = foundPanelHtml(top.row, top.nm)
+      + (rest.length
+          ? "<div class='neigh'><h4>" + rest.length + " nearest neighbouring cells</h4>"
+            + "<div class='seedrows'>" + rest.map(function(h){
+                return seedRowHtml(h.row, h.nm ? (h.nm / 1000).toFixed(1) + " µm away" : "");
+              }).join("") + "</div></div>"
+          : "");
+    if (card) card.classList.add("show");
+    if (why) say("find-msg", esc(why));
+    rest.forEach(function(h){ wireSeedRow(h.row); });
+    wireFoundPanel(top.row);
+    if (host.scrollIntoView) host.scrollIntoView({ behavior:"smooth", block:"nearest" });
+  }
+
+  function wireFoundPanel(row){
+    var root = el("found-panel"); if (!root) return;
+    var segs = X.seedSegments(row);
+    /* A plain object standing in for a cell. UJ.mesh3d.show only ever reads .segments and writes
+       the coverage counts back, so a proofread reconstruction and an assembled one can share one
+       renderer without either knowing about the other. */
+    var asCell = { id: row.key, segments: segs, nucleus: row.pos || null };
+    var out = root.querySelector(".mesh-out");
+    root.querySelector("#found-3d").addEventListener("click", function(){
+      UJ.mesh3d.show(asCell, root.querySelector(".mesh3d-host"));
+    });
+    root.querySelector("#found-cov").addEventListener("click", function(){
+      checkMeshes(asCell, out);
+    });
+    root.querySelector("#found-add").addEventListener("click", function(){
+      TARGET = row.key;
+      var box = el("paste");
+      if (box){ box.value = ""; box.focus();
+        if (box.scrollIntoView) box.scrollIntoView({ behavior:"smooth", block:"center" }); }
+      LAST = null;
+      say("paste-msg", "Adding to <code>" + esc(row.name) + "</code> — click the extra fragments "
+        + "in the viewer and paste the link.", true);
+      renderPaste();
+    });
+    Array.prototype.forEach.call(root.querySelectorAll(".idval[data-c]"), function(v){
+      v.addEventListener("click", function(){
+        try { navigator.clipboard.writeText(v.getAttribute("data-c")); } catch(e){}
+      });
+    });
+  }
+
+  /* ── the volume, drawn ────────────────────────────────────────────────────────────────────
+     Søren: "if possible we should have a model of the dataset so we can see the location of the
+     coordinate". ηJump answers that with a cortical-layer wedge sampled from H01's own layers
+     volume; cb2 publishes no such volume, so inventing layer boundaries here would be a drawing
+     that asserts something nobody measured.
+
+     What IS measured is the block itself and the somata of the cells the Lee lab proofread. So
+     this draws the block to scale from two sides, scatters the Purkinje somata the seed list
+     actually contains, and marks the query point. Both views share one scale, which is what makes
+     the side view worth having: cb2 is 998 x 922 x 48 µm, and seeing the third number as a sliver
+     explains at a glance why its cells arrive as fragments rather than whole. */
+  var PC_DOTS = null;
+  function pcSomata(){
+    if (PC_DOTS) return PC_DOTS;
+    PC_DOTS = (window.UJ.seeds ? X.seedList() : []).filter(function(r){
+      return r.pos && r.whole && r.type === "pc"; }).map(function(r){ return X.toNm(r.pos); });
+    return PC_DOTS;
+  }
+
+  /* NANOMETRES, not voxels, and this is not a detail. cb2's z voxels are 40 nm against 4 nm in x
+     and y, so a diagram drawn in voxel counts would make the block look 480 µm deep instead of 48
+     -- the same class of error as the ten-fold mesh transform Søren caught by eye in the 3D panel,
+     and the reason the page check compares the two views against the volume's real extent rather
+     than against each other. */
+  function mapSvg(extNm, ax, ay, ptNm, labX, labY){
+    var W = 200, PAD = 9;
+    var sx = W / extNm[ax], H = extNm[ay] * sx;
+    var f = function(v){ return (v * sx + PAD).toFixed(1); };
+    var dots = pcSomata().map(function(p){
+      return "<circle cx='" + f(p[ax]) + "' cy='" + f(p[ay]) + "' r='1.6'/>"; }).join("");
+    var pt = ptNm;
+    var mark = "";
+    if (pt) mark = "<g stroke='var(--bad)' stroke-width='1.4' fill='none'>"
+      + "<circle cx='" + f(pt[ax]) + "' cy='" + f(pt[ay]) + "' r='4.5'/>"
+      + "<line x1='" + f(pt[ax]) + "' y1='" + (+f(pt[ay]) - 8) + "' x2='" + f(pt[ax])
+      +   "' y2='" + (+f(pt[ay]) + 8) + "'/>"
+      + "<line x1='" + (+f(pt[ax]) - 8) + "' y1='" + f(pt[ay]) + "' x2='" + (+f(pt[ax]) + 8)
+      +   "' y2='" + f(pt[ay]) + "'/></g>";
+    return "<svg viewBox='0 0 " + (W + PAD * 2) + " " + (H + PAD * 2).toFixed(1) + "' "
+      + "role='img' aria-label='cb2 seen along " + labX + " and " + labY
+      + (pt ? ", with your coordinate marked" : "") + "'>"
+      + "<rect x='" + PAD + "' y='" + PAD + "' width='" + W + "' height='" + H.toFixed(1)
+      +   "' fill='none' stroke='var(--line)' stroke-width='1'/>"
+      + "<g fill='var(--accent)' opacity='.45'>" + dots + "</g>" + mark + "</svg>";
+  }
+
+  function drawMap(pt){
+    var host = el("dsmap"); if (!host) return;
+    var ext = X.extentNm();
+    var ptNm = pt ? X.toNm(pt) : null;
+    var n = pcSomata().length;
+    /* The side view is a twentieth the height of the top view at the same scale, so it goes in a
+       column with the explanation beneath it rather than beside it. Two figures side by side would
+       leave the right-hand one floating over a hand's width of nothing. */
+    host.innerHTML =
+        "<figure>" + mapSvg(ext, 0, 1, ptNm, "x", "y")
+      +   "<figcaption>from above &middot; x " + Math.round(ext[0] / 1000)
+      +   " &times; y " + Math.round(ext[1] / 1000) + " &micro;m</figcaption></figure>"
+      + "<div style='flex:1 1 220px;min-width:200px'>"
+      +   "<figure>" + mapSvg(ext, 0, 2, ptNm, "x", "z")
+      +     "<figcaption>from the side &middot; z is only "
+      +     Math.round(ext[2] / 1000) + " &micro;m &mdash; same scale</figcaption></figure>"
+      +   "<p class='hint' style='margin:10px 0 0'>"
+      +   (n ? "The " + n + " dots are the somata of the proofread Purkinje cells, plotted from "
+                + "the seed list itself &mdash; not a drawn layer boundary. " : "")
+      +   (pt ? "The cross is <code>" + esc(pt.join(", ")) + "</code>."
+                : "Enter a coordinate above to mark it here.")
+      +   "</p></div>";
   }
 
   /* ── the cells somebody has already proofread ──────────────────────────────────────────────
@@ -2419,10 +2970,15 @@ UJ.app = (function(){
     }
     var byType = {};
     rows.forEach(function(r){ byType[r.label] = (byType[r.label] || 0) + 1; });
-    if (el("seed-count"))
-      el("seed-count").textContent = rows.length.toLocaleString() + " cells · "
-        + Object.keys(byType).map(function(k){ return byType[k].toLocaleString() + " " + k
-            + (byType[k] === 1 ? "" : "s"); }).join(", ");
+    /* The label carries the total and nothing else. The full breakdown used to go here too, and in
+       the label's uppercase letter-spacing eleven counts became a five-line wall above the search
+       box you were trying to reach. It reads as a sentence below instead. */
+    if (el("seed-count")) el("seed-count").textContent = rows.length.toLocaleString() + " cells";
+    if (el("seed-breakdown"))
+      el("seed-breakdown").textContent =
+        Object.keys(byType).sort(function(a, b){ return byType[b] - byType[a]; })
+          .map(function(k){ return byType[k].toLocaleString() + " " + k
+            + (byType[k] === 1 ? "" : "s"); }).join(", ") + ".";
     if (el("seed-prov") && !el("seed-prov").innerHTML)
       el("seed-prov").innerHTML =
         "Proofread by the Lee lab for "
@@ -2444,15 +3000,32 @@ UJ.app = (function(){
         ? hits.length + (hits.length === 25 ? "+ shown" : " found")
         : "showing the first 25 — type to search";
     host.innerHTML = hits.length
-      ? "<div class='seedrows'>" + hits.map(seedRowHtml).join("") + "</div>"
+      /* NOT hits.map(seedRowHtml): Array.map passes (item, index, array), so the index lands in
+         seedRowHtml's `extra` and every row after the first printed its own position in the list
+         as though it were a distance -- "1 · 136 fragments", "2 · 105 fragments". Caught in a
+         screenshot, and it had been there since the seed list shipped. */
+      ? "<div class='seedrows'>"
+        + hits.map(function(r){ return seedRowHtml(r); }).join("") + "</div>"
       : "<p class='hint' style='margin:0'>Nothing matches “" + esc(q) + "”.</p>";
     hits.forEach(wireSeedRow);
+  }
+
+  /* The source disagreeing with itself, said on the row. See seedNameDisagrees() in the logic:
+     six of the Lee lab's cells are typed `grc` and named `interneuron_*`. The type shown is still
+     the source's; the marker is so nobody uses one as a granule cell without noticing. */
+  var ODD_TITLE = "The published table types this cell one way and names it another. Both fields "
+    + "are the source's own — this page has no standing to correct either, so it shows the type "
+    + "the table gives and marks the disagreement.";
+  function oddChip(r){
+    return r.odd ? " <span class='chip st-contested' title='" + esc(ODD_TITLE)
+                   + "'>named " + esc(r.name) + "</span>" : "";
   }
 
   function seedRowHtml(r, extra){
     return "<div class='seedrow' id='seed-" + cssId(r.key) + "'>"
       + "<a class='seed-open' href='#' data-key='" + esc(r.key) + "'>" + esc(r.name) + " &#8599;</a>"
-      + "<span class='chip'>" + esc(r.label) + "</span>"
+      + "<span class='chip" + (r.odd ? " st-contested' title='" + esc(ODD_TITLE) : "")
+      + "'>" + esc(r.label) + "</span>"
       + "<span class='hint'>" + (extra ? esc(extra) + " · " : "")
       + r.count + " fragment" + (r.count === 1 ? "" : "s") + "</span>"
       + "<span class='hint'>" + esc(r.annotator || "—") + "</span>"
@@ -2931,6 +3504,16 @@ UJ.app = (function(){
     if (el("find-coord")) el("find-coord").addEventListener("keydown", function(e){
       if (e.key === "Enter") findByCoord();
     });
+    if (el("go")) el("go").addEventListener("click", findByCoord);
+    if (el("rand")) el("rand").addEventListener("click", function(){ showRandom(null); });
+    coordFields().forEach(function(f){
+      if (!f) return;
+      f.addEventListener("keydown", function(e){ if (e.key === "Enter") findByCoord(); });
+    });
+    /* Deferred a turn: on paste the field still holds its OLD value when the event fires, so
+       splitting immediately would split whatever was there before. Same shape readPaste() uses on
+       the fragment box, for the same reason. */
+    if (el("x")) el("x").addEventListener("paste", function(){ setTimeout(splitPaste, 0); });
     if (el("next-box")) el("next-box").addEventListener("click", nextBox);
     if (el("nuc-go")) el("nuc-go").addEventListener("click", readNuclei);
     if (el("nuc-paste")) el("nuc-paste").addEventListener("paste", function(){
@@ -2945,8 +3528,13 @@ UJ.app = (function(){
         + X.extentNm().map(function(v){ return Math.round(v/1000); }).join(" &times; ")
         + " &micro;m &middot; " + UJ.cfg.volume.res_nm.slice().reverse().join(" &times; ")
         + " nm &middot; fragments, not cells &mdash; you assemble them";
+    if (el("unitres"))
+      el("unitres").textContent = UJ.cfg.volume.res_nm.slice().reverse().join("·") + " nm";
     STATE.explore = STATE.explore || { visited:{}, nuclei:[] };
     render(); renderExplore(); renderSeeds(); renderRandomButtons();
+    /* The volume is drawn before anybody has typed a coordinate. An empty box that appears only
+       after your first search is a feature you have to already know about to find. */
+    drawMap(null);
     /* Reading is public; only writing needs a credential. So the load happens immediately rather
        than waiting for sign-in -- somebody who just wants to see what has been assembled should
        not have to identify themselves first. */
@@ -2978,6 +3566,7 @@ UJ.app = (function(){
            nextBox:nextBox, readNuclei:readNuclei, joinAll:joinAll,
            seeds:seeds, renderSeeds:renderSeeds,
            findByCoord:findByCoord, renderRandomButtons:renderRandomButtons,
+           showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
            box:function(){ return BOX; },
            setCredential: function(c, who){
              ApiStore.credential = c; ApiStore.who = who || ""; render();

@@ -13,11 +13,17 @@
    DRAWING lives here. That is why this file is 300 lines rather than 1,500.
 
    HOW IT REACHES FIVE TOOLS WITHOUT EDITING FIVE TOOLS
-   µJump, δJump, πJump and ηJump all render their mesh-download control as
-   `<button class="idbtn meshdl" data-root="…">`, and βJump's is one string away from the same.
-   So this module installs ITSELF: it watches for those buttons and puts a "Show in 3D" beside
-   each, reading the root id from the attribute that is already there. Every tool needs exactly
-   one line added -- the script tag -- and none of them needs its own logic touched.
+   µJump, δJump and πJump all render their mesh-download control as
+   `<button class="idbtn meshdl" data-root="…">`, and βJump's and ηJump's were one attribute away
+   from the same. So this module installs ITSELF: it watches for those buttons and puts a
+   "Show in 3D" beside each, reading the root id from the attribute that is already there. Every
+   tool needs exactly one line added -- the script tag -- and none of them needs its own logic
+   touched.
+
+   ηJump was the exception worth recording: its button carried `class="idbtn meshdl"` but no
+   `data-root` (it closes over `c3Id(i)` in its own click handler instead), so the selector never
+   matched it and no 3D button appeared -- exactly what Søren reported on 2026-09-01. The fix was
+   to give it the attribute the other four already had, not to special-case it here.
 
    That matters more than the line count. These are live pages with months of community data
    behind them; a change that cannot reach inside their handlers cannot break their handlers.
@@ -375,7 +381,12 @@ UJ.mesh3d = (function(){
     + ".m3d-note b{color:var(--ink,#eee)}"
     + ".m3d-err{font-size:12px;color:var(--bad,#e55);line-height:1.5;"
     + "border:1px solid var(--line,#333);border-radius:10px;padding:12px;background:var(--bg,#111)}"
-    + ".m3d-btn{margin-left:6px}";
+    /* No sizing here on purpose. Søren, 2026-09-01: "the button should be similar size and shape
+       as the download 3D model button". Those buttons are sized by INLINE styles that differ per
+       tool -- µJump's is `padding:1px 8px;font-size:11px;vertical-align:middle`, βJump's is
+       `flex:1;min-width:150px` in a flex row -- so a fixed rule here could only ever match one of
+       them. copyShape() below lifts each tool's own sizing off the button it sits beside. */
+    + ".m3d-btn{}";
   function injectStyle(){
     if (document.getElementById("m3d-style")) return;
     var s = document.createElement("style");
@@ -394,13 +405,35 @@ UJ.mesh3d = (function(){
 
      `data-m3d` marks a button already dealt with. Without it the observer would re-decorate on
      every mutation, including the ones this module causes, which is a loop. */
-  function buttonFor(root){
+  /* The inline properties worth copying from the download button: everything that decides how big
+     the button is and how it sits in its row. NOT `display` -- that one is state, not shape, and
+     is mirrored live below, because µJump/δJump/πJump render their download button hidden and
+     reveal it only once a root id exists. */
+  var SHAPE = ["padding","paddingTop","paddingRight","paddingBottom","paddingLeft",
+               "fontSize","lineHeight","fontWeight","verticalAlign","borderRadius",
+               "flex","flexGrow","flexShrink","flexBasis","minWidth","width",
+               "marginLeft","marginRight","marginTop","marginBottom"];
+  function copyShape(from, to){
+    if (!from || !from.style) return;
+    for (var i = 0; i < SHAPE.length; i++){
+      var v = from.style[SHAPE[i]];
+      if (v) to.style[SHAPE[i]] = v;
+    }
+  }
+
+  function buttonFor(root, dl){
     var b = document.createElement("button");
-    b.className = "idbtn m3d-btn";
+    /* The tool's own classes minus `meshdl` -- so it inherits `idbtn` (and anything else the page
+       styles its row buttons with) and does NOT match this module's own selector, which would
+       otherwise make the observer decorate the button it just created, forever. */
+    var cls = (dl && dl.className ? String(dl.className) : "idbtn")
+                .replace(/\bmeshdl\b/g, " ").replace(/\s+/g, " ").trim() || "idbtn";
+    b.className = cls + " m3d-btn";
     b.type = "button";
     b.textContent = "Show in 3D";
     b.title = "Draw this cell in the page, without leaving it";
     b.setAttribute("data-root", root);
+    copyShape(dl, b);
     return b;
   }
 
@@ -421,7 +454,7 @@ UJ.mesh3d = (function(){
          somebody to fetch a mesh for a cell that does not exist. */
       if (!root || root === "0") return;
       dl.setAttribute("data-m3d", "1");
-      var btn = buttonFor(root);
+      var btn = buttonFor(root, dl);
       var host = document.createElement("div");
       host.className = "m3d-host";
       /* After the ROW the button sits in, not after the button: these panels are flex rows, and a
@@ -429,20 +462,33 @@ UJ.mesh3d = (function(){
       var row = dl.parentNode;
       if (row && row.parentNode) row.parentNode.insertBefore(host, row.nextSibling);
       else if (dl.parentNode) dl.parentNode.appendChild(host);
-      dl.parentNode.insertBefore(btn, dl.nextSibling);
+      /* BEFORE the download button, not after. Søren, 2026-09-01: "the Show in 3D should come
+         before the download 3D model". Looking at a cell in the page is the cheap thing you do
+         first; downloading a .glb is what you do once you know you want it. */
+      dl.parentNode.insertBefore(btn, dl);
 
-      /* MIRROR THE TOOL'S OWN JUDGEMENT. Every one of these tools disables its mesh-download
-         button when it knows there is no mesh -- βJump meshes only about half its segments, and
-         says so by disabling. Ignoring that would offer a 3D view for cells the page has already
-         worked out do not have one, and the person would get a fetch failure instead of a button
-         that was never enabled.
+      /* MIRROR THE TOOL'S OWN JUDGEMENT, on two counts.
 
-         Watched rather than read once, because the tool sets it as its own panel renders. */
-      function mirror(){ btn.disabled = !!dl.disabled; }
+         `disabled`: every one of these tools disables its mesh-download button when it knows
+         there is no mesh -- βJump meshes only about half its segments, and says so by disabling.
+         Ignoring that would offer a 3D view for cells the page has already worked out do not have
+         one, and the person would get a fetch failure instead of a button that was never enabled.
+
+         `display`: µJump, δJump and πJump render the download button HIDDEN and reveal it only
+         once at least one root id exists for the cell. A "Show in 3D" that stayed visible beside
+         an invisible sibling would be a button for a cell that has nothing to draw.
+
+         Watched rather than read once, because the tools set both as their panels render. */
+      function mirror(){
+        btn.disabled = !!dl.disabled;
+        var d = dl.style ? dl.style.display : "";
+        if (btn.style.display !== d) btn.style.display = d;
+        if (host.style.display !== d) host.style.display = d;
+      }
       mirror();
       if (window.MutationObserver)
         new MutationObserver(mirror).observe(dl, { attributes:true,
-                                                   attributeFilter:["disabled"] });
+                                                   attributeFilter:["disabled","style"] });
 
       btn.addEventListener("click", function(){
         if (btn.disabled) return;
