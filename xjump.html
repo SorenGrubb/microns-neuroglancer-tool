@@ -1,0 +1,1857 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>χJump — assemble cells from fragments</title>
+<script>
+/* Applied BEFORE the first paint so a light-mode user does not get a dark flash on every load.
+   Tiny and dependency-free: nothing else on the page exists yet. */
+try{var _t=localStorage.getItem("ujump_theme");
+    if(_t==="light"||_t==="dark")document.documentElement.setAttribute("data-theme",_t);}catch(e){}
+</script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+/* THEME. Three blocks, in this order, for the reason the other eight carry the same three:
+   :root is dark; the media query supplies light for anyone whose system asks for it but only
+   while no explicit choice has been made; and [data-theme] beats both, in either direction, so
+   the button can override a light system into dark as well as the other way round. Without the
+   :not(), a dark choice on a light machine would lose to the media query. */
+ :root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ee;--mut:#9aa4b2;--line:#262c35;
+       --accent:#22d3ee;--on-accent:#04252a;
+       --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--shadow:rgba(0,0,0,.4)}
+ @media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f7f9;--card:#fff;
+       --ink:#16181d;--mut:#5b6472;--line:#e3e6ea;--accent:#0e7490;--on-accent:#ffffff;
+       --shadow:rgba(140,149,159,.25)}}
+ :root[data-theme="light"]{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mut:#5b6472;
+       --line:#e3e6ea;--accent:#0e7490;--on-accent:#ffffff;--shadow:rgba(140,149,159,.25)}
+ #themeToggleBtn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12px;
+   color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:20px;
+   padding:6px 12px;cursor:pointer;width:auto;box-shadow:0 2px 8px var(--shadow)}
+ #themeToggleBtn:hover{border-color:var(--accent)}
+ *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);
+   font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+ .wrap{max-width:960px;margin:0 auto;padding:24px 18px 70px}
+ .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+ h1{font-size:21px;margin:0} .logo .mu{color:var(--accent);font-weight:700}
+ .sub{color:var(--mut);font-size:13px;margin:4px 0 18px}
+ .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
+ label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);
+   font-weight:600;display:block;margin-bottom:6px}
+ button{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;
+   padding:9px 14px;font-size:14px;cursor:pointer} button:hover{border-color:var(--accent)}
+ button.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+ button:disabled{opacity:.45;cursor:not-allowed}
+ input,select,textarea{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+   border-radius:8px;padding:9px 10px;font:inherit;width:100%}
+ textarea{min-height:78px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+ .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+ .hint{color:var(--mut);font-size:12.5px}
+ /* Links inherit the accent rather than the browser's default blue, which on the dark palette is
+    #0000EE against #0f1216 -- 1.3:1, effectively invisible. Caught in a screenshot rather than by
+    reading the CSS, which is the only way this kind of thing is ever caught. */
+ a{color:var(--accent)} a:hover{text-decoration:underline}
+ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+ .chip{display:inline-block;border:1px solid var(--line);border-radius:20px;padding:2px 9px;
+   font-size:11.5px;color:var(--mut)}
+ .chip.st-agreed{border-color:var(--ok);color:var(--ok)}
+ .chip.st-contested{border-color:var(--warn);color:var(--warn)}
+ .chip.st-unnamed{border-color:var(--bad);color:var(--bad)}
+ .chip.st-retracted{border-color:var(--bad);color:var(--bad);text-decoration:line-through}
+ .frags{display:flex;flex-wrap:wrap;gap:6px}
+ .frag-chip{border:1px solid var(--line);border-radius:6px;padding:2px 6px;background:var(--bg)}
+ /* A fragment already claimed by another cell. Marked rather than hidden or refused: it is a
+    disagreement about where a cell ends, and the person pasting is entitled to see it and decide. */
+ .frag-chip.taken{border-color:var(--warn);color:var(--warn)}
+ .callout{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;
+   padding:10px 12px;margin:10px 0;background:var(--bg)}
+ .callout.warn{border-left-color:var(--warn)}
+ .cell{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg)}
+ .cellid{color:var(--accent);font-weight:600}
+ #stats{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--mut)}
+ #stats b{color:var(--ink);font-size:18px;margin-right:4px}
+ summary{cursor:pointer}
+ /* The in-page 3D panel. touch-action:none is not cosmetic: without it a drag on the canvas
+    scrolls the page on a tablet instead of turning the cell, and the panel appears not to work. */
+ .m3d{margin-top:10px}
+ .m3d-canvas{display:block;width:100%;height:300px;border:1px solid var(--line);
+   border-radius:10px;background:var(--bg);cursor:grab;touch-action:none}
+ .m3d-canvas:active{cursor:grabbing}
+ .m3d-note{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.5}
+ .m3d-note b{color:var(--ink)}
+ .m3d-note .ok{color:var(--ok)}
+ .m3d-note.bad{color:var(--bad)}
+ /* A drawing failure, which replaces the canvas and leaves the coverage note alone below it. */
+ .m3d-err{font-size:12px;color:var(--bad);line-height:1.5;border:1px solid var(--line);
+   border-radius:10px;padding:12px;background:var(--bg)}
+ /* Sign-in, top right with the theme button. Reading is public, so this is deliberately quiet. */
+ .who{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+ #whoami{font-size:12px;color:var(--mut)}
+</style></head><body>
+
+<div class="wrap">
+<div class="top">
+  <div>
+    <h1 class="logo"><span class="mu">&chi;</span>Jump</h1>
+    <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span></p>
+  </div>
+  <div class="who">
+    <span id="whoami">not signed in</span><div id="gsiButton"></div>
+    <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
+            aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span>
+      <span id="themeToggleLabel">Dark</span></button>
+  </div>
+</div>
+
+<div class="card">
+  <label>The volume</label>
+  <p class="hint" style="margin:0" id="dsfacts"></p>
+  <p class="hint" style="margin:8px 0 0">Nguyen, Thomas, Rhoades, Ricchi, Yuan, Sheridan, Hildebrand, Funke, Regehr &amp; Lee, &ldquo;Structured cerebellar connectivity supports resilient pattern separation&rdquo;, <a href='https://doi.org/10.1038/s41586-022-05471-w' target='_blank' rel='noopener'><i>Nature</i> 613, 543&ndash;549 (2023)</a>, served by <a href='https://bossdb.org/project/nguyen_thomas2022' target='_blank' rel='noopener'>BossDB</a>. <b>Access, not a reuse licence:</b> BossDB reports this data public and the paper names the repository, but no reuse terms are stated on the project page. Cite the paper, and check the terms before redistributing pixels.</p>
+  <div class="row" style="margin-top:10px">
+    <button id="open-empty">Open cb2 in the viewer &#8599;</button>
+  </div>
+</div>
+
+<div class="card">
+  <label for="paste">1 &middot; Paste a Neuroglancer link</label>
+  <p class="hint" style="margin-top:0">Click the fragments you want in the viewer &mdash; as many
+  as you like &mdash; then copy the whole address bar and paste it here. Deselected fragments
+  (the ones neuroglancer keeps with a <code>!</code>) are left out, and so is anything in a layer
+  you have switched off.</p>
+  <textarea id="paste" placeholder="https://neuroglancer-demo.appspot.com/#!{&quot;layers&quot;:[&hellip;"></textarea>
+  <div class="row" style="margin-top:8px">
+    <button class="primary" id="paste-go">Read the fragment ids</button>
+    <span class="hint" id="paste-msg"></span>
+  </div>
+  <div id="paste-body" style="margin-top:12px"></div>
+</div>
+
+<div class="card">
+  <label>2 &middot; The cells built so far</label>
+  <div id="stats" style="margin-bottom:10px"></div>
+  <div id="cells"></div>
+</div>
+
+<div class="card">
+  <label>What this is</label>
+  <p class="hint" style="margin-top:0">Every other tool in this family classifies cells somebody
+  else already found. cb2 has no such list &mdash; what it publishes is a segmentation of
+  <b>fragments</b>, pieces of neurite split wherever the automatic segmentation was not confident.
+  Putting them back together is the work, and it is what this page records.</p>
+  <p class="hint">A built cell carries the fragment ids and whatever people have called it. When
+  you open one in the viewer its fragments are merged into a single object using neuroglancer's
+  own <code>equivalences</code>, so anybody you send the link to sees one cell rather than forty
+  pieces &mdash; without needing this page at all.</p>
+  
+</div>
+</div>
+
+<script>window.XJUMP_LIVE = true;</script>
+<script>
+/* The same module the other eight tools carry, on the same localStorage key, so a person who has
+   already chosen light in µJump gets light here without choosing again.
+
+   ngBgColor() is a plain function declaration because xjump_logic.js builds neuroglancer states
+   from a different script tag and has to reach it. The viewer opens in its own tab and inherits
+   none of this page's CSS, so the background has to be stated in the state itself -- and stated
+   from the LIVE theme rather than hardcoded. "#000000" is neuroglancer's own default. */
+function currentTheme(){
+  var a = document.documentElement.getAttribute("data-theme");
+  if (a === "light" || a === "dark") return a;
+  return (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches)
+    ? "light" : "dark";
+}
+function ngBgColor(){ return currentTheme() === "light" ? "#ffffff" : "#000000"; }
+function setTheme(mode){
+  var light = mode === "light";
+  document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+  try { localStorage.setItem("ujump_theme", light ? "light" : "dark"); } catch(e){}
+  paintToggle(light);
+}
+function paintToggle(light){
+  var i = document.getElementById("themeToggleIcon"),
+      l = document.getElementById("themeToggleLabel"),
+      b = document.getElementById("themeToggleBtn");
+  if (i) i.textContent = light ? "☀️" : "🌙";
+  if (l) l.textContent = light ? "Light" : "Dark";
+  if (b) b.setAttribute("aria-pressed", light ? "true" : "false");
+}
+function toggleTheme(){ setTheme(currentTheme() === "light" ? "dark" : "light"); }
+(function(){
+  var b = document.getElementById("themeToggleBtn");
+  if (b) b.addEventListener("click", toggleTheme);
+  /* Sync the button WITHOUT writing to storage: following the system must stay following the
+     system until somebody actually chooses. */
+  paintToggle(currentTheme() === "light");
+})();
+</script>
+<script>/* ── χJump ──────────────────────────────────────────────────────────────────────────────────
+   Mouse cerebellar cortex, lobule V — Nguyen, Thomas et al. 2023, served by BossDB.
+
+   WHY THIS TOOL IS NOT LIKE THE OTHER SEVEN. Every one of them starts from a table of cells
+   somebody else produced: µJump classifies MICrONS's 144,118 detected nuclei, ωJump grids a volume
+   and asks "is there a nucleus in this box?". cb2 has neither. What it publishes is a
+   SEGMENTATION OF FRAGMENTS -- pieces of neurite, split wherever the automatic segmentation was
+   not confident -- and the work is putting them back together into cells.
+
+   So the unit of work here is an ASSEMBLY, not a classification, and the tool is built around the
+   thing Søren asked for: "you can go to neuroglancer and click a lot of segmentations and then
+   paste the code and it gets all their IDs and you can press build cell or add to segmentation."
+   Clicking is how a person selects fragments; the browser's address bar is how that selection
+   leaves Neuroglancer; this tool is what turns it into a record.
+
+   ── access ──
+   BossDB serves cb2 as ordinary precomputed volumes on a public AWS Open Data bucket, which is
+   why this is possible at all. Read from the BossDB API on 2026-08-31 rather than copied off the
+   project page:
+
+     GET /v1/collection/nguyen_thomas2022/experiment/          -> ["cb2","cb2_seg"]
+     GET /v1/.../cb2/channel/em    -> type image,      uint8,  cv_path nguyen_thomas2022/cb2/em
+     GET /v1/.../cb2_seg/channel/seg -> type annotation, uint64, cv_path nguyen_thomas2022/cb2/seg
+     GET /v1/coord/nguyen_thomas2022_cb2 -> 249600 x 230400 x 1200 voxels at 4 x 4 x 40 nm
+
+   Both channels report storage_type "cloudvol" and bucket "bossdb-open-data", so the
+   precomputed:// URLs below are the same bytes the BossDB viewer serves, not a mirror that could
+   drift. Both report public: true.
+
+   The segmentation publishes UNSHARDED meshes (s3 listing, 2026-08-31: keys of the form
+   `mesh/1001627975765:0`, which is the legacy manifest naming -- not `<hex>.shard`). That is the
+   format core/mesh.js already reads for µJump and λJump, which is what makes a 3D view of an
+   assembly affordable rather than a project of its own.
+   ────────────────────────────────────────────────────────────────────────────────────────── */
+window.UJ = window.UJ || {};
+UJ.cfg = { id: "xjump", label: "cb2 — mouse cerebellum, assembled from fragments" };
+
+UJ.cfg.dataset = {
+  name: "BossDB (Lee lab / Regehr lab)",
+  /* STATED, NOT ASSUMED. BossDB's API reports public:true on both channels, which is a statement
+     about access rather than about reuse terms, and those are different things -- λJump's ODC-By
+     and OpenOrganelle's CC-BY are both "public" and neither permits the same things. The page
+     shows this text per dataset; it does not paraphrase it into a licence the publisher did not
+     state. */
+  licence: "no reuse licence stated on the project page — public access via BossDB",
+  licenceUrl: "https://bossdb.org/project/nguyen_thomas2022",
+  portal: "https://bossdb.org/project/nguyen_thomas2022",
+  bucket: "bossdb-open-data",
+  citation: "Nguyen, Thomas, Rhoades, Ricchi, Yuan, Sheridan, Hildebrand, Funke, Regehr & Lee, " +
+            "“Structured cerebellar connectivity supports resilient pattern separation”, " +
+            "Nature 613, 543–549 (2023)",
+  doi: "https://doi.org/10.1038/s41586-022-05471-w",
+  terms: {
+    basis: "both channels report public: true from the BossDB API, and the paper's data " +
+           "availability statement names this repository outright: “The electron microscopy " +
+           "dataset is publicly available at the BossDB repository”.",
+    verifiedFrom: "https://api.bossdb.io/v1/collection/nguyen_thomas2022/experiment/cb2_seg/channel/seg",
+    note: "BossDB states access, not reuse. Anyone publishing from an assembly built here should " +
+          "cite the paper above and check the project page for terms before redistributing pixels."
+  }
+};
+
+UJ.cfg.viewer = { base: "https://neuroglancer-demo.appspot.com/" };
+
+/* The volume. One dataset, so this is an object rather than the roster ωJump needs -- but written
+   in the same shape, because "one for now" is how ωJump started too and a second cerebellar volume
+   would otherwise mean rewriting every caller.
+
+   shape is (z, y, x) VOXELS and res_nm is (z, y, x) NANOMETRES, the same convention as every other
+   tool in this family. Positions are in VOXELS: the viewer state below declares the dataset's own
+   voxel size as its dimensions, so what the page shows is what Neuroglancer's position box shows
+   and what a coordinate pasted from BossDB's own viewer means. */
+UJ.cfg.volume = {
+  id: "cb2",
+  tissue: "cerebellar cortex (lobule V)",
+  species: "mouse",
+  shape: [1200, 230400, 249600],
+  res_nm: [40, 4, 4],
+  /* THE https:// FORM, NOT s3://. Neuroglancer accepts both, but `s3://` is resolved by the
+     viewer deployment rather than by the URL, and λJump has already been bitten by that: its note
+     records that lee16 loads in ngl.microns-explorer.org "with no CORS error, no token and no
+     login" and that this is why that viewer is used there rather than neuroglancer-demo. Writing
+     the bucket's real https address removes the question -- the source means the same thing in
+     every viewer, and whether it loads depends only on the bucket's CORS, which is a property of
+     the data rather than of who is looking at it. */
+  em:  "precomputed://https://bossdb-open-data.s3.amazonaws.com/nguyen_thomas2022/cb2/em",
+  seg: "precomputed://https://bossdb-open-data.s3.amazonaws.com/nguyen_thomas2022/cb2/seg",
+
+  /* ── THE SEGMENTATION SITS 1,216 SECTIONS BELOW THE EM ────────────────────────────────────
+     The first link this tool generated showed the EM perfectly and no segmentation at all, and
+     the reason was not CORS and not the URL form -- the EM loads from the same bucket by the same
+     mechanism. The two volumes simply do not overlap as published. BossDB's own coord frames say
+     so outright: the EM channel runs z 0..1200 while the segmentation runs z -1280..-32, which is
+     not one shared section.
+
+     The number here is 1216, NOT the 1280 those frames imply. It comes from a working NeuroGlass
+     state Søren sent, which carries exactly this translation on the segmentation source and
+     renders. Between a number derived from two metadata records and a number taken from a viewer
+     that is demonstrably showing the right pixels, the second wins -- and the 64-section
+     difference between them is precisely the sort of thing a derivation gets wrong.
+
+     Applied as a translation on the SOURCE, in output-space z voxels (40 nm each), so the
+     segmentation lands on the tissue rather than the page having to move the user 48 µm to find
+     it. */
+  segTranslateZ: 1216,
+
+  /* ── the meshes are a SEPARATE precomputed volume ──────────────────────────────────────────
+     Not `…/cb2/seg/mesh/`, which is what the bucket listing shows beside the segmentation and
+     which I had assumed. There is a second store at `mesh/nguyen_thomas2022/cb2/` with its own
+     `info` and its own manifests, and that is the one the working state points at.
+
+     It also needs an axis flip. The transform below is the one from that state, verbatim: an
+     anti-diagonal matrix, so the mesh's axes are the reverse of the viewer's (x <-> z), scaled by
+     1e9 because the mesh's own coordinates are in metres rather than voxels. This is not a matrix
+     to derive or tidy -- it is a statement about how that store was written, and it is copied
+     rather than reasoned about. */
+  mesh: "precomputed://https://bossdb-open-data.s3.amazonaws.com/mesh/nguyen_thomas2022/cb2/mesh",
+  meshTransform: [[0, 0, 1e9, 0], [0, 1e9, 0, 0], [1e9, 0, 0, 0]],
+  /* Where the page fetches manifests and fragments directly -- to find out which fragments HAVE a
+     mesh, and to draw them in the page. */
+  meshBase: "https://bossdb-open-data.s3.amazonaws.com/mesh/nguyen_thomas2022/cb2/mesh/",
+  /* The same statement as meshTransform above, resolved into nanometres, for the page's OWN
+     renderer -- which has no neuroglancer to apply a layer transform for it.
+
+     Composed rather than re-derived: neuroglancer's matrix maps a mesh vertex to the viewer's
+     output space, and that space's units are the volume's own voxels (4, 4, 40 nm). So
+
+         nm_x = 4  * 1e9 * v[2]      nm_y = 4  * 1e9 * v[1]      nm_z = 40 * 1e9 * v[0]
+
+     which is the anti-diagonal below. Every factor in it comes from the working state; none of it
+     is a guess about what the mesh's native unit "should" be, because that question does not have
+     to be answered to place the vertices correctly.
+
+     WHAT THE MESH'S NATIVE UNIT ACTUALLY IS, worked out from this matrix rather than assumed --
+     and worth writing down, because the 1e9 looks like a mistake until it is.
+
+     Take a vertex 100,000 voxels along x and 600 sections deep, which is a real place in cb2. If
+     the stored triple is (z, y, x) VOXEL INDICES scaled by 1e-9, it is (6e-7, 1e-4, 1e-4), and
+     the matrix gives
+
+         x: 4e9  × 1e-4 = 400,000 nm = 400 µm   =  100,000 voxels × 4 nm   ✓
+         z: 40e9 × 6e-7 =  24,000 nm =  24 µm   =      600 sections × 40 nm ✓
+
+     Both land exactly where that voxel is. So the meshes are in voxel indices, in (z,y,x) order,
+     written as if metres -- which is why the axis order reverses and why the two scale factors
+     are the volume's own 4 and 40 rather than one number. Nothing here is isotropic-in-disguise:
+     a mesh that looked isotropic in its own units would be a genuinely 10:1 object.
+
+     That is a DERIVATION, not a measurement. It is the only reading under which the numbers come
+     out at the right physical scale, but the way to settle it is one glance: the 3D panel prints
+     the assembly's extent in µm, and neuroglancer will say the same thing for the same cell. The
+     panel labels that figure as derived from this transform for exactly that reason. */
+  meshVertexToNm: [[0, 0, 4e9], [0, 4e9, 0], [40e9, 0, 0]],
+
+  /* ── NOT EVERY FRAGMENT HAS A MESH ────────────────────────────────────────────────────────
+     Established 2026-08-31 by listing the bucket for three ids taken from a real assembly in
+     Søren's own NeuroGlass state:
+
+       mesh/…/cb2/mesh/7545904169112:0    32 bytes
+       mesh/…/cb2/mesh/3323082834073      NOT FOUND
+       mesh/…/cb2/mesh/9520490087067      NOT FOUND
+
+     and neither of the missing two is in the other mesh store either. The two stores are not the
+     same id set: 1001627975765 is in both, 7545904169112 only in mesh/…/cb2/mesh/.
+
+     This matters more than it looks. A person assembles fourteen fragments, the 3D view draws
+     nine, and nothing says why -- so they conclude the cell is nine pieces, or that their
+     assembly was wrong, or that the tool is broken. All three conclusions are wrong and all three
+     are reasonable. The page therefore COUNTS the coverage and says it: "9 of 14 fragments have a
+     mesh". A partial picture labelled as partial is useful; the same picture unlabelled is a lie.
+
+     It is checked rather than assumed because the answer is per fragment and there is no rule to
+     derive it from -- which is also why this is a lookup and not a flag. */
+  meshCoverageUnknown: true,
+
+  /* Read off the same working state. Without it neuroglancer stretches the full 0-255 and the EM
+     reads flat -- the same reason ωJump's volumes carry em_range. */
+  em_range: [0, 210],
+
+  segLayerName: "seg",
+  emLayerName: "em",
+  meshLayerName: "mesh"
+};
+
+/* ── assembly ────────────────────────────────────────────────────────────────────────────────
+   The rules that decide what a "cell" is here. Kept as config rather than buried in the logic
+   because every one of them is a judgement Søren may want to change once people have used it. */
+UJ.cfg.assembly = {
+  /* A fragment belongs to at most ONE built cell. Two people assembling overlapping sets is not
+     two opinions about a name -- it is a disagreement about where the cell ends, and silently
+     letting a fragment sit in both would make the second cell look complete while it is really
+     half of somebody else's. Reported as a conflict instead. */
+  oneCellPerFragment: true,
+  /* Below this, an assembly is almost certainly a mis-click rather than a cell: cb2's fragments
+     are pieces of neurite, and a cerebellar granule cell is dozens of them. Not refused -- a
+     single fragment CAN be a whole soma -- but the page says so before it is saved. */
+  smallAssemblyWarn: 2,
+  /* Names are FREE TEXT, as in ωJump, and for the same reason: this is a published volume with a
+     known cell-type vocabulary (granule, Golgi, Purkinje, molecular-layer interneuron, mossy
+     fibre, climbing fibre), but the tool's job is to record what people call things rather than
+     to hand them a menu and discover only that they can use a menu. The page autocompletes over
+     what has already been used here. */
+  suggestedNames: ["granule cell", "Golgi cell", "Purkinje cell", "molecular layer interneuron",
+                   "mossy fibre", "climbing fibre", "Bergmann glia", "astrocyte",
+                   "oligodendrocyte", "microglia", "unipolar brush cell", "Lugaro cell"]
+};
+
+UJ.cfg.tabs = { lsKey: "xjump_active_tab", urlParam: "tab" };
+UJ.cfg.backend = {
+  /* Shares ωJump's deployment; the handlers are new (XJumpCells.gs) and write to their own
+     sheets, keyed by ds:"xjump". Same endpoint means one script to redeploy, not two. */
+  endpoint: "https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec",
+  clientId: "240227117082-gmiv0s37qdqngo3t3ph0lmthg4t4t47p.apps.googleusercontent.com",
+  ownerEmail: "", ds: "xjump"
+};
+</script>
+<script>/* ── χJump logic ────────────────────────────────────────────────────────────────────────────
+   Everything here is pure: no DOM, no network, no Google. xjumpcheck.js runs it in node, which is
+   the whole reason it is a separate file from the app.
+
+   The centre of this tool is one function, parseSegments(), and it is worth saying why a paste
+   parser deserves this much care. Søren's ask was "you can go to neuroglancer and click a lot of
+   segmentations and then paste the code and it gets all their IDs". Everything downstream -- the
+   assembly, the 3D view, the record in the sheet -- is only as good as that list. A parser that
+   drops one fragment produces a cell with a hole in it that looks complete; one that includes a
+   fragment the user had deselected produces a cell with somebody else's dendrite in it. Neither
+   announces itself.
+   ────────────────────────────────────────────────────────────────────────────────────────── */
+window.UJ = window.UJ || {};
+UJ.xjump = (function(){
+  "use strict";
+  var V = function(){ return UJ.cfg.volume; };
+  var A = function(){ return UJ.cfg.assembly; };
+
+  /* ── units ───────────────────────────────────────────────────────────────────────────────
+     Voxels at every edge, nanometres for anything physical -- the same split ωJump settled on,
+     for the same reason: cb2 is 4 x 4 x 40 nm, so a distance measured in voxel units would be ten
+     times more forgiving along z than across it. */
+  function resXYZ(){ var r = V().res_nm; return [r[2], r[1], r[0]]; }
+  function extentVox(){ var s = V().shape; return [s[2], s[1], s[0]]; }
+  function extentNm(){ var r = resXYZ(), e = extentVox(); return [e[0]*r[0], e[1]*r[1], e[2]*r[2]]; }
+  function toNm(v){ var r = resXYZ(); return [v[0]*r[0], v[1]*r[1], v[2]*r[2]]; }
+  function toVox(nm){ var r = resXYZ(); return [nm[0]/r[0], nm[1]/r[1], nm[2]/r[2]]; }
+
+  /* ── segment ids are STRINGS, always ─────────────────────────────────────────────────────
+     Neuroglancer segment ids are uint64. cb2's happen to sit around 1.0e12, comfortably inside
+     the 2^53 a JavaScript number represents exactly -- so Number() would work here, today, on
+     this volume, and would keep working right up until this code met a graphene-backed
+     segmentation whose ids run to 8.6e17. There, Number("864691135234029401") is
+     864691135234029400: a valid-looking id, off by one, for a segment that does not exist.
+
+     There is no reason to take that risk for nothing. Ids are read as strings, compared as
+     strings, stored as strings and printed as strings. The ONLY numeric thing done to them is
+     sorting, and that is done by length-then-lexicographic so it is a true numeric order without
+     ever converting. */
+  var ID_RE = /^[0-9]+$/;
+  function isId(s){ return typeof s === "string" && ID_RE.test(s) && s !== "0"; }
+  function normId(s){
+    /* Leading zeros would make two spellings of one id compare unequal. */
+    var t = String(s == null ? "" : s).trim().replace(/^0+(?=[0-9])/, "");
+    return isId(t) ? t : null;
+  }
+  function cmpId(a, b){
+    if (a.length !== b.length) return a.length - b.length;   // numeric order without Number()
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+  function sortIds(list){ return list.slice().sort(cmpId); }
+
+  /* ── reading a pasted Neuroglancer state ─────────────────────────────────────────────────
+     Tolerant on input because this is the one place a person pastes something: a full URL, a bare
+     `#!` fragment, or the raw JSON all work, URL-encoded or not. Same shape as ωJump's
+     parseFinds, and deliberately so -- somebody who has used one tool should not have to learn
+     that the other is fussier. */
+  function decodeState(text){
+    if (!text) return { ok:false, error:"nothing pasted" };
+    var t = String(text).trim();
+    var hash = t.indexOf("#!");
+    if (hash >= 0) t = t.slice(hash + 2);
+    if (/%7B|%22/i.test(t)){ try { t = decodeURIComponent(t); } catch (e){} }
+    t = t.trim();
+    if (t.charAt(0) !== "{") return { ok:false, error:"that does not look like a Neuroglancer link" };
+    var st;
+    try { st = JSON.parse(t); }
+    catch (e){ return { ok:false, error:"that link's state is not valid JSON — copy the whole "
+                        + "address bar, not part of it" }; }
+    return { ok:true, state:st };
+  }
+
+  /* Every segment id a person has SELECTED in a pasted state.
+
+     Four things this has to get right, and each of them is a way to be quietly wrong:
+
+       1. `!`-PREFIXED IDS ARE NOT SELECTED. Neuroglancer keeps deselected segments in the same
+          `segments` list with a leading "!" so that unticking one does not lose it from the panel.
+          Reading the list naively picks those up, and the user gets a cell containing the very
+          fragments they looked at and rejected.
+       2. HIDDEN LAYERS DO NOT COUNT. A segmentation layer with visible:false is one the person
+          turned off. Its selection is still in the state.
+       3. MORE THAN ONE SEGMENTATION LAYER IS POSSIBLE, and this volume will grow more. Collected
+          from all visible ones, with the layer named per id so the page can say where each came
+          from rather than presenting one undifferentiated list.
+       4. ORDER AND DUPLICATES. First-seen order is kept -- it is the order the person clicked,
+          which is the only ordering information there is -- and an id selected in two layers is
+          one fragment, not two.
+
+     `segmentQuery` is deliberately ignored: it is the text in the search box, not a selection. */
+  function parseSegments(text){
+    var d = decodeState(text);
+    if (!d.ok) return { ok:false, error:d.error };
+    var st = d.state;
+    var layers = st && st.layers;
+    if (!layers || !layers.length) return { ok:false, error:"no layers in that link" };
+    if (!layers.slice) layers = Object.keys(layers).map(function(k){ return layers[k]; });
+
+    var seen = {}, ids = [], byLayer = {}, hidden = 0, fromHiddenLayers = 0, segLayers = 0;
+    layers.forEach(function(L){
+      if (!L || L.type !== "segmentation") return;
+      segLayers++;
+      var name = String(L.name || "segmentation");
+      var list = L.segments || [];
+      if (!list.length) return;
+      if (L.visible === false){ fromHiddenLayers += list.length; return; }
+      list.forEach(function(raw){
+        var s = String(raw == null ? "" : raw).trim();
+        if (s.charAt(0) === "!"){ hidden++; return; }          // deselected, not selected
+        var id = normId(s);
+        if (!id) return;
+        if (seen[id]) return;                                   // one fragment, not two
+        seen[id] = true; ids.push(id);
+        (byLayer[name] = byLayer[name] || []).push(id);
+      });
+    });
+
+    if (!segLayers)
+      return { ok:false, error:"that link has no segmentation layer — is it the cb2 viewer?" };
+    if (!ids.length)
+      return { ok:false, error: fromHiddenLayers
+        ? "the only segments in that link are in a layer that is switched off — turn it back on "
+          + "and copy the address again"
+        : "no segments are selected in that link — click the fragments in the viewer first" };
+    /* Groups, when the pasted state carries equivalences. Restricted to what is SELECTED: a
+       state can carry equivalences for thousands of fragments nobody clicked, and reporting those
+       as "cells you just built" would be handing back somebody else's work. */
+    var sel = {}; ids.forEach(function(i){ sel[i] = true; });
+    var pairs = parseEquivalences(st).filter(function(p){ return sel[p[0]] && sel[p[1]]; });
+    var groups = pairs.length ? componentsOf(pairs, ids) : [];
+    return { ok:true, ids:ids, byLayer:byLayer, hiddenCount:hidden,
+             hiddenLayerCount:fromHiddenLayers, layerCount:segLayers,
+             equivalences: pairs, groups: groups,
+             position: readPosition(st) };
+  }
+
+  /* A layer's source, as a list of url strings, whatever shape the state wrote it in.
+
+     Three shapes exist in the wild and the working NeuroGlass state Søren sent uses two of them
+     in one layer: a bare string, an object {url, transform}, and an ARRAY mixing both -- its
+     segmentation layer's source is
+         [ {url:"precomputed://…/seg", transform:{…}}, "local://equivalences" ]
+     A reader that assumed a string would see `undefined` there and quietly decide the layer is
+     not the one it wants. */
+  function sourceUrls(L){
+    var src = L && L.source;
+    if (!src) return [];
+    var list = Array.isArray(src) ? src : [src];
+    return list.map(function(x){
+      return typeof x === "string" ? x : (x && typeof x.url === "string" ? x.url : "");
+    }).filter(Boolean);
+  }
+
+  /* ── equivalences: neuroglancer's own way of saying "these fragments are one thing" ────────
+     This is the part of the working state that changes the design rather than fixing it. Its
+     segmentation layer carries a `local://equivalences` source and an `equivalences` array of id
+     PAIRS, and Neuroglancer then treats each connected group as a single object: click any
+     fragment and the whole cell lights up.
+
+     So "build cell" does not have to invent a representation. The viewer already has one, it
+     round-trips through a URL, and a cell built here can be handed to somebody who has never seen
+     this tool and will still see one cell rather than forty fragments. χJump reads them in and
+     writes them out.
+
+     Pairs are unordered and the graph is undirected; a cell is a connected component of it. */
+  function parseEquivalences(st){
+    var out = [];
+    var layers = (st && st.layers) || [];
+    if (!Array.isArray(layers)) layers = Object.keys(layers).map(function(k){ return layers[k]; });
+    layers.forEach(function(L){
+      if (!L || L.type !== "segmentation") return;
+      (L.equivalences || []).forEach(function(pair){
+        if (!Array.isArray(pair) || pair.length < 2) return;
+        var a = normId(pair[0]), b = normId(pair[1]);
+        if (a && b && a !== b) out.push([a, b]);
+      });
+    });
+    return out;
+  }
+
+  /* Connected components of an equivalence graph -- one array of ids per assembled object.
+     Union-find rather than a graph walk: the working state Søren sent carries about a thousand
+     pairs and there is no reason for this to be quadratic. */
+  function componentsOf(pairs, alsoInclude){
+    var parent = {};
+    function find(x){
+      if (parent[x] === undefined) parent[x] = x;
+      while (parent[x] !== x){ parent[x] = parent[parent[x]]; x = parent[x]; }
+      return x;
+    }
+    function union(a, b){ var ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; }
+    (pairs || []).forEach(function(p){ union(p[0], p[1]); });
+    (alsoInclude || []).forEach(function(id){ find(id); });
+    var groups = {};
+    Object.keys(parent).forEach(function(id){
+      var r = find(id);
+      (groups[r] = groups[r] || []).push(id);
+    });
+    return Object.keys(groups).map(function(r){ return sortIds(groups[r]); })
+      .sort(function(a, b){ return b.length - a.length || cmpId(a[0], b[0]); });
+  }
+
+  /* The pairs that make these fragments one object. A STAR from the lowest id rather than a
+     chain: n-1 pairs either way, but a star keeps the representative stable when fragments are
+     added later, so re-exporting a grown cell does not rewrite every pair. */
+  function equivalencesFor(ids){
+    var s = sortIds((ids || []).filter(isId));
+    if (s.length < 2) return [];
+    return s.slice(1).map(function(id){ return [s[0], id]; });
+  }
+
+  /* Where the viewer was pointing, in voxels, if the state says. Useful rather than essential:
+     a built cell with a coordinate can be jumped back to, one without can still be opened by its
+     segments. Returned as null rather than [0,0,0] when absent, because the origin is a real
+     place in this volume and "we do not know" must not look like it. */
+  function readPosition(st){
+    var p = st && st.position;
+    if (!Array.isArray(p) || p.length !== 3) return null;
+    var out = p.map(Number);
+    return out.every(function(v){ return isFinite(v); }) ? out : null;
+  }
+
+  /* ── assemblies ──────────────────────────────────────────────────────────────────────────
+     A cell is a set of fragment ids plus whatever people have called it. Kept as a plain object
+     so the same shape survives a round trip through the sheet. */
+  function newCell(id, ids, who){
+    return { id:String(id), segments:sortIds(ids), names:{}, totalVotes:0, rejects:0,
+             builtBy: who || "", position:null };
+  }
+
+  /* Which built cell, if any, already claims each of these fragments.
+
+     This is the check that stops two people quietly assembling halves of the same neuron. It
+     returns the conflicts rather than resolving them: which of two assemblies is right is a
+     judgement about the tissue, and the tool has no basis for making it. */
+  function claimsFor(cells, ids){
+    var owner = {};
+    (cells || []).forEach(function(c){
+      (c.segments || []).forEach(function(s){ owner[s] = c.id; });
+    });
+    var clashes = [];
+    (ids || []).forEach(function(s){
+      if (owner[s]) clashes.push({ segment:s, cell:owner[s] });
+    });
+    return clashes;
+  }
+
+  /* Add fragments to an existing cell. Returns what CHANGED as well as the new set, because
+     "added 14" and "added 2, you already had 12" are different sentences and the page should be
+     able to say the true one. */
+  function addToCell(cell, ids){
+    var have = {};
+    (cell.segments || []).forEach(function(s){ have[s] = true; });
+    var added = [], already = [];
+    (ids || []).forEach(function(s){ (have[s] ? already : added).push(s); have[s] = true; });
+    return { segments: sortIds(Object.keys(have)), added:added, already:already };
+  }
+
+  function removeFromCell(cell, ids){
+    var drop = {};
+    (ids || []).forEach(function(s){ drop[s] = true; });
+    var kept = (cell.segments || []).filter(function(s){ return !drop[s]; });
+    return { segments: kept, removed: (cell.segments || []).length - kept.length };
+  }
+
+  /* ── what people have called it ──────────────────────────────────────────────────────────
+     The same tally ωJump uses, and the same reasoning: case-folded for COUNTING so that
+     "Granule cell" and "granule cell" are one vote for one thing, but shown back in the spelling
+     somebody actually used, because nobody wants to read a name that has been lower-cased at
+     them. */
+  function tallySummary(c){
+    var names = (c && c.names) || {};
+    var all = Object.keys(names).map(function(k){ return names[k]; });
+    all.sort(function(a, b){ return b.n - a.n || (a.label < b.label ? -1 : 1); });
+    var tot = all.reduce(function(s, x){ return s + x.n; }, 0);
+    var rej = (c && c.rejects) || 0;
+    var status = !all.length ? "unnamed"
+               : (all.length > 1 && all[0].n === all[1].n) ? "contested"
+               : (all[0].n >= 2 ? "agreed" : "single");
+    if (rej >= 2 && rej > tot) status = "retracted";
+    return { labels:all, total:tot, rejects:rej, status:status,
+             leader: all.length ? all[0].label : "" };
+  }
+  function settledLabel(c){
+    var s = tallySummary(c);
+    return (s.status === "agreed" || s.status === "single") ? s.leader : "";
+  }
+
+  /* Names already used here, most-used first, for the autocomplete -- with the config's suggested
+     vocabulary behind them. The suggestions are a starting point on an empty sheet and nothing
+     more: they are appended after whatever people have actually written, never in place of it. */
+  function nameSuggestions(cells){
+    var n = {};
+    (cells || []).forEach(function(c){
+      Object.keys(c.names || {}).forEach(function(k){
+        n[k] = (n[k] || 0) + c.names[k].n;
+      });
+    });
+    var used = Object.keys(n).sort(function(a, b){ return n[b] - n[a]; })
+                 .map(function(k){ return (cells.map(function(c){ return c.names[k]; })
+                                                .filter(Boolean)[0] || {}).label || k; });
+    var seen = {}; used.forEach(function(x){ seen[x.toLowerCase()] = true; });
+    (A().suggestedNames || []).forEach(function(x){
+      if (!seen[x.toLowerCase()]) used.push(x);
+    });
+    return used;
+  }
+
+  /* ── the viewer ──────────────────────────────────────────────────────────────────────────
+     Positions in VOXELS, like every tool in this family since 2026-08-31: the state declares the
+     dataset's own voxel size as its dimensions, so what this page shows is what Neuroglancer's
+     position box shows. */
+  function localDims(){
+    var r = resXYZ();
+    return { x:[r[0]*1e-9,"m"], y:[r[1]*1e-9,"m"], z:[r[2]*1e-9,"m"] };
+  }
+  function ngBg(){
+    try { if (typeof ngBgColor === "function") return ngBgColor(); } catch (e){}
+    return "#000000";
+  }
+
+  /* ── framing ─────────────────────────────────────────────────────────────────────────────
+     Søren, on the first working link: "I see the fragment, but it is tiny."
+
+     Two different things, and only one of them is a bug. A single cb2 fragment IS tiny -- these
+     are pieces of neurite a few micrometres long, which is the entire reason this tool exists;
+     one fragment is not a cell and looking small is it telling the truth. But the 3D panel was
+     opening at a FIXED 120 µm field whatever was selected, so a 4 µm fragment had to be tiny, and
+     a whole assembled Purkinje arbour would have been cropped by the same number. A view that is
+     the wrong size in both directions is not a view, it is a constant.
+
+     So the frame is derived from what is actually being shown. The page can only do that once it
+     knows where the fragments are -- which it does as soon as it has fetched their meshes for its
+     own 3D view -- so this takes a bounding box and returns the three numbers a state needs.
+
+     Pure, so it is testable without a network: nanometres in, viewer units out. */
+  var PANEL_PX = 700;          // roughly one quadrant of a 4-panel layout on a laptop
+  var FILL = 1.4;              // leave a margin rather than cropping the ends of an arbour
+  function frameFor(loNm, hiNm){
+    if (!Array.isArray(loNm) || !Array.isArray(hiNm)) return null;
+    var mid = [0,1,2].map(function(i){ return (Number(loNm[i]) + Number(hiNm[i])) / 2; });
+    var span = Math.max.apply(null, [0,1,2].map(function(i){
+      return Math.abs(Number(hiNm[i]) - Number(loNm[i]));
+    }));
+    if (!isFinite(span) || span <= 0 || !mid.every(isFinite)) return null;
+    var canon = Math.min.apply(null, resXYZ());
+    return {
+      position: toVox(mid).map(Math.round),
+      /* Both scales are in CANONICAL VOXELS -- the smallest axis scale -- not nanometres. Same
+         rule as ωJump's, and read from neuroglancer's navigation_state.js rather than guessed. */
+      projectionScale: Math.max(1, Math.round(span * FILL / canon)),
+      crossSectionScale: Math.max(0.5, Math.round((span * FILL / PANEL_PX) / canon * 100) / 100)
+    };
+  }
+
+  /* A state showing exactly these fragments, with the point tool NOT armed: this tool collects
+     segment ids by clicking segments, which needs no annotation layer at all. That is the one
+     real simplification over ωJump -- there is nothing to transcribe, because Neuroglancer
+     already puts the selection in the URL. */
+  function buildState(ids, posVox, opts){
+    var v = V(), o = opts || {};
+    var segs = sortIds((ids || []).filter(isId));
+    var dims = localDims();
+
+    var em = { type:"image", name:v.emLayerName, source:v.em, tab:"source" };
+    if (v.em_range) em.shaderControls = { normalized: { range: v.em_range } };
+
+    /* The segmentation, shifted onto the tissue. See segTranslateZ in the config: as published
+       these two volumes share no section at all, and the first link this tool made showed a
+       perfect EM with nothing on it. */
+    var segSource = { url: v.seg, transform: {
+      matrix: [[1,0,0,0], [0,1,0,0], [0,0,1, v.segTranslateZ || 0]],
+      outputDimensions: dims } };
+    /* Equivalences make the selected fragments behave as ONE object in the viewer -- click any
+       of them and the whole assembly lights up. Emitted only when there is something to merge,
+       because an empty local://equivalences source is a layer that does nothing. */
+    var eq = (o.merge === false) ? [] : equivalencesFor(segs);
+    var seg = { type:"segmentation", name:v.segLayerName,
+                source: eq.length ? [segSource, "local://equivalences"] : segSource,
+                segments: segs,
+                /* The panel opens on the segment list, because the whole job here is looking at
+                   which fragments are in and which are not. */
+                tab: "segments" };
+    if (eq.length) seg.equivalences = eq;
+
+    var layers = [em, seg];
+    /* The meshes are a separate store with reversed axes -- see the config. Linked to the
+       segmentation layer's selection so the 3D view follows what is selected without the caller
+       having to keep two lists in step. */
+    if (v.mesh && segs.length && o.mesh !== false){
+      layers.push({ type:"segmentation", name:v.meshLayerName,
+                    source: { url: v.mesh,
+                              transform: { matrix: v.meshTransform, outputDimensions: dims } },
+                    linkedSegmentationGroup: v.segLayerName, tab:"source" });
+    }
+    var pos = posVox || (o.frame && o.frame.position) || centreVox();
+    return {
+      dimensions: localDims(),
+      position: pos,
+      /* Defaults sized for ONE FRAGMENT rather than for the whole volume: a few micrometres, not
+         120 µm. `frame` overrides both once the caller knows the assembly's real extent -- see
+         frameFor() -- and that is the path the page uses. */
+      crossSectionScale: (o.frame && o.frame.crossSectionScale) || o.crossSectionScale || 2,
+      projectionScale: (o.frame && o.frame.projectionScale) || o.projectionScale || 1750,
+      layers: layers,
+      selectedLayer: { visible:true, layer:v.segLayerName },
+      showSlices: false,
+      layout: segs.length ? "xy-3d" : "4panel",
+      crossSectionBackgroundColor: ngBg(),
+      perspectiveViewBackgroundColor: ngBg()
+    };
+  }
+  function centreVox(){ return extentVox().map(function(n){ return Math.round(n/2); }); }
+  function viewerUrl(ids, posVox, opts){
+    return UJ.cfg.viewer.base + "#!" + encodeURIComponent(JSON.stringify(buildState(ids, posVox, opts)));
+  }
+
+  /* ── mesh ────────────────────────────────────────────────────────────────────────────────
+     Unsharded precomputed: one manifest per segment at `<id>:0`, listing fragment files beside
+     it. Returned as URLs rather than fetched here so this file stays free of the network and the
+     check suite can assert the addressing without one. */
+  function meshManifestUrl(id){
+    if (!isId(String(id))) return null;
+    return V().meshBase + String(id) + ":0";
+  }
+  function meshFragmentUrl(name){ return V().meshBase + String(name); }
+
+  return { resXYZ:resXYZ, extentVox:extentVox, extentNm:extentNm, toNm:toNm, toVox:toVox,
+           sourceUrls:sourceUrls, parseEquivalences:parseEquivalences, componentsOf:componentsOf,
+           frameFor:frameFor,
+           equivalencesFor:equivalencesFor,
+           isId:isId, normId:normId, cmpId:cmpId, sortIds:sortIds,
+           decodeState:decodeState, parseSegments:parseSegments, readPosition:readPosition,
+           newCell:newCell, claimsFor:claimsFor, addToCell:addToCell, removeFromCell:removeFromCell,
+           tallySummary:tallySummary, settledLabel:settledLabel, nameSuggestions:nameSuggestions,
+           localDims:localDims, buildState:buildState, viewerUrl:viewerUrl, centreVox:centreVox,
+           meshManifestUrl:meshManifestUrl, meshFragmentUrl:meshFragmentUrl };
+})();
+</script>
+<script>/* ── χJump: drawing an assembly in the page ─────────────────────────────────────────────────
+   Søren asked for the assembly to be visible in 3D as you build it, rather than only after
+   opening a viewer tab. This is that.
+
+   WHY IT IS ITS OWN RENDERER RATHER THAN core/mesh.js
+   core/mesh.js reads this exact format already -- unsharded precomputed, neuroglancer_legacy_mesh
+   -- and it is 1,150 lines of µJump: a chunked-graph client, Draco, sharded minishard indices, a
+   .glb writer, a PowerPoint builder, and a not-found cache keyed by µJump's dataset names. cb2
+   needs none of it. Prising a config seam into that file to reach the one path χJump uses would
+   have been a change to five live tools in service of a sixth, at night, with nobody to check it.
+   So: the legacy path only, here, in a form small enough to read in one sitting. If a second tool
+   ever needs it, THIS is what gets promoted to core/legacymesh.js -- not the other way round.
+
+   WHY NO THREE.JS
+   Every page in this family is one self-contained file. The visible cost of that discipline is
+   this module writing its own matrix maths and its own shaders; the benefit is that the page
+   works from a memory stick, and that the tool cannot break because a CDN moved.
+
+   THE HONEST PART
+   Not every cb2 fragment has a published mesh (see xjump_config.js for the evidence). So this
+   panel can only ever draw the fragments that HAVE geometry, and it says so on the panel itself
+   rather than leaving somebody to conclude that their cell is smaller than it is. That sentence
+   is not decoration -- it is the difference between a partial picture and a wrong one. */
+window.UJ = window.UJ || {};
+UJ.mesh3d = (function(){
+  "use strict";
+
+  function V(){ return UJ.cfg.volume; }
+  /* One assembly at a time, and a token so that a slow load for a cell you have already navigated
+     away from cannot paint over the one you are looking at now. */
+  var SEQ = 0;
+
+  /* ── the file format ──────────────────────────────────────────────────────────────────────
+     neuroglancer_legacy_mesh, which is as simple as a mesh format gets:
+
+       uint32          number of vertices, N
+       float32 × 3N    positions
+       uint32  × 3T    triangle indices, to the end of the file
+
+     Everything that could go wrong here is a truncated or mislabelled file, so the length is
+     checked against N rather than trusted: a short read would otherwise produce a Float32Array
+     view past the end of the buffer, which throws somewhere unrelated. */
+  function decodeLegacy(buf){
+    if (!buf || buf.byteLength < 4) throw new Error("empty mesh fragment");
+    var n = new DataView(buf).getUint32(0, true);
+    var need = 4 + n * 12;
+    if (n <= 0 || buf.byteLength < need) throw new Error("mesh fragment declares " + n
+      + " vertices but holds " + buf.byteLength + " bytes");
+    /* .slice(), not a view: the byte offset is not guaranteed to be 4-aligned for the index
+       array, and a misaligned typed-array view throws in every browser. Same reason core/mesh.js
+       slices in decodeLegacyFragment(). */
+    var verts = new Float32Array(buf.slice(4, need));
+    /* Truncate to whole TRIANGLES, not merely to whole uint32s. A byte-range fetch that came up
+       short leaves a dangling index or two, and a partial triangle is a triangle to nowhere --
+       drawElements with a count that is not a multiple of three is undefined behaviour in the
+       spec and silently ignores the remainder in practice. Dropping it here is the same answer,
+       said out loud. */
+    var whole = Math.floor((buf.byteLength - need) / 4);
+    var idx = new Uint32Array(buf.slice(need, need + (whole - whole % 3) * 4));
+    return { verts: verts, idx: idx };
+  }
+
+  /* Mesh vertex -> nanometres, by the matrix in the config. See its comment for where every
+     factor comes from; nothing is derived here. */
+  function toNm(verts){
+    var M = V().meshVertexToNm, out = new Float32Array(verts.length);
+    for (var i = 0; i < verts.length; i += 3){
+      var a = verts[i], b = verts[i+1], c = verts[i+2];
+      out[i]   = M[0][0]*a + M[0][1]*b + M[0][2]*c;
+      out[i+1] = M[1][0]*a + M[1][1]*b + M[1][2]*c;
+      out[i+2] = M[2][0]*a + M[2][1]*b + M[2][2]*c;
+    }
+    return out;
+  }
+
+  function fetchBuf(url){
+    return fetch(url, { cache: "force-cache" }).then(function(r){
+      if (!r.ok) { var e = new Error("HTTP " + r.status); e.status = r.status; throw e; }
+      return r.arrayBuffer();
+    });
+  }
+
+  /* One fragment id -> its geometry, or null if it simply has no mesh.
+
+     "No mesh" and "could not fetch" are kept apart all the way through. A 403/404 on this bucket
+     means the object is not published; anything else -- offline, DNS, a CORS change -- means we
+     do not know. Reporting an offline laptop as a volume with no geometry would be the kind of
+     confident wrong answer this whole page exists to avoid. */
+  function loadOne(id){
+    return fetchBuf(UJ.xjump.meshManifestUrl(id)).then(function(buf){
+      var man = JSON.parse(new TextDecoder().decode(buf));
+      var frags = (man && man.fragments) || [];
+      if (!frags.length) return { id: id, state: "none" };
+      return Promise.all(frags.map(function(nm){
+        return fetchBuf(UJ.xjump.meshFragmentUrl(nm)).then(decodeLegacy);
+      })).then(function(parts){
+        return { id: id, state: "ok", parts: parts };
+      });
+    }).catch(function(e){
+      return { id: id, state: (e.status === 403 || e.status === 404) ? "none" : "unknown",
+               why: e.message };
+    });
+  }
+
+  /* Coverage WITHOUT downloading the geometry: the manifests only, which are about thirty bytes
+     each. Used by the "Coverage only" button, and it goes through the same loadOne() the 3D panel
+     uses so the two controls cannot report different numbers for the same cell.
+
+     They did, briefly, when this was written twice: the button counted any HTTP 200 as "has a
+     mesh" while the panel additionally required a manifest that parsed and named a fragment. On
+     a bucket that answers 200 with an error page, those are different answers to the same
+     question, and the page would have shown both. */
+  function coverage(ids){
+    return Promise.all((ids || []).map(function(id){
+      return fetchBuf(UJ.xjump.meshManifestUrl(id)).then(function(buf){
+        var man = JSON.parse(new TextDecoder().decode(buf));
+        return { id: id, state: (man && man.fragments && man.fragments.length) ? "ok" : "none" };
+      }).catch(function(e){
+        return { id: id, state: (e.status === 403 || e.status === 404) ? "none" : "unknown" };
+      });
+    })).then(function(rows){
+      return { total: rows.length,
+               have: rows.filter(function(r){ return r.state === "ok"; }).length,
+               none: rows.filter(function(r){ return r.state === "none"; }).map(function(r){ return r.id; }),
+               unknown: rows.filter(function(r){ return r.state === "unknown"; }).map(function(r){ return r.id; }) };
+    });
+  }
+
+  /* Concatenate, keeping index bases straight, and compute per-vertex normals by accumulating
+     face normals. Flat shading would be truer to a marching-cubes mesh, but WebGL 1 has no
+     geometry stage and duplicating every vertex to fake it triples the buffer for a cosmetic
+     difference on a shape whose job here is to be recognised, not admired. */
+  function combine(loaded){
+    var nV = 0, nI = 0;
+    loaded.forEach(function(L){ (L.parts || []).forEach(function(p){
+      nV += p.verts.length; nI += p.idx.length; }); });
+    var pos = new Float32Array(nV), idx = new Uint32Array(nI), vo = 0, io = 0;
+    loaded.forEach(function(L){ (L.parts || []).forEach(function(p){
+      var nmv = toNm(p.verts);
+      pos.set(nmv, vo);
+      var base = vo / 3;
+      for (var i = 0; i < p.idx.length; i++) idx[io + i] = p.idx[i] + base;
+      vo += nmv.length; io += p.idx.length;
+    }); });
+
+    var nrm = new Float32Array(nV);
+    for (var t = 0; t + 2 < idx.length; t += 3){
+      var a = idx[t]*3, b = idx[t+1]*3, c = idx[t+2]*3;
+      var ux = pos[b]-pos[a], uy = pos[b+1]-pos[a+1], uz = pos[b+2]-pos[a+2];
+      var vx = pos[c]-pos[a], vy = pos[c+1]-pos[a+1], vz = pos[c+2]-pos[a+2];
+      var nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+      nrm[a]+=nx; nrm[a+1]+=ny; nrm[a+2]+=nz;
+      nrm[b]+=nx; nrm[b+1]+=ny; nrm[b+2]+=nz;
+      nrm[c]+=nx; nrm[c+1]+=ny; nrm[c+2]+=nz;
+    }
+
+    var lo = [Infinity,Infinity,Infinity], hi = [-Infinity,-Infinity,-Infinity];
+    for (var i2 = 0; i2 < pos.length; i2 += 3)
+      for (var k = 0; k < 3; k++){
+        if (pos[i2+k] < lo[k]) lo[k] = pos[i2+k];
+        if (pos[i2+k] > hi[k]) hi[k] = pos[i2+k];
+      }
+    if (!isFinite(lo[0])){ lo = [0,0,0]; hi = [0,0,0]; }
+
+    /* Re-centred on the assembly, in place, and this is not a tidy-up.
+
+       A float32 holds about seven significant digits. A vertex 400 µm into the volume is 4e5 nm,
+       where the spacing between representable values is ~0.03 nm -- fine. But these coordinates
+       come from a matrix with 1e9 in it, so an unlucky volume or a future one could easily put
+       them at 1e11, where float32 steps in units of ~8 µm and a neurite 2 µm across collapses
+       into a staircase. Subtracting the centre first costs one pass and removes the question:
+       what the buffer holds is always an offset within one cell, never a position in the world.
+
+       lo/hi stay ABSOLUTE, because that is what the panel reports and what somebody would compare
+       against neuroglancer. */
+    var mid = [ (lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2 ];
+    for (var i3 = 0; i3 < pos.length; i3 += 3){
+      pos[i3]   -= mid[0];
+      pos[i3+1] -= mid[1];
+      pos[i3+2] -= mid[2];
+    }
+    return { pos: pos, idx: idx, nrm: nrm, lo: lo, hi: hi, mid: mid, centred: true,
+             span: Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) || 1,
+             vertices: nV/3, triangles: idx.length/3 };
+  }
+
+  /* ── the smallest amount of matrix maths that draws a rotatable solid ─────────────────────── */
+  function mul(a, b){                       // column-major 4x4, as WebGL wants
+    var o = new Float32Array(16);
+    for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++){
+      var s = 0; for (var k = 0; k < 4; k++) s += a[k*4+r] * b[c*4+k];
+      o[c*4+r] = s;
+    }
+    return o;
+  }
+  function perspective(fovy, aspect, near, far){
+    var f = 1/Math.tan(fovy/2), o = new Float32Array(16);
+    o[0]=f/aspect; o[5]=f; o[10]=(far+near)/(near-far); o[11]=-1;
+    o[14]=2*far*near/(near-far);
+    return o;
+  }
+  function rotY(a){ var c=Math.cos(a), s=Math.sin(a), o=new Float32Array(16);
+    o[0]=c; o[2]=-s; o[5]=1; o[8]=s; o[10]=c; o[15]=1; return o; }
+  function rotX(a){ var c=Math.cos(a), s=Math.sin(a), o=new Float32Array(16);
+    o[0]=1; o[5]=c; o[6]=s; o[9]=-s; o[10]=c; o[15]=1; return o; }
+  function translate(x,y,z){ var o=new Float32Array(16);
+    o[0]=o[5]=o[10]=o[15]=1; o[12]=x; o[13]=y; o[14]=z; return o; }
+  function scale(s){ var o=new Float32Array(16); o[0]=o[5]=o[10]=s; o[15]=1; return o; }
+
+  var VS = [
+    "attribute vec3 p; attribute vec3 n;",
+    "uniform mat4 mvp; uniform mat4 mv;",
+    "varying vec3 vn;",
+    "void main(){ vn = normalize((mv * vec4(n, 0.0)).xyz);",
+    "  gl_Position = mvp * vec4(p, 1.0); }"
+  ].join("\n");
+  /* Two lights and a rim term rather than one lambert: a single headlight on a tubular neurite
+     flattens it into a silhouette, which is exactly the shape information somebody is looking at
+     this panel to judge. */
+  var FS = [
+    "precision mediump float; varying vec3 vn; uniform vec3 tint;",
+    /* TWO-SIDED. Back faces are lit with the normal flipped rather than discarded, because these
+       meshes come from an automatic segmentation and their winding is not guaranteed to be
+       consistent. With culling on, a fragment whose triangles happen to be wound the other way
+       renders as a hole -- and a hole in a cell is exactly what somebody here is looking FOR, so
+       an artefact shaped like one is worse than a little wasted fill rate. */
+    "void main(){ vec3 n = normalize(vn); if (!gl_FrontFacing) n = -n;",
+    "  float key  = max(dot(n, normalize(vec3( 0.4, 0.6, 0.8))), 0.0);",
+    "  float fill = max(dot(n, normalize(vec3(-0.5,-0.3, 0.4))), 0.0) * 0.35;",
+    "  float rim  = pow(1.0 - abs(n.z), 3.0) * 0.35;",
+    "  gl_FragColor = vec4(tint * (0.18 + key * 0.75 + fill) + rim, 1.0); }"
+  ].join("\n");
+
+  function compile(gl, type, src){
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+      throw new Error("shader: " + gl.getShaderInfoLog(s));
+    return s;
+  }
+
+  function draw(canvas, geo, tint){
+    var gl = canvas.getContext("webgl", { antialias: true, alpha: false })
+          || canvas.getContext("experimental-webgl", { antialias: true, alpha: false });
+    if (!gl) throw new Error("no WebGL");
+    /* Indices past 65,535 need the 32-bit element extension. Without it the draw would silently
+       wrap and paint a shredded version of the cell, which is worse than not drawing: it looks
+       like a segmentation problem. So it is checked, and the fallback is to say so. */
+    var big = geo.vertices > 65535;
+    if (big && !gl.getExtension("OES_element_index_uint"))
+      throw new Error("this assembly has " + geo.vertices.toLocaleString() + " vertices and this "
+        + "browser cannot index past 65,535 — open it in the viewer instead");
+
+    var prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
+    gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+      throw new Error("link: " + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    function buf(data, target){
+      var b = gl.createBuffer();
+      gl.bindBuffer(target, b); gl.bufferData(target, data, gl.STATIC_DRAW); return b;
+    }
+    var pb = buf(geo.pos, gl.ARRAY_BUFFER), nb = buf(geo.nrm, gl.ARRAY_BUFFER);
+    var ib = buf(big ? geo.idx : new Uint16Array(geo.idx), gl.ELEMENT_ARRAY_BUFFER);
+    var aP = gl.getAttribLocation(prog, "p"), aN = gl.getAttribLocation(prog, "n");
+    gl.enableVertexAttribArray(aP); gl.enableVertexAttribArray(aN);
+    var uMvp = gl.getUniformLocation(prog, "mvp"), uMv = gl.getUniformLocation(prog, "mv"),
+        uTint = gl.getUniformLocation(prog, "tint");
+    gl.enable(gl.DEPTH_TEST);
+    /* No CULL_FACE -- see the fragment shader. */
+
+    /* combine() already centred the buffer (see its comment on float32 precision), so all that is
+       left is normalising the longest side to 1 -- and the camera below then never has to know
+       anything about how big a cerebellar fragment is. */
+    var norm = scale(1 / (geo.span || 1));
+
+    /* dist is in units of the object's longest side, which combine() normalised to 1. At a 0.9 rad
+       field of view the visible height here is about 1.7, so the cell fills roughly 60% of the
+       panel from the opening angle -- close enough to read, far enough that turning it does not
+       swing a long fragment off the edge. */
+    var view = { yaw: 0.6, pitch: 0.3, dist: 1.9 };
+    function paint(){
+      var w = canvas.clientWidth || 480, h = canvas.clientHeight || 300;
+      /* devicePixelRatio, capped: an uncapped 3× on a phone is nine times the fragments for a
+         panel nobody is inspecting pixel by pixel. */
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (canvas.width !== Math.round(w*dpr) || canvas.height !== Math.round(h*dpr)){
+        canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
+      }
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      var bg = (typeof currentTheme === "function" && currentTheme() === "light")
+             ? [0.965, 0.969, 0.976] : [0.059, 0.071, 0.086];
+      gl.clearColor(bg[0], bg[1], bg[2], 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      var mv = mul(translate(0, 0, -view.dist), mul(rotX(view.pitch), mul(rotY(view.yaw), norm)));
+      var mvp = mul(perspective(0.9, w/h, 0.01, 100), mv);
+      gl.uniformMatrix4fv(uMvp, false, mvp);
+      gl.uniformMatrix4fv(uMv, false, mv);
+      gl.uniform3fv(uTint, tint);
+      gl.bindBuffer(gl.ARRAY_BUFFER, pb); gl.vertexAttribPointer(aP, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, nb); gl.vertexAttribPointer(aN, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+      gl.drawElements(gl.TRIANGLES, geo.idx.length,
+                      big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
+    }
+
+    var down = null;
+    canvas.addEventListener("pointerdown", function(e){
+      down = { x:e.clientX, y:e.clientY, yaw:view.yaw, pitch:view.pitch };
+      canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener("pointermove", function(e){
+      if (!down) return;
+      view.yaw = down.yaw + (e.clientX - down.x) * 0.01;
+      /* Clamped just short of the poles: past them the model appears to spin the wrong way, which
+         reads as a bug in the mesh rather than in the camera. */
+      view.pitch = Math.max(-1.5, Math.min(1.5, down.pitch + (e.clientY - down.y) * 0.01));
+      paint();
+    });
+    canvas.addEventListener("pointerup", function(){ down = null; });
+    canvas.addEventListener("pointercancel", function(){ down = null; });
+    canvas.addEventListener("wheel", function(e){
+      e.preventDefault();
+      view.dist = Math.max(0.6, Math.min(12, view.dist * (e.deltaY > 0 ? 1.12 : 0.89)));
+      paint();
+    }, { passive: false });
+    /* The panel follows the theme like everything else -- and unlike the viewer, this canvas IS
+       on the page, so it has to be repainted rather than merely re-styled. */
+    var btn = document.getElementById("themeToggleBtn");
+    if (btn) btn.addEventListener("click", function(){ setTimeout(paint, 0); });
+    paint();
+    /* Kept so a check can ask whether anything was actually PAINTED, which is the one question
+       jsdom cannot answer and which a suite of green ticks would otherwise leave open. It has to
+       be gl and paint together: without preserveDrawingBuffer -- which is off, because keeping a
+       full-size copy of every frame for a panel nobody screenshots is a real cost -- readPixels
+       is only valid in the same turn as the draw. So a probe must repaint and read immediately,
+       and that means it needs the same context, not a second getContext() on the same canvas
+       (which returns the first context and ignores the attributes, so asking for
+       preserveDrawingBuffer after the fact does nothing at all -- a trap this suite fell into
+       once and reported "nothing was drawn" about a panel that was drawing perfectly). */
+    LAST = { gl: gl, paint: paint, canvas: canvas };
+    return paint;
+  }
+  var LAST = null;
+
+  function esc(s){ return String(s == null ? "" : s)
+    .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+  /* ── the panel ──────────────────────────────────────────────────────────────────────────── */
+  function show(cell, host){
+    if (!host) return Promise.resolve(null);
+    var mine = ++SEQ;
+    var ids = (cell.segments || []).slice();
+    if (!ids.length){ host.innerHTML = ""; return Promise.resolve(null); }
+    host.innerHTML = "<div class='m3d'><div class='m3d-note'>loading " + ids.length
+      + " fragment" + (ids.length === 1 ? "" : "s") + "…</div></div>";
+
+    return Promise.all(ids.map(loadOne)).then(function(loaded){
+      if (mine !== SEQ) return null;                       // a newer panel has taken over
+      var have = loaded.filter(function(L){ return L.state === "ok"; });
+      var none = loaded.filter(function(L){ return L.state === "none"; });
+      var unk  = loaded.filter(function(L){ return L.state === "unknown"; });
+
+      /* Recorded on the cell so the coverage line survives a re-render, and so the "Coverage
+         only" button and this panel can never disagree about the same number. */
+      cell.meshHave = have.length; cell.meshTotal = ids.length;
+
+      if (!have.length){
+        host.innerHTML = "<div class='m3d'><div class='m3d-note bad'><b>None of these "
+          + ids.length + " fragments has a published mesh.</b> "
+          + (unk.length ? unk.length + " could not be checked at all — "
+              + esc(unk[0].why) + ". " : "")
+          + "That is a property of the dataset, not of your assembly: cb2 publishes geometry for "
+          + "some fragments and not others. The segmentation itself is still there in the viewer."
+          + "</div></div>";
+        return null;
+      }
+
+      var geo = combine(have);
+      var umSpan = [0,1,2].map(function(i){ return (geo.hi[i]-geo.lo[i]) / 1000; });
+      host.innerHTML = "<div class='m3d'>"
+        + "<canvas class='m3d-canvas'></canvas>"
+        + "<div class='m3d-note'></div></div>";
+      var canvas = host.querySelector(".m3d-canvas");
+      var note = host.querySelector(".m3d-note");
+
+      /* THE COVERAGE LINE, written BEFORE anything is drawn and never taken away by a drawing
+         failure. It is the sentence that decides whether the picture above it means what it
+         appears to mean, and it is just as true on a machine with no WebGL as on one with it.
+         Writing it after draw() -- which is how this was first written -- meant that the people
+         most likely to be confused, the ones who got no picture at all, were the only ones not
+         told why the picture would have been incomplete. */
+      var cov = have.length === ids.length
+        ? "<span class='ok'>all " + ids.length + " fragments drawn</span>"
+        : "<b>" + have.length + " of " + ids.length + " fragments drawn</b> — "
+          + none.length + " ha" + (none.length === 1 ? "s" : "ve")
+          + " no published mesh, so the cell is larger than what you see here"
+          + (unk.length ? "; " + unk.length + " could not be checked" : "");
+      note.innerHTML = cov
+        + "<br><span class='hint'>"
+        + umSpan.map(function(v){ return v.toFixed(1); }).join(" × ") + " µm "
+        + "(from the viewer's own mesh transform — worth checking against neuroglancer once) · "
+        + geo.triangles.toLocaleString() + " triangles · drag to turn, scroll to zoom</span>";
+
+      var tint = (typeof currentTheme === "function" && currentTheme() === "light")
+               ? [0.05, 0.45, 0.55] : [0.13, 0.83, 0.93];
+      try { draw(canvas, geo, tint); }
+      catch (e){
+        /* The canvas goes; the coverage line stays. A DIFFERENT class, deliberately: with both
+           carrying .m3d-note, the first match in the document would be this failure rather than
+           the coverage sentence, and anything reading the panel -- a check, or a person skimming
+           -- would find the wrong one. */
+        var msg = host.ownerDocument.createElement("div");
+        msg.className = "m3d-err";
+        msg.innerHTML = "Could not draw it here: " + esc(e.message)
+          + ". Use <b>Open in the viewer</b> instead.";
+        canvas.parentNode.replaceChild(msg, canvas);
+        return null;
+      }
+      return geo;
+    }).catch(function(e){
+      if (mine !== SEQ) return null;
+      host.innerHTML = "<div class='m3d'><div class='m3d-note bad'>"
+        + esc("Could not load the geometry: " + e.message) + "</div></div>";
+      return null;
+    });
+  }
+
+  function hide(host){ if (host) host.innerHTML = ""; }
+
+  /* Repaint and count the distinct colours in the frame, in one turn. A cleared panel has one
+     colour; a lit solid has hundreds. Returns -1 if nothing has been drawn yet. */
+  function probe(){
+    if (!LAST) return -1;
+    LAST.paint();
+    var gl = LAST.gl, c = LAST.canvas;
+    var px = new Uint8Array(c.width * c.height * 4);
+    gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    var seen = {}, n = 0;
+    for (var i = 0; i < px.length; i += 4){
+      var k = px[i] + "," + px[i+1] + "," + px[i+2];
+      if (!seen[k]){ seen[k] = 1; n++; }
+    }
+    return n;
+  }
+
+  return { show: show, hide: hide, coverage: coverage,
+           /* Exposed for the checks: the format decoder and the combiner are the two places a
+              silent wrong answer could live, and both are testable without a browser. probe() is
+              the one that needs a browser -- see its comment. */
+           decodeLegacy: decodeLegacy, combine: combine, toNm: toNm, probe: probe };
+})();
+</script>
+<script>/* ── χJump application ──────────────────────────────────────────────────────────────────────
+   The UI and the loop. Written once and run in two modes, exactly as ωJump is:
+
+     XJUMP_LIVE = false   the harness. State in memory, exported as JSON, opens from file://
+     XJUMP_LIVE = true    the real page. Google sign-in, reads and writes the χJump sheet
+
+   One file rather than two, for the reason ωJump's says: a prototype kept as a separate copy
+   stops being evidence about the real thing the first time either is edited.
+
+   THE LOOP, and it is one loop rather than ωJump's two:
+
+     1. click fragments in Neuroglancer
+     2. paste the address here
+     3. Build cell, or Add to an existing one
+     4. name it, and agree or disagree with what others have named
+
+   Depends on xjump_config.js and xjump_logic.js being loaded first. */
+window.UJ = window.UJ || {};
+UJ.app = (function(){
+  "use strict";
+  var X = UJ.xjump;
+  var LIVE = !!window.XJUMP_LIVE;
+  var STATE = { cells: [], claimed: {} };
+  var LAST = null;            // the most recent paste: { ids, groups, position, … }
+  var BUSY = false;
+
+  function esc(s){ return String(s == null ? "" : s)
+    .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+  function el(id){ return document.getElementById(id); }
+  function say(id, html, good){
+    var n = el(id); if (!n) return;
+    n.innerHTML = html;
+    n.style.color = good === undefined ? "" : (good ? "var(--ok)" : "var(--bad)");
+  }
+  /* Ids are strings and stay strings -- see the note in xjump_logic.js. Printed in groups of
+     three digits so a fourteen-digit number can be read back to somebody without losing your
+     place, and NOT with thousands separators, because a copied id has to paste back into
+     Neuroglancer unchanged. */
+  function idHtml(id){ return "<code class='frag'>" + esc(id) + "</code>"; }
+
+  /* ── the paste ───────────────────────────────────────────────────────────────────────────── */
+  function readPaste(){
+    var box = el("paste"); if (!box) return;
+    var r = X.parseSegments(box.value);
+    if (!r.ok){ LAST = null; say("paste-msg", esc(r.error), false); renderPaste(); return; }
+    LAST = r;
+    var bits = [r.ids.length + " fragment" + (r.ids.length === 1 ? "" : "s")];
+    /* Everything the parse noticed is SAID, not silently applied. A person who unticked two
+       fragments and sees "14 fragments" has to count them to find out whether the tool agreed
+       with them. */
+    if (r.hiddenCount)
+      bits.push(r.hiddenCount + " deselected in the viewer, not included");
+    if (r.layerCount > 1)
+      bits.push("from " + Object.keys(r.byLayer).length + " layers");
+    if (r.groups.length)
+      bits.push(r.groups.length + " already grouped by equivalences");
+    say("paste-msg", esc(bits.join(" · ")), true);
+    renderPaste();
+  }
+
+  /* Who already holds each of these fragments, from BOTH the cells this page has rendered and the
+     server's own claimed map.
+
+     The two overlap almost entirely today, because the page loads every cell. They are not the
+     same thing, though: STATE.claimed is what the server said when the page loaded, and it is
+     the authority -- it covers a cell this client failed to render, or one added since. Merging
+     them means the warning is never weaker than either source alone, and it means the server's
+     map is doing work rather than being sent and ignored, which is the state it was in when this
+     was first written. A field that is transmitted and never read is one nobody notices going
+     wrong. */
+  function allClaims(ids){
+    var out = [], seen = {};
+    function add(seg, cell){
+      var k = seg + "|" + cell;
+      if (seen[k]) return; seen[k] = true;
+      out.push({ segment: seg, cell: cell });
+    }
+    X.claimsFor(STATE.cells, ids).forEach(function(c){ add(c.segment, c.cell); });
+    (ids || []).forEach(function(s){
+      var keys = (STATE.claimed || {})[s];
+      if (!keys) return;
+      (typeof keys === "string" ? [keys] : keys).forEach(function(k){ add(s, k); });
+    });
+    return out;
+  }
+
+  function renderPaste(){
+    var host = el("paste-body"); if (!host) return;
+    if (!LAST){ host.innerHTML = ""; return; }
+    var claims = allClaims(LAST.ids);
+    var claimed = {};
+    claims.forEach(function(c){
+      claimed[c.segment] = claimed[c.segment] ? claimed[c.segment] + ", " + c.cell : c.cell;
+    });
+
+    var warn = "";
+    if (claims.length){
+      /* A fragment already in another cell is a disagreement about where a cell ENDS, not about
+         what it is called. Shown before anything is saved, and never resolved automatically:
+         which of two assemblies is right is a judgement about the tissue. */
+      var cells = {};
+      claims.forEach(function(c){ cells[c.cell] = (cells[c.cell] || 0) + 1; });
+      warn = "<div class='callout warn'><b>" + claims.length + " of these fragments "
+           + (claims.length === 1 ? "is" : "are") + " already in "
+           + Object.keys(cells).map(function(k){
+               return "<code>" + esc(k) + "</code> (" + cells[k] + ")"; }).join(", ")
+           + ".</b><br><span class='hint'>Building a new cell from them would put one fragment in "
+           + "two cells. That is not two opinions about a name &mdash; it is a disagreement about "
+           + "where the cell ends. Add to the existing cell instead, or say why this is a "
+           + "different cell in the comment.</span></div>";
+    }
+    if (LAST.ids.length < UJ.cfg.assembly.smallAssemblyWarn)
+      warn += "<div class='callout'><span class='hint'>One fragment. That can be a whole soma, so "
+            + "it is allowed &mdash; but in cb2 most cells are dozens of pieces, so it is worth a "
+            + "second look before saving.</span></div>";
+
+    host.innerHTML = warn
+      + "<div class='frags'>" + LAST.ids.map(function(id){
+          return "<span class='frag-chip" + (claimed[id] ? " taken" : "") + "' title='"
+               + (claimed[id] ? "already in " + esc(claimed[id]) : "not in any cell yet")
+               + "'>" + idHtml(id) + "</span>"; }).join("") + "</div>"
+      + "<div class='row' style='margin-top:10px;gap:8px;flex-wrap:wrap'>"
+      +   "<button class='primary' id='build'>Build cell from these " + LAST.ids.length + "</button>"
+      +   (STATE.cells.length
+            ? "<select id='addto' style='width:auto'><option value=''>Add to an existing cell&hellip;</option>"
+              + STATE.cells.map(function(c){
+                  return "<option value='" + esc(c.id) + "'>" + esc(c.id) + " &mdash; "
+                       + esc(X.settledLabel(c) || "unnamed") + " (" + c.segments.length + ")</option>";
+                }).join("") + "</select><button id='add'>Add</button>"
+            : "")
+      +   "<button id='open-paste'>Open these in the viewer &#8599;</button>"
+      + "</div>";
+    if (el("build")) el("build").addEventListener("click", buildCell);
+    if (el("add")) el("add").addEventListener("click", addToExisting);
+    if (el("open-paste")) el("open-paste").addEventListener("click", function(){
+      window.open(X.viewerUrl(LAST.ids, LAST.position), "_blank", "noopener");
+    });
+  }
+
+  /* ── building ──────────────────────────────────────────────────────────────────────────────
+     The KEY comes from the server, always, and nothing is added to STATE until it does. Numbering
+     locally and posting afterwards works perfectly for one person and gives two people the same
+     cb2:7 -- and the second write would land silently on the first person's cell.
+
+     The server also decides the conflicts, for the same reason. claimsFor() in renderPaste warns
+     against the cells this page has LOADED; two people working the same region each hold a
+     snapshot from before the other saved, so both warnings are clean and both builds overlap.
+     Only the server sees both, and what it reports is said here even though the build succeeded:
+     a disagreement about where a cell ends is the finding, not an error. */
+  function conflictNote(conflicts){
+    if (!conflicts || !conflicts.length) return "";
+    var by = {};
+    conflicts.forEach(function(c){ by[c.cell] = (by[c.cell] || 0) + 1; });
+    return " <b>" + conflicts.length + " of them "
+      + (conflicts.length === 1 ? "is" : "are") + " also in "
+      + Object.keys(by).map(function(k){ return "<code>" + esc(k) + "</code>"; }).join(", ")
+      + "</b> — somebody else claimed "
+      + (conflicts.length === 1 ? "it" : "them") + " while you were working. Both assemblies are "
+      + "kept; which is right is a judgement about the tissue, not something this page can settle.";
+  }
+  function buildCell(){
+    if (!LAST || BUSY) return;
+    if (needSignIn("paste-msg")) return;
+    BUSY = true;
+    var ids = LAST.ids, position = LAST.position;
+    say("paste-msg", "saving…");
+    STORE.build(ids, position).then(function(d){
+      var c = X.newCell(d.cellKey, d.segments || ids, whoami());
+      c.position = position;
+      STATE.cells.push(c);
+      say("paste-msg", "Built <code>" + esc(c.id) + "</code> from " + c.segments.length
+        + " fragments. Name it below." + conflictNote(d.conflicts), !(d.conflicts || []).length);
+      LAST = null; el("paste").value = "";
+      render(); focusCell(c.id);
+    }).catch(failed("paste-msg", "Building the cell")).then(function(){ BUSY = false; });
+  }
+  function addToExisting(){
+    var sel = el("addto"); if (!sel || !sel.value || !LAST || BUSY) return;
+    var c = byId(sel.value); if (!c) return;
+    if (needSignIn("paste-msg")) return;
+    BUSY = true;
+    var ids = LAST.ids;
+    say("paste-msg", "saving…");
+    STORE.add(c.id, ids).then(function(d){
+      var added = d.added || [], already = d.already || [];
+      if (!added.length){
+        say("paste-msg", "Every one of those fragments is already in <code>" + esc(c.id)
+          + "</code> — nothing to add.", false);
+        return;
+      }
+      c.segments = X.addToCell(c, added).segments;
+      /* The true sentence, not the flattering one. */
+      say("paste-msg", "Added " + added.length + " fragment" + (added.length === 1 ? "" : "s")
+        + " to <code>" + esc(c.id) + "</code>"
+        + (already.length ? "; " + already.length + " " + (already.length === 1 ? "was" : "were")
+            + " already there" : "")
+        + ". It now has " + c.segments.length + "." + conflictNote(d.conflicts),
+        !(d.conflicts || []).length);
+      LAST = null; el("paste").value = "";
+      render(); focusCell(c.id);
+    }).catch(failed("paste-msg", "Adding to " + c.id)).then(function(){ BUSY = false; });
+  }
+
+  function byId(id){
+    for (var i = 0; i < STATE.cells.length; i++) if (STATE.cells[i].id === id) return STATE.cells[i];
+    return null;
+  }
+  function focusCell(id){
+    var n = el("cell-" + cssId(id));
+    if (n && n.scrollIntoView) n.scrollIntoView({ behavior:"smooth", block:"center" });
+  }
+  function cssId(id){ return String(id).replace(/[^a-zA-Z0-9_-]/g, "_"); }
+
+  /* ── the cells ───────────────────────────────────────────────────────────────────────────── */
+  function render(){
+    renderPaste();
+    var host = el("cells"); if (!host) return;
+    if (!STATE.cells.length){
+      host.innerHTML = "<p class='hint' style='margin:0'>No cells yet. Click fragments in the "
+        + "viewer, paste the address above, and press <b>Build cell</b>.</p>";
+      renderStats(); return;
+    }
+    var names = X.nameSuggestions(STATE.cells);
+    host.innerHTML = "<datalist id='cellnames'>"
+      + names.map(function(n){ return "<option value=\"" + esc(n) + "\">"; }).join("")
+      + "</datalist>"
+      + STATE.cells.slice().reverse().map(cellHtml).join("");
+    STATE.cells.forEach(wireCell);
+    renderStats();
+  }
+
+  function cellHtml(c){
+    var t = X.tallySummary(c);
+    var status = { unnamed:"nobody has named it", single:"one person's call",
+                   agreed:"agreed by " + t.total, contested:"two labels tied",
+                   retracted:"retracted" }[t.status] || "";
+    return "<div class='cell' id='cell-" + cssId(c.id) + "'>"
+      + "<div class='row' style='justify-content:space-between;align-items:baseline'>"
+      +   "<div><code class='cellid'>" + esc(c.id) + "</code> "
+      +     "<span class='chip'>" + c.segments.length + " fragment"
+      +     (c.segments.length === 1 ? "" : "s") + "</span> "
+      +     "<span class='chip st-" + t.status + "'>" + esc(t.leader || "unnamed") + "</span> "
+      +     "<span class='hint'>" + esc(status) + "</span></div>"
+      +   "<button class='open' data-id='" + esc(c.id) + "'>Open in the viewer &#8599;</button>"
+      + "</div>"
+      + (t.labels.length > 1
+          ? "<div class='hint' style='margin-top:4px'>" + t.labels.map(function(l){
+              return esc(l.label) + " &times;" + l.n; }).join(" &middot; ") + "</div>" : "")
+      + "<div class='row' style='margin-top:8px;gap:8px;flex-wrap:wrap'>"
+      +   "<input list='cellnames' class='nm' data-id='" + esc(c.id)
+      +     "' placeholder='What kind of cell is this?' style='flex:1 1 220px'>"
+      +   "<button class='save-nm' data-id='" + esc(c.id) + "'>Save name</button>"
+      +   "<button class='rej' data-id='" + esc(c.id) + "' title='This is not one cell'>Not one cell</button>"
+      +   "<button class='view3d' data-id='" + esc(c.id)
+      +     "' title='Draw the assembled fragments here'>Show in 3D</button>"
+      +   "<button class='mesh3d' data-id='" + esc(c.id)
+      +     "' title='Not every cb2 fragment has published geometry'>Coverage only</button>"
+      + "</div>"
+      + "<div class='mesh3d-host'></div>"
+      + "<div class='hint mesh-out' style='margin-top:6px'>"
+      +   (c.meshTotal ? c.meshHave + " of " + c.meshTotal + " fragments have a mesh" : "") + "</div>"
+      + "<details style='margin-top:8px'><summary class='hint'>the " + c.segments.length
+      +   " fragment ids</summary><div class='frags' style='margin-top:6px'>"
+      +   c.segments.map(function(s){ return "<span class='frag-chip'>" + idHtml(s) + "</span>"; }).join("")
+      +   "</div></details>"
+      + "</div>";
+  }
+
+  function wireCell(c){
+    var root = el("cell-" + cssId(c.id)); if (!root) return;
+    root.querySelector(".open").addEventListener("click", function(){
+      window.open(X.viewerUrl(c.segments, c.position), "_blank", "noopener");
+    });
+    var out = root.querySelector(".mesh-out");
+    var note = function(html, good){ if (out){ out.innerHTML = html; out.style.color =
+      good === undefined ? "" : (good ? "var(--ok)" : "var(--bad)"); } };
+    root.querySelector(".save-nm").addEventListener("click", function(){
+      var v = root.querySelector(".nm").value.trim();
+      if (!v) return;
+      if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
+      STORE.name(c.id, v, 0, !!c.revealed, "").then(function(){
+        /* Applied only after the server took it. A vote shown as counted and then lost on the
+           next reload is worse than one that visibly failed. */
+        var key = v.toLowerCase();
+        c.names[key] = c.names[key] || { label:v, n:0 };
+        c.names[key].n++; c.totalVotes = (c.totalVotes || 0) + 1;
+        render();
+      }).catch(function(e){ note(esc("Saving the name failed: " + e.message), false); });
+    });
+    root.querySelector(".mesh3d").addEventListener("click", function(){
+      checkMeshes(c, out);
+    });
+    if (root.querySelector(".view3d"))
+      root.querySelector(".view3d").addEventListener("click", function(){
+        UJ.mesh3d.show(c, root.querySelector(".mesh3d-host"));
+      });
+    root.querySelector(".rej").addEventListener("click", function(){
+      if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
+      STORE.reject(c.id, "not_one_cell", "").then(function(){
+        c.rejects = (c.rejects || 0) + 1; render();
+      }).catch(function(e){ note(esc("Saving that failed: " + e.message), false); });
+    });
+  }
+
+  function renderStats(){
+    var n = el("stats"); if (!n) return;
+    var frags = 0, named = 0;
+    STATE.cells.forEach(function(c){
+      frags += c.segments.length;
+      if (X.settledLabel(c)) named++;
+    });
+    n.innerHTML = "<span><b>" + STATE.cells.length + "</b> cells</span>"
+      + "<span><b>" + frags + "</b> fragments assembled</span>"
+      + "<span><b>" + named + "</b> named</span>";
+  }
+
+  function whoami(){ return (STORE.who || "").trim(); }
+
+  /* ── which fragments actually have a mesh ────────────────────────────────────────────────
+     Established 2026-08-31: they do not all have one. Of three ids taken from a real assembly,
+     one had a mesh and two had none, in either store.
+
+     So the 3D view of an assembled cell can be partial, and a partial picture that does not say
+     so is worse than no picture: a person who assembles fourteen fragments and sees nine will
+     conclude the cell is nine pieces, or that their assembly was wrong. Both are reasonable and
+     both are wrong.
+
+     Checked on demand rather than on render, because it is one request per fragment and a table
+     of twenty cells would be hundreds. Manifests only -- one is about thirty bytes -- so this is
+     cheap per id; it is the COUNT of ids that makes it worth a button rather than a render.
+
+     The counting itself lives in UJ.mesh3d.coverage(), which is also what the 3D panel uses. Two
+     implementations of "does this fragment have a mesh" is two answers waiting to disagree, and
+     they would disagree on this page, side by side, about the same cell. */
+  function checkMeshes(c, out){
+    if (!c.segments.length || !window.UJ.mesh3d) return;
+    out.textContent = "checking " + c.segments.length + "…";
+    UJ.mesh3d.coverage(c.segments).then(function(cov){
+      c.meshHave = cov.have; c.meshTotal = cov.total;
+      out.innerHTML = cov.have === cov.total
+        ? "<span style='color:var(--ok)'>all " + cov.have + " fragments have a mesh</span>"
+        : "<b>" + cov.have + " of " + cov.total + "</b> fragments have a mesh"
+          + (cov.unknown.length ? " (" + cov.unknown.length + " could not be checked)" : "")
+          + " &mdash; <span class='hint'>the 3D view will show "
+          + (cov.have ? "only those " + cov.have : "nothing") + ". The rest are real fragments with "
+          + "no published geometry, not a mistake in your assembly.</span>";
+    }).catch(function(e){
+      out.innerHTML = esc("Could not check the meshes: " + e.message);
+    });
+  }
+
+  /* ── storage ───────────────────────────────────────────────────────────────────────────────
+     Two stores, one interface. Every method returns a promise for what the SERVER decided, not
+     for what the page hoped: build() resolves with a cellKey, add() with what was actually added
+     as opposed to already present, and both with any conflicts. The page then says the true
+     sentence. Guessing locally and posting afterwards would work perfectly for one user and
+     produce two cells called cb2:7 for two. */
+  var MemStore = {
+    who: "you (harness)",
+    canWrite: function(){ return true; },
+    load: function(){ return Promise.resolve({ cells: STATE.cells }); },
+    build: function(ids){
+      /* Local numbering is correct HERE and only here: the harness has exactly one user. */
+      var n = 0;
+      STATE.cells.forEach(function(c){ var m = /:(\d+)$/.exec(c.id); if (m && +m[1] > n) n = +m[1]; });
+      return Promise.resolve({ ok:true, cellKey: UJ.cfg.volume.id + ":" + (n + 1),
+                               segments: ids, conflicts: X.claimsFor(STATE.cells, ids) });
+    },
+    add: function(cellKey, ids){
+      var c = byId(cellKey);
+      var r = c ? X.addToCell(c, ids) : { added: ids, already: [] };
+      return Promise.resolve({ ok:true, cellKey: cellKey, added: r.added, already: r.already,
+                               conflicts: X.claimsFor(STATE.cells.filter(function(x){
+                                 return x.id !== cellKey; }), ids) });
+    },
+    remove: function(cellKey, ids){ return Promise.resolve({ ok:true, removed: ids.length }); },
+    name:   function(){ return Promise.resolve({ ok:true }); },
+    reject: function(){ return Promise.resolve({ ok:true }); }
+  };
+
+  /* Every call to Apps Script goes through here, and the reason is one message Søren saw on
+   another tool:
+
+       save failed: Unexpected token '<', "
+
+     That is JSON.parse being handed an HTML page. It blames the parser for somebody else's
+     problem and sends you looking at the coordinates, the dataset, the page -- when the answer is
+     that Apps Script answered with a web page instead of data. It does that in a handful of
+     situations, all with different fixes, and the BODY says which. So read it as text first.
+     r.json() throws away the only evidence that could explain the failure. */
+  function readJson(r, what){
+    return r.text().then(function(body){
+      var t = (body || "").trim(), hint;
+      try { return JSON.parse(t); } catch (e){}
+      if (/^\s*</.test(t)){
+        if (/accounts\.google\.com|Sign in|ServiceLogin/i.test(t))
+          hint = "the deployment is asking for a Google sign-in, so it is not published as "
+               + "“Anyone”. Deploy → Manage deployments → edit → "
+               + "Who has access: Anyone.";
+        else if (/Exception|TypeError|ReferenceError/.test(t))
+          hint = "the script threw before it could answer. Almost always the deployed code is "
+               + "OLDER than this page — re-paste XJumpCells.gs, Datasets.gs and Code.gs, then "
+               + "Deploy → Manage deployments → edit → New version. Pasting without "
+               + "redeploying leaves the old code serving, which looks exactly like this.";
+        else if (r.status === 404)
+          hint = "the deployment URL is gone (404). A new deployment gets a new /exec URL; the one "
+               + "in xjump_config.js may be stale.";
+        else
+          hint = "Apps Script answered with a web page rather than data — usually a stale "
+               + "deployment, or one not published to “Anyone”.";
+      } else if (!t){
+        hint = "the backend returned nothing at all (HTTP " + r.status + ").";
+      } else {
+        hint = "the backend returned something that is not JSON: " + t.slice(0, 120);
+      }
+      var err = new Error((what ? what + ": " : "") + hint);
+      err.notJson = true; throw err;
+    });
+  }
+
+  var ApiStore = {
+    credential: null, who: "",
+    canWrite: function(){ return !!this.credential; },
+    _post: function(payload){
+      /* No Content-Type header, deliberately: that keeps the request "simple" so the browser sends
+         no CORS preflight, which Apps Script would answer with a redirect and fail. Same trick
+         every other tool in this family uses. */
+      payload.ds = UJ.cfg.backend.ds;
+      payload.volume = UJ.cfg.volume.id;
+      payload.credential = this.credential;
+      payload.timestamp = new Date().toISOString();
+      var what = payload.type;
+      return fetch(UJ.cfg.backend.endpoint, { method:"POST", body: JSON.stringify(payload) })
+        .then(function(r){ return readJson(r, what); })
+        .then(function(d){
+          /* An ok:false is a REFUSAL with a reason, and the reason is the useful part. Resolving
+             it as though it had worked is how a write that never happened gets a green message. */
+          if (!d || !d.ok) throw new Error((d && d.error) || (what + " was refused"));
+          return d;
+        });
+    },
+    load: function(){
+      var u = UJ.cfg.backend.endpoint + "?xjumpState=1&ds="
+            + encodeURIComponent(UJ.cfg.backend.ds)
+            + "&volume=" + encodeURIComponent(UJ.cfg.volume.id);
+      return fetch(u).then(function(r){ return readJson(r, "reading the cells"); })
+        .then(function(d){
+          if (!d || !d.ok) throw new Error((d && d.error) || "could not read the cells");
+          /* The wire shape IS the page's shape -- see xjumpState's own comment. Two shapes for
+             one thing is where drift starts. */
+          STATE.cells = (d.cells || []).map(function(c){
+            return { id: c.id, segments: (c.segments || []).slice(), names: c.names || {},
+                     totalVotes: c.totalVotes || 0, rejects: c.rejects || 0,
+                     unsure: c.unsure || 0, builtBy: c.builtBy || "", position: c.position || null };
+          });
+          STATE.claimed = d.claimed || {};
+          return STATE;
+        });
+    },
+    build: function(ids, position){
+      var p = { type:"xjump_cell_build", segments: ids };
+      if (position){ p.x_vox = position[0]; p.y_vox = position[1]; p.z_vox = position[2]; }
+      return this._post(p);
+    },
+    add:    function(k, ids){ return this._post({ type:"xjump_cell_add", cellKey:k, segments:ids }); },
+    remove: function(k, ids){ return this._post({ type:"xjump_cell_remove", cellKey:k, segments:ids }); },
+    name:   function(k, identity, certainty, sawTally, comment){
+      return this._post({ type:"xjump_cell_name", cellKey:k, identity:identity,
+                          certainty:certainty || "", sawTally: !!sawTally, comment: comment || "" });
+    },
+    reject: function(k, kind, comment){
+      return this._post({ type:"xjump_cell_reject", cellKey:k, kind:kind, comment: comment || "" });
+    }
+  };
+
+  var STORE = LIVE ? ApiStore : MemStore;
+
+  /* A write that cannot happen must say so BEFORE the optimistic update, not after. */
+  function needSignIn(where){
+    if (STORE.canWrite()) return false;
+    say(where, "Sign in with Google first — reading is public, adding to the record is not.",
+        false);
+    return true;
+  }
+  function failed(where, what){
+    return function(e){
+      say(where, esc(what + " failed: " + (e && e.message ? e.message : e)), false);
+    };
+  }
+
+  function init(){
+    if (el("paste-go")) el("paste-go").addEventListener("click", readPaste);
+    if (el("paste")) el("paste").addEventListener("paste", function(){ setTimeout(readPaste, 0); });
+    if (el("open-empty")) el("open-empty").addEventListener("click", function(){
+      window.open(X.viewerUrl([], null), "_blank", "noopener");
+    });
+    if (el("dslabel"))
+      el("dslabel").textContent = UJ.cfg.volume.tissue + " — " + UJ.cfg.volume.species;
+    if (el("dsfacts"))
+      el("dsfacts").innerHTML = "<code>" + esc(UJ.cfg.volume.id) + "</code> &middot; "
+        + X.extentNm().map(function(v){ return Math.round(v/1000); }).join(" &times; ")
+        + " &micro;m &middot; " + UJ.cfg.volume.res_nm.slice().reverse().join(" &times; ")
+        + " nm &middot; fragments, not cells &mdash; you assemble them";
+    render();
+    /* Reading is public; only writing needs a credential. So the load happens immediately rather
+       than waiting for sign-in -- somebody who just wants to see what has been assembled should
+       not have to identify themselves first. */
+    /* try/catch as well as .catch: a store whose load() throws SYNCHRONOUSLY -- no fetch in the
+       environment, a config that is not there yet -- never returns a promise, so .catch is never
+       attached and the exception escapes init() itself. Everything after this line would then
+       silently not run. The page must still let somebody paste a link and read fragment ids even
+       when the backend is unreachable, so this failure is reported and stepped over rather than
+       allowed to take the page down. */
+    if (LIVE) try {
+      STORE.load().then(render).catch(function(e){
+        say("stats", esc("Could not read the cells: " + e.message), false); });
+    } catch (e){
+      say("stats", esc("Could not read the cells: " + e.message), false);
+    }
+  }
+
+  return { init:init, state:function(){ return STATE; }, last:function(){ return LAST; },
+           readPaste:readPaste, render:render, store:function(){ return STORE; },
+           setCredential: function(c, who){
+             ApiStore.credential = c; ApiStore.who = who || ""; render();
+           } };
+})();
+</script>
+<script>UJ.app.init();</script>
+<script>
+/* Google Identity Services, the same module the other tools carry.
+
+   Reading the assembled cells is PUBLIC and happens before any of this: somebody who just wants
+   to see what has been put together should not have to identify themselves first. Only writing
+   needs a credential, and the write buttons stay live-looking and refuse with a reason rather
+   than sitting disabled with no explanation. */
+function xjumpGsi(retries){
+  if (!(window.google && google.accounts && google.accounts.id)){
+    if (retries > 0) return setTimeout(function(){ xjumpGsi(retries - 1); }, 300);
+    var w = document.getElementById("whoami");
+    if (w) w.textContent = "Google sign-in did not load — you can still read, not write";
+    return;
+  }
+  google.accounts.id.initialize({
+    client_id: UJ.cfg.backend.clientId,
+    callback: function(resp){
+      var who = "";
+      try { who = JSON.parse(atob(resp.credential.split(".")[1])).email || ""; } catch(e){}
+      UJ.app.setCredential(resp.credential, who);
+      document.getElementById("whoami").innerHTML =
+        "signed in as <b>" + who.replace(/</g, "&lt;") + "</b>";
+      var b = document.getElementById("gsiButton"); if (b) b.style.display = "none";
+    },
+    auto_select: true
+  });
+  google.accounts.id.renderButton(document.getElementById("gsiButton"),
+    { theme:"outline", size:"medium", type:"standard" });
+  try { google.accounts.id.prompt(); } catch(e){}
+}
+xjumpGsi(12);
+</script>
+</body></html>

@@ -171,6 +171,22 @@
     :root[data-theme="dark"] .feature.omega .cta{background:#fbbf24;color:#2a1f04}
     :root[data-theme="dark"] .feature.pi{--teal:#f78ad4;--teal-soft:#2e0722}
     :root[data-theme="dark"] .feature.pi .cta{background:#f78ad4;color:#2e0722}
+  /* χJump. Green, the last hue family the other seven leave empty (µ teal 175°, χ 143°,
+     η 17°, ω 32°, λ 224°, δ 263°, π 316°, β 343°).
+
+     Green and teal are now the closest pair on the page at 32°, edging past λ/δ's 39° -- which is
+     why χ sits LAST and µ sits first, the furthest apart two cards can be. Hue is what keeps
+     eight cards distinguishable, and when the gaps get this tight, position has to help.
+
+     Measured with the same WCAG formula as the blocks above, and measured AFTER choosing the
+     colours rather than before: #166534 on white is 7.13:1, #4ade80 on #1a1e24 is 9.60:1, and the
+     dark card's CTA -- #04240f ink on the light green fill -- is 9.53:1. All comfortably past AA
+     and in the same band as the rest of the row. */
+  .feature.chi{--teal:#166534;--teal-soft:#e6f4ea}
+  .feature.chi .cta{background:#166534;color:#ffffff}
+      :root[data-theme="dark"] .feature.chi{--teal:#4ade80;--teal-soft:#0b2416}
+    /* dark text on the light green fill, not white -- same reason as ω and λ above */
+    :root[data-theme="dark"] .feature.chi .cta{background:#4ade80;color:#04240f}
   .feature.lambda{--teal:#1d4ed8;--teal-soft:#e6edfd}
   .feature.lambda .cta{background:#1d4ed8;color:#ffffff}
       :root[data-theme="dark"] .feature.lambda{--teal:#7aa2ff;--teal-soft:#121d38}
@@ -399,12 +415,40 @@
     <span class="cta">Open &omega;Jump &rarr;</span>
   </a>
 
+  <a class="feature chi" href="/xjump.html">
+    <div class="kicker">Interactive tool</div>
+    <div class="logo"><span class="mu">&chi;</span><span class="jm">Jump</span></div>
+    <p class="desc">
+      The one volume here whose segmentation is not of cells. cb2 is a
+      998&nbsp;&times;&nbsp;922&nbsp;&times;&nbsp;48&nbsp;&micro;m block of
+      <em>mouse cerebellar cortex</em> at 4&nbsp;&times;&nbsp;4&nbsp;&times;&nbsp;40&nbsp;nm, and
+      what it publishes is <em>fragments</em> &mdash; pieces of neurite cut wherever the automatic
+      segmentation lost confidence. One Purkinje cell is scattered across dozens of them and no
+      root id gathers them up. So the work here is assembly: click fragments in Neuroglancer, paste
+      the address, and the set becomes a cell, merged into one object by Neuroglancer&rsquo;s own
+      equivalences &mdash; so the link you send somebody shows a cell rather than forty pieces.
+      Not every fragment has a published mesh, and the page counts yours and says so.
+    </p>
+    <div class="chips">
+      <span class="chip">Mouse cerebellar cortex</span>
+      <span class="chip">998 &times; 922 &times; 48&nbsp;&micro;m</span>
+      <span class="chip">4 &times; 4 &times; 40&nbsp;nm</span>
+      <span class="chip">No cell list &mdash; fragments, not cells</span>
+      <span class="chip">0 classified</span>
+      <span class="chip">Every cell &mdash; you build it</span>
+      <span class="chip">Free-text cell names</span>
+      <span class="chip">Community assembly</span>
+      <span class="chip">Public via BossDB; no reuse terms stated</span>
+    </div>
+    <span class="cta">Open &chi;Jump &rarr;</span>
+  </a>
+
 
 
   <!-- Stated once here rather than repeated on every card, so the descriptions stay strictly
        parallel and comparable. -->
   <p class="note" style="margin:22px 0 0">
-    One account across all seven tools &mdash; your points, level and submission history follow you
+    One account across all eight tools &mdash; your points, level and submission history follow you
     between them. Signing in is optional; you can browse and explore without it.
   </p>
 </div>
