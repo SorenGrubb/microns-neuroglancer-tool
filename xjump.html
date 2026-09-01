@@ -74,7 +74,13 @@ try{var _t=localStorage.getItem("ujump_theme");
    padding:10px 12px;margin:10px 0;background:var(--bg)}
  .callout.warn{border-left-color:var(--warn)}
  .cell{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg)}
- .cellid{color:var(--accent);font-weight:600}
+ .cellid{color:var(--mut);font-weight:600}
+ /* The cell's NAME is the link to the viewer, so it is the largest thing on the row. "Unnamed" is
+    a link too: an unnamed cell is precisely the one worth opening. A real <a>, not a button that
+    calls window.open() -- so it can be middle-clicked, copied, and dragged into a message. */
+ .cell-open{font-size:16px;font-weight:650;text-decoration:none;color:var(--accent);
+   margin-right:8px}
+ .cell-open:hover{text-decoration:underline}
  #stats{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--mut)}
  #stats b{color:var(--ink);font-size:18px;margin-right:4px}
  summary{cursor:pointer}
@@ -138,6 +144,26 @@ try{var _t=localStorage.getItem("ujump_theme");
   <label>2 &middot; The cells built so far</label>
   <div id="stats" style="margin-bottom:10px"></div>
   <div id="cells"></div>
+</div>
+
+<div class="card">
+  <label>3 &middot; Nuclei &mdash; mark them in bulk</label>
+  <p class="hint" style="margin-top:0">The page sends you to a 40&nbsp;&micro;m column nobody has
+  searched yet. The link opens with an empty annotation layer already selected, so
+  <b>ctrl-click every nucleus you can see</b>, then copy the address bar and paste it below.
+  Fifty nuclei in one paste. Nuclei already recorded are drawn in grey so you can see where not
+  to mark again.</p>
+  <div class="row" style="margin-bottom:10px">
+    <button class="primary" id="next-box">Send me somewhere</button>
+    <span class="hint" id="box-msg"></span>
+  </div>
+  <div id="box-body"></div>
+  <textarea id="nuc-paste" placeholder="paste the link back here once you have marked them"></textarea>
+  <div class="row" style="margin-top:8px">
+    <button id="nuc-go">Record the nuclei</button>
+    <span class="hint" id="nuc-msg"></span>
+  </div>
+  <div id="explore-stats" style="margin-top:12px"></div>
 </div>
 
 <div class="card">
@@ -398,6 +424,52 @@ UJ.cfg.assembly = {
   suggestedNames: ["granule cell", "Golgi cell", "Purkinje cell", "molecular layer interneuron",
                    "mossy fibre", "climbing fibre", "Bergmann glia", "astrocyte",
                    "oligodendrocyte", "microglia", "unipolar brush cell", "Lugaro cell"]
+};
+
+/* ── nuclei ──────────────────────────────────────────────────────────────────────────────────
+   Marked in BULK, with neuroglancer's own annotation tool, exactly as ωJump does it: the link
+   this page hands you carries an empty annotation layer, already selected, and you drop a point
+   on every nucleus you can see before pasting the whole thing back. Fifty nuclei in one paste
+   rather than fifty round trips.
+
+   That choice is what makes the join possible at all. A nucleus marked this way is a POSITION and
+   nothing else -- it does not say which fragment it is in, and in cb2 that is the interesting
+   half. The page works it out afterwards, by testing the point against the geometry of the
+   fragments people assemble (see the mesh module). */
+UJ.cfg.nuclei = {
+  layerName: "nuclei",
+  colour: "#4ade80",
+  /* Two marks closer than this are the same nucleus. 2.5 µm, and the number is a cerebellar one
+     rather than ωJump's 5 µm: granule cell somas are about 6 µm across and packed almost
+     touching, so a 5 µm radius would weld a nucleus to its neighbour and the second person's mark
+     would vanish with a message saying it was already recorded.
+
+     Erő, Gewaltig, Keller & Markram's mouse cell atlas puts cerebellar granule cells above
+     2.5·10^5 mm^-3 averaged over the whole cerebellum, and the granular layer proper is an order
+     denser than that -- which is why this is the one dataset in the family where the dedup radius
+     had to be argued rather than copied.
+     https://doi.org/10.3389/fninf.2018.00084 */
+  dedupNm: 2500
+};
+
+/* ── where to look next ──────────────────────────────────────────────────────────────────────
+   ωJump's sampler, over cb2. The box is 40 × 40 µm in plane and the FULL DEPTH of the volume in
+   z, because cb2 is a 48 µm slab: a cubic box would make two layers, the second of them 8 µm
+   thick, and "the box below this one" is a distinction without a difference in a slab. One column
+   through the tissue is the unit a person actually searches.
+
+   That gives 25 × 24 × 1 = 600 boxes. Søren has chosen to treat the volume as a map to complete,
+   and 600 is a number a group can finish -- but the nuclei inside them are not: cerebellar cortex
+   is the densest neuropil in the brain, and this block holds of order 10^4-10^5 of them. So the
+   coverage the page reports is BOXES LOOKED AT, never "nuclei found out of nuclei present", and
+   the page says which it means. A progress bar against an unknown denominator is a bar that
+   cannot be read. */
+UJ.cfg.explore = {
+  boxNm: [40000, 40000, 48000],
+  /* Among the K boxes furthest from anywhere already visited, pick at random. Deterministic
+     ranking would send two people who open the page in the same minute to the same 40 µm of
+     tissue. */
+  topK: 8
 };
 
 UJ.cfg.tabs = { lsKey: "xjump_active_tab", urlParam: "tab" };
@@ -804,6 +876,41 @@ UJ.xjump = (function(){
                               transform: { matrix: v.meshTransform, outputDimensions: dims } },
                     linkedSegmentationGroup: v.segLayerName, tab:"source" });
     }
+    /* ── the nucleus layer ────────────────────────────────────────────────────────────────────
+       Handed out EMPTY and already selected, so the annotation tool is armed the moment the tab
+       opens and marking a nucleus is one click. Same arrangement as ωJump's mark layer, and for
+       the same reason: a layer the user has to create themselves is a layer most people never
+       create, and their marks then land in a layer this page cannot find on the way back.
+
+       Any nuclei already known are drawn in a SECOND, separate layer. Two layers rather than one
+       because neuroglancer colours per layer, not per annotation -- and because a fresh mark
+       must be distinguishable from a recorded one when the state comes back. Points pasted from
+       the "recorded" layer are ignored on re-entry, so opening a box twice cannot record the same
+       nucleus a second time. */
+    if (o.nuclei !== false){
+      var nc = UJ.cfg.nuclei;
+      var known = (o.knownNuclei || []).filter(function(p){ return p && p.length === 3; });
+      if (known.length)
+        layers.push({ type:"annotation", name: nc.layerName + " (recorded)",
+                      source: { url:"local://annotations", transform:{ outputDimensions: dims } },
+                      tab:"source", annotationColor:"#9aa4b2",
+                      annotations: known.map(function(p, i){
+                        return { type:"point", id:"rec" + i, point: p.map(Number) }; }) });
+      layers.push({ type:"annotation", name: nc.layerName,
+                    source: { url:"local://annotations", transform:{ outputDimensions: dims } },
+                    tab:"annotations", annotationColor: nc.colour, annotations: [] });
+    }
+    /* The box, when the sampler sent you to one. An axis-aligned bounding box draws its
+       intersection with the current section in every panel, which is the only way to answer
+       "am I still inside it?" while scrolling through z. */
+    if (o.box && o.box.loVox && o.box.hiVox){
+      layers.push({ type:"annotation", name:"search box",
+                    source: { url:"local://annotations", transform:{ outputDimensions: dims } },
+                    tab:"source", annotationColor:"#fbbf24",
+                    annotations: [{ type:"axis_aligned_bounding_box", id:"searchbox",
+                                    pointA: o.box.loVox, pointB: o.box.hiVox }] });
+    }
+
     var pos = posVox || (o.frame && o.frame.position) || centreVox();
     return {
       dimensions: localDims(),
@@ -826,6 +933,109 @@ UJ.xjump = (function(){
     return UJ.cfg.viewer.base + "#!" + encodeURIComponent(JSON.stringify(buildState(ids, posVox, opts)));
   }
 
+  /* ── reading nuclei back ─────────────────────────────────────────────────────────────────
+     Points from the MARK layer only. The "(recorded)" layer carries nuclei this page already
+     knows about, drawn so you can see where not to mark again; reading them back would record
+     every one of them a second time on every paste, and the dedup would then quietly swallow the
+     duplicates while the page reported fifty new nuclei. Silent, wrong, and cumulative.
+
+     Coordinates come back in VOXELS -- the unit neuroglancer's own position box shows and the
+     unit this family standardised on. Physical distances (the dedup radius, the box test) convert
+     at the point of use, because a Euclidean distance between anisotropic voxel coordinates is
+     not a distance: on cb2 one unit is 4 nm across and 40 nm deep, so the same number would mean
+     ten times as far in z. */
+  function parseNuclei(text){
+    var st = decodeState(text);
+    if (!st.ok) return st;
+    var name = UJ.cfg.nuclei.layerName, L = null, recorded = 0;
+    (st.state.layers || []).forEach(function(l){
+      if (!l || l.type !== "annotation") return;
+      if (l.name === name) L = l;
+      else if (l.name === name + " (recorded)") recorded += (l.annotations || []).length;
+    });
+    if (!L) return { ok:false, error:"that link has no “" + name + "” layer — use "
+                     + "the link this page gives you, which carries one ready to draw in",
+                     recorded: recorded };
+    var pts = (L.annotations || [])
+      .filter(function(a){ return a && a.point && a.point.length === 3
+                                  && a.point.every(function(v){ return isFinite(Number(v)); }); })
+      .map(function(a){ return a.point.map(Number); });
+    /* Dedup WITHIN the paste as well as against the sheet. Marking the same nucleus twice in one
+       session is easy -- the tool leaves no visible trace of an existing point until you look for
+       it -- and two marks 0.2 µm apart are not two nuclei. */
+    var kept = [], r = UJ.cfg.nuclei.dedupNm;
+    pts.forEach(function(p){
+      var pn = toNm(p);
+      for (var i = 0; i < kept.length; i++){
+        var q = toNm(kept[i]);
+        var dx = q[0]-pn[0], dy = q[1]-pn[1], dz = q[2]-pn[2];
+        if (Math.sqrt(dx*dx + dy*dy + dz*dz) <= r) return;
+      }
+      kept.push(p);
+    });
+    return { ok:true, points: kept, dropped: pts.length - kept.length,
+             recorded: recorded, position: readPosition(st.state) };
+  }
+
+  /* ── the box grid ────────────────────────────────────────────────────────────────────────
+     Boxes are addressed by integer index, and the KEY is the index triple as a string, so a box
+     means the same thing to every user and to the sheet for ever. Deriving them from the volume
+     rather than listing them means the grid cannot drift from the volume it covers. */
+  function boxGrid(){
+    var b = UJ.cfg.explore.boxNm, ext = extentNm();
+    return [0,1,2].map(function(i){ return Math.max(1, Math.ceil(ext[i] / b[i])); });
+  }
+  function boxCount(){ var g = boxGrid(); return g[0]*g[1]*g[2]; }
+  function boxKeyOf(ix){ return ix.join(","); }
+  function boxOf(key){
+    var p = String(key).split(",").map(Number);
+    return p.length === 3 && p.every(isFinite) ? p : null;
+  }
+  /* A box's own corners, in voxels, clipped to the volume: the last box in a row is a partial one
+     and drawing it full size would send somebody hunting outside the data. */
+  function boxBounds(ix){
+    var b = UJ.cfg.explore.boxNm, ext = extentNm();
+    var loNm = [0,1,2].map(function(i){ return ix[i] * b[i]; });
+    var hiNm = [0,1,2].map(function(i){ return Math.min((ix[i]+1) * b[i], ext[i]); });
+    return { loNm: loNm, hiNm: hiNm,
+             loVox: toVox(loNm).map(Math.round), hiVox: toVox(hiNm).map(Math.round),
+             centreVox: toVox([0,1,2].map(function(i){ return (loNm[i]+hiNm[i])/2; })).map(Math.round) };
+  }
+  function boxOfPointVox(v){
+    var b = UJ.cfg.explore.boxNm, nm = toNm(v), g = boxGrid();
+    return [0,1,2].map(function(i){
+      return Math.max(0, Math.min(g[i]-1, Math.floor(nm[i] / b[i]))); });
+  }
+  /* The next box to send somebody to: furthest from anywhere already looked at, then one of the
+     top K at random.
+
+     Ranked against VISITED boxes rather than against found nuclei, and ωJump learned this the
+     hard way: rank by distance to nuclei and a region with nothing in it stays for ever the point
+     furthest from a nucleus, so the sampler serves the same void again and again. An empty box
+     reported as empty is what keeps that from happening, which is why reporting one counts. */
+  function nextBox(visitedKeys, rnd){
+    var g = boxGrid(), visited = {}, any = false;
+    (visitedKeys || []).forEach(function(k){ visited[k] = true; any = true; });
+    var best = [];
+    for (var x = 0; x < g[0]; x++) for (var y = 0; y < g[1]; y++) for (var z = 0; z < g[2]; z++){
+      var key = boxKeyOf([x,y,z]);
+      if (visited[key]) continue;
+      var d = Infinity;
+      if (any) (visitedKeys || []).forEach(function(k){
+        var q = boxOf(k); if (!q) return;
+        var dx = q[0]-x, dy = q[1]-y, dz = q[2]-z;
+        var dd = dx*dx + dy*dy + dz*dz;
+        if (dd < d) d = dd;
+      });
+      best.push({ key: key, ix: [x,y,z], d: d });
+    }
+    if (!best.length) return null;
+    best.sort(function(a, b2){ return b2.d - a.d; });
+    var k = Math.min(UJ.cfg.explore.topK, best.length);
+    var pick = best[Math.floor((rnd === undefined ? Math.random() : rnd) * k) % k];
+    return { key: pick.key, ix: pick.ix, bounds: boxBounds(pick.ix), remaining: best.length };
+  }
+
   /* ── mesh ────────────────────────────────────────────────────────────────────────────────
      Unsharded precomputed: one manifest per segment at `<id>:0`, listing fragment files beside
      it. Returned as URLs rather than fetched here so this file stays free of the network and the
@@ -845,6 +1055,9 @@ UJ.xjump = (function(){
            newCell:newCell, claimsFor:claimsFor, addToCell:addToCell, removeFromCell:removeFromCell,
            tallySummary:tallySummary, settledLabel:settledLabel, nameSuggestions:nameSuggestions,
            localDims:localDims, buildState:buildState, viewerUrl:viewerUrl, centreVox:centreVox,
+           parseNuclei:parseNuclei,
+           boxGrid:boxGrid, boxCount:boxCount, boxKeyOf:boxKeyOf, boxOf:boxOf,
+           boxBounds:boxBounds, boxOfPointVox:boxOfPointVox, nextBox:nextBox,
            meshManifestUrl:meshManifestUrl, meshFragmentUrl:meshFragmentUrl };
 })();
 </script>
@@ -1032,6 +1245,106 @@ UJ.mesh3d = (function(){
     return { pos: pos, idx: idx, nrm: nrm, lo: lo, hi: hi, mid: mid, centred: true,
              span: Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) || 1,
              vertices: nV/3, triangles: idx.length/3 };
+  }
+
+  /* ── is this nucleus inside this fragment? ─────────────────────────────────────────────────
+     The join Søren asked for: a nucleus is marked as a bare position, and the question is which
+     fragment contains it.
+
+     The obvious way is a voxel lookup -- fetch the segmentation chunk holding that voxel and read
+     the uint64. That is a real option and it is what neuroglancer does internally, but it means
+     writing a decoder for a chunk format whose encoding I cannot check from here, and one chunk
+     fetch per nucleus.
+
+     This is the other way, and it is better for this job: the MESH IS THE SURFACE of the segment,
+     so a point-in-mesh test answers exactly the same question using geometry the page already
+     downloads to draw the 3D panel. One pass over triangles already in memory, no new format, and
+     every nucleus tested at once instead of one fetch each.
+
+     Ray casting: fire a ray from the point along +x and count how many triangles it crosses. Odd
+     is inside. The classic Möller–Trumbore intersection, with the ray direction fixed so the
+     arithmetic collapses to two dimensions.
+
+     WHERE IT CANNOT ANSWER: a fragment with no published mesh has no surface to test against, and
+     cb2 has many (see xjump_config.js). So this returns "unknown", never "outside", for those --
+     the page says how many fragments could not be tested rather than reporting a nucleus as
+     outside a cell whose geometry was never there to check. */
+  var EPS = 1e-7;
+  /* One ray, offset in (y,z). Returns the number of triangles it crosses ahead of the point. */
+  function crossingsAlongX(px, py, pz, geo){
+    var pos = geo.pos, idx = geo.idx, n = 0;
+    for (var t = 0; t + 2 < idx.length; t += 3){
+      var a = idx[t]*3, b = idx[t+1]*3, c = idx[t+2]*3;
+      var ay = pos[a+1], az = pos[a+2];
+      var by = pos[b+1], bz = pos[b+2];
+      var cy = pos[c+1], cz = pos[c+2];
+      /* Does the ray's (y,z) point fall inside the triangle's (y,z) projection? Barycentric, with
+         the signed area folded in so a triangle wound either way still counts -- these meshes come
+         from an automatic segmentation and their winding is not guaranteed consistent. */
+      var d = (by-ay)*(cz-az) - (bz-az)*(cy-ay);
+      if (d > -EPS && d < EPS) continue;                 // edge-on to the ray; contributes nothing
+      var u = ((py-ay)*(cz-az) - (pz-az)*(cy-ay)) / d;
+      if (u < 0 || u > 1) continue;
+      var v = ((by-ay)*(pz-az) - (bz-az)*(py-ay)) / d;
+      if (v < 0 || u + v > 1) continue;
+      /* Where the plane is crossed, along x. Only crossings AHEAD of the point count. */
+      var x = pos[a] + u*(pos[b]-pos[a]) + v*(pos[c]-pos[a]);
+      if (x > px) n++;
+    }
+    return n;
+  }
+
+  function pointInGeometry(pt, geo){
+    if (!geo || !geo.pos || !geo.idx || !geo.idx.length) return false;
+    /* geo.pos is CENTRED on the assembly (see combine); the point has to move into the same
+       frame or every test would be answered by an offset the size of the volume. */
+    var px = pt[0] - geo.mid[0], py = pt[1] - geo.mid[1], pz = pt[2] - geo.mid[2];
+    /* Bounding-box reject first. Most nuclei are nowhere near most cells, and this turns the
+       common case into three comparisons instead of a walk over ten thousand triangles. */
+    var hx = (geo.hi[0]-geo.lo[0])/2, hy = (geo.hi[1]-geo.lo[1])/2, hz = (geo.hi[2]-geo.lo[2])/2;
+    if (px < -hx || px > hx || py < -hy || py > hy || pz < -hz || pz > hz) return false;
+
+    /* THREE RAYS, MAJORITY WINS, and this is not belt-and-braces -- one ray gives the wrong
+       answer on a case that is common rather than exotic.
+
+       A ray that passes exactly along an edge shared by two triangles is counted by BOTH, so the
+       crossing count comes out even and a point plainly inside is reported outside. The first
+       version of this failed on the simplest possible fixture for exactly that reason: the centre
+       of a cube lies on the diagonal where the two triangles of each face meet, so the ray scored
+       2 instead of 1. Real meshes are worse, not better -- marching cubes puts vertices on a
+       regular lattice, so an axis-aligned ray meets shared edges constantly.
+
+       So: cast three rays whose (y,z) offsets are in deliberately irrational-looking ratios, and
+       take the majority. Any one of them can land on an edge; all three cannot, unless the mesh
+       is degenerate in a way no answer would be right for. The offsets scale with the assembly,
+       and at 1e-4 of its longest side they are a few nanometres for a real cell -- far below the
+       size of anything being asked about. */
+    var e = (geo.span || 1) * 1e-4;
+    var votes = 0;
+    if (crossingsAlongX(px, py, pz, geo) & 1) votes++;
+    if (crossingsAlongX(px, py + e, pz + e * 0.6180339, geo) & 1) votes++;
+    if (crossingsAlongX(px, py - e * 0.7861513, pz + e * 1.3110179, geo) & 1) votes++;
+    return votes >= 2;
+  }
+
+  /* Which of these nuclei are inside this assembly. Points in NANOMETRES, like everything else
+     geometric in this module. */
+  function nucleiInside(points, geo){
+    return (points || []).map(function(p, i){ return { i: i, p: p }; })
+      .filter(function(r){ return pointInGeometry(r.p, geo); });
+  }
+
+  /* Load an assembly's geometry without drawing it -- the join needs the triangles, not a canvas.
+     Shares loadOne/combine with the panel, so what the join tests is exactly what the panel
+     draws, and the two can never disagree about where a cell is. */
+  function geometryFor(ids){
+    return Promise.all((ids || []).map(loadOne)).then(function(loaded){
+      var have = loaded.filter(function(L){ return L.state === "ok"; });
+      return { geo: have.length ? combine(have) : null,
+               have: have.length, total: (ids || []).length,
+               untestable: loaded.filter(function(L){ return L.state !== "ok"; })
+                                 .map(function(L){ return L.id; }) };
+    });
   }
 
   /* ── the smallest amount of matrix maths that draws a rotatable solid ─────────────────────── */
@@ -1301,6 +1614,7 @@ UJ.mesh3d = (function(){
   }
 
   return { show: show, hide: hide, coverage: coverage,
+           pointInGeometry: pointInGeometry, nucleiInside: nucleiInside, geometryFor: geometryFor,
            /* Exposed for the checks: the format decoder and the combiner are the two places a
               silent wrong answer could live, and both are testable without a browser. probe() is
               the one that needs a browser -- see its comment. */
@@ -1331,6 +1645,10 @@ UJ.app = (function(){
   var LIVE = !!window.XJUMP_LIVE;
   var STATE = { cells: [], claimed: {} };
   var LAST = null;            // the most recent paste: { ids, groups, position, … }
+  /* Which cell the next paste is FOR, set by a cell's own "Add fragments" button. null means
+     "build a new one". Kept as page state rather than as a dropdown value because the choice is
+     made at one end of the page and acted on at the other. */
+  var TARGET = null;
   var BUSY = false;
 
   function esc(s){ return String(s == null ? "" : s)
@@ -1429,18 +1747,30 @@ UJ.app = (function(){
                + (claimed[id] ? "already in " + esc(claimed[id]) : "not in any cell yet")
                + "'>" + idHtml(id) + "</span>"; }).join("") + "</div>"
       + "<div class='row' style='margin-top:10px;gap:8px;flex-wrap:wrap'>"
-      +   "<button class='primary' id='build'>Build cell from these " + LAST.ids.length + "</button>"
-      +   (STATE.cells.length
-            ? "<select id='addto' style='width:auto'><option value=''>Add to an existing cell&hellip;</option>"
-              + STATE.cells.map(function(c){
-                  return "<option value='" + esc(c.id) + "'>" + esc(c.id) + " &mdash; "
-                       + esc(X.settledLabel(c) || "unnamed") + " (" + c.segments.length + ")</option>";
-                }).join("") + "</select><button id='add'>Add</button>"
-            : "")
+      /* With a target set, ADDING is the primary action and building is the escape hatch. The
+         other way round -- Build first, with Add as a dropdown you have to notice -- is how a
+         fragment ends up in a second cell of its own instead of the one it belongs to. */
+      +   (TARGET
+            ? "<button class='primary' id='add'>Add these " + LAST.ids.length + " to "
+              + esc(TARGET) + "</button>"
+              + "<button id='build'>Build a new cell instead</button>"
+              + "<button id='cancel-target'>Cancel</button>"
+            : "<button class='primary' id='build'>Build cell from these " + LAST.ids.length
+              + "</button>"
+              + (STATE.cells.length
+                  ? "<select id='addto' style='width:auto'><option value=''>Add to an existing cell&hellip;</option>"
+                    + STATE.cells.map(function(c){
+                        return "<option value='" + esc(c.id) + "'>" + esc(c.id) + " &mdash; "
+                             + esc(X.settledLabel(c) || "unnamed") + " (" + c.segments.length + ")</option>";
+                      }).join("") + "</select><button id='add'>Add</button>"
+                  : ""))
       +   "<button id='open-paste'>Open these in the viewer &#8599;</button>"
       + "</div>";
     if (el("build")) el("build").addEventListener("click", buildCell);
     if (el("add")) el("add").addEventListener("click", addToExisting);
+    if (el("cancel-target")) el("cancel-target").addEventListener("click", function(){
+      TARGET = null; say("paste-msg", "", true); renderPaste();
+    });
     if (el("open-paste")) el("open-paste").addEventListener("click", function(){
       window.open(X.viewerUrl(LAST.ids, LAST.position), "_blank", "noopener");
     });
@@ -1479,13 +1809,20 @@ UJ.app = (function(){
       STATE.cells.push(c);
       say("paste-msg", "Built <code>" + esc(c.id) + "</code> from " + c.segments.length
         + " fragments. Name it below." + conflictNote(d.conflicts), !(d.conflicts || []).length);
-      LAST = null; el("paste").value = "";
+      LAST = null; TARGET = null; el("paste").value = "";
       render(); focusCell(c.id);
+      /* The join, straight away: the fragments have just changed, so which nucleus is inside them
+         may have changed too. Silent when it finds nothing, which is most of the time. */
+      joinAll(c);
     }).catch(failed("paste-msg", "Building the cell")).then(function(){ BUSY = false; });
   }
   function addToExisting(){
-    var sel = el("addto"); if (!sel || !sel.value || !LAST || BUSY) return;
-    var c = byId(sel.value); if (!c) return;
+    /* TARGET (a cell's own button) wins over the dropdown; only one of the two is ever on the
+       page at a time, so this is which one is showing rather than a precedence rule. */
+    var sel = el("addto");
+    var which = TARGET || (sel && sel.value);
+    if (!which || !LAST || BUSY) return;
+    var c = byId(which); if (!c) return;
     if (needSignIn("paste-msg")) return;
     BUSY = true;
     var ids = LAST.ids;
@@ -1505,8 +1842,11 @@ UJ.app = (function(){
             + " already there" : "")
         + ". It now has " + c.segments.length + "." + conflictNote(d.conflicts),
         !(d.conflicts || []).length);
-      LAST = null; el("paste").value = "";
+      LAST = null; TARGET = null; el("paste").value = "";
       render(); focusCell(c.id);
+      /* The join, straight away: the fragments have just changed, so which nucleus is inside them
+         may have changed too. Silent when it finds nothing, which is most of the time. */
+      joinAll(c);
     }).catch(failed("paste-msg", "Adding to " + c.id)).then(function(){ BUSY = false; });
   }
 
@@ -1538,19 +1878,49 @@ UJ.app = (function(){
     renderStats();
   }
 
+  /* Where the viewer should land when you open this cell.
+
+     The NUCLEUS, whenever one is known -- not the fragment somebody happened to add last. A cell
+     assembled over three sessions ends up centred on whichever dendrite tip was pasted most
+     recently, which is nowhere in particular and is not where you want to arrive. The soma is.
+
+     `position` is the fallback and is what a cell built before nuclei existed carries: the
+     crosshair at the moment it was pasted. Neither is guessed -- if there is no nucleus and no
+     recorded position, the viewer frames the assembly and the page says the nucleus is unknown. */
+  function nucleusOf(c){ return (c && (c.nucleus || c.position)) || null; }
+
+  function cellUrl(c){ return X.viewerUrl(c.segments, nucleusOf(c)); }
+
   function cellHtml(c){
     var t = X.tallySummary(c);
     var status = { unnamed:"nobody has named it", single:"one person's call",
                    agreed:"agreed by " + t.total, contested:"two labels tied",
                    retracted:"retracted" }[t.status] || "";
+    /* THE NAME IS THE LINK. Søren's ask, and it is the right shape: what you want to click is the
+       cell, and the thing that identifies a cell to a person is what it is called. "Unnamed" is
+       still a link -- an unnamed cell is exactly the one worth opening and looking at. */
     return "<div class='cell' id='cell-" + cssId(c.id) + "'>"
       + "<div class='row' style='justify-content:space-between;align-items:baseline'>"
-      +   "<div><code class='cellid'>" + esc(c.id) + "</code> "
+      +   "<div><a class='cell-open' href='" + esc(cellUrl(c)) + "' target='_blank' rel='noopener'"
+      +     " title='Open this cell in Neuroglancer, centred on its nucleus'>"
+      +     esc(t.leader || "Unnamed") + " &#8599;</a> "
+      +     "<code class='cellid'>" + esc(c.id) + "</code> "
       +     "<span class='chip'>" + c.segments.length + " fragment"
       +     (c.segments.length === 1 ? "" : "s") + "</span> "
-      +     "<span class='chip st-" + t.status + "'>" + esc(t.leader || "unnamed") + "</span> "
-      +     "<span class='hint'>" + esc(status) + "</span></div>"
-      +   "<button class='open' data-id='" + esc(c.id) + "'>Open in the viewer &#8599;</button>"
+      +     "<span class='chip st-" + t.status + "'>" + esc(status) + "</span> "
+      +     (nucleusOf(c)
+           ? "<span class='hint' title='the viewer opens here'>"
+             + (c.nucleusId
+                 ? "nucleus <code>" + esc(c.nucleusId) + "</code> is inside this cell"
+                   + (c.nucleusUntested
+                       ? " (" + c.nucleusUntested + " fragment"
+                         + (c.nucleusUntested === 1 ? " has" : "s have")
+                         + " no mesh and could not be tested)" : "")
+                 : "nucleus at " + nucleusOf(c).map(function(v){ return Math.round(v); }).join(", "))
+             + "</span>"
+           : "<span class='hint'>no nucleus recorded</span>")
+      +     "</div>"
+      +   "<button class='addto-cell' data-id='" + esc(c.id) + "'>Add fragments</button>"
       + "</div>"
       + (t.labels.length > 1
           ? "<div class='hint' style='margin-top:4px'>" + t.labels.map(function(l){
@@ -1577,12 +1947,25 @@ UJ.app = (function(){
 
   function wireCell(c){
     var root = el("cell-" + cssId(c.id)); if (!root) return;
-    root.querySelector(".open").addEventListener("click", function(){
-      window.open(X.viewerUrl(c.segments, c.position), "_blank", "noopener");
-    });
+    /* The old "Open in the viewer" button is gone: the cell's NAME is the link now, and it is a
+       real <a> so it can be middle-clicked, copied, and dragged into a message. A button that
+       calls window.open() can do none of those. */
     var out = root.querySelector(".mesh-out");
     var note = function(html, good){ if (out){ out.innerHTML = html; out.style.color =
       good === undefined ? "" : (good ? "var(--ok)" : "var(--bad)"); } };
+    /* Growing a cell used to mean scrolling back to the top and finding it in a dropdown, which
+       is fine with three cells and unusable with thirty. The button is on the cell itself and
+       aims the paste box at it; renderPaste then offers "Add to cb2:7" as the primary action. */
+    root.querySelector(".addto-cell").addEventListener("click", function(){
+      TARGET = c.id;
+      var box = el("paste");
+      if (box){ box.value = ""; box.focus();
+        if (box.scrollIntoView) box.scrollIntoView({ behavior:"smooth", block:"center" }); }
+      LAST = null;
+      say("paste-msg", "Adding to <code>" + esc(c.id) + "</code> — click the extra fragments in "
+        + "the viewer and paste the link.", true);
+      renderPaste();
+    });
     root.querySelector(".save-nm").addEventListener("click", function(){
       var v = root.querySelector(".nm").value.trim();
       if (!v) return;
@@ -1658,6 +2041,179 @@ UJ.app = (function(){
     });
   }
 
+  /* ── nuclei, and the box that sends you to them ────────────────────────────────────────────
+     Marked in BULK with neuroglancer's own annotation tool, because that is the only way fifty
+     marks cost one round trip instead of fifty. See UJ.cfg.nuclei.
+
+     BOX is where the sampler last sent this person. It travels with the paste so a batch of
+     nuclei can be attributed to the column they were found in -- which is what lets an empty
+     column be told apart from one nobody has opened. */
+  var BOX = null;
+
+  function nextBox(){
+    var visited = Object.keys((STATE.explore && STATE.explore.visited) || {});
+    var b = X.nextBox(visited);
+    if (!b){
+      BOX = null;
+      say("box-msg", "Every one of the " + X.boxCount() + " columns has been looked at. "
+        + "Anything still unmarked is inside a column somebody has already searched.", true);
+      renderBox(); return;
+    }
+    BOX = b;
+    say("box-msg", "column <code>" + esc(b.key) + "</code> &middot; " + b.remaining
+      + " of " + X.boxCount() + " still unlooked-at", true);
+    renderBox();
+  }
+
+  function renderBox(){
+    var host = el("box-body"); if (!host) return;
+    if (!BOX){ host.innerHTML = ""; return; }
+    /* Only the nuclei INSIDE this column are drawn in the link. Sending every nucleus in the
+       volume would put 10^4-10^5 inline annotations in a URL, and a URL has a practical ceiling
+       around 64 kB -- the state would be silently truncated by the browser and the person would
+       be marking on top of nuclei the page knew about but could not fit. */
+    var here = ((STATE.explore && STATE.explore.nuclei) || []).filter(function(n){
+      return X.boxKeyOf(X.boxOfPointVox(n.pos)) === BOX.key; });
+    var url = X.viewerUrl([], BOX.bounds.centreVox,
+      { box: BOX.bounds, knownNuclei: here.map(function(n){ return n.pos; }),
+        crossSectionScale: 8, projectionScale: 12000 });
+    host.innerHTML = "<div class='row' style='gap:8px;flex-wrap:wrap;margin-bottom:10px'>"
+      + "<a class='cell-open' href='" + esc(url) + "' target='_blank' rel='noopener'>"
+      + "Open column " + esc(BOX.key) + " &#8599;</a>"
+      + "<button id='box-empty'>Nothing here</button>"
+      + "<span class='hint'>" + (here.length ? here.length + " already marked in this column"
+                                             : "nothing marked here yet") + "</span></div>";
+    if (el("box-empty")) el("box-empty").addEventListener("click", function(){
+      if (!STORE.canWrite()){ say("box-msg", "Sign in with Google first.", false); return; }
+      var k = BOX.key;
+      STORE.visit(k, "empty", 0).then(function(){
+        markVisited(k, "empty");
+        say("box-msg", "Recorded <code>" + esc(k) + "</code> as empty. That counts &mdash; the "
+          + "sampler ranks against columns already looked at, so an unreported empty one gets "
+          + "served again.", true);
+        nextBox(); renderExplore();
+      }).catch(failed("box-msg", "Recording the column"));
+    });
+  }
+
+  function markVisited(key, outcome){
+    STATE.explore = STATE.explore || { visited:{}, nuclei:[] };
+    var v = STATE.explore.visited[key] || (STATE.explore.visited[key] = { empty:0, found:0 });
+    v[outcome === "found" ? "found" : "empty"]++;
+  }
+
+  function readNuclei(){
+    var box = el("nuc-paste"); if (!box) return;
+    var r = X.parseNuclei(box.value);
+    if (!r.ok){ say("nuc-msg", esc(r.error), false); return; }
+    if (!r.points.length){
+      say("nuc-msg", "That link has the layer but no points in it &mdash; ctrl-click a nucleus to "
+        + "drop one." + (r.recorded ? " (" + r.recorded + " already-recorded nuclei were shown, "
+        + "and those are not re-read.)" : ""), false);
+      return;
+    }
+    if (!STORE.canWrite()){ say("nuc-msg", "Sign in with Google first.", false); return; }
+    say("nuc-msg", "saving " + r.points.length + "…");
+    var k = BOX && BOX.key;
+    STORE.nuclei(r.points, k).then(function(d){
+      /* The TRUE sentence. "38 new, 12 already known" and "50 recorded" are different facts, and
+         the second is what you would say if you had not looked. Somebody who re-pastes a column
+         they already did needs to see that nothing new happened. */
+      var bits = [];
+      if (d.added) bits.push("<b>" + d.added + "</b> new");
+      if (d.merged) bits.push(d.merged + " already known");
+      if (r.dropped) bits.push(r.dropped + " duplicate marks in your own paste");
+      say("nuc-msg", bits.join(" &middot; ") || "nothing new", d.added > 0);
+      (d.results || []).forEach(function(res, i){
+        if (res.merged) return;
+        STATE.explore = STATE.explore || { visited:{}, nuclei:[] };
+        STATE.explore.nuclei.push({ id: res.key, pos: r.points[i], box: k || "", cell: "" });
+      });
+      if (k){ markVisited(k, d.added ? "found" : "empty"); STORE.visit(k, d.added ? "found" : "empty", d.added); }
+      el("nuc-paste").value = "";
+      renderExplore(); renderBox();
+      joinAll();
+    }).catch(failed("nuc-msg", "Recording the nuclei"));
+  }
+
+  function renderExplore(){
+    var n = el("explore-stats"); if (!n) return;
+    var ex = STATE.explore || { visited:{}, nuclei:[] };
+    var seen = Object.keys(ex.visited).length, total = X.boxCount();
+    var joined = ex.nuclei.filter(function(x){ return !!x.cell; }).length;
+    /* COVERAGE IS COLUMNS, and it says so. "Nuclei found out of nuclei present" would need a
+       denominator nobody has: cerebellar cortex is the densest neuropil in the brain and this
+       block holds of order 10^4-10^5 of them. A progress bar against an unknown denominator is a
+       bar that cannot be read, and one that only ever creeps is worse than none. */
+    n.innerHTML = "<span><b>" + seen + "</b> of " + total + " columns looked at</span>"
+      + "<span><b>" + ex.nuclei.length + "</b> nuclei marked</span>"
+      + "<span><b>" + joined + "</b> matched to a cell</span>";
+    n.className = "";
+    n.setAttribute("id", "explore-stats");
+    n.style.cssText = "display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--mut)";
+  }
+
+  /* ── the join ──────────────────────────────────────────────────────────────────────────────
+     A nucleus is a bare position; a cell is a set of fragments. The question "which cell is this
+     nucleus in" is answered by testing the point against the cell's own SURFACE -- the mesh is
+     the segment's surface, so this is exact wherever a mesh exists, and it uses geometry the page
+     already downloads to draw the 3D panel.
+
+     Run after every build and every add, over nuclei not yet matched to anything. Silent when it
+     finds nothing, which is the common case; when it finds one it says so on the cell, because a
+     cell quietly acquiring a nucleus is a change somebody should be able to see happen.
+
+     WHAT IT CANNOT ANSWER: a fragment with no published mesh has no surface to test against, and
+     cb2 has many. Those are reported as untestable rather than as "no nucleus here" -- the
+     difference between "we looked and it is not there" and "we could not look". */
+  function joinAll(cell){
+    if (!window.UJ.mesh3d) return Promise.resolve(0);
+    var ex = STATE.explore || { nuclei: [] };
+    var free = ex.nuclei.filter(function(n){ return !n.cell; });
+    if (!free.length) return Promise.resolve(0);
+    var cells = cell ? [cell] : STATE.cells.filter(function(c){ return !c.nucleus; });
+    if (!cells.length) return Promise.resolve(0);
+    /* Nanometres for the geometry, which is where every distance in the mesh module lives. */
+    var ptsNm = free.map(function(n){ return X.toNm(n.pos); });
+    var done = 0;
+    return cells.reduce(function(chain, c){
+      return chain.then(function(){
+        return UJ.mesh3d.geometryFor(c.segments).then(function(g){
+          c.meshHave = g.have; c.meshTotal = g.total;
+          if (!g.geo) return;
+          var inside = UJ.mesh3d.nucleiInside(ptsNm, g.geo);
+          if (!inside.length) return;
+          /* One soma per cell. More than one point inside an assembly means either two cells were
+             welded together or a mark is wrong, and either way it is a finding rather than
+             something to average away -- so the nearest to the assembly's centre is taken and the
+             rest are LEFT FREE, to be matched by whoever assembles the cell they belong to. */
+          inside.sort(function(a, b){
+            var da = 0, db = 0;
+            for (var i = 0; i < 3; i++){
+              da += Math.pow(a.p[i] - g.geo.mid[i], 2);
+              db += Math.pow(b.p[i] - g.geo.mid[i], 2);
+            }
+            return da - db;
+          });
+          var n = free[inside[0].i];
+          return STORE.join(n.id, c.id).then(function(res){
+            if (res && res.joined === false) return;      // already another cell's soma
+            /* Recorded ON THE CELL, not written into the DOM. The first version poked the message
+               into the cell's mesh line and then called render(), which rebuilt the cell and wiped
+               it -- the join had worked and left no trace. A fact the page derives from its own
+               state survives every re-render; one typed into an element survives until the next. */
+            n.cell = c.id; c.nucleus = n.pos; c.nucleusId = n.id;
+            c.nucleusUntested = g.total - g.have;
+            done++;
+          });
+        });
+      });
+    }, Promise.resolve()).then(function(){
+      if (done) render();
+      return done;
+    });
+  }
+
   /* ── storage ───────────────────────────────────────────────────────────────────────────────
      Two stores, one interface. Every method returns a promise for what the SERVER decided, not
      for what the page hoped: build() resolves with a cellKey, add() with what was actually added
@@ -1684,7 +2240,37 @@ UJ.app = (function(){
     },
     remove: function(cellKey, ids){ return Promise.resolve({ ok:true, removed: ids.length }); },
     name:   function(){ return Promise.resolve({ ok:true }); },
-    reject: function(){ return Promise.resolve({ ok:true }); }
+    reject: function(){ return Promise.resolve({ ok:true }); },
+    /* Numbers nuclei locally -- correct HERE and only here, because the harness has exactly one
+       user and no sheet to collide with -- but dedups against what is already recorded, by the
+       same physical rule the server uses.
+
+       The first version skipped that and reported every paste as all-new. It is tempting to call
+       that acceptable in a harness, and it is not: the harness is what somebody uses to LEARN the
+       loop, and one that records the same nucleus twice teaches that re-pasting a column is free.
+       A prototype that behaves differently from the real thing in the one way that matters is
+       worse than no prototype. */
+    nuclei: function(points){
+      var ex = STATE.explore = STATE.explore || { visited:{}, nuclei:[] };
+      var r = UJ.cfg.nuclei.dedupNm, added = 0, merged = 0;
+      var have = ex.nuclei.map(function(n){ return { key:n.id, nm:X.toNm(n.pos) }; });
+      var results = points.map(function(p){
+        var nm = X.toNm(p);
+        for (var i = 0; i < have.length; i++){
+          var q = have[i].nm;
+          var dx = q[0]-nm[0], dy = q[1]-nm[1], dz = q[2]-nm[2];
+          if (Math.sqrt(dx*dx + dy*dy + dz*dz) <= r){ merged++; return { key:have[i].key, merged:true }; }
+        }
+        var key = UJ.cfg.volume.id + "/n" + (have.length + 1);
+        have.push({ key:key, nm:nm }); added++;
+        return { key:key, merged:false };
+      });
+      return Promise.resolve({ ok:true, added:added, merged:merged, total:points.length,
+                               results:results });
+    },
+    visit:  function(){ return Promise.resolve({ ok:true }); },
+    join:   function(){ return Promise.resolve({ ok:true, joined:true }); },
+    loadExplore: function(){ return Promise.resolve(STATE.explore || { visited:{}, nuclei:[] }); }
   };
 
   /* Every call to Apps Script goes through here, and the reason is one message Søren saw on
@@ -1794,6 +2380,35 @@ UJ.app = (function(){
     },
     reject: function(k, kind, comment){
       return this._post({ type:"xjump_cell_reject", cellKey:k, kind:kind, comment: comment || "" });
+    },
+    /* ONE POST for the whole batch. Fifty marks would otherwise be fifty round trips and fifty
+       chances for half of them to land -- and only a batch can be deduped against itself as well
+       as against the sheet, which is what stops two marks a micrometre apart in the same paste
+       from both becoming permanent. */
+    nuclei: function(points, boxKey){
+      return this._post({ type:"xjump_nuclei_found", points: points, boxKey: boxKey || "" });
+    },
+    visit:  function(boxKey, outcome, n){
+      return this._post({ type:"xjump_box_visit", boxKey:boxKey, outcome:outcome, foundCount:n||0 });
+    },
+    join:   function(nucleusKey, cellKey){
+      return this._post({ type:"xjump_nucleus_join", nucleusKey:nucleusKey, cellKey:cellKey });
+    },
+    loadExplore: function(){
+      var u = UJ.cfg.backend.endpoint + "?xjumpExplore=1&ds="
+            + encodeURIComponent(UJ.cfg.backend.ds)
+            + "&volume=" + encodeURIComponent(UJ.cfg.volume.id);
+      return fetch(u).then(function(r){ return readJson(r, "reading the nucleus map"); })
+        .then(function(d){
+          if (!d || !d.ok) throw new Error((d && d.error) || "could not read the nucleus map");
+          STATE.explore = { visited: d.visited || {}, nuclei: d.nuclei || [] };
+          /* A cell whose nucleus is already known gets it back here, so the viewer link centres
+             on the soma from the moment the page loads rather than only after a fresh join. */
+          var byCell = {};
+          STATE.explore.nuclei.forEach(function(n){ if (n.cell) byCell[n.cell] = n.pos; });
+          STATE.cells.forEach(function(c){ if (byCell[c.id]) c.nucleus = byCell[c.id]; });
+          return STATE.explore;
+        });
     }
   };
 
@@ -1867,6 +2482,10 @@ UJ.app = (function(){
   function init(){
     if (el("paste-go")) el("paste-go").addEventListener("click", readPaste);
     if (el("paste")) el("paste").addEventListener("paste", function(){ setTimeout(readPaste, 0); });
+    if (el("next-box")) el("next-box").addEventListener("click", nextBox);
+    if (el("nuc-go")) el("nuc-go").addEventListener("click", readNuclei);
+    if (el("nuc-paste")) el("nuc-paste").addEventListener("paste", function(){
+      setTimeout(readNuclei, 0); });
     if (el("open-empty")) el("open-empty").addEventListener("click", function(){
       window.open(X.viewerUrl([], null), "_blank", "noopener");
     });
@@ -1877,7 +2496,8 @@ UJ.app = (function(){
         + X.extentNm().map(function(v){ return Math.round(v/1000); }).join(" &times; ")
         + " &micro;m &middot; " + UJ.cfg.volume.res_nm.slice().reverse().join(" &times; ")
         + " nm &middot; fragments, not cells &mdash; you assemble them";
-    render();
+    STATE.explore = STATE.explore || { visited:{}, nuclei:[] };
+    render(); renderExplore();
     /* Reading is public; only writing needs a credential. So the load happens immediately rather
        than waiting for sign-in -- somebody who just wants to see what has been assembled should
        not have to identify themselves first. */
@@ -1897,12 +2517,17 @@ UJ.app = (function(){
        when the backend is unreachable, so this failure is reported and stepped over rather than
        allowed to take the page down. */
     if (LIVE) try {
-      STORE.load().then(render).catch(loadFailed);
+      STORE.load()
+        .then(function(){ return STORE.loadExplore(); })
+        .then(function(){ render(); renderExplore(); })
+        .catch(loadFailed);
     } catch (e){ loadFailed(e); }
   }
 
   return { init:init, state:function(){ return STATE; }, last:function(){ return LAST; },
            readPaste:readPaste, render:render, store:function(){ return STORE; },
+           nextBox:nextBox, readNuclei:readNuclei, joinAll:joinAll,
+           box:function(){ return BOX; },
            setCredential: function(c, who){
              ApiStore.credential = c; ApiStore.who = who || ""; render();
            } };
