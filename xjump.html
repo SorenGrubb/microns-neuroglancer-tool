@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 11:40</span></p>
+ctrl-shift-R.">build 2026-09-02 11:56</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -977,27 +977,39 @@ UJ.cfg.volume = {
   /* Mesh vertex -> nanometres, for the page's OWN renderer, which has no neuroglancer to apply a
      layer transform for it.
 
-     ISOTROPIC. One mesh unit is 4 nm along every axis, and the axes are reversed -- the mesh is
-     (z,y,x) where the viewer is (x,y,z), which is what the anti-diagonal in meshTransform above
-     is saying.
+     THE VERTICES ARE IN METRES. One unit is 1e9 nanometres, along every axis, with the axes
+     reversed -- the mesh is (z,y,x) where the viewer is (x,y,z), which is what the anti-diagonal
+     in meshTransform above is saying. The same 1e9 that transform carries, copied rather than
+     reasoned about, exactly as segTranslateZ's comment four lines up says to do.
 
-     THIS WAS WRONG ONCE, BY A FACTOR OF TEN IN Z, AND THE WAY IT WAS WRONG IS WORTH KEEPING.
-     The first version reasoned it out from neuroglancer's own numbers: the mesh layer's matrix
-     carries 1e9, the output dimensions declare z as 4e-8 m, so -- the argument went -- a mesh unit
-     must be 40 nm in z and 4 nm across. It was a clean derivation from real values in a file the
-     authors wrote, and it was false. The composition neuroglancer actually performs already
-     accounts for the source's own dimensions, so the per-axis scale does not reappear here.
+     THIS WAS WRONG TWICE, AND BOTH TIMES BY THE SAME STEP, WHICH IS THE PART WORTH KEEPING.
+     The argument each time was: the mesh layer's matrix carries 1e9, its output dimensions
+     declare 4 nm, therefore a unit is 4e9 nm. The first version pushed it further and made z
+     40e9 -- a cell 444 µm deep, caught only because Søren looked at it and said it was stretched.
+     The fix made it isotropic at 4e9 and kept the multiplication. The multiplication IS the
+     error: the composition neuroglancer performs already accounts for the source's own
+     dimensions, so nothing about the output voxel size reappears here.
 
-     What caught it was not a better derivation. It was Søren looking at a cell and saying it was
-     stretched, and the panel printing "98.3 x 60.5 x 444.0 µm" underneath -- 444 µm of z in a
-     block that is 48 µm deep. The number was on screen because the panel prints the extent and
-     labels it as derived; that label was written precisely so this could be checked in one glance,
-     and it is the only reason a ten-fold error in a matrix nobody can see got found at all.
+     WHAT SETTLED IT, on 2026-09-02, is one line the contacts panel printed for grc_3479:
 
-     So the rule the renderer now enforces: NO ASSEMBLY CAN BE LARGER THAN THE VOLUME. It is a
-     fact about the data that no transform can be right and violate, it costs three comparisons,
-     and it turns this class of mistake from "the picture looks a bit odd" into a sentence. */
-  meshVertexToNm: [[0, 0, 4e9], [0, 4e9, 0], [4e9, 0, 0]],
+       the mesh decodes to x 562,784…623,072 · y 396,224…430,880 · z 280…2,910 voxels;
+       this cell's recorded soma is at 148,738, 103,680, 507;
+       the block is 0…249,600 · 0…230,400 · 0…1,200.
+
+     As decoded that assembly is 241 x 139 x 105 µm -- 105 µm deep in a block 48 µm deep, which no
+     matrix can be right and produce. Divided by four the box is x 140,696…155,768 ·
+     y 99,056…107,720 · z 70…727: it fits the block, it CONTAINS the cell's independently
+     published soma, its centre sits within 2 µm of that soma in x and y, and the cell measures
+     60 x 35 x 26 µm, which is a granule cell with its ascending axon. Two facts, neither derived
+     from the other, both saying divide by four.
+
+     Note what did NOT catch it. The 3D panel normalises an assembly's longest side to 1, so a
+     pure scale error is invisible there; the fixtures were built with the same constant they were
+     testing, so they agreed with it; and the contacts panel's own GAPS were right throughout,
+     because a distance is a difference and both clouds carried the same error. Only a coordinate
+     compared against something published separately could say anything, which is why the panel
+     now prints exactly that comparison when it cannot place a mesh. */
+  meshVertexToNm: [[0, 0, 1e9], [0, 1e9, 0], [1e9, 0, 0]],
 
   /* ── NOT EVERY FRAGMENT HAS A MESH ────────────────────────────────────────────────────────
      Established 2026-08-31 by listing the bucket for three ids taken from a real assembly in
@@ -6034,9 +6046,10 @@ UJ.app = (function(){
      the documented translation brings it in: two comparisons against the block's published
      extent, and if neither placement works this returns null and the caller says so instead of
      inventing a correction. */
-  function ccFrameShift(g){
+  function ccFrameShift(g, cellKey){
     if (!g || !g.loUm || !g.hiUm) return [0, 0, 0];
     var eUm = X.extentNm().map(function(n){ return n / 1000; });
+    var r = X.resXYZ(), soma = posForCell(cellKey);
     function inBlock(dz){
       for (var i = 0; i < 3; i++){
         var lo = g.loUm[i] + (i === 2 ? dz : 0), hi = g.hiUm[i] + (i === 2 ? dz : 0);
@@ -6044,9 +6057,28 @@ UJ.app = (function(){
       }
       return true;
     }
-    if (inBlock(0)) return [0, 0, 0];
+    /* AND THE SOMA HAS TO BE IN IT. Fitting inside the block is necessary and nowhere near
+       sufficient: a mesh decoded four times too large also fits, once, somewhere else entirely.
+       The cell's own recorded soma is the one fact about its position that comes from OUTSIDE the
+       mesh -- a different record, made by different people from different data -- so it is the
+       only thing a coordinate derived from geometry can honestly be checked against. It is what
+       settled the 4e9 error on 2026-09-02, and it is here so the page can settle the next one
+       itself. Generously: 25 µm of slack, because an assembly whose soma fragment has no
+       published mesh is a real and ordinary thing, and a false alarm costs the markers while a
+       missed one costs the truth. */
+    function holdsSoma(dz){
+      if (!soma) return true;
+      for (var i = 0; i < 3; i++){
+        var lo = (g.loUm[i] + (i === 2 ? dz : 0)) * 1000 / r[i],
+            hi = (g.hiUm[i] + (i === 2 ? dz : 0)) * 1000 / r[i];
+        var slackVox = 25000 / r[i];
+        if (soma[i] < lo - slackVox || soma[i] > hi + slackVox) return false;
+      }
+      return true;
+    }
+    if (inBlock(0) && holdsSoma(0)) return [0, 0, 0];
     var dz = (UJ.cfg.volume.segTranslateZ || 0) * X.resXYZ()[2] / 1000;   // voxels -> µm
-    if (dz && inBlock(dz)) return [0, 0, dz];
+    if (dz && inBlock(dz) && holdsSoma(dz)) return [0, 0, dz];
     return null;
   }
 
@@ -6057,16 +6089,21 @@ UJ.app = (function(){
   function ccFrameReport(g, cellKey){
     if (!g || !g.loUm || !g.hiUm) return "";
     var r = X.resXYZ(), e = X.extentVox(), soma = posForCell(cellKey);
+    /* PLAIN DIGITS, no toLocaleString. This line exists to be pasted into a message, and the
+       first one ever pasted arrived as "x 562.784…623.072" -- Danish thousands separators, which
+       read as decimals to everyone and everything else. The numbers were right and nearly
+       unreadable. */
+    function n(v){ return String(Math.round(v)); }
     function ax(i){
-      return "xyz".charAt(i) + " " + Math.round(g.loUm[i] * 1000 / r[i]).toLocaleString()
-           + "…" + Math.round(g.hiUm[i] * 1000 / r[i]).toLocaleString();
+      return "xyz".charAt(i) + " " + n(g.loUm[i] * 1000 / r[i]) + "-" + n(g.hiUm[i] * 1000 / r[i]);
     }
-    return "the mesh decodes to " + ax(0) + " · " + ax(1) + " · " + ax(2) + " voxels; "
-         + "this cell's recorded soma is at "
-         + (soma ? soma.map(function(v){ return Math.round(v).toLocaleString(); }).join(", ")
-                 : "an unknown position")
-         + "; the block is 0…" + e[0].toLocaleString() + " · 0…" + e[1].toLocaleString()
-         + " · 0…" + e[2].toLocaleString() + ".";
+    return "the mesh decodes to " + ax(0) + " " + ax(1) + " " + ax(2) + " voxels, spanning "
+         + [0,1,2].map(function(i){ return (g.hiUm[i] - g.loUm[i]).toFixed(1); }).join(" x ")
+         + " um; this cell's recorded soma is at "
+         + (soma ? soma.map(function(v){ return n(v); }).join(", ") : "an unknown position")
+         + "; the block is " + e.join(" x ") + " voxels ("
+         + [0,1,2].map(function(i){ return Math.round(e[i] * r[i] / 1000); }).join(" x ")
+         + " um).";
   }
 
   function ccRun(d, cellKey){
@@ -6113,7 +6150,7 @@ UJ.app = (function(){
          whatever it takes to get from the mesh store's frame to the viewer's, measured once here
          because it is a property of the store rather than of a cell. */
       var home = g.midUm || [0,0,0];
-      shift = ccFrameShift(g);
+      shift = ccFrameShift(g, cellKey);
       if (shift === null) frameNote = ccFrameReport(g, cellKey);
       /* NOT `var`. This assigns the one declared beside `rows` above -- a second declaration here
          would shadow it inside this function, so the guard below would use the corrected origin
