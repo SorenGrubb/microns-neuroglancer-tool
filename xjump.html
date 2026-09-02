@@ -282,23 +282,74 @@ try{var _t=localStorage.getItem("ujump_theme");
  /* One class per layer, worn by both the band in the SVG and its swatch in the key. The opacities
     differ per theme on purpose: the accent at 20% reads on the dark ground and is nearly invisible
     on white, so a single number could not serve both. */
- /* The two unsampled bands are HATCHED, not tinted. A flat tint would read as a fourth layer;
-    diagonal lines read as "nothing was measured here", which is what they mean. The key's swatch
-    uses a CSS gradient rather than the SVG pattern, since one cannot be referenced from the other. */
- .lay-un{fill:url(#m3d-hatch)} .lay-un-line{stroke:var(--mut);stroke-width:1.2;opacity:.22}
- .lkey-swatch.lay-un{background:repeating-linear-gradient(45deg,var(--mut) 0 1px,
-   transparent 1px 4px);opacity:.6}
+ /* The HATCHED "not sampled" bands went on 2026-09-02: Søren traced the boundaries, so there is
+    no part of the block the diagram has to decline to colour any more. What replaced them is a
+    white-matter band, which is what was under the hatching all along. */
  .lay-ml{fill:var(--mut);fill-opacity:.16} .lkey-swatch.lay-ml{background:var(--mut);opacity:.4}
+ /* White matter is the PALEST band on the figure in both themes, which is why it is the one band
+    keyed off --ink rather than --mut: --ink is near-white on the dark ground and near-black on the
+    light one, so "pale" needs opposite opacities and a single number could not do it. The order of
+    lightness carries the meaning -- white matter, then molecular, then granular, then Purkinje --
+    and it has to survive the theme flip or the figure means something different in light mode. */
+ .lay-wm{fill:var(--ink);fill-opacity:.22} .lkey-swatch.lay-wm{background:var(--ink);opacity:.3}
+ /* Søren's own traced lines, over the fills. The fills say which layer you are in; these say
+    where the evidence for that is, and they are what he will recognise as his annotation. */
+ .lay-edge polyline{fill:none;stroke:var(--ink);stroke-width:.9;opacity:.45;
+   stroke-linejoin:round;vector-effect:non-scaling-stroke}
  .lay-pcl{fill:var(--warn);fill-opacity:.6} .lkey-swatch.lay-pcl{background:var(--warn)}
  .lay-gl{fill:var(--accent);fill-opacity:.2} .lkey-swatch.lay-gl{background:var(--accent);opacity:.45}
  .lay-dot{fill:var(--ink);opacity:.55}
  @media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .lay-ml{fill-opacity:.28}
    :root:not([data-theme="dark"]) .lay-gl{fill-opacity:.3}
+   :root:not([data-theme="dark"]) .lay-wm{fill-opacity:.03}
+   :root:not([data-theme="dark"]) .lkey-swatch.lay-wm{opacity:.09}
    :root:not([data-theme="dark"]) .lay-dot{opacity:.7}}
  :root[data-theme="light"] .lay-ml{fill-opacity:.28}
  :root[data-theme="light"] .lay-gl{fill-opacity:.3}
+ :root[data-theme="light"] .lay-wm{fill-opacity:.03}
+ :root[data-theme="light"] .lkey-swatch.lay-wm{opacity:.09}
  :root[data-theme="light"] .lay-dot{opacity:.7}
 
+
+ /* ── THE FILTER PANEL ────────────────────────────────────────────────────────────────────
+    µJump's own classes, copied rather than reinvented, so the two panels look like one design.
+    details/summary rather than always-open sections: eight open sections is a page you scroll
+    past to reach the button that runs them. */
+ .rv-panel{margin-top:10px}
+ .rv-panel summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none}
+ .rv-panel summary::-webkit-details-marker{display:none}
+ /* The disclosure triangle. DOUBLE backslash: this CSS lives in a plain Python
+    string, where \25 is an octal escape and would emit a literal 0x15 control
+    character into the page -- which the build's own control-character guard catches,
+    and which is how this was found. */
+ .rv-panel summary::before{content:"\25B6";display:inline-block;flex:none;font-size:10px;
+   color:var(--mut);transition:transform .15s ease}
+ .rv-panel[open]>summary::before{transform:rotate(90deg)}
+ .filter-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+ .filter-section summary{font-size:13px;font-weight:600;color:var(--ink)}
+ .filter-section:first-of-type{margin-top:10px;padding-top:0;border-top:none}
+ .toggles{display:flex;gap:16px;flex-wrap:wrap;margin-top:4px}
+ .toggles label{display:flex;align-items:center;gap:7px;text-transform:none;letter-spacing:0;
+   color:var(--ink);font-size:13px;cursor:pointer;margin:0}
+ /* THE TICKBOXES ARE NOT FULL WIDTH. This file's base rule is `input,select,textarea{width:100%}`,
+    which is right for the coordinate fields and catastrophic for a checkbox inside a flex label:
+    the box stretches to fill the row, the label's text is squeezed to nothing, and "Granule cell"
+    wraps onto two lines with the count stranded at the far right. Caught in a screenshot. */
+ .toggles input[type=checkbox],.toggles input[type=radio]{width:auto;flex:none;padding:0;margin:0}
+ /* And the name itself stays on one line: it is a flex item beside the box and the count, so it
+    shrinks before they do unless it is told not to. */
+ .toggles label>.fname{white-space:nowrap}
+ .nsub{font-family:var(--mono);font-size:11px;color:var(--mut)}
+ /* A group of ticks inside the scrolling type box. */
+ .fgroup{margin-top:8px} .fgroup:first-child{margin-top:0}
+ .fgroup>b{font-size:12px;color:var(--mut)}
+ /* A kind with nothing in it is DIMMED, not hidden: "no mossy fibres match your other filters"
+    and "this tool has no idea what a mossy fibre is" look identical once the row is gone. */
+ .toggles label.zero{opacity:.45}
+ /* The Preview button carries its own match count, so it needs room to grow without the row
+    reflowing under it. */
+ #filterRun{font-weight:600}
+ #filterCard input[type=text],#filterCard input:not([type]){text-transform:none}
  /* ── STATISTICS ──────────────────────────────────────────────────────────────────────────
     Bars in plain CSS rather than a charting library. χJump already carries 4.5 MB of seed data;
     a megabyte of Plotly to draw eleven horizontal bars would be the wrong trade, and these are
@@ -334,7 +385,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-01 20:52</span></p>
+ctrl-shift-R.">build 2026-09-02 06:39</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -455,21 +506,160 @@ ctrl-shift-R.">build 2026-09-01 20:52</span></p>
 </div><!-- /jump -->
 
 <div class="tabpanel" data-tabpanel="filter">
+
+<!-- ── THE FILTER, in µJump's shape ──────────────────────────────────────────────────────────
+     Søren, 2026-09-02: "I want the Filter and show to be more like uJump. I want Select the
+     cell(s) of interest with the same style of cell type selection, I also want the Do you want
+     to find cells close to another cell type?, I also want the Which layer should the cell be in
+     ... I also want the Should the cells fall inside specific bounding box(es)?, I also want the
+     Add extra layers to the 3D view ... I also want the stepping through the matches, and of
+     course the open in neuroglancer and download as Excel."
+
+     Same markup as µJump's, down to the class names, so somebody who has learned that panel can
+     read this one: details.rv-panel.filter-section for each section, div.toggles for the ticks,
+     span.nsub for the counts, the match count printed ON the Preview button.
+
+     WHAT IS NOT HERE, and it is one thing. µJump's "Has the cell been annotated with a specific
+     organelle or extracellular structure?" filters a sheet of logged organelles that µJump
+     collects and cb2 has no counterpart to -- χJump records assemblies, names and nuclei, not
+     centrioles. Rendering that section against an empty vocabulary would be forty tickboxes all
+     reading zero. So the section below asks what this tool actually knows about a cell, and says
+     in its own summary that that is what it is. -->
+<div class="card" id="filterCard">
+  <label>Filter the cells</label>
+  <p class="hint" style="margin-top:0">Every filter is applied in your browser over the
+  <span id="filterUniverse">cells</span> this page holds &mdash; the ones proofread for the paper
+  and the ones assembled here. Nothing is sent anywhere.</p>
+
+  <details class="rv-panel filter-section" id="filterSecSelect" open>
+    <summary>Select the cell(s) of interest</summary>
+    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;
+      padding:8px 10px;margin-top:8px" id="filterTypes"></div>
+    <p class="hint">Leave everything unticked to match every kind. The counts are of cells that
+    have a soma position, which is what every distance and layer test below needs.</p>
+    <div class="toggles" style="margin-top:6px">
+      <label style="font-size:12px" title="Cells built here out of loose fragments that nobody has
+named yet. They have no kind, so no tickbox above can reach them."><input type="checkbox"
+        id="filterIncludeUnnamed"> Also include cells assembled here that nobody has named yet</label>
+    </div>
+  </details>
+
+  <details class="rv-panel filter-section" id="filterSecNear">
+    <summary>Do you want to find cells close to another cell type?</summary>
+    <div class="toggles" style="margin-top:8px">
+      <label style="font-size:12px"><input type="checkbox" id="filterNearOn"> Only cells within</label>
+      <label style="font-size:12px"><input id="filterNearDist" value="10" style="width:70px;
+        text-transform:none"> &micro;m of one of these</label>
+      <label style="font-size:12px"><input type="checkbox" id="filterNearIncludeRef">
+        Also include the reference cells themselves</label>
+    </div>
+    <div style="max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;
+      padding:8px 10px;margin-top:8px" id="filterNearTypes"></div>
+    <p class="hint">Soma to soma, in three dimensions. cb2 is a 48&nbsp;&micro;m slab, so a
+    radius much larger than that is measuring in x and y with the third axis nearly flat.</p>
+  </details>
+
+  <details class="rv-panel filter-section" id="filterSecLayer">
+    <summary>Which layer should the cell be in?</summary>
+    <div class="toggles" id="filterLayers" style="margin-top:8px"></div>
+    <div class="toggles" style="margin-top:8px">
+      <label style="font-size:12px"><input type="radio" name="flimb" class="flimb" value=""
+        checked> either limb</label>
+      <label style="font-size:12px"><input type="radio" name="flimb" class="flimb" value="upper">
+        upper limb only</label>
+      <label style="font-size:12px"><input type="radio" name="flimb" class="flimb" value="lower">
+        lower limb only</label>
+    </div>
+    <!-- SØREN'S OWN CAVEAT, AS A CONTROL. 2026-09-02: "these lines are an approximation, so if
+         you have evidence that some cells are in e.g. the purkinje layer, but they are outside of
+         my annotations, then don't put too much weight on my annotation." A tolerance the user
+         can set is what taking that seriously looks like in a filter: strict for a claim, generous
+         for a search. -->
+    <div class="toggles" style="margin-top:8px">
+      <label style="font-size:12px"><input type="checkbox" id="filterLayerNear" checked>
+        Also include cells within <span id="filterLayerTolUm">one Purkinje soma</span> of the
+        boundary</label>
+    </div>
+    <p class="hint" id="filterLayerNote"></p>
+  </details>
+
+  <details class="rv-panel filter-section" id="filterSecAnnot">
+    <summary>Has the cell been annotated here?</summary>
+    <p class="hint" style="margin-top:8px">cb2 carries no organelle annotations, so there is no
+    organelle vocabulary to filter on &mdash; what this tool records about a cell is who assembled
+    it, what they called it, and whether a nucleus has been joined to it.</p>
+    <div class="toggles" id="filterAnnot" style="margin-top:8px"></div>
+  </details>
+
+  <details class="rv-panel filter-section" id="filterSecRegion">
+    <summary>Should the cells fall inside specific bounding box(es)?</summary>
+    <div class="toggles" style="margin-top:8px">
+      <label style="font-size:12px"><input type="checkbox" id="filterRegionOn">
+        Limit to region(s) (bounding box)</label>
+    </div>
+    <div id="regionBoxes"></div>
+    <button type="button" class="idbtn" id="regionAddBox" style="margin-top:8px">+ Add another
+      box</button>
+    <div id="regionViz" style="margin-top:10px"></div>
+  </details>
+
+  <details class="rv-panel filter-section" id="filterSecViewer" style="margin-top:22px">
+    <summary>Add extra layers to the 3D view (optional &mdash; doesn&rsquo;t change which cells
+      match)</summary>
+    <div class="toggles" style="margin-top:8px">
+      <label style="font-size:12px" title="The imagery is left in the link either way; unticking
+sends it switched off, so you can turn it back on in the viewer without rebuilding the link."><input
+        type="checkbox" id="filterEMOn" checked> EM imagery</label>
+      <label style="font-size:12px"><input type="checkbox" id="filterMarkOn" checked>
+        A point on every matched soma</label>
+      <label style="font-size:12px" title="The six boundaries Søren traced, as line annotations on
+the section they were drawn on."><input type="checkbox" id="filterBordersOn"> The traced
+        cerebellar layer borders</label>
+      <label style="font-size:12px"><input type="checkbox" id="filterNucOn"> The nuclei marked
+        here</label>
+    </div>
+  </details>
+
+  <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
+    <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
+    <button class="idbtn" id="filterDownload" disabled
+      title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
+  </div>
+  <div class="row" style="margin-top:8px;gap:10px">
+    <button class="idbtn" id="filterViewerAll" disabled
+      title="Click &quot;Preview matches&quot; first" style="flex:1">Open all matches in
+      Neuroglancer (3D)</button>
+  </div>
+
+  <div class="card" id="stepThroughCard" style="margin-top:14px;display:none">
+    <label title="Visits every matched cell exactly once, remembering where you were.">Systematically
+      step through matches</label>
+    <p class="hint" id="stepCounter" style="margin-top:10px;font-weight:600;color:var(--ink)"></p>
+    <div class="row" style="gap:8px;margin-top:6px">
+      <button class="idbtn" id="stepPrev" style="flex:1">&larr; Previous</button>
+      <button class="idbtn" id="stepNext" style="flex:1">Next &rarr;</button>
+    </div>
+    <div id="stepNucMount"></div>
+    <button type="button" class="idbtn" id="stepReset" style="margin-top:8px;padding:6px 10px;
+      font-size:12px;width:auto"
+      title="Clear checked-progress for this exact set of matched cells">Reset progress</button>
+  </div>
+</div>
+
 <div class="card" id="seed-card">
   <label>The cell list &mdash; <span id="seed-count"></span></label>
   <p class="hint" style="margin-top:0">Every cell in cb2 this tool knows about: the ones proofread
-  for the paper, and the ones assembled here. Searchable by name, kind or annotator, and applied
-  entirely in your browser &mdash; the list is embedded in this page. Each row shows the cell
-  <b>as it stands now</b>, so a reconstruction somebody has extended here says so and opens with
-  the extra fragments in it. <b>Add fragments</b> aims the paste box at that cell, so you extend
-  or correct an existing reconstruction rather than starting a rival one.</p>
+  for the paper, and the ones assembled here. Each row shows the cell <b>as it stands now</b>, so a
+  reconstruction somebody has extended here says so and opens with the extra fragments in it.
+  <b>Add fragments</b> aims the paste box at that cell, so you extend or correct an existing
+  reconstruction rather than starting a rival one.</p>
   <p class="hint" style="margin-top:6px"><span id="seed-breakdown"></span></p>
   <div class="row" style="margin:10px 0">
-    <input id="seed-q" placeholder="grc_100, purkinje, mf&hellip;" style="flex:1 1 240px">
+    <input id="seed-q" placeholder="search by name, kind or annotator&hellip;" style="flex:1 1 240px">
     <span class="hint" id="seed-msg"></span>
     <button type="button" id="seed-csv" title="The whole list, not just what is on screen &mdash;
-every cell, its kind, its soma position, how many fragments it has now and who worked on it.">Download
-the whole list (CSV)</button>
+every cell, its kind, its layer, its soma position, how many fragments it has now and who worked on
+it.">Download the whole list (CSV)</button>
   </div>
   <div id="seed-list"></div>
 </div>
@@ -852,6 +1042,40 @@ UJ.cfg.explore = {
 };
 
 UJ.cfg.tabs = { lsKey: "xjump_active_tab", urlParam: "tab" };
+/* core/stepthrough.js. Its tab half is NOT used -- χJump has its own tab machinery, which also
+   redraws the statistics on open -- only initStepThrough/stepGoTo. nucPanelId names the element
+   the step-through physically MOVES under its card as you walk the matches: in µJump that is the
+   nucleus panel, here it is the whole cell card, so what you get while stepping is the same
+   identity panel with the same buttons rather than a reduced copy of it that can drift. */
+UJ.cfg.stepthrough = { lsKey: "xjump_stepthrough_v1", nucPanelId: "cellPanelCard" };
+
+/* core/regionbox.js -- "Should the cells fall inside specific bounding box(es)?"
+   One extent, because there is one volume; µJump draws two because minnie65 and minnie35 are
+   different blocks. A FUNCTION rather than an array so it is resolved at mount time from the
+   volume's own numbers rather than restated here, which is how λJump once shipped drawing one
+   outline instead of two. */
+UJ.cfg.regionbox = {
+  extents: function(){
+    var v = UJ.cfg.volume, r = [v.res_nm[2], v.res_nm[1], v.res_nm[0]];
+    var e = [v.shape[2] * r[0], v.shape[1] * r[1], v.shape[0] * r[2]];
+    return [{ name: v.id, color: "#4ade80",
+              xmin:0, xmax:e[0], ymin:0, ymax:e[1], zmin:0, zmax:e[2] }];
+  },
+  unit: "voxels",
+  /* Not "pia at top": this block is a folium, so the pia is at the TOP and the BOTTOM and the
+     white matter runs down the middle. Saying "pia at top" here would be copying µJump's caption
+     onto tissue it is false of. */
+  depthCaption: "Y — molecular layer at top and bottom, white matter down the middle",
+  colab: { em: true, seg: true, meshes: true }
+};
+
+/* core/colabexport.js, for the per-box notebook. cb2 is served as ordinary precomputed volumes on
+   a public bucket, so cloud-volume opens both without any credential -- which is why there is no
+   segCaveAuth here and why the notebook has no token cell. */
+UJ.cfg.em = {
+  emSource:  "https://bossdb-open-data.s3.amazonaws.com/nguyen_thomas2022/cb2/em",
+  segSource: "https://bossdb-open-data.s3.amazonaws.com/nguyen_thomas2022/cb2/seg"
+};
 UJ.cfg.backend = {
   /* Shares ωJump's deployment; the handlers are new (XJumpCells.gs) and write to their own
      sheets, keyed by ds:"xjump". Same endpoint means one script to redeploy, not two. */
@@ -878,6 +1102,69 @@ UJ.cfg.mesh = {};
      mean everywhere: the same fix made in one tool's own chip reached that tool only, and
      Søren's next screenshot was the next tool still showing 1786.5000000000002. -->
 <script src="core/points.js"></script>
+<!-- The filter panel's shared halves: the bounding-box rows and preview, the per-box Colab
+     notebook they generate, and the step-through. Same files µJump, λJump and ωJump load, so a
+     fix to any of them reaches every tool rather than the one it was found in. core/tree.js,
+     core/ontology.js and core/panel.js are NOT loaded: they are µJump's guided-identification
+     and organelle-report machinery, and cb2 has neither. -->
+<script src="core/regionbox.js"></script>
+<script src="core/colabexport.js"></script>
+<script src="core/stepthrough.js"></script>
+<!-- SheetJS, for "Download as Excel". Deferred and null-checked at the call site: the button says
+     so rather than doing nothing if the CDN is blocked, and the CSV download beside it needs no
+     library at all. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<!-- The six cerebellar boundaries, traced in neuroglancer. Before the logic, which reads them
+     through UJ.cfg.cerebellum the first time anything asks what layer a point is in. -->
+<script>/* cb2's cerebellar layers, TRACED -- not fitted.            generated 2026-09-02
+   src/build_xjump_layers.py, from src/cb2_layer_annotations.json
+
+   Søren traced these in neuroglancer on section z = 612 and sent the state back on 2026-09-02.
+   Six boundaries, in the volume's own voxels at 4 x 4 x 40 nm, each a polyline of [x, y] read
+   left to right. y increases DOWNWARD, the image-row convention this whole family uses.
+
+   Top to bottom through the folium:
+
+       molecular layer          (above pcUpperOuter)
+       PURKINJE CELL LAYER      pcUpperOuter .. pcUpperInner
+       granular layer           pcUpperInner .. wmUpper
+       WHITE MATTER             wmUpper      .. wmLower
+       granular layer           wmLower      .. pcLowerInner
+       PURKINJE CELL LAYER      pcLowerInner .. pcLowerOuter
+       molecular layer          (below pcLowerOuter)
+
+   -- which is a folium in cross-section: cortex on both limbs, white matter down the core, and
+   the two molecular layers facing outwards. It is the arrangement Søren described from the
+   paper's own parasagittal figure and that the old percentile fit could not see, because every
+   proofread cell in the published database lies on the UPPER limb.
+
+   ONE SECTION, USED FOR ALL 1,200. The tracing was done at z = 612 and is applied at every z.
+   That is a real approximation and the page says so: cb2 is a 48 um slab and the folium's
+   boundaries do move through it, but they move by much less than the layers are thick, and a
+   boundary traced on one section is a far better answer than a percentile of somata that exist
+   on only one limb. */
+window.UJ = window.UJ || {};
+UJ.cfg = UJ.cfg || {};
+UJ.cfg.cerebellum = {
+  tracedBy: "Søren Grubb, in neuroglancer, 2026-09-02",
+  tracedAtZ: 612,
+  units: "voxels of the volume's own grid (4 x 4 x 40 nm), [x, y], y increasing downward",
+  boundaries: {
+    /* upper Purkinje layer, superficial edge */
+    pcUpperOuter: [[32120,94632],[42850,95559],[57752,95294],[68746,94963],[91794,94897],[101729,93109],[121598,91453],[138222,89267],[160674,86618],[179352,83704],[199817,78406],[213461,73372],[221673,69531]],
+    /* upper Purkinje layer, deep edge */
+    pcUpperInner: [[32202,98340],[43329,99465],[56304,99224],[71770,98742],[83219,98300],[94186,97617],[116441,96332],[135923,94283],[153599,91632],[169627,89583],[183526,86811],[196783,83156],[206866,79661],[216908,76648],[224099,72350]],
+    /* white matter, upper edge */
+    wmUpper: [[33537,120827],[59417,118206],[81147,120172],[101130,120063],[124061,119517],[157803,116459],[182044,113402],[207705,106413],[225832,102154]],
+    /* white matter, lower edge */
+    wmLower: [[34193,133384],[50135,133494],[66624,132511],[85842,132729],[116527,132729],[143498,131528],[175274,127925],[193728,126396],[211527,123666],[226924,120172]],
+    /* lower Purkinje layer, edge facing the granular layer */
+    pcLowerInner: [[35246,156141],[46345,154971],[59583,154695],[73964,154856],[89350,154936],[107184,155700],[123866,156776],[133940,157306],[145147,158551],[156757,159435],[168206,159716],[179172,160721],[195241,160118],[208979,161122],[216130,163493],[226695,161364],[232881,160922]],
+    /* lower Purkinje layer, edge facing the molecular layer */
+    pcLowerOuter: [[35637,159386],[42908,158020],[53834,157739],[63756,158060],[77575,158502],[90591,158462],[104249,160189],[121482,161234],[144299,163122],[160448,165130],[176316,165974],[197767,165331],[211948,166416],[223236,166175],[233078,164809]]
+  }
+};
+</script>
 <script>/* ── χJump seed cells ────────────────────────────────────────────────────────────────────────
    GENERATED by build_xjump_seeds.py from the cb2 proofreading database. Do not edit by hand.
 
@@ -1272,6 +1559,12 @@ UJ.xjump = (function(){
 
     var em = { type:"image", name:v.emLayerName, source:v.em, tab:"source" };
     if (v.em_range) em.shaderControls = { normalized: { range: v.em_range } };
+    /* The imagery can be turned OFF and still be in the state. Søren, 2026-09-02, listing what the
+       filter's viewer section should offer: "where you can deselect the EM imagery". Deselected
+       rather than omitted, deliberately -- a layer that is absent cannot be switched back on
+       without rebuilding the link, and somebody who hid the EM to look at meshes usually wants it
+       back a minute later. `visible:false` is neuroglancer's own word for that. */
+    if (o.em === false) em.visible = false;
 
     /* The segmentation, shifted onto the tissue. See segTranslateZ in the config: as published
        these two volumes share no section at all, and the first link this tool made showed a
@@ -1336,6 +1629,41 @@ UJ.xjump = (function(){
                                     pointA: o.box.loVox, pointB: o.box.hiVox }] });
     }
 
+    /* ── the traced cerebellar boundaries, as a layer ─────────────────────────────────────────
+       Søren traced these in neuroglancer in the first place, so handing them back is giving him
+       his own annotation to check the tool against. One layer per boundary would be six layers in
+       the panel; one layer of six polylines is one thing to switch on and off, and neuroglancer
+       colours per layer anyway. */
+    if (o.layerBorders){
+      var CB = UJ.cfg.cerebellum;
+      if (CB && CB.boundaries){
+        var lz = (pos0(posVox, o) || centreVox())[2], segsOut = [], li = 0;
+        LAYER_ORDER.forEach(function(k){
+          var poly = CB.boundaries[k] || [];
+          for (var i = 1; i < poly.length; i++)
+            segsOut.push({ type:"line", id:"lb" + (li++),
+                           pointA:[poly[i-1][0], poly[i-1][1], lz],
+                           pointB:[poly[i][0], poly[i][1], lz] });
+        });
+        if (segsOut.length)
+          layers.push({ type:"annotation", name:"cerebellar layer borders (traced)",
+                        source: { url:"local://annotations", transform:{ outputDimensions: dims } },
+                        tab:"source", annotationColor:"#66ff00", annotations: segsOut });
+      }
+    }
+    /* The matched somata, as points. What makes "open all matches in the viewer" mean anything
+       when the matches are five hundred cells: their fragments would be a link nobody's browser
+       would accept, and a point per soma is the map of the answer. */
+    if (o.markers && o.markers.length){
+      layers.push({ type:"annotation", name: o.markerName || "matched cells",
+                    source: { url:"local://annotations", transform:{ outputDimensions: dims } },
+                    tab:"annotations", annotationColor: o.markerColour || "#4ade80",
+                    annotations: o.markers.slice(0, 5000).map(function(m, i){
+                      var p = m.pos || m;
+                      return { type:"point", id:"mk" + i, point: p.map(Number),
+                               description: m.name || undefined }; }) });
+    }
+
     var pos = posVox || (o.frame && o.frame.position) || centreVox();
     return {
       dimensions: localDims(),
@@ -1354,6 +1682,9 @@ UJ.xjump = (function(){
     };
   }
   function centreVox(){ return extentVox().map(function(n){ return Math.round(n/2); }); }
+  /* The z the caller is going to end up at, needed BEFORE `pos` is computed because the traced
+     boundaries have to be drawn on that section. Same expression, named once. */
+  function pos0(posVox, o){ return posVox || (o && o.frame && o.frame.position) || null; }
   function viewerUrl(ids, posVox, opts){
     return UJ.cfg.viewer.base + "#!" + encodeURIComponent(JSON.stringify(buildState(ids, posVox, opts)));
   }
@@ -1468,158 +1799,222 @@ UJ.xjump = (function(){
     return !!(s && pos && pos[2] === s.z);
   }
 
-  /* ── the cerebellar layers, derived rather than drawn ────────────────────────────────────
-     Søren, 2026-09-01: "I would like if the model could be divided in what parts of the
-     cerebellum, like what layers the cells are in."
+  /* ── the cerebellar layers, TRACED ───────────────────────────────────────────────────────
+     Søren, 2026-09-02: "I have annotated the layers in the following JSON, I annotated two lines
+     for each layer marking the borders, the molecular layers are everything above and below the
+     two Purkinje cell layers." And, immediately after: "of course the granular layer is in
+     between the white matter border and the purkinje cell layer."
 
-     cb2 publishes no layer volume, so there is nothing to sample -- but the layers are DEFINED by
-     the cells in them, and this page is carrying five thousand proofread cells with somata. The
-     granular layer is where granule cell somata are; the Purkinje cell layer is where Purkinje
-     somata are; the molecular layer is what lies superficial to those. So the boundaries are read
-     off the seed populations rather than asserted, and every number below is a percentile of a
-     stated set of cells.
+     WHAT THIS REPLACED, and why it is a different kind of claim. Until now this function INFERRED
+     the layers: it binned the proofread somata in x and took percentiles of them, because cb2
+     publishes no layer volume and the layers are, after all, defined by the cells in them. That
+     fit was honest about its reach -- it returned two "unsampled" outcomes, one of them the deep
+     400 um where it had no cells at all -- but it could only ever see the ONE limb of the folium
+     the published database happens to cover. Søren went and traced the boundaries in the image,
+     on section z = 612. A neuroscientist reading the tissue supersedes a percentile of a soma
+     list, so that is what the page answers from. The bands live in xjump_layers.js.
 
-     PER X BIN, not one flat band across the block. The folium is tilted: the Purkinje somata sit
-     at y ~= 97,000 at the left edge and ~= 83,000 at the right, a slope of about 56 µm across the
-     millimetre, and the granule cells' upper edge follows it. A single horizontal line would be
-     visibly wrong at both ends.
+     "THESE LINES ARE AN APPROXIMATION, so if you have evidence that some cells are in e.g. the
+     purkinje layer, but they are outside of my annotations, then don't put too much weight on my
+     annotation." Taken seriously, and the way to take it seriously was to MEASURE the agreement
+     rather than to fudge the bands toward whichever cells disagreed. Of the 170 Purkinje records:
 
-     NOT IN Z. The granule somata are spread evenly through all 1,200 sections, so there is no
-     layer structure along the thin axis -- the slab cuts across the layers, it is not stacked in
-     them. Drawing bands on the side view would be inventing a third dimension of structure that
-     the data says is not there.
+       - 42 of the 62 whose z is real fall inside the traced band, which is 15-17 um thick -- one
+         soma. For a boundary drawn by hand across a millimetre of tissue that is close agreement,
+         not a coincidence.
+       - 3 of the 108 whose z is the stand-in value (see suspectZ) fall inside. Those sit a median
+         133 um SUPERFICIAL to the band, in the molecular layer. The tracing therefore reaches the
+         same verdict on those records that suspectZ() reached from the z values alone, by a route
+         that shares no arithmetic with it.
+       - 18 of the 19 cells the source itself names ml_grc_* / grc_ml_* land in the molecular
+         layer. The tracing agrees with the source's own naming, on cells it never saw.
 
-     Excluded, deliberately, and each for a stated reason:
-       - Purkinje records whose z is the suspect one (see suspectZ above) -- 108 of 170.
-       - `ml_grc_*` / `grc_ml_*`, the granule cells the source itself names as being in the
-         MOLECULAR layer. Including them in "where granule somata are" would drag the granular
-         layer's boundary up through the very layer they are named after.
-       - dendrites, axons and fragments, which have no soma to be anywhere. */
-  var LAYERS = null;
-  function layerBands(nBins){
-    var bins = nBins || 12;
-    if (LAYERS && LAYERS.bins === bins) return LAYERS;
-    var ext = extentVox();
-    var rows = seedList().filter(function(r){ return r.pos && r.whole; });
-    var pcs = rows.filter(function(r){
-      return r.type === "pc" && !seedZSuspect(r.pos, "pc"); });
-    /* The other Purkinje records -- the ones whose z is the stand-in. Their x and y are real, and
-       plotted they turn out to be something better than junk: they sit as a 190 µm cloud
-       SUPERFICIAL to the soma band, which is the molecular layer's thickness and where a Purkinje
-       cell's dendrites are. So they are not a second Purkinje layer -- a layer is one soma thick,
-       and no fit could smear one over 190 µm -- they are Purkinje-cell points inside the molecular
-       layer, and their outer envelope is the one measurement this database offers of how far the
-       molecular layer reaches. Used for that and nothing else: never for a soma, never for a
-       depth. */
-    var pcOuter = rows.filter(function(r){
-      return r.type === "pc" && seedZSuspect(r.pos, "pc"); });
-    var grcs = rows.filter(function(r){
-      return r.type === "grc" && !/^ml_grc|^grc_ml/.test(r.name); });
+     And the 20 real-z Purkinje records that fall outside are NOT a boundary in the wrong place:
+     they are one-sided (19 of 20 superficial), spread from 3 to 203 um rather than clustered at
+     one offset, and their per-bin median is zero. A boundary drawn too deep would move every
+     soma in that bin together. A one-sided tail reaching exactly the molecular layer's thickness
+     is what dendritic points catalogued as somata look like -- the same population as the 108.
 
-    function pct(vals, f){
-      if (!vals.length) return null;
-      var v = vals.slice().sort(function(a, b){ return a - b; });
-      return v[Math.min(v.length - 1, Math.floor(v.length * f))];
+     So the tracing stands, and what this function does with the approximation is state it:
+     `nearBoundary` is set within one band-thickness of any boundary, so a caller can say "in the
+     Purkinje cell layer, close to its edge" instead of implying a precision no hand trace has. */
+
+  /* The y of a traced boundary at a given x, by linear interpolation between its vertices.
+     Clamped at both ends and SAID so: the tracing runs x = 32,000..233,000 of a 249,600-voxel
+     block, so the ends beyond the tracing hold its end vertex flat. */
+  function boundaryYAt(poly, x){
+    if (!poly || !poly.length) return null;
+    if (x <= poly[0][0]) return poly[0][1];
+    if (x >= poly[poly.length - 1][0]) return poly[poly.length - 1][1];
+    for (var i = 1; i < poly.length; i++){
+      if (x <= poly[i][0]){
+        var x0 = poly[i-1][0], y0 = poly[i-1][1], x1 = poly[i][0], y1 = poly[i][1];
+        return x1 === x0 ? y0 : y0 + (x - x0) / (x1 - x0) * (y1 - y0);
+      }
     }
-    var band = [], i;
-    for (i = 0; i < bins; i++){
-      var x0 = ext[0] * i / bins, x1 = ext[0] * (i + 1) / bins;
-      var inBin = function(r){ return r.pos[0] >= x0 && r.pos[0] < x1; };
-      var py = pcs.filter(inBin).map(function(r){ return r.pos[1]; });
-      var gy = grcs.filter(inBin).map(function(r){ return r.pos[1]; });
-      var oy = pcOuter.filter(inBin).map(function(r){ return r.pos[1]; });
-      band.push({ x0:x0, x1:x1, nPc:py.length, nGrc:gy.length,
-                  /* Both populations present in this bin: the only place the drawing may claim to
-                     be showing a measured boundary rather than an interpolation. */
-                  measured: py.length > 0 && gy.length >= 10,
-                  /* The Purkinje layer's own thickness, measured: the middle half of the somata in
-                     this bin. One soma is about 20 µm, so a bin with too few cells to measure gets
-                     that instead of a guess. */
-                  pcLo: py.length >= 4 ? pct(py, 0.25) : null,
-                  pcHi: py.length >= 4 ? pct(py, 0.75) : null,
-                  pcMid: py.length ? pct(py, 0.5) : null,
-                  /* The granular layer's far edge. The 95th percentile rather than the maximum:
-                     one stray reconstruction should not stretch a layer boundary by 100 µm. */
-                  glHi: gy.length >= 10 ? pct(gy, 0.95) : null,
-                  /* How far out the molecular layer is known to reach, from the Purkinje points
-                     above the soma band. 5th percentile, same reasoning as glHi's 95th. */
-                  nOut: oy.length,
-                  mlLo: oy.length >= 5 ? pct(oy, 0.05) : null });
-    }
-    /* Bins with nothing in them -- the block's two ends have no proofread cells at all -- take the
-       nearest measured value rather than collapsing to zero, and are MARKED so the drawing can
-       show them as unmeasured rather than as fact. */
-    ["pcMid", "pcLo", "pcHi", "glHi", "mlLo"].forEach(function(k){
-      var last = null, j;
-      for (j = 0; j < band.length; j++){
-        if (band[j][k] == null){ band[j][k + "Est"] = true; band[j][k] = last; }
-        else last = band[j][k];
-      }
-      for (j = band.length - 1; j >= 0; j--){
-        if (band[j][k] == null) band[j][k] = last;
-        else last = band[j][k];
-      }
-    });
-    /* A bin whose Purkinje spread could not be measured gets one soma's thickness, 20 µm, centred
-       on the interpolated middle -- stated as a drawing convention, not as a measurement. */
-    var halfNm = 10000, r = resXYZ();
-    band.forEach(function(b){
-      if (b.pcLo == null || b.pcHi == null || b.pcLoEst || b.pcHiEst){
-        if (b.pcMid != null){
-          b.pcLo = b.pcMid - halfNm / r[1];
-          b.pcHi = b.pcMid + halfNm / r[1];
-          b.pcNominal = true;
-        }
-      }
-    });
-    LAYERS = { bins: bins, band: band, ext: ext,
-               nPc: pcs.length, nGrc: grcs.length, nOuter: pcOuter.length,
-               pcDropped: pcOuter.length };
-    /* HOW MUCH OF THE BLOCK THIS ACCOUNTS FOR, and it is not most of it. Søren, 2026-09-01, looking
-       at the paper's own ROI figure: "We should have a Purkinje cell layer going both up and down
-       and separated by a white matter layer". He is describing a folium -- the fold the ROI box is
-       drawn across -- and a folium has cortex on both limbs with white matter down its core
-       (Univ. of Minnesota veterinary neuroanatomy, cerebellar folium).
-       The proofread cells do not show that. Every one of the 5,318 lies between y = 118 µm and
-       y = 522 µm; below that the block continues for another 400 µm with nothing in it at all, and
-       that is exactly where a second Purkinje layer and the white matter core would be. So the
-       diagram states the extent it covers and marks the rest as unsampled, rather than either
-       drawing a second layer nobody measured or implying the block ends where the cells do. */
+    return poly[poly.length - 1][1];
+  }
+  function tracedRange(){
+    var B = tracedBounds();
+    if (!B) return null;
     var lo = Infinity, hi = -Infinity;
-    rows.forEach(function(r){
-      if (r.pos[1] < lo) lo = r.pos[1];
-      if (r.pos[1] > hi) hi = r.pos[1];
+    LAYER_ORDER.forEach(function(k){
+      var p = B[k]; if (!p || !p.length) return;
+      if (p[0][0] < lo) lo = p[0][0];
+      if (p[p.length-1][0] > hi) hi = p[p.length-1][0];
     });
-    LAYERS.sampledY = isFinite(lo) ? [lo, hi] : null;
-    return LAYERS;
+    return isFinite(lo) ? [lo, hi] : null;
+  }
+  /* Superficial to deep, and the ORDER is the definition: everything below reads the boundaries
+     as a sorted stack rather than by name, so adding a boundary is adding a line here. */
+  var LAYER_ORDER = ["pcUpperOuter", "pcUpperInner", "wmUpper", "wmLower",
+                     "pcLowerInner", "pcLowerOuter"];
+  /* What lies in each of the seven gaps the six boundaries make. The folium, top to bottom. */
+  var LAYER_NAMES = ["molecular layer", "Purkinje cell layer", "granular layer", "white matter",
+                     "granular layer", "Purkinje cell layer", "molecular layer"];
+  /* Which limb of the folium each gap is on, for a caller that wants to tell the two Purkinje
+     layers apart without re-deriving it from the y. */
+  var LAYER_LIMB = ["upper", "upper", "upper", "core", "lower", "lower", "lower"];
+
+  function tracedBounds(){
+    var c = window.UJ && UJ.cfg && UJ.cfg.cerebellum;
+    return (c && c.boundaries) || null;
+  }
+  function tracedAtZ(){
+    var c = window.UJ && UJ.cfg && UJ.cfg.cerebellum;
+    return c ? c.tracedAtZ : null;
+  }
+  /* Every boundary's y at one x, superficial first. Null when xjump_layers.js is not loaded --
+     the page then has no layers at all, which is a state it says rather than fakes. */
+  function layerEdgesAt(x){
+    var B = tracedBounds(); if (!B) return null;
+    var out = [], i;
+    for (i = 0; i < LAYER_ORDER.length; i++){
+      var y = boundaryYAt(B[LAYER_ORDER[i]], x);
+      if (y == null) return null;
+      out.push(y);
+    }
+    return out;
+  }
+  /* The list of layers as a filter or a legend wants them: name, and which gaps it occupies. */
+  function layerList(){
+    var seen = {}, out = [];
+    LAYER_NAMES.forEach(function(n, i){
+      if (!seen[n]){ seen[n] = { name:n, gaps:[] }; out.push(seen[n]); }
+      seen[n].gaps.push(i);
+    });
+    return out;
   }
 
-  /* Which layer a point is in, by the bands above. Returns null outside the volume in x, because
-     a band fitted where there are no cells is not an answer. */
+  /* Which layer a point is in.
+
+     Returns null only when there are no traced boundaries at all. Outside the traced x range the
+     answer is still given -- the boundaries are held flat past their end vertices, which over
+     128 um of a folium that is changing slowly is a better answer than none -- but `extrapolated`
+     says so, and every caller that prints a layer prints that too. */
   function layerAt(posVox){
     if (!posVox) return null;
-    var L = layerBands(), ext = L.ext;
-    if (posVox[0] < 0 || posVox[0] > ext[0]) return null;
-    var i = Math.min(L.band.length - 1,
-                     Math.max(0, Math.floor(posVox[0] / ext[0] * L.band.length)));
-    var b = L.band[i], y = posVox[1], r = resXYZ();
-    if (b.pcLo == null || b.glHi == null) return null;
-    /* Five outcomes, not three. The two "not sampled" ones matter more than the layers: outside the
-       range the proofread cells cover, this page knows nothing, and the deep one is where Søren's
-       second Purkinje layer and the folium's white matter would be. Calling that "molecular layer"
-       or "granular layer" because it is on that side of a boundary would be the fit answering a
-       question it was never given data for. */
-    var name = (b.mlLo != null && y < b.mlLo) ? "unsampled — outside the proofread cells"
-             : y < b.pcLo ? "molecular layer"
-             : y <= b.pcHi ? "Purkinje cell layer"
-             : y <= b.glHi ? "granular layer"
-             : "unsampled — deeper than any proofread cell";
-    var mid = b.pcMid == null ? (b.pcLo + b.pcHi) / 2 : b.pcMid;
-    return { layer: name, bin: i, nominal: !!b.pcNominal,
-             /* Signed, in nanometres: negative is superficial to the Purkinje layer (towards the
-                molecular layer), positive is deep to it (towards the granular layer). */
-             fromPcNm: (y - mid) * r[1] };
+    var e = layerEdgesAt(posVox[0]); if (!e) return null;
+    var y = posVox[1], r = resXYZ(), i, gap = e.length;
+    for (i = 0; i < e.length; i++){ if (y < e[i]){ gap = i; break; } }
+    /* Distance to the nearest boundary, and to the Purkinje layer's middle -- both signed in
+       nanometres, negative meaning superficial (towards the pia on the upper limb). */
+    var nearest = Infinity, d;
+    for (i = 0; i < e.length; i++){
+      d = (y - e[i]) * r[1];
+      if (Math.abs(d) < Math.abs(nearest)) nearest = d;
+    }
+    /* The tolerance is the traced Purkinje band's OWN thickness at this x -- about 16 um, one
+       soma. A cell within that of a boundary is reported in its layer and marked as being near
+       the edge, because a hand-drawn line is not accurate to less than the thing it separates. */
+    var pcThick = Math.abs(e[1] - e[0]) * r[1];
+    var range = tracedRange();
+    /* Which Purkinje layer to measure depth from: the one on this point's own limb. */
+    var lo = LAYER_LIMB[gap] === "lower" ? e[4] : e[0],
+        hi = LAYER_LIMB[gap] === "lower" ? e[5] : e[1];
+    return { layer: LAYER_NAMES[gap], gap: gap, limb: LAYER_LIMB[gap],
+             nearBoundary: Math.abs(nearest) <= pcThick,
+             toBoundaryNm: nearest,
+             extrapolated: !!(range && (posVox[0] < range[0] || posVox[0] > range[1])),
+             /* Signed, in nanometres, from the middle of this limb's Purkinje layer: negative is
+                towards the molecular layer, positive towards the white matter. The lower limb is
+                upside down, so its sign is flipped to keep "negative means towards the pia" true
+                of both. */
+             fromPcNm: ((y - (lo + hi) / 2) * r[1]) * (LAYER_LIMB[gap] === "lower" ? -1 : 1) };
   }
+
+  /* HOW WELL THE TRACING AND THE PUBLISHED SOMATA AGREE, computed rather than quoted, so the
+     figures the page prints cannot drift from the tracing or the seed list. Søren asked for the
+     annotation not to be over-weighted; this is the page's evidence for how much weight it has
+     earned, recomputed every time either side changes. */
+  var AGREE = null;
+  function layerAgreement(){
+    if (AGREE) return AGREE;
+    var rows = seedList().filter(function(r){ return r.pos; });
+    function tally(list){
+      var by = {}, n = 0;
+      list.forEach(function(r){
+        var L = layerAt(r.pos); if (!L) return;
+        by[L.layer] = (by[L.layer] || 0) + 1; n++;
+      });
+      return { by: by, n: n };
+    }
+    var pcReal = rows.filter(function(r){
+      return r.type === "pc" && r.whole && !seedZSuspect(r.pos, "pc"); });
+    var pcSus = rows.filter(function(r){
+      return r.type === "pc" && r.whole && seedZSuspect(r.pos, "pc"); });
+    var ml = rows.filter(function(r){ return /^ml_grc|^grc_ml/.test(r.name); });
+    var grc = rows.filter(function(r){
+      return r.type === "grc" && r.whole && !/^ml_grc|^grc_ml/.test(r.name); });
+    function inLayer(list, name){
+      return list.filter(function(r){
+        var L = layerAt(r.pos); return L && L.layer === name; }).length;
+    }
+    /* THE ONES THAT DISAGREE, described rather than counted away. How far outside, and on which
+       side -- because those two facts are what tell "the line is in the wrong place" apart from
+       "these records are not somata". A boundary drawn too deep puts its whole bin on one side by
+       about the same amount; a population of dendritic points scatters out to the far edge of the
+       next layer and only ever on one side. */
+    function strays(list, name){
+      var out = [];
+      list.forEach(function(r){
+        var L = layerAt(r.pos); if (!L || L.layer === name) return;
+        out.push(L.fromPcNm / 1000);
+      });
+      out.sort(function(a, b){ return Math.abs(a) - Math.abs(b); });
+      return { n: out.length,
+               /* Towards the pia, on either limb: fromPcNm is signed the same way on both. */
+               towardsPia: out.filter(function(v){ return v < 0; }).length,
+               nearestUm: out.length ? Math.abs(out[0]) : 0,
+               furthestUm: out.length ? Math.abs(out[out.length - 1]) : 0 };
+    }
+    AGREE = {
+      /* Purkinje somata with a real z, in the traced Purkinje band. The headline number. */
+      pcReal: { n: pcReal.length, hit: inLayer(pcReal, "Purkinje cell layer") },
+      /* The same for the records whose z is the stand-in -- a control, and it fails, which is
+         the point: the tracing tells the two populations apart. */
+      pcSuspect: { n: pcSus.length, hit: inLayer(pcSus, "Purkinje cell layer") },
+      /* Cells the SOURCE names as molecular-layer granule cells, in the traced molecular layer. */
+      mlNamed: { n: ml.length, hit: inLayer(ml, "molecular layer") },
+      /* And the bulk: ordinary granule cells in the granular layer. */
+      grc: { n: grc.length, hit: inLayer(grc, "granular layer") },
+      /* The real-z Purkinje somata that fall outside the traced band. */
+      pcStray: strays(pcReal, "Purkinje cell layer"),
+      /* How thick the traced Purkinje band is where the cells are, which is the yardstick every
+         "near the boundary" judgement uses. Median over the somata themselves rather than at one
+         arbitrary x. */
+      pcBandUm: (function(){
+        var t = pcReal.map(function(r){
+          var e = layerEdgesAt(r.pos[0]);
+          return e ? Math.abs(e[1] - e[0]) * resXYZ()[1] / 1000 : null;
+        }).filter(function(v){ return v != null; }).sort(function(a, b){ return a - b; });
+        return t.length ? Math.round(t[Math.floor(t.length / 2)]) : null;
+      })(),
+      all: tally(rows)
+    };
+    return AGREE;
+  }
+
   function seedList(){
     var s = (window.UJ.seeds && window.UJ.seeds.cells) || [];
     return s.map(function(c){
@@ -1939,7 +2334,10 @@ UJ.xjump = (function(){
            parseCoord:parseCoord, seedsNear:seedsNear, randomSeed:randomSeed,
            seedTypes:seedTypes, seedLabelFor:seedLabelFor, isWholeCell:isWholeCell,
            seedNameDisagrees:seedNameDisagrees, suspectZ:suspectZ,
-           seedZSuspect:seedZSuspect, layerBands:layerBands, layerAt:layerAt,
+           seedZSuspect:seedZSuspect, layerAt:layerAt, layerList:layerList,
+           layerEdgesAt:layerEdgesAt, boundaryYAt:boundaryYAt, tracedBounds:tracedBounds,
+           tracedRange:tracedRange, tracedAtZ:tracedAtZ, layerAgreement:layerAgreement,
+           LAYER_ORDER:LAYER_ORDER, LAYER_NAMES:LAYER_NAMES, LAYER_LIMB:LAYER_LIMB,
            boxGrid:boxGrid, boxCount:boxCount, boxKeyOf:boxKeyOf, boxOf:boxOf,
            boxBounds:boxBounds, boxOfPointVox:boxOfPointVox, nextBox:nextBox,
            nucleiNear:nucleiNear,
@@ -3183,6 +3581,7 @@ UJ.app = (function(){
        fragment count, so leaving it drawn from the load-time store would show the published
        figure again the moment you added to a cell. It reads the search box, so redrawing it
        keeps whatever was typed. */
+    invalidateUniverse();
     renderSeeds();
     var host = el("cells"); if (!host) return;
     if (!STATE.cells.length){
@@ -4331,43 +4730,53 @@ UJ.app = (function(){
     return PC_DOTS;
   }
 
-  /* ── the layers, drawn from the bands the logic derived ───────────────────────────────────
-     Søren, 2026-09-01: "I would like if the model could be divided in what parts of the
-     cerebellum, like what layers the cells are in."
+  /* ── the layers, drawn from the boundaries Søren traced ───────────────────────────────────
+     Søren, 2026-09-02: "update the model of 'Where it is in the block' with these borders."
 
-     Every boundary here is a percentile of a stated set of proofread somata -- see layerBands() in
-     the logic for what is measured, what is excluded and why. Two rules this drawing keeps:
+     What this drawing showed until today was a percentile fit to the proofread somata, with two
+     HATCHED bands meaning "nothing was measured here" -- one of them the deep 400 µm where the
+     paper's own ROI figure says the folium's white matter core and its opposite limb are. The
+     tracing fills exactly that gap, so the hatching is gone: there is no unsampled band any more,
+     because the boundaries no longer come from where cells happen to have been reconstructed.
 
-       - IT STOPS WHERE THE CELLS STOP. The bands are clipped to the x range that actually has both
-         populations in it. The block's two ends have no proofread cells at all, and colouring them
-         from an interpolated boundary would be the diagram asserting a layer nobody looked at.
-       - NOT ON THE SIDE VIEW. The granule somata are spread evenly through all 1,200 sections, so
-         there is no layer structure along z. Bands there would invent a third dimension of
-         structure the data says is not there. */
-  /* The fills live in the STYLESHEET, one class each, not as inline attributes -- so light mode
-     can carry its own opacities. The accent at 20% is legible on the dark ground and almost
-     invisible on white; a single number cannot serve both. The legend swatches wear the same
-     classes, so a colour can never drift between the drawing and the key. */
+     Seven bands from six lines, and the polygons are built from the traced vertices themselves
+     rather than resampled onto bins. A boundary drawn as fourteen line segments IS fourteen line
+     segments; drawing it through a 12-bin grid would round off the folium's tip, which is the one
+     part of the shape a reader could not have guessed. */
   var LAYER_STYLE = [
-    { cls:"lay-un",  label:"not sampled",           top:null,    bot:"mlLo" },
-    { cls:"lay-ml",  label:"molecular layer",       top:"mlLo",  bot:"pcLo" },
-    { cls:"lay-pcl", label:"Purkinje cell layer",   top:"pcLo",  bot:"pcHi" },
-    { cls:"lay-gl",  label:"granular layer",        top:"pcHi",  bot:"glHi" },
-    { cls:"lay-un",  label:"not sampled",           top:"glHi",  bot:null }
+    { cls:"lay-ml",  label:"molecular layer" },
+    { cls:"lay-pcl", label:"Purkinje cell layer" },
+    { cls:"lay-gl",  label:"granular layer" },
+    { cls:"lay-wm",  label:"white matter" },
+    { cls:"lay-gl",  label:"granular layer" },
+    { cls:"lay-pcl", label:"Purkinje cell layer" },
+    { cls:"lay-ml",  label:"molecular layer" }
   ];
 
-  /* One band as a polygon: the top edge across the measured bins, then the bottom edge back. Bin
-     CENTRES rather than bin edges, so the tilt reads as a slope instead of a staircase. */
-  function bandPath(bins, topKey, botKey, f, ext){
-    var top = [], bot = [], i, b;
-    for (i = 0; i < bins.length; i++){
-      b = bins[i];
-      var cx = (b.x0 + b.x1) / 2;
-      /* The first and last measured bins run out to their own outer edge, so the band reaches the
-         end of what was measured rather than stopping half a bin short. */
-      var x = i === 0 ? b.x0 : i === bins.length - 1 ? b.x1 : cx;
-      top.push([x, topKey === null ? 0 : b[topKey]]);
-      bot.push([x, botKey === null ? ext[1] : b[botKey]]);
+  /* The x values every band shares: each traced vertex, plus the block's two edges so the bands
+     reach the sides of the drawing rather than stopping where the tracing does. Held flat past
+     the end vertices -- boundaryYAt does that, and the caption says so. */
+  var LAYER_XS = null;
+  function layerXs(){
+    if (LAYER_XS) return LAYER_XS;
+    var B = X.tracedBounds(), ext = X.extentVox(), xs = {};
+    if (!B) return (LAYER_XS = []);
+    X.LAYER_ORDER.forEach(function(k){
+      (B[k] || []).forEach(function(p){ xs[p[0]] = 1; });
+    });
+    xs[0] = 1; xs[ext[0]] = 1;
+    LAYER_XS = Object.keys(xs).map(Number).sort(function(a, b){ return a - b; });
+    return LAYER_XS;
+  }
+
+  /* One band as a polygon: its top edge left to right, its bottom edge back. gap 0's top and
+     gap 6's bottom are the block itself, not a traced line. */
+  function bandPath(gap, f, ext){
+    var xs = layerXs(), top = [], bot = [], i;
+    for (i = 0; i < xs.length; i++){
+      var e = X.layerEdgesAt(xs[i]); if (!e) return "";
+      top.push([xs[i], gap === 0 ? 0 : e[gap - 1]]);
+      bot.push([xs[i], gap === LAYER_STYLE.length - 1 ? ext[1] : e[gap]]);
     }
     var pts = top.concat(bot.reverse());
     return "<polygon points='" + pts.map(function(p){
@@ -4375,13 +4784,18 @@ UJ.app = (function(){
   }
 
   function topViewLayers(f, extVox){
-    var L = X.layerBands();
-    var used = L.band.filter(function(b){ return b.measured; });
-    if (used.length < 2) return { svg:"", from:null, to:null, L:L };
-    var g = "<g>" + LAYER_STYLE.map(function(st){
-      return "<g class='" + st.cls + "'>" + bandPath(used, st.top, st.bot, f, extVox) + "</g>";
-    }).join("") + "</g>";
-    return { svg:g, from:used[0].x0, to:used[used.length - 1].x1, L:L, bins:used.length };
+    if (!X.tracedBounds()) return { svg:"" };
+    var g = "<g>" + LAYER_STYLE.map(function(st, gap){
+      return "<g class='" + st.cls + "'>" + bandPath(gap, f, extVox) + "</g>";
+    }).join("")
+    /* The traced lines themselves, drawn over the fills. The fills say which layer; the lines say
+       where the evidence is -- and they are what Søren will recognise as his own annotation. */
+    + "<g class='lay-edge'>" + X.LAYER_ORDER.map(function(k){
+        var poly = X.tracedBounds()[k];
+        return "<polyline points='" + poly.map(function(p){
+          return f(p[0], 0) + "," + f(p[1], 1); }).join(" ") + "'/>";
+      }).join("") + "</g></g>";
+    return { svg:g };
   }
 
   /* NANOMETRES, not voxels, and this is not a detail. cb2's z voxels are 40 nm against 4 nm in x
@@ -4396,7 +4810,7 @@ UJ.app = (function(){
     var layers = "", dots = "";
     if (withLayers){
       var r = X.resXYZ();
-      /* layerBands() speaks voxels; everything drawn here speaks nanometres. */
+      /* The traced boundaries speak voxels; everything drawn here speaks nanometres. */
       var fv = function(v, axis){ return f(v * r[axis]); };
       layers = topViewLayers(fv, X.extentVox()).svg;
       dots = "<g class='lay-dot'>" + pcSomata().map(function(p){
@@ -4411,59 +4825,53 @@ UJ.app = (function(){
       +   "' y2='" + f(pt[ay]) + "'/></g>";
     return "<svg viewBox='0 0 " + (W + PAD * 2) + " " + (H + PAD * 2).toFixed(1) + "' "
       + "role='img' aria-label='cb2 seen along " + labX + " and " + labY
-      + (withLayers ? ", divided into the cerebellar layers measured from the proofread somata" : "")
+      + (withLayers ? ", divided into the cerebellar layers traced on section "
+                      + X.tracedAtZ() + ": molecular, Purkinje cell and granular layers on both "
+                      + "limbs of the folium, with white matter down its core" : "")
       + (pt ? ", with your coordinate marked" : "") + "'>"
-      /* Diagonal hatching for the two unsampled bands. A flat tint would read as a fourth layer;
-         hatching reads as "nothing was measured here", which is what it means. The pattern is
-         defined per svg with its own id so two drawings on one page cannot collide. */
-      + (withLayers
-          ? "<defs><pattern id='m3d-hatch' width='6' height='6' patternUnits='userSpaceOnUse' "
-            + "patternTransform='rotate(45)'>"
-            + "<line x1='0' y1='0' x2='0' y2='6' class='lay-un-line'/></pattern></defs>"
-          : "")
       + layers
       + "<rect x='" + PAD + "' y='" + PAD + "' width='" + W + "' height='" + H.toFixed(1)
       +   "' fill='none' stroke='var(--line)' stroke-width='1'/>"
       + dots + mark + "</svg>";
   }
 
-  /* One entry per DISTINCT style -- the two unsampled bands share a class and a meaning, so they
-     share a key entry rather than appearing twice. */
+  /* One entry per DISTINCT layer -- the folium has two molecular, two granular and two Purkinje
+     bands, and six key entries for four layers would read as six layers. */
   function layerKeyHtml(){
     var seen = {};
     return "<div class='lkey'>" + LAYER_STYLE.filter(function(s){
-      if (seen[s.cls]) return false; seen[s.cls] = 1; return true;
+      if (seen[s.label]) return false; seen[s.label] = 1; return true;
     }).map(function(s){
       return "<span class='lkey-item'><span class='lkey-swatch " + s.cls + "'></span>"
         + esc(s.label) + "</span>"; }).join("")
       + "<span class='lkey-item'><span class='lkey-dot'></span>Purkinje somata</span></div>";
   }
 
-  /* Where a coordinate sits, in words. The signed distance to the Purkinje layer is what makes the
-     label safe to read: 2 µm on the molecular side of a boundary fitted to 47 cells is not a
-     finding, and printing the number lets a person see that for themselves. */
+  /* Where a coordinate sits, in words. The distance to the Purkinje layer is what makes the label
+     safe to read: 2 µm on the molecular side of a hand-drawn line is not a finding, and printing
+     the number lets a person see that for themselves. */
   function layerLine(pt){
     var L = pt ? X.layerAt(pt) : null;
     if (!L) return "";
     var d = Math.abs(L.fromPcNm) / 1000;
     return "<b>" + esc(L.layer) + "</b>"
+      + (L.limb === "core" ? "" : " <span class='hint'>(" + esc(L.limb) + " limb)</span>")
       + (L.layer === "Purkinje cell layer" ? ""
          : " &mdash; " + d.toFixed(1) + " &micro;m "
-           + (L.fromPcNm < 0 ? "superficial to" : "deep to") + " the Purkinje cell layer")
-      + (L.nominal ? " (no Purkinje cells were proofread in this part of the block, so the "
-                     + "boundary here is interpolated)" : "");
+           + (L.fromPcNm < 0 ? "towards the pia from" : "deep to") + " the Purkinje cell layer")
+      + (L.nearBoundary ? " <span class='hint'>&mdash; within one Purkinje soma of the boundary, "
+                          + "which is about as close as a hand-drawn line can be read</span>" : "")
+      + (L.extrapolated ? " <span class='hint'>&mdash; beyond the traced x range, so the boundary "
+                          + "here is its end vertex held flat</span>" : "");
   }
 
   function drawMap(pt){
     var host = el("dsmap"); if (!host) return;
-    var ext = X.extentNm();
+    var ext = X.extentNm(), r = X.resXYZ();
     var ptNm = pt ? X.toNm(pt) : null;
-    var info = topViewLayers(function(v, a){ return v; }, X.extentVox());
-    var L = info.L;
-    var covered = info.from == null ? null
-      : [Math.round(info.from * X.resXYZ()[0] / 1000), Math.round(info.to * X.resXYZ()[0] / 1000)];
-    var sampled = L.sampledY
-      ? L.sampledY.map(function(v){ return Math.round(v * X.resXYZ()[1] / 1000); }) : null;
+    var range = X.tracedRange();
+    var A = X.layerAgreement();
+    var pct = function(o){ return o.n ? Math.round(100 * o.hit / o.n) : 0; };
     /* ONE VIEW. The side view went on 2026-09-01 -- Søren: "We can remove the from the side view
        from the model. It does not add much." He is right, and the reason is worth keeping: it
        carried exactly one fact, that z is 48 µm against 998, and the caption below says that in
@@ -4480,29 +4888,47 @@ UJ.app = (function(){
       +   "<p class='hint' style='margin:8px 0 0'>"
       +   (pt ? "Your coordinate is in the " + layerLine(pt) + ". "
                 : "Enter a coordinate above to place it in a layer. ")
-      +   "The boundaries are percentiles of the proofread somata themselves &mdash; the granular "
-      +   "layer is where " + L.nGrc.toLocaleString() + " granule cell somata are, the Purkinje "
-      +   "layer is the middle half of " + L.nPc + " Purkinje somata, and the molecular layer "
-      +   "reaches as far out as the " + L.nOuter + " Purkinje points that lie above them. Not a "
-      +   "published layer volume: cb2 has none."
-      +   (covered ? " Coloured only across x " + covered[0] + "&ndash;" + covered[1]
-                     + "&nbsp;&micro;m, where cells were actually proofread." : "")
+      +   "This is a <b>folium in cross-section</b>: cortex on both limbs, white matter down the "
+      +   "core, and the two molecular layers facing outwards. The six boundaries were traced by "
+      +   "hand in neuroglancer on section&nbsp;" + X.tracedAtZ() + " and are used at every z "
+      +   "&mdash; cb2 is a 48&nbsp;µm slab, so they move much less through it than the layers "
+      +   "are thick."
+      +   (range ? " Traced across x&nbsp;" + Math.round(range[0] * r[0] / 1000) + "&ndash;"
+                   + Math.round(range[1] * r[0] / 1000) + "&nbsp;µm; outside that the end of each "
+                   + "line is held flat." : "")
       +   "</p>"
-      /* THE HONEST ANSWER TO "WHERE IS THE SECOND PURKINJE LAYER". Søren, reading the paper's own
-         ROI figure, is describing a folium: cortex on both limbs, white matter down the core. The
-         proofread cells do not reach it -- every one of the 5,318 lies in the upper 40% of the
-         block -- so the diagram marks that space rather than filling it with a layer nobody
-         measured or leaving it looking like the edge of the volume. */
-      +   (sampled
-            ? "<p class='hint' style='margin:8px 0 0'>Every proofread cell lies between "
-              + sampled[0] + " and " + sampled[1] + "&nbsp;&micro;m in y, of a block "
-              + Math.round(ext[1] / 1000) + "&nbsp;&micro;m deep. The hatched band below them is "
-              + (Math.round(ext[1] / 1000) - sampled[1]) + "&nbsp;&micro;m of volume with no "
-              + "proofread cell in it &mdash; and the ROI in the paper's own figure is drawn "
-              + "across a folium, so that is where its <b>white matter</b> core and the opposite "
-              + "limb&rsquo;s Purkinje and granular layers should be. This page cannot draw them: "
-              + "nobody has reconstructed a cell there yet. Build one and it will."
-              + "</p>"
+      /* HOW MUCH WEIGHT THE TRACING HAS EARNED. Søren, 2026-09-02: "these lines are an
+         approximation, so if you have evidence that some cells are in e.g. the purkinje layer,
+         but they are outside of my annotations, then don't put too much weight on my annotation."
+         The way to take that seriously was to check it rather than to fudge the lines toward
+         whichever cells disagreed -- and the check is printed here, recomputed from the tracing
+         and the seed list every time the page draws, so the numbers cannot go stale. */
+      +   "<p class='hint' style='margin:8px 0 0'><b>Checked against the published cells, not "
+      +   "assumed.</b> " + A.pcReal.hit + " of the " + A.pcReal.n + " Purkinje somata whose z is "
+      +   "real (" + pct(A.pcReal) + "%) fall inside the traced Purkinje band, which is about "
+      +   A.pcBandUm + "&nbsp;µm thick &mdash; one soma. " + A.grc.hit.toLocaleString() + " of "
+      +   A.grc.n.toLocaleString() + " granule somata (" + pct(A.grc) + "%) fall in the granular "
+      +   "layer, and " + A.mlNamed.hit + " of the " + A.mlNamed.n + " cells the source itself "
+      +   "names <code>ml_grc_*</code> fall in the molecular layer &mdash; the tracing agrees with "
+      +   "the source's own naming, on cells it never saw."
+      +   (A.pcSuspect.n
+            ? " Of the " + A.pcSuspect.n + " Purkinje records whose z is the stand-in value, only "
+              + A.pcSuspect.hit + " do; the rest sit in the molecular layer. So the tracing "
+              + "reaches the same verdict on those records as their z values did, by a route that "
+              + "shares no arithmetic with it."
+            : "")
+      +   "</p>"
+      +   (A.pcStray.n
+            ? "<p class='hint' style='margin:8px 0 0'>The " + A.pcStray.n + " real-z Purkinje "
+              + (A.pcStray.n === 1 ? "soma that falls" : "somata that fall") + " outside are "
+              + "<b>not</b> a line in the wrong place: "
+              + A.pcStray.towardsPia + " of " + A.pcStray.n + " are on the same side &mdash; "
+              + "towards the pia &mdash; and they are spread from "
+              + A.pcStray.nearestUm.toFixed(0) + " to " + A.pcStray.furthestUm.toFixed(0)
+              + "&nbsp;µm rather than clustered at one offset. A boundary drawn too deep would "
+              + "move every soma near it together, by about the same amount. A one-sided scatter "
+              + "reaching the molecular layer&rsquo;s own thickness is what dendritic points "
+              + "catalogued as somata look like.</p>"
             : "")
       +   "</div>";
   }
@@ -4562,11 +4988,24 @@ UJ.app = (function(){
     }
 
     var q = el("seed-q") ? el("seed-q").value : "";
-    var hits = X.seedSearch(rows, q, 25);
-    if (el("seed-msg"))
-      el("seed-msg").textContent = q
-        ? hits.length + (hits.length === 25 ? "+ shown" : " found")
-        : "showing the first 25 — type to search";
+    /* THE LIST IS THE RESULTS AREA. µJump prints its match count on the button and leaves the
+       matches to the step-through; χJump already had a list of every cell sitting under the
+       panel, so a preview simply narrows it. One list, so the filter and the thing you read the
+       answer off can never be describing different sets -- which was the whole complaint that
+       started this tab's rework. */
+    var R = filterResult(), hits, note = "";
+    if (R && !q){
+      hits = R.matches.filter(function(u){ return !!u.row; })
+                      .map(function(u){ return u.row; }).slice(0, 25);
+      note = R.matches.length.toLocaleString() + " match"
+           + (R.matches.length === 1 ? "" : "es")
+           + (R.matches.length > hits.length ? " — first " + hits.length + " shown" : "");
+    } else {
+      hits = X.seedSearch(rows, q, 25);
+      note = q ? hits.length + (hits.length === 25 ? "+ shown" : " found")
+               : "showing the first 25 — type to search, or filter above";
+    }
+    if (el("seed-msg")) el("seed-msg").textContent = note;
     host.innerHTML = hits.length
       /* NOT hits.map(seedRowHtml): Array.map passes (item, index, array), so the index lands in
          seedRowHtml's `extra` and every row after the first printed its own position in the list
@@ -4574,7 +5013,8 @@ UJ.app = (function(){
          screenshot, and it had been there since the seed list shipped. */
       ? "<div class='seedrows'>"
         + hits.map(function(r){ return seedRowHtml(r); }).join("") + "</div>"
-      : "<p class='hint' style='margin:0'>Nothing matches “" + esc(q) + "”.</p>";
+      : "<p class='hint' style='margin:0'>Nothing matches "
+        + (q ? "“" + esc(q) + "”" : "those filters") + ".</p>";
     hits.forEach(wireSeedRow);
   }
 
@@ -4623,6 +5063,426 @@ UJ.app = (function(){
       + (b && b.builtBy && added > 0 ? " · " + esc(b.builtBy) : "") + "</span>"
       + "<button class='seed-add' data-key='" + esc(r.key) + "'>Add fragments</button>"
       + "</div>";
+  }
+
+  /* ══ THE FILTER ═══════════════════════════════════════════════════════════════════════════
+     Søren, 2026-09-02: "I want the Filter and show to be more like uJump." What follows is
+     µJump's panel over cb2's own facts -- the same sections in the same order, the same match
+     count on the same button, the same step-through and the same two exports.
+
+     ONE UNIVERSE OF CELLS, and it is the one the list below shows: every published cell joined to
+     everything assembled here, so a filter and the list under it can never be answering about
+     different sets. Everything here runs in the browser over that array. Five thousand cells is a
+     few milliseconds; there is no reason to involve the backend and every reason not to.
+
+     A cell with no soma is not filterable -- every distance and every layer test needs a point --
+     so those are set aside and the panel says how many, rather than letting the counts quietly
+     fail to add up. */
+
+  var UNIVERSE = null;
+  function invalidateUniverse(){ UNIVERSE = null; }
+  function universe(){
+    if (UNIVERSE) return UNIVERSE;
+    var out = [], seen = {};
+    seeds().forEach(function(r){
+      var b = builtOn(r.key);
+      seen[r.key] = 1;
+      out.push({ key:r.key, name:r.name, label:r.label, type:r.type, whole:r.whole,
+                 pos:r.pos, zOdd:r.zOdd, odd:r.odd, annotator:r.annotator, row:r,
+                 proofread:true, cell:b,
+                 added: b ? allSegs(b).length - r.count : 0,
+                 frags: b ? allSegs(b).length : r.count,
+                 here: b ? (X.settledLabel(b) || "") : "" });
+    });
+    STATE.cells.forEach(function(c){
+      if (seen[c.id] || X.isSeedKey(c.id)) return;
+      if (!allSegs(c).length) return;
+      var lab = X.settledLabel(c);
+      out.push({ key:c.id, name:c.id, label:lab || "", type:"", whole:true,
+                 pos:c.position || null, zOdd:false, odd:false, annotator:"", row:null,
+                 proofread:false, cell:c, added:c.segments.length, frags:c.segments.length,
+                 here:lab });
+    });
+    UNIVERSE = out;
+    return out;
+  }
+  /* Everything the filter can actually test. Separate from universe() so the panel can say how
+     many cells it had to set aside and why. */
+  function filterable(){
+    return universe().filter(function(u){ return !!u.pos; });
+  }
+
+  /* ── section 1: select the cell(s) of interest ────────────────────────────────────────────
+     µJump's widget exactly: a scrolling box of grouped checkboxes with live counts, one class for
+     the primary list and another for the proximity list so the two ":checked" sets cannot
+     collide. Grouped by what the label MEANS here rather than alphabetically -- a whole cell and
+     a stray dendrite are different things to ask for. */
+  var TYPE_GROUPS = [
+    { name:"Whole cells", test: function(u){ return u.proofread && u.whole; } },
+    { name:"Parts of cells", test: function(u){ return u.proofread && !u.whole; } },
+    { name:"Assembled here", test: function(u){ return !u.proofread; } }
+  ];
+  /* Counted into a NESTED structure rather than a flat map keyed by "group + label": the labels
+     contain spaces ("granule cell dendrite"), so any single-string key has to be split back apart
+     and every separator that is not in a label today is one somebody adds tomorrow. */
+  function typeTally(){
+    var groups = TYPE_GROUPS.map(function(G){ return { name:G.name, by:{} }; });
+    filterable().forEach(function(u){
+      var lab = u.label || "(unnamed)", gi = 0;
+      TYPE_GROUPS.forEach(function(G, i){ if (G.test(u)) gi = i; });
+      groups[gi].by[lab] = (groups[gi].by[lab] || 0) + 1;
+    });
+    return groups.map(function(g){
+      return { name: g.name,
+               items: Object.keys(g.by).map(function(k){ return { label:k, n:g.by[k] }; })
+                        .sort(function(a, b){ return b.n - a.n; }) };
+    }).filter(function(g){ return g.items.length; });
+  }
+  function buildTypeChecksInto(host, cls){
+    if (!host) return;
+    var groups = typeTally();
+    host.innerHTML = groups.length
+      ? groups.map(function(g){
+          return "<div class='fgroup'><b>" + esc(g.name) + "</b><div class='toggles'>"
+            + g.items.map(function(it){
+                return "<label style='font-size:12px'><input type='checkbox' class='" + cls
+                  + "' value='" + esc(it.label) + "'> <span class='fname'>" + esc(cap(it.label))
+                  + "</span> <span class='nsub'>" + it.n.toLocaleString() + "</span></label>";
+              }).join("")
+            + "</div></div>";
+        }).join("")
+      : "<p class='hint' style='margin:0'>No cells with a soma position.</p>";
+    Array.prototype.forEach.call(host.querySelectorAll("input"), function(i){
+      i.addEventListener("change", invalidatePreview);
+    });
+  }
+  function checkedValues(sel){
+    return Array.prototype.slice.call(document.querySelectorAll(sel))
+      .filter(function(i){ return i.checked; })
+      .map(function(i){ return i.value; });
+  }
+
+  /* ── section 3: which layer ───────────────────────────────────────────────────────────────
+     Built from X.layerList() rather than typed out, so adding a boundary to xjump_layers.js adds
+     a tickbox here and nothing has to be kept in step. The counts are of the filterable cells,
+     which is what makes an empty layer visible as empty rather than as a tickbox that silently
+     matches nothing. */
+  function buildLayerChecks(){
+    var host = el("filterLayers"); if (!host) return;
+    var by = {};
+    filterable().forEach(function(u){
+      var L = X.layerAt(u.pos); if (L) by[L.layer] = (by[L.layer] || 0) + 1; });
+    host.innerHTML = X.layerList().map(function(L){
+      var n = by[L.name] || 0;
+      return "<label style='font-size:12px" + (n ? "" : "' class='zero")
+        + "'><input type='checkbox' class='flayer' value='" + esc(L.name)
+        + "'> <span class='fname'>" + esc(cap(L.name)) + "</span> <span class='nsub'>"
+        + n.toLocaleString() + "</span></label>";
+    }).join("");
+    Array.prototype.forEach.call(host.querySelectorAll("input"), function(i){
+      i.addEventListener("change", invalidatePreview);
+    });
+    var A = X.layerAgreement();
+    if (el("filterLayerTolUm"))
+      el("filterLayerTolUm").textContent = A.pcBandUm + " µm";
+    if (el("filterLayerNote"))
+      el("filterLayerNote").innerHTML =
+        "The boundaries were traced by hand on section " + X.tracedAtZ() + " and are an "
+        + "approximation &mdash; " + A.pcReal.hit + " of the " + A.pcReal.n + " Purkinje somata "
+        + "whose z is real fall inside a band about " + A.pcBandUm + "&nbsp;&micro;m thick, which "
+        + "is one soma. The tolerance above is that same thickness: with it ticked, a cell just "
+        + "outside a layer still matches it &mdash; the right setting for finding cells and the "
+        + "wrong one for counting them. The block model on the Jump tab shows how the tracing was "
+        + "checked against the published somata.";
+  }
+
+  /* ── section 4: what this tool knows about a cell ─────────────────────────────────────────
+     NOT µJump's organelle list. cb2 carries no organelle annotations and χJump logs none, so
+     rendering that vocabulary would be forty tickboxes all reading zero. These are the things
+     χJump actually records, and the section's own text says that is what they are. */
+  var ANNOT = [
+    { id:"named",     label:"has a settled name from this community",
+      test: function(u){ return !!u.here; } },
+    { id:"unnamed",   label:"nobody here has named it",
+      test: function(u){ return !u.here; } },
+    { id:"extended",  label:"somebody here has added fragments to it",
+      test: function(u){ return u.added > 0; } },
+    { id:"contested", label:"people here disagree about what it is",
+      test: function(u){ return !!u.cell && X.tallySummary(u.cell).status === "contested"; } },
+    { id:"disagrees", label:"the published table types it one way and names it another",
+      test: function(u){ return !!u.odd; } },
+    { id:"nodepth",   label:"its recorded z is the stand-in value, not a depth",
+      test: function(u){ return !!u.zOdd; } }
+  ];
+  function buildAnnotChecks(){
+    var host = el("filterAnnot"); if (!host) return;
+    var rows = filterable();
+    host.innerHTML = ANNOT.map(function(a){
+      var n = rows.filter(a.test).length;
+      return "<label style='font-size:12px" + (n ? "" : "' class='zero")
+        + "'><input type='checkbox' class='fannot' value='" + esc(a.id) + "'> "
+        + esc(cap(a.label)) + " <span class='nsub'>" + n.toLocaleString() + "</span></label>";
+    }).join("");
+    Array.prototype.forEach.call(host.querySelectorAll("input"), function(i){
+      i.addEventListener("change", invalidatePreview);
+    });
+  }
+
+  /* ── running it ───────────────────────────────────────────────────────────────────────────
+     Every clause is a plain predicate over the universe and they are ANDed. Proximity is the one
+     that is not: it needs the reference set first, so it runs as a second pass. */
+  var RESULT = null, REGION = null;
+
+  function nearDistNm(){
+    var v = parseFloat((el("filterNearDist") || {}).value);
+    return isFinite(v) && v > 0 ? v * 1000 : 10000;
+  }
+  function limbWanted(){
+    var r = document.querySelector(".flimb:checked");
+    return r ? r.value : "";
+  }
+  /* A layer next to one of the wanted ones, for the tolerance. Derived from the gap order rather
+     than from a table of adjacencies, so it cannot disagree with the boundaries themselves. */
+  function nextTo(L, wanted){
+    var names = X.LAYER_NAMES;
+    return wanted.some(function(w){
+      return names[L.gap - 1] === w || names[L.gap + 1] === w;
+    });
+  }
+  /* A uniform grid over the reference somata, so "within d of any of these" is a handful of
+     bucket lookups rather than 5,318 x 4,393 distance computations -- twenty-three million at
+     cb2's counts, which takes long enough to look like a hung page. */
+  function buildGrid(refs, dNm){
+    var cell = Math.max(dNm, 1), g = {};
+    refs.forEach(function(u){
+      var nm = X.toNm(u.pos);
+      var k = Math.floor(nm[0]/cell) + "," + Math.floor(nm[1]/cell) + "," + Math.floor(nm[2]/cell);
+      (g[k] = g[k] || []).push({ nm: nm, key: u.key });
+    });
+    return { cell: cell, g: g };
+  }
+  function anyWithin(grid, nm, dNm, selfKey){
+    var cx = Math.floor(nm[0]/grid.cell), cy = Math.floor(nm[1]/grid.cell),
+        cz = Math.floor(nm[2]/grid.cell), d2 = dNm * dNm, i, j, k, m;
+    for (i = -1; i <= 1; i++) for (j = -1; j <= 1; j++) for (k = -1; k <= 1; k++){
+      var b = grid.g[(cx+i) + "," + (cy+j) + "," + (cz+k)];
+      if (!b) continue;
+      for (m = 0; m < b.length; m++){
+        if (b[m].key === selfKey) continue;          /* a cell is not near itself */
+        var dx = b[m].nm[0]-nm[0], dy = b[m].nm[1]-nm[1], dz = b[m].nm[2]-nm[2];
+        if (dx*dx + dy*dy + dz*dz <= d2) return true;
+      }
+    }
+    return false;
+  }
+
+  function runFilter(){
+    var types  = checkedValues(".ftype"),
+        layers = checkedValues(".flayer"),
+        annots = checkedValues(".fannot"),
+        limb   = limbWanted(),
+        tol    = !!(el("filterLayerNear") && el("filterLayerNear").checked),
+        unnamed = !!(el("filterIncludeUnnamed") && el("filterIncludeUnnamed").checked);
+    var boxes = (REGION && el("filterRegionOn") && el("filterRegionOn").checked)
+      ? REGION.getBoxesNM() : [];
+    var rows = filterable();
+
+    function keep(u){
+      if (types.length){
+        if (types.indexOf(u.label || "(unnamed)") < 0 && !(unnamed && !u.label)) return false;
+      } else if (!unnamed && !u.proofread && !u.label) return false;
+      if (layers.length || limb){
+        var L = X.layerAt(u.pos);
+        if (!L) return false;
+        if (limb && L.limb !== limb) return false;
+        if (layers.length && layers.indexOf(L.layer) < 0){
+          /* THE TOLERANCE. Søren's lines are a hand trace, so a cell just the other side of one
+             is not evidence against the cell. With the box ticked, a point within one Purkinje
+             soma of a boundary counts as being in the layer on either side of it. */
+          if (!(tol && L.nearBoundary && nextTo(L, layers))) return false;
+        }
+      }
+      if (annots.length){
+        for (var i = 0; i < ANNOT.length; i++)
+          if (annots.indexOf(ANNOT[i].id) >= 0 && !ANNOT[i].test(u)) return false;
+      }
+      if (boxes.length){
+        var nm = X.toNm(u.pos);
+        var inAny = boxes.some(function(b){
+          return nm[0] >= b.xmin && nm[0] <= b.xmax && nm[1] >= b.ymin && nm[1] <= b.ymax
+              && nm[2] >= b.zmin && nm[2] <= b.zmax; });
+        if (!inAny) return false;
+      }
+      return true;
+    }
+    var hits = rows.filter(keep);
+
+    var nearOn = !!(el("filterNearOn") && el("filterNearOn").checked);
+    var nearTypes = checkedValues(".fneartype");
+    if (nearOn && nearTypes.length){
+      var refs = rows.filter(function(u){
+        return nearTypes.indexOf(u.label || "(unnamed)") >= 0; });
+      var d = nearDistNm(),
+          keepRef = !!(el("filterNearIncludeRef") && el("filterNearIncludeRef").checked);
+      var grid = buildGrid(refs, d);
+      hits = hits.filter(function(u){
+        var isRef = nearTypes.indexOf(u.label || "(unnamed)") >= 0;
+        return anyWithin(grid, X.toNm(u.pos), d, u.key) || (keepRef && isRef);
+      });
+    }
+    RESULT = { matches: hits, types: types, layers: layers, annots: annots, limb: limb,
+               boxes: boxes.length, near: (nearOn && nearTypes.length) ? nearTypes : null,
+               nearUm: nearDistNm() / 1000,
+               dropped: universe().length - rows.length };
+    return RESULT;
+  }
+
+  /* THE COUNT LIVES ON THE BUTTON, as it does in µJump: a separate line of text below a button is
+     a line people do not look at, and this is the one number the whole panel exists to produce. */
+  function invalidatePreview(){
+    RESULT = null;
+    if (el("filterRun")) el("filterRun").textContent = "Preview matches";
+    ["filterDownload", "filterViewerAll"].forEach(function(id){
+      if (el(id)) el(id).disabled = true; });
+    if (window.UJ.stepthrough) UJ.stepthrough.initStepThrough(null);
+    renderSeeds();
+  }
+  function previewFilter(){
+    var r = runFilter(), n = r.matches.length;
+    if (el("filterRun"))
+      el("filterRun").textContent = n
+        ? "Preview matches — " + n.toLocaleString() + " cell" + (n === 1 ? "" : "s")
+        : "Preview matches — none match";
+    ["filterDownload", "filterViewerAll"].forEach(function(id){
+      if (el(id)) el(id).disabled = !n; });
+    if (window.UJ.stepthrough)
+      UJ.stepthrough.initStepThrough(n ? r.matches.map(function(u){ return { row: u }; }) : null);
+    renderSeeds();
+  }
+  function filterResult(){ return RESULT; }
+
+  /* core/stepthrough.js's host contract: two globals, and they are the same two things the Jump
+     tab already does. rowPos gives it the soma; jumpToVoxel is the coordinate box's own Go. */
+  window.rowPos = function(row){ return (row && row.pos) || [0, 0, 0]; };
+  window.jumpToVoxel = function(x, y, z){ writeCoord([x, y, z]); findByCoord(); };
+
+  /* ── the two exports ──────────────────────────────────────────────────────────────────────
+     The same columns as the CSV beside the list, and the same rule for Danish Excel: NO DECIMAL
+     NUMBERS. An .xlsx carries its own cell types so the separator question does not arise, but a
+     decimal written as text still would, and rounding here costs nothing anyone wanted. */
+  function matchColumns(){
+    function L(u){ return X.layerAt(u.pos); }
+    return [
+      { header:"name",  get: function(u){ return u.name; } },
+      { header:"key",   get: function(u){ return u.key; } },
+      { header:"kind",  get: function(u){ return u.label || ""; } },
+      { header:"layer", get: function(u){ var l = L(u); return l ? l.layer : ""; } },
+      { header:"limb",  get: function(u){ var l = L(u); return l ? l.limb : ""; } },
+      { header:"near_boundary",
+        get: function(u){ var l = L(u); return l && l.nearBoundary ? "yes" : "no"; } },
+      { header:"um_from_purkinje_layer",
+        get: function(u){ var l = L(u); return l ? Math.round(l.fromPcNm / 1000) : ""; } },
+      { header:"x_vox", get: function(u){ return Math.round(u.pos[0]); } },
+      { header:"y_vox", get: function(u){ return Math.round(u.pos[1]); } },
+      { header:"z_vox", get: function(u){ return Math.round(u.pos[2]); } },
+      { header:"proofread_fragments", get: function(u){ return u.frags - u.added; } },
+      { header:"added_here",   get: function(u){ return u.added; } },
+      { header:"fragments_now", get: function(u){ return u.frags; } },
+      { header:"proofread_by",  get: function(u){ return u.annotator || ""; } },
+      { header:"identity_given_here", get: function(u){ return u.here || ""; } }
+    ];
+  }
+  function matchRows(){
+    var cols = matchColumns(), out = [cols.map(function(c){ return c.header; })];
+    ((RESULT && RESULT.matches) || []).forEach(function(u){
+      out.push(cols.map(function(c){ return c.get(u); })); });
+    return out;
+  }
+  function downloadMatchesXlsx(){
+    if (!RESULT || !RESULT.matches.length) return;
+    var btn = el("filterDownload");
+    /* SAID, not silent. The library is a CDN script tag, and a page whose Excel button does
+       nothing is indistinguishable from a page that is still thinking. */
+    if (!window.XLSX){
+      if (btn) btn.textContent = "Excel library did not load — use the CSV below";
+      return;
+    }
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(matchRows()), "Cells");
+    XLSX.writeFile(wb, "cb2_filtered_cells_" + new Date().toISOString().slice(0, 10) + ".xlsx");
+  }
+  /* The optional viewer layers, read once so the two callers cannot drift. */
+  function viewerExtras(){
+    return {
+      em: !(el("filterEMOn") && !el("filterEMOn").checked),
+      layerBorders: !!(el("filterBordersOn") && el("filterBordersOn").checked),
+      nuclei: !!(el("filterNucOn") && el("filterNucOn").checked),
+      knownNuclei: ((STATE.explore || {}).nuclei || []).map(function(n){ return n.pos; })
+    };
+  }
+  function openMatchesInViewer(){
+    if (!RESULT || !RESULT.matches.length) return;
+    var us = RESULT.matches;
+    /* NOT their fragments. A hundred granule cells is eleven thousand ids and a URL no browser
+       would accept; a point on every soma is the map of the answer, and clicking one in the
+       viewer selects the segment under it. */
+    var o = viewerExtras();
+    o.markers = (el("filterMarkOn") && el("filterMarkOn").checked)
+      ? us.map(function(u){ return { pos: u.pos, name: u.name }; }) : null;
+    o.markerName = us.length.toLocaleString() + " matched cells";
+    window.open(X.viewerUrl([], us[0].pos, o), "_blank", "noopener");
+  }
+
+  function wireFilter(){
+    if (!el("filterCard")) return;
+    buildTypeChecksInto(el("filterTypes"), "ftype");
+    buildTypeChecksInto(el("filterNearTypes"), "fneartype");
+    buildLayerChecks();
+    buildAnnotChecks();
+    if (el("filterUniverse"))
+      el("filterUniverse").textContent =
+        filterable().length.toLocaleString() + " cells with a soma position";
+    ["filterNearOn", "filterNearDist", "filterNearIncludeRef", "filterIncludeUnnamed",
+     "filterLayerNear", "filterRegionOn"].forEach(function(id){
+      var e = el(id); if (e) e.addEventListener("change", invalidatePreview);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".flimb"), function(i){
+      i.addEventListener("change", invalidatePreview); });
+    if (el("filterRun")) el("filterRun").addEventListener("click", previewFilter);
+    if (el("filterDownload")) el("filterDownload").addEventListener("click", downloadMatchesXlsx);
+    if (el("filterViewerAll")) el("filterViewerAll").addEventListener("click", openMatchesInViewer);
+    /* The bounding boxes, from the shared module. Wrapped because mount() THROWS on a bad config
+       -- deliberately, see its own comment -- and a whole filter panel that will not draw is a
+       worse failure than one section of it reporting why it could not. */
+    if (window.UJ.regionbox && el("regionBoxes")){
+      try {
+        REGION = UJ.regionbox.mount({
+          boxesEl: el("regionBoxes"), addBtn: el("regionAddBox"),
+          onEl: el("filterRegionOn"), vizEl: el("regionViz"),
+          res: X.resXYZ(), onChange: invalidatePreview,
+          /* Which fragments a per-box Colab notebook should fetch meshes for: the ones belonging
+             to cells whose soma is in that box, which is the only set the notebook could mean. */
+          rootIdsInBox: function(boxNM){
+            var out = [];
+            filterable().forEach(function(u){
+              if (out.length >= 2000) return;
+              var nm = X.toNm(u.pos);
+              if (nm[0] < boxNM.xmin || nm[0] > boxNM.xmax
+                  || nm[1] < boxNM.ymin || nm[1] > boxNM.ymax
+                  || nm[2] < boxNM.zmin || nm[2] > boxNM.zmax) return;
+              var segs = u.cell ? allSegs(u.cell) : (u.row ? X.seedSegments(u.row) : []);
+              segs.forEach(function(sg){ if (out.length < 2000) out.push(sg); });
+            });
+            return out;
+          }
+        });
+      } catch (err){
+        el("regionBoxes").innerHTML = "<p class='hint' style='margin:0;color:var(--bad)'>"
+          + "The bounding-box section could not start: " + esc(String((err && err.message) || err))
+          + "</p>";
+      }
+    }
+    invalidatePreview();
   }
 
   /* ── the whole list, as a file ─────────────────────────────────────────────────────────────
@@ -5188,6 +6048,9 @@ UJ.app = (function(){
     if (el("paste")) el("paste").addEventListener("paste", function(){ setTimeout(readPaste, 0); });
     if (el("seed-q")) el("seed-q").addEventListener("input", renderSeeds);
     if (el("seed-csv")) el("seed-csv").addEventListener("click", downloadSeedCsv);
+    /* AFTER the list, because every section's counts are computed from the same universe the list
+       shows -- and after the store's first load, which is why the load handler calls it again. */
+    wireFilter();
     if (el("find-go")) el("find-go").addEventListener("click", findByCoord);
     if (el("find-coord")) el("find-coord").addEventListener("keydown", function(e){
       if (e.key === "Enter") findByCoord();
@@ -5264,6 +6127,9 @@ UJ.app = (function(){
            readPaste:readPaste, render:render, store:function(){ return STORE; },
            nextBox:nextBox, renderBox:renderBox, readNuclei:readNuclei, joinAll:joinAll,
            seeds:seeds, renderSeeds:renderSeeds, seedCsv:seedCsv,
+           universe:universe, filterable:filterable, runFilter:runFilter,
+           previewFilter:previewFilter, filterResult:filterResult,
+           matchRows:matchRows, wireFilter:wireFilter,
            findByCoord:findByCoord, renderRandomButtons:renderRandomButtons,
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
            showRandomUntouched:showRandomUntouched, showRandomBuilt:showRandomBuilt,
