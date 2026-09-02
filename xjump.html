@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 16:22</span></p>
+ctrl-shift-R.">build 2026-09-02 18:03</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -835,6 +835,22 @@ function toggleTheme(){ setTheme(currentTheme() === "light" ? "dark" : "light");
     /* Counted on open rather than on load: five thousand cells is a fast pass, but it is a pass
        nobody browsing the Jump tab should pay for. */
     if (name === "dash" && window.UJ && UJ.app && UJ.app.renderDashboard) UJ.app.renderDashboard();
+    /* THE IDENTITY CARD FOLLOWS YOU. Søren, 2026-09-02: "when I press preview matches ... the cell
+       identity card shows correctly for the first cell, however, at the same time it is removed
+       from the jump panel. It should still show in both places."
+
+       core/stepthrough.js MOVES the one real panel into the step-through card rather than drawing
+       a copy of it -- deliberately, since 2026-08-20: a copy has dead buttons and duplicate ids.
+       It puts the panel back in its home when you leave the filter tab, and it does that inside
+       its own wireTabs(), which χJump does not use (see UJ.cfg.stepthrough's note). So the panel
+       moved out of the Jump tab on the first Preview matches and stayed there. These are the two
+       lines that copy carries; nothing else about the arrangement changes. */
+    if (window.UJ && UJ.stepthrough && UJ.stepthrough.relocateNucPanel){
+      if (name === "filter"){
+        if (UJ.stepthrough.currentMatches && UJ.stepthrough.currentMatches())
+          UJ.stepthrough.relocateNucPanel();
+      } else UJ.stepthrough.restoreNucPanel();
+    }
   }
   btns.forEach(function(b){
     b.addEventListener("click", function(){ activate(b.getAttribute("data-tab")); });
@@ -2210,7 +2226,10 @@ UJ.xjump = (function(){
   var AGREE = null;
   function layerAgreement(){
     if (AGREE) return AGREE;
-    var rows = seedList().filter(function(r){ return r.pos; });
+    /* seedListAll, not seedList: this function is the EVIDENCE for the removal that seedList
+       performs, so computing it over the already-narrowed list would make the figures agree with
+       the rule by construction and stop describing the published data. */
+    var rows = seedListAll().filter(function(r){ return r.pos; });
     function tally(list){
       var by = {}, n = 0;
       list.forEach(function(r){
@@ -2275,7 +2294,10 @@ UJ.xjump = (function(){
     return AGREE;
   }
 
-  function seedList(){
+  /* THE WHOLE PUBLISHED LIST, exactly as imported. seedList() below is what the page uses and
+     it is narrower; this is what the evidence is computed over, so a figure that justifies the
+     narrowing cannot be computed from an already-narrowed list. */
+  function seedListAll(){
     var s = (window.UJ.seeds && window.UJ.seeds.cells) || [];
     return s.map(function(c){
       return { key: seedKey(c.n), name: c.n, type: c.t,
@@ -2293,6 +2315,78 @@ UJ.xjump = (function(){
                pos: c.p || null,
                count: c.s.length ? c.s.split(".").length : 0 };
     });
+  }
+
+  /* ── records typed as a cell that are pieces of one ──────────────────────────────────────
+     Søren, 2026-09-02: "there are a lot of purkinje cell annotations outside of the purkinje cell
+     layer. They are all in the same z-plane. Those are just fragments and should not be counted
+     as Purkinje cells. Let's remove them."
+
+     He is describing a population this file had already found twice, from two directions that
+     share no arithmetic: suspectZ() saw 108 of the 170 `pc` records carrying one z while their x
+     and y are all distinct, and layerAgreement() saw 105 of those 108 land outside the band he
+     traced, a median 133 um towards the pia. What the page did with that was mark them and go on
+     calling them Purkinje cells.
+
+     A THIRD SIGNAL DECIDES WHICH ONES, because "all of them" is wrong. Their fragment lists split
+     the 105 in two with nothing in between: 99 carry 1 to 18 fragments -- 27 of them carry
+     exactly one -- and 6 carry 206 to 2,429. A proofread Purkinje cell here is a median 199
+     fragments. Ninety-nine single-digit lists in the molecular layer are dendritic pieces filed
+     under the parent's type, which is what he called them. pc_40 to pc_43 are not: at 1,632 to
+     2,429 fragments they are bigger than any whole Purkinje cell with a real z in the database,
+     and they are cells whose recorded POINT is on the dendrite rather than the soma. Dropping
+     those would delete four of the largest proofread arbors in cb2 to satisfy a rule about
+     fragments, so they stay -- marked, as they already were.
+
+     So a record is removed only when all three agree, and none of the three numbers is typed in:
+     the stand-in z is detected per type against that type's own count, the layer is his tracing,
+     and the fragment floor is the 25th percentile of what that type's own confirmed cells carry
+     (117 for pc, from 42 of them). The floor lands in a gap running 18 to 206, so any value
+     between those picks the same 99 records: the agreement does the work, not the threshold.
+
+     Removed here means removed from seedList(), so they are not cells anywhere the page counts,
+     searches, filters, ranks or picks at random -- and not in seedIndex() either, which is the
+     part nobody asked for and is the most useful: their fragments stop being claimed by a phantom
+     Purkinje cell, so whoever assembles the cell those pieces came from is no longer told they
+     are already catalogued. Nothing is deleted from the import. */
+  var TYPE_HOME_LAYER = { pc: "Purkinje cell layer", grc: "granular layer" };
+  var MISPLACED = null;
+  function misplacedSeeds(){
+    if (MISPLACED) return MISPLACED;
+    var rows = seedListAll(), out = [], keys = {}, floors = {};
+    Object.keys(suspectZ()).forEach(function(t){
+      var home = TYPE_HOME_LAYER[t];
+      if (!home) return;
+      /* The floor, from this type's OWN confirmed cells: whole, a real z, and where the tracing
+         puts them in the layer that type belongs to. Fewer than eight of those and the rule has
+         no reference population, so it does not run at all -- a floor computed from three cells
+         would be a number pretending to be a measurement. */
+      var ref = rows.filter(function(r){
+        if (r.type !== t || !r.whole || !r.pos || r.zOdd) return false;
+        var L = layerAt(r.pos);
+        return !!L && L.layer === home;
+      }).map(function(r){ return r.count; }).sort(function(a, b){ return a - b; });
+      if (ref.length < 8) return;
+      var floor = ref[Math.floor(0.25 * (ref.length - 1))];
+      floors[t] = { floor: floor, from: ref.length, home: home };
+      rows.forEach(function(r){
+        if (r.type !== t || !r.pos || !r.zOdd) return;
+        var L = layerAt(r.pos);
+        /* No tracing, no verdict. layerAt() returns null when the boundaries are missing, and a
+           missing boundary file must not silently delete a hundred cells. */
+        if (!L || L.layer === home) return;
+        if (r.count >= floor) return;
+        keys[r.key] = 1;
+        out.push(r);
+      });
+    });
+    return (MISPLACED = { rows: out, keys: keys, floors: floors });
+  }
+  /* What the page treats as the published cell list. */
+  function seedList(){
+    var drop = misplacedSeeds().keys;
+    var rows = seedListAll();
+    return rows.filter(function(r){ return !drop[r.key]; });
   }
 
   /* ── µJump's navigation, over the proofread cells ────────────────────────────────────────
@@ -2615,7 +2709,8 @@ UJ.xjump = (function(){
            parseNuclei:parseNuclei, parsePoints:parsePoints,
            goldenAngleColour:goldenAngleColour,
            decodeSeed:decodeSeed, seedKey:seedKey, isSeedKey:isSeedKey, seedName:seedName,
-           seedList:seedList, seedSegments:seedSegments, seedSearch:seedSearch,
+           seedList:seedList, seedListAll:seedListAll, misplacedSeeds:misplacedSeeds,
+           seedSegments:seedSegments, seedSearch:seedSearch,
            seedIndex:seedIndex, seedOwnerOf:seedOwnerOf, seedClaimsFor:seedClaimsFor,
            parseCoord:parseCoord, seedsNear:seedsNear, randomSeed:randomSeed,
            seedTypes:seedTypes, seedLabelFor:seedLabelFor, isWholeCell:isWholeCell,
@@ -4381,17 +4476,39 @@ UJ.app = (function(){
             + X.suspectZ().pc.n + " of the " + X.suspectZ().pc.of + " Purkinje records share one "
             + "z</b> (" + X.suspectZ().pc.z + ", thirty sections from the end of the block) while "
             + "their x and y are all distinct. The commonest z among the granule cells accounts "
-            + "for 1.0% of them. Those records are left out of the layer fit and carry no depth "
-            + "label; they are still findable and still open in the viewer.</p>"
+            + "for 1.0% of them. Those records carry no depth label and are left out of the layer "
+            + "evidence below.</p>"
           : "")
+      /* WHAT WAS TAKEN OUT OF THE LIST, on the page, with the rule that took it. A tool that
+         quietly holds back a hundred records of its own source is a tool you cannot check. */
+      + (function(){
+          var M = X.misplacedSeeds(), f = M.floors.pc;
+          if (!M.rows.length || !f) return "";
+          var ex = M.rows.slice(0, 4).map(function(r){
+            return "<code>" + esc(r.name) + "</code> (" + r.count
+                 + (r.count === 1 ? " fragment" : " fragments") + ")"; }).join(", ");
+          return "<p class='hint'><b>" + M.rows.length + " of them are not in this list at all.</b> "
+            + "Søren, 2026-09-02: &ldquo;those are just fragments and should not be counted as "
+            + "Purkinje cells&rdquo;. A record is left out only where three things agree, from "
+            + "three sources that share no arithmetic: its z is the stand-in value, the traced "
+            + "boundaries put it outside the Purkinje layer, and it carries fewer than " + f.floor
+            + " fragments &mdash; the quartile of what the " + f.from + " confirmed Purkinje cells "
+            + "with a real depth carry. " + ex + ", and so on. The six that meet the first two "
+            + "tests and not the third stay: <code>pc_40</code> to <code>pc_43</code> carry 1,632 "
+            + "to 2,429 fragments each, which is larger than any Purkinje cell here with a real "
+            + "depth, so those are cells whose recorded point is on the dendrite rather than the "
+            + "soma. Nothing is deleted from the import, and a record comes straight back into "
+            + "the list if anybody here builds on it.</p>";
+        })()
       /* Where the cells actually are, by the same bands the map draws. Counted with layerAt() so a
          figure here and a label on a cell can never come from two different fits. */
       + "<div class='statlab' style='margin:18px 0 0'>Whole cells by layer</div>"
       + barsHtml(layerCounts(whole), whole.length)
-      + "<p class='hint'>Read off the layer bands, which are themselves percentiles of these same "
-      + "somata &mdash; so this is a description of the fit, not independent evidence for it. "
-      + "Granule cells landing in the molecular layer are mostly the " + mlNamed + " the source "
-      + "names <code>ml_grc_*</code>, which is what that name means.</p>"
+      + "<p class='hint'>Read off the boundaries Søren traced in the image on section 612 &mdash; "
+      + "not off these somata, so unlike the percentile fit this replaced it is independent "
+      + "evidence rather than a description of itself. Granule cells landing in the molecular "
+      + "layer are mostly the " + mlNamed + " the source names <code>ml_grc_*</code>, which is "
+      + "what that name means.</p>"
 
       + "<div class='statlab' style='margin:18px 0 0'>Cells by annotator</div>"
       + "<div id='annotBars'>" + barsHtml(rankedAnnotators(whoRows), rows.length) + "</div>"
@@ -6529,6 +6646,23 @@ UJ.app = (function(){
                  frags: b ? allSegs(b).length : r.count,
                  here: b ? (X.settledLabel(b) || "") : "" });
     });
+    /* A REMOVED RECORD COMES BACK IF SOMEBODY HERE HAS WORKED ON IT. X.misplacedSeeds() drops
+       99 Purkinje records that are pieces of Purkinje cells (see its comment in xjump_logic.js),
+       and the community loop below deliberately skips seed keys -- so without this, a cell
+       somebody had adopted and extended would vanish from the list, the filter and the exports
+       the day that rule shipped. The rule is about what the published table claims, not about
+       whose work counts. */
+    X.misplacedSeeds().rows.forEach(function(r){
+      var b = builtOn(r.key);
+      if (!b || seen[r.key]) return;
+      seen[r.key] = 1;
+      out.push({ key:r.key, name:r.name, label:r.label, type:r.type, whole:r.whole,
+                 pos:r.pos, zOdd:r.zOdd, odd:r.odd, annotator:r.annotator, row:r,
+                 proofread:true, cell:b,
+                 added: allSegs(b).length - r.count,
+                 frags: allSegs(b).length,
+                 here: X.settledLabel(b) || "" });
+    });
     STATE.cells.forEach(function(c){
       if (seen[c.id] || X.isSeedKey(c.id)) return;
       if (!allSegs(c).length) return;
@@ -7674,6 +7808,20 @@ UJ.app = (function(){
     coordFields().forEach(function(f){
       if (!f) return;
       f.addEventListener("keydown", function(e){ if (e.key === "Enter") findByCoord(); });
+      /* Søren, 2026-09-02: "when clicking the first coordinate where there is already a number in
+         it, it should select the whole number so it is easier to paste a new coordinate."
+
+         TWO HANDLERS, because one is not enough. focus fires before the browser places the caret,
+         so select() there is undone by the click that caused it -- which is why "select on focus"
+         alone is the classic version of this that does not work. The mouseup handler puts it back,
+         and only when the click COLLAPSED the selection to a caret, so dragging across part of the
+         number still selects what you dragged over. focus alone still does the job for Tab. */
+      f.addEventListener("focus", function(){ if (f.value !== "") f.select(); });
+      f.addEventListener("mouseup", function(e){
+        if (f.value === "" || f.selectionStart !== f.selectionEnd) return;
+        e.preventDefault();
+        f.select();
+      });
     });
     /* Deferred a turn: on paste the field still holds its OLD value when the event fires, so
        splitting immediately would split whatever was there before. Same shape readPaste() uses on
