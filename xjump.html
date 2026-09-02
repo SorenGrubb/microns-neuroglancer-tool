@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 11:21</span></p>
+ctrl-shift-R.">build 2026-09-02 11:40</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -6050,6 +6050,25 @@ UJ.app = (function(){
     return null;
   }
 
+  /* WHAT THE MESH ACTUALLY DECODES TO, said in voxels beside the two things it should agree
+     with. Printed rather than reasoned about: two frame corrections have now been argued from the
+     config and refuted by the data, and segTranslateZ's own comment in that config records the
+     same lesson about itself -- the derived number was wrong and the observed one was right. */
+  function ccFrameReport(g, cellKey){
+    if (!g || !g.loUm || !g.hiUm) return "";
+    var r = X.resXYZ(), e = X.extentVox(), soma = posForCell(cellKey);
+    function ax(i){
+      return "xyz".charAt(i) + " " + Math.round(g.loUm[i] * 1000 / r[i]).toLocaleString()
+           + "…" + Math.round(g.hiUm[i] * 1000 / r[i]).toLocaleString();
+    }
+    return "the mesh decodes to " + ax(0) + " · " + ax(1) + " · " + ax(2) + " voxels; "
+         + "this cell's recorded soma is at "
+         + (soma ? soma.map(function(v){ return Math.round(v).toLocaleString(); }).join(", ")
+                 : "an unknown position")
+         + "; the block is 0…" + e[0].toLocaleString() + " · 0…" + e[1].toLocaleString()
+         + " · 0…" + e[2].toLocaleString() + ".";
+  }
+
   function ccRun(d, cellKey){
     var sel = d.querySelector(".cc-type"), label = sel.value;
     if (!label) return;
@@ -6082,7 +6101,7 @@ UJ.app = (function(){
     };
     say("loading this cell…", 0);
 
-    var mine = null, rows = [], outside = 0, shift = [0,0,0], origin = null;
+    var mine = null, rows = [], outside = 0, shift = [0,0,0], origin = null, frameNote = "";
     ccGeometry(cellKey, function(done, total){
       say("loading this cell…", frac(0, done, total));
     }).then(function(g){
@@ -6095,6 +6114,7 @@ UJ.app = (function(){
          because it is a property of the store rather than of a cell. */
       var home = g.midUm || [0,0,0];
       shift = ccFrameShift(g);
+      if (shift === null) frameNote = ccFrameReport(g, cellKey);
       /* NOT `var`. This assigns the one declared beside `rows` above -- a second declaration here
          would shadow it inside this function, so the guard below would use the corrected origin
          while the RESULT kept the uncorrected one, and the panel would discard nothing and still
@@ -6120,10 +6140,17 @@ UJ.app = (function(){
                                                    his[2]-home[2]);
             var pts = UJ.mesh.allContactPointsWithinThreshold(
               g.geo.positions, grid, theirs, gapUm, spacingUm);
-            /* The guard, applied where the points are made rather than where they are drawn. */
-            var kept = pts.filter(function(pt){ return ccInBlock(pt.point, origin); });
-            outside += pts.length - kept.length;
-            pts = kept;
+            /* THE GUARD ONLY APPLIES WHEN THERE IS A FRAME TO JUDGE AGAINST. With one, a point
+               outside the block is arithmetic gone wrong and is dropped. WITHOUT one, dropping is
+               the worse error by far: the distances are differences and are unaffected by any
+               offset, so throwing the points away turns four cells that touch into "0 of 4" --
+               which is exactly what it did to Søren twice. The measurement survives; only the
+               addresses are withheld, below. */
+            if (shift !== null){
+              var kept = pts.filter(function(pt){ return ccInBlock(pt.point, origin); });
+              outside += pts.length - kept.length;
+              pts = kept;
+            }
             /* NOTHING WITHIN THE GAP IS NOT AN ANSWER ON ITS OWN. Measure how close they DO come,
                so the row can say whether these two are 137 nm apart -- one decimated mesh away
                from a contact -- or 90 µm apart. The cost is one bounded pass and it is only paid
@@ -6167,7 +6194,10 @@ UJ.app = (function(){
                              /* Kept so the panel can say which frame it decided the mesh store is
                                 published in -- a silent 48 µm correction is not better than a
                                 silent 48 µm error. */
-                             shiftUm: shift, outside: outside };
+                             shiftUm: shift, outside: outside, frameNote: frameNote,
+                             /* Whether a coordinate derived from this geometry can be believed.
+                                The contacts can be believed either way. */
+                             frameOk: shift !== null };
       ccShowRows(d, cellKey);
     }).catch(function(e){
       d.querySelector(".cc-results").innerHTML =
@@ -6217,9 +6247,11 @@ UJ.app = (function(){
             / X.resXYZ()[2]) + "&nbsp;sections below the EM, like the segmentation; the touch "
             + "points are placed accordingly.</span>";
     if (R.shiftUm === null)
-      note += " <span class='cc-part'>This cell's mesh does not fall inside the block at all, "
-            + "either as published or with the segmentation's own offset applied &mdash; the "
-            + "coordinates below cannot be trusted; please tell Søren.</span>";
+      note += " <span class='cc-part'>The gaps below are right &mdash; a distance is a difference,"
+            + " so no coordinate offset can affect it &mdash; but this cell's mesh does not decode"
+            + " to anywhere inside the block, so the touch points have no address and are not"
+            + " drawn in the viewer. Please send Søren this line: " + esc(R.frameNote || "")
+            + "</span>";
     /* Said out loud rather than swallowed, and APPENDED -- the branch above assigns, so this has
        to come after it or a discarded point would be silently overwritten by the ordinary note.
        If this line ever appears the frames have come apart again, and the count is how badly. */
@@ -6319,6 +6351,11 @@ UJ.app = (function(){
         }
         return;
       }
+      /* NOT DRAWN when the frame is unknown. A marker in the wrong place is worse than no
+         marker: it is a claim about where two cells meet, and the one thing this page must not do
+         is state a position it cannot stand behind. The cells themselves still open, in their two
+         colours, which is enough to look at the contact by eye. */
+      if (!R.frameOk) return;
       var pts = r.points.map(function(p){
         return { pos: touchVox(p, R), name: (p.dist * 1000).toFixed(0) + " nm" }; });
       pts.forEach(function(p){ all.push(p.pos); });
@@ -6390,7 +6427,9 @@ UJ.app = (function(){
                     r.have == null ? "" : r.have, r.total];
       if (!r.points.length){ data.push(common.concat(["", 0, "", "", ""])); return; }  // no touch points
       r.points.forEach(function(p, i){
-        var v = touchVox(p, R);
+        /* Blank rather than wrong: the gap is exported, the position is not, when the frame could
+           not be established. A spreadsheet outlives the sentence on the panel that explained. */
+        var v = R.frameOk ? touchVox(p, R) : ["", "", ""];
         data.push(common.concat([i + 1, r.points.length, v[0], v[1], v[2]]));
       });
     });
