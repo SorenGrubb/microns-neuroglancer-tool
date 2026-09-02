@@ -223,7 +223,17 @@ function downloadMyWork(){
   if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){alert("Please sign in with Google first.");return;}
   var origText=btn?btn.textContent:"";
   if(btn){btn.disabled=true;btn.textContent="Preparing…";}
-  fetch(REPORT_ENDPOINT+"?myReports="+encodeURIComponent(GOOGLE_CREDENTIAL))
+  /* THE ds, WHICH THIS CALL LOST BY NOT GOING THROUGH gamifyGet. Søren, 2026-09-02:
+     "when you 'download your work' as an Excel file from xJump, it downloads the reports from
+     uJump." Without it the backend falls back to DEFAULT_DS, which is µJump, and reads µJump's
+     spreadsheet -- and since every tool loads this same file, every tool downloaded µJump's work.
+     Built exactly as gamifyGet builds it, in the same defensive try/catch, because the two must
+     not be able to disagree about how a dataset is named. */
+  var q=REPORT_ENDPOINT+"?myReports="+encodeURIComponent(GOOGLE_CREDENTIAL);
+  var dsName="";
+  try{ dsName=(UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds)||""; }catch(_e){}
+  if(dsName)q+="&ds="+encodeURIComponent(dsName);
+  fetch(q)
     .then(function(r){return r.json();})
     .then(function(d){
       if(!d||d.error){alert("Couldn't load your work"+(d&&d.error?(": "+d.error):"")+". Try signing in again.");return;}
@@ -240,7 +250,11 @@ function downloadMyWork(){
         var tabName=name.replace(/[\[\]\*\?\/\\:]/g,"").slice(0,31);
         XLSX.utils.book_append_sheet(wb,ws,tabName);
       });
-      XLSX.writeFile(wb,"my_microns_work_"+(d.email||"me").replace(/[^a-z0-9]+/gi,"_")+".xlsx");
+      /* NAMED FOR THE TOOL. Every tool writes this file, and "my_microns_work_soren.xlsx"
+         out of χJump was the first sign that the contents were wrong too -- a filename that
+         cannot be wrong about which dataset it holds is worth the four characters. */
+      XLSX.writeFile(wb,"my_"+(dsName||"microns")+"_work_"
+        +(d.email||"me").replace(/[^a-z0-9]+/gi,"_")+".xlsx");
     })
     .catch(function(err){alert("Couldn't download your work — network error. Please try again.");})
     .finally(function(){if(btn){btn.disabled=false;btn.textContent=origText;}});
