@@ -44,6 +44,10 @@ try{var _t=localStorage.getItem("ujump_theme");
    font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
  .wrap{max-width:960px;margin:0 auto;padding:24px 18px 70px}
  h1{font-size:21px;margin:0} .sub{color:var(--mut);font-size:13px;margin:4px 0 18px}
+ /* WHEN THIS FILE WAS BUILT. Søren, 2026-09-02: "For all of the tools, we should have a build date
+    and time, like for xJump." ωJump is generated, so the stamp is written as the page is written
+    and cannot be stale; the six hand-maintained pages get theirs from src/build_stamps.py. */
+ .build{font-family:var(--mono,ui-monospace,Menlo,monospace);font-size:11.5px;opacity:.75}
  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
  label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);
    font-weight:600;display:block;margin-bottom:6px}
@@ -113,7 +117,9 @@ try{var _t=localStorage.getItem("ujump_theme");
        title="Reload &omega;Jump"><h1 class="logo"><span class="mu">&omega;</span><span
        class="jm">Jump</span></h1></a>
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
-    <span id="dslabel"></span></p>
+    <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
+    does not match the file you think you are looking at, your browser is showing you a cached copy
+    &mdash; reload with ctrl-shift-R.">build 2026-09-02 20:52</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"

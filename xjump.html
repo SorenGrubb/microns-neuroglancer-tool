@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 18:22</span></p>
+ctrl-shift-R.">build 2026-09-02 19:14</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -476,6 +476,13 @@ ctrl-shift-R.">build 2026-09-02 18:22</span></p>
       <p class="hint" id="randomCounts" style="margin:-2px 0 8px"></p>
       <button type="button" class="idbtn wide" id="randomBuilt"
         title="Jump to a cell somebody assembled in this page — useful for reviewing, confirming or challenging another person's assembly">Random community-built cell &mdash; review someone&rsquo;s assembly</button>
+      <!-- Søren, 2026-09-02: nuclei marked here "should also be searchable as a random unassigned
+           cell". The strongest claim of the three to be work worth doing: a cell body somebody has
+           already found, with no cell assembled around it at all. Its label carries the count and
+           is rewritten by renderRandomButtons, so it says "none marked yet" rather than sitting
+           enabled over an empty pool. -->
+      <button type="button" class="idbtn wide" id="randomUnassigned"
+        title="A nucleus somebody marked in this volume that nobody has built a cell around yet — build one and the nucleus is joined to it automatically">Random unassigned cell</button>
       <div class="row" style="gap:8px">
         <select id="randomTypeSelect" style="flex:1 1 auto"></select>
         <button type="button" class="idbtn" id="randomOfType">Random example</button>
@@ -722,10 +729,12 @@ matched cell, as points in their own layer."><input type="checkbox" id="filterOr
 <div class="card" id="seed-card">
   <label>The cell list &mdash; <span id="seed-count"></span></label>
   <p class="hint" style="margin-top:0">Every cell in cb2 this tool knows about: the ones proofread
-  for the paper, and the ones assembled here. Each row shows the cell <b>as it stands now</b>, so a
-  reconstruction somebody has extended here says so and opens with the extra fragments in it.
+  for the paper, the ones assembled here, and the nuclei somebody has marked with no cell built
+  around them yet. Each row shows the cell <b>as it stands now</b>, so a reconstruction somebody
+  has extended here says so and opens with the extra fragments in it.
   <b>Add fragments</b> aims the paste box at that cell, so you extend or correct an existing
-  reconstruction rather than starting a rival one.</p>
+  reconstruction rather than starting a rival one &mdash; an unassigned cell offers
+  <b>Build a cell here</b> instead, because there is nothing to extend yet.</p>
   <p class="hint" style="margin-top:6px"><span id="seed-breakdown"></span></p>
   <div class="row" style="margin:10px 0">
     <input id="seed-q" placeholder="search by name, kind or annotator&hellip;" style="flex:1 1 240px">
@@ -4046,6 +4055,8 @@ UJ.app = (function(){
        figure again the moment you added to a cell. It reads the search box, so redrawing it
        keeps whatever was typed. */
     invalidateUniverse();
+    /* The filter's own tickboxes carry counts off that universe -- see refreshFilterControls. */
+    refreshFilterControls();
     renderSeeds();
     var host = el("cells"); if (!host) return;
     if (!STATE.cells.length){
@@ -4696,6 +4707,14 @@ UJ.app = (function(){
     /* Disabled rather than hidden when there is nothing to review: a button that vanishes teaches
        nobody what it would have done, and this one explains itself in its own label. */
     if (el("randomBuilt")) el("randomBuilt").disabled = built === 0;
+    var free = nucleusRows().length;
+    if (el("randomUnassigned")){
+      el("randomUnassigned").disabled = free === 0;
+      el("randomUnassigned").textContent = free
+        ? "Random unassigned cell — " + free.toLocaleString() + " marked nucle"
+          + (free === 1 ? "us" : "i") + " with no cell yet"
+        : "Random unassigned cell — none marked yet";
+    }
   }
 
   /* Landing on a random cell fills the coordinate fields in as well as showing the panel. Without
@@ -4730,6 +4749,88 @@ UJ.app = (function(){
       ? seeds().filter(function(r){ return r.key === c.id; })[0] : null;
     if (seed) landOn(seed, "built on by somebody here");
     focusCell(c.id);
+  }
+
+  /* ── an unassigned cell, opened ──────────────────────────────────────────────────────────
+     Not showFound(): that panel is built around a cell that HAS fragments, and it would also push
+     the nearest proofread cell into the navigation history, which is a different cell from the one
+     you asked for. So this is its own headline with the neighbours underneath, using the same row
+     markup and the same wiring as everywhere else. */
+  function nucPanelHtml(r){
+    var pos = r.pos.map(function(v){ return Math.round(v); });
+    var lay = layerLine(pos);
+    return "<div class='nuc' id='found-panel'>"
+      + "<div class='row' style='gap:6px'><span class='tag warn'>no cell built around it yet</span>"
+      +   "<span class='tag'>marked here</span></div>"
+      + "<div class='celltype'><a href='"
+      +   esc(X.viewerUrl([], r.pos, { knownNuclei: [r.pos] }))
+      +   "' target='_blank' rel='noopener' title='Open cb2 at this nucleus'>"
+      +   esc(cap(NUC_LABEL)) + " <span class='ext'>&#8599;</span></a> "
+      +   "<small class='cellref'>" + esc(r.name) + "</small></div>"
+      + (lay ? "<div class='meta'>soma in the " + lay + "</div>" : "")
+      + (r.box ? "<div class='meta'>found while searching column <code>" + esc(r.box)
+                 + "</code></div>" : "")
+      + "<div class='ids'><div class='idrow'><span class='k'>soma</span>"
+      +   "<span class='idval' title='click to copy' data-c='" + esc(pos.join(", ")) + "'>"
+      +   esc(pos.join(", ")) + "</span>"
+      +   "<button class='idbtn' id='nuc-build' title='Aim the paste box at a new cell and go "
+      +     "there. Build it and this nucleus is joined to it automatically'>Build a cell here"
+      +     "</button>"
+      + "</div></div>"
+      + "<p class='hint'>A cell body somebody found and nobody has assembled. Click its fragments "
+      + "in the viewer, paste the link into the box on this tab, and press <b>Build cell</b> "
+      + "&mdash; the join runs by itself and this stops being unassigned.</p>"
+      + "</div>";
+  }
+  /* Aim the paste box at a NEW cell and go there. TARGET null is "build one", which is the whole
+     difference between this and "Add fragments". */
+  function buildHere(r){
+    TARGET = null; LAST = null;
+    var box = el("paste"); if (box) box.value = "";
+    if (r && r.pos){ writeCoord(r.pos.map(function(v){ return Math.round(v); })); drawMap(r.pos); }
+    say("paste-msg", "Building a new cell at <code>" + esc(r ? r.name : "") + "</code> — click "
+      + "its fragments in the viewer and paste the link below. The nucleus is joined to whatever "
+      + "you build here, on its own.", true);
+    render();
+    goToPasteBox();
+  }
+  function landOnNucleus(r, why){
+    if (!r || !r.pos) return;
+    writeCoord(r.pos.map(function(v){ return Math.round(v); }));
+    drawMap(r.pos);
+    var host = el("find-body"), card = el("cellPanelCard");
+    if (!host) return;
+    var near = X.seedsNear(r.pos, 5);
+    host.innerHTML = nucPanelHtml(r)
+      + (near.length
+          ? "<div class='neigh'><h4>" + near.length + " nearest proofread cells</h4>"
+            + "<div class='seedrows'>" + near.map(function(h){
+                return seedRowHtml(h.row, (h.nm / 1000).toFixed(1) + " µm away"); }).join("")
+            + "</div></div>"
+          : "");
+    if (card) card.classList.add("show");
+    near.forEach(function(h){ wireSeedRow(h.row); });
+    if (el("nuc-build")) el("nuc-build").addEventListener("click", function(){ buildHere(r); });
+    Array.prototype.forEach.call(host.querySelectorAll(".idval[data-c]"), function(v){
+      v.addEventListener("click", function(){
+        try { navigator.clipboard.writeText(v.getAttribute("data-c")); } catch(e){}
+      });
+    });
+    if (why) say("find-msg", esc(why));
+    if (host.scrollIntoView) host.scrollIntoView({ behavior:"smooth", block:"nearest" });
+  }
+  /* Søren, 2026-09-02: nuclei "should also be searchable as a random unassigned cell". The third
+     random button, beside "nobody has worked on this one" and "somebody's assembly" -- and the
+     one with the strongest claim to be work worth doing, since there is no cell there at all. */
+  function showRandomUnassigned(){
+    var pool = nucleusRows();
+    if (!pool.length){
+      say("find-msg", "No unassigned nuclei yet. Mark some in <b>Search the volume for cells</b> "
+        + "below — every one you mark becomes an unassigned cell here.", false);
+      return;
+    }
+    landOnNucleus(pool[Math.floor(Math.random() * pool.length)],
+                  "an unassigned cell — a nucleus with no cell built around it");
   }
 
   /* Landing on a cell fills the coordinate fields in as well as showing the panel. Without that the
@@ -5370,14 +5471,23 @@ UJ.app = (function(){
        forking one -- so it is not counted twice. */
     var own = STATE.cells.filter(function(c){
       return !X.isSeedKey(c.id) && allSegs(c).length > 0; }).length;
+    /* Plus the marked nuclei, since 2026-09-02: an unassigned cell is a cell this list holds, and
+       a total that left them out would disagree with the sentence under it that names them. */
     if (el("seed-count"))
-      el("seed-count").textContent = (rows.length + own).toLocaleString() + " cells";
+      el("seed-count").textContent =
+        (rows.length + own + nucleusRows().length).toLocaleString() + " cells";
     if (el("seed-breakdown"))
       el("seed-breakdown").textContent =
         Object.keys(byType).sort(function(a, b){ return byType[b] - byType[a]; })
           .map(function(k){ return byType[k].toLocaleString() + " " + k
             + (byType[k] === 1 ? "" : "s"); }).join(", ")
-        + (own ? ", and " + own + " assembled here from loose fragments" : "") + ".";
+        + (own ? ", and " + own + " assembled here from loose fragments" : "")
+        + (nucleusRows().length
+            ? ", and " + nucleusRows().length.toLocaleString() + " marked nucle"
+              + (nucleusRows().length === 1 ? "us" : "i") + " with no cell built around "
+              + (nucleusRows().length === 1 ? "it" : "them") + " yet"
+            : "")
+        + ".";
     if (el("seed-prov") && !el("seed-prov").innerHTML)
       el("seed-prov").innerHTML =
         "Proofread by the Lee lab for "
@@ -5406,7 +5516,7 @@ UJ.app = (function(){
            + (R.matches.length === 1 ? "" : "es")
            + (R.matches.length > hits.length ? " — first " + hits.length + " shown" : "");
     } else {
-      hits = X.seedSearch(rows, q, 25);
+      hits = X.seedSearch(listRows(), q, 25);
       note = q ? hits.length + (hits.length === 25 ? "+ shown" : " found")
                : "showing the first 25 — type to search, or filter above";
     }
@@ -5439,7 +5549,27 @@ UJ.app = (function(){
      Lee lab proofread and what this community has since attached are different kinds of evidence,
      and a row reading "191 fragments" would quietly present the second as the first. The total is
      the one the link opens. */
+  /* A free nucleus, in the same list. Not seedRowHtml's markup with the numbers blanked: the
+     things a seed row prints -- fragment counts, an annotator, "Add fragments" -- are all things
+     this has none of, and a row of dashes reads as data that failed to load rather than as a cell
+     nobody has started. The action is the one thing you can do with it. */
+  function nucRowHtml(r, extra){
+    var L = r.pos ? X.layerAt(r.pos) : null;
+    return "<div class='seedrow' id='seed-" + cssId(r.key) + "'>"
+      + "<a class='seed-open' href='#' data-key='" + esc(r.key) + "'>" + esc(r.name)
+      + " &#8599;</a>"
+      + "<span class='chips'><span class='chip' title='" + esc("A nucleus somebody marked here. "
+        + "Nobody has assembled a cell around it yet — build one and it is joined automatically.")
+        + "'>" + esc(NUC_LABEL) + "</span></span>"
+      + "<span class='hint'>" + (extra ? esc(extra) + " · " : "")
+      + (L ? esc(L.layer) : "outside the traced layers")
+      + (r.box ? " · found in column " + esc(r.box) : "") + "</span>"
+      + "<span class='hint'>marked here</span>"
+      + "<button class='seed-add' data-key='" + esc(r.key) + "'>Build a cell here</button>"
+      + "</div>";
+  }
   function seedRowHtml(r, extra){
+    if (r.nucleus) return nucRowHtml(r, extra);
     var b = builtOn(r.key);
     var n = b ? allSegs(b).length : r.count;
     var added = n - r.count;
@@ -6687,6 +6817,17 @@ UJ.app = (function(){
                  frags: allSegs(b).length,
                  here: X.settledLabel(b) || "" });
     });
+    /* THE NUCLEI NOBODY HAS BUILT A CELL AROUND. `row` is set, so the list under the filter
+       renders them alongside everything else rather than dropping them from a preview whose count
+       already included them -- which would be the filter and the list disagreeing, the exact fault
+       this tab was reworked to remove. */
+    nucleusRows().forEach(function(r){
+      if (seen[r.key]) return;
+      seen[r.key] = 1;
+      out.push({ key:r.key, name:r.name, label:r.label, type:r.type, whole:true,
+                 pos:r.pos, zOdd:false, odd:false, annotator:"", row:r,
+                 proofread:false, nucleus:true, cell:null, added:0, frags:0, here:"" });
+    });
     STATE.cells.forEach(function(c){
       if (seen[c.id] || X.isSeedKey(c.id)) return;
       if (!allSegs(c).length) return;
@@ -6713,7 +6854,12 @@ UJ.app = (function(){
   var TYPE_GROUPS = [
     { name:"Whole cells", test: function(u){ return u.proofread && u.whole; } },
     { name:"Parts of cells", test: function(u){ return u.proofread && !u.whole; } },
-    { name:"Assembled here", test: function(u){ return !u.proofread; } }
+    { name:"Assembled here", test: function(u){ return !u.proofread && !u.nucleus; } },
+    /* Søren, 2026-09-02: nuclei "should be filtered as one in Filter and show". Their own group
+       rather than a line inside "Assembled here", because nothing has been assembled: this is the
+       list of cells waiting for somebody, which is a different question from "what has this
+       community built". */
+    { name:"Unassigned cells", test: function(u){ return !!u.nucleus; } }
   ];
   /* Counted into a NESTED structure rather than a flat map keyed by "group + label": the labels
      contain spaces ("granule cell dendrite"), so any single-string key has to be split back apart
@@ -7104,6 +7250,37 @@ UJ.app = (function(){
     window.open(X.viewerUrl([], us[0].pos, o), "_blank", "noopener");
   }
 
+  /* ── THE CONTROLS ARE COUNTS, SO THEY GO STALE ───────────────────────────────────────────
+     Every tickbox in sections 1, 3 and 4 carries a live count off the universe, and the universe
+     changes while the page is open: somebody builds a cell, somebody marks fifty nuclei. Built
+     once in wireFilter(), the counts then describe the page as it was at load -- and since
+     2026-09-02 an entire GROUP can appear ("Unassigned cells", the moment the first nucleus is
+     marked), so the control is not merely stale but missing.
+
+     Rebuilt with the ticks put back. The boxes are re-rendered from scratch, so what was checked
+     has to be read first and restored after; a tick silently dropped by a redraw is worse than a
+     stale count, because the preview then answers a question nobody asked. A tick whose option no
+     longer exists is simply gone, which is the truth about it. */
+  function refreshFilterControls(){
+    if (!el("filterCard")) return;
+    var was = {};
+    [".ftype", ".fneartype", ".flayer", ".fannot"].forEach(function(sel){
+      was[sel] = checkedValues(sel);
+    });
+    buildTypeChecksInto(el("filterTypes"), "ftype");
+    buildTypeChecksInto(el("filterNearTypes"), "fneartype");
+    buildLayerChecks();
+    buildAnnotChecks();
+    Object.keys(was).forEach(function(sel){
+      Array.prototype.forEach.call(document.querySelectorAll(sel), function(i){
+        if (was[sel].indexOf(i.value) >= 0) i.checked = true;
+      });
+    });
+    if (el("filterUniverse"))
+      el("filterUniverse").textContent =
+        filterable().length.toLocaleString() + " cells with a soma position";
+  }
+
   function wireFilter(){
     if (!el("filterCard")) return;
     buildTypeChecksInto(el("filterTypes"), "ftype");
@@ -7193,6 +7370,15 @@ UJ.app = (function(){
                 r.count, n - r.count, n, r.annotator || "",
                 b ? (b.builtBy || "") : "", b ? X.settledLabel(b) : ""].map(cell).join(";"));
     });
+    /* AND THE UNASSIGNED CELLS. The header above this list says 5,222 cells and names them in its
+       own sentence, so a download called "the whole list" that held 5,219 would be the page
+       disagreeing with itself about what it knows. Zero fragments, no annotator: what is true
+       about them is the position and the fact that nobody has built anything there. */
+    nucleusRows().forEach(function(r){
+      var L = r.pos ? X.layerAt(r.pos) : null;
+      out.push([r.name, r.key, r.label, L ? L.layer : "",
+                r.pos[0], r.pos[1], r.pos[2], 0, 0, 0, "", "", ""].map(cell).join(";"));
+    });
     Object.keys(extra).forEach(function(k){
       var c = extra[k], p = c.position, L = p ? X.layerAt(p) : null;
       out.push([X.seedName ? k : k, k, "", L ? L.layer : "",
@@ -7224,6 +7410,21 @@ UJ.app = (function(){
      decoding twenty-five per keypress is what makes a search box feel broken. */
   function wireSeedRow(r){
     var root = el("seed-" + cssId(r.key)); if (!root) return;
+    if (r.nucleus){
+      /* No fragments to open, so the viewer opens on the POINT -- which is what you want anyway:
+         you are going there to click the pieces that belong to it. */
+      root.querySelector(".seed-open").addEventListener("click", function(e){
+        e.preventDefault();
+        window.open(X.viewerUrl([], r.pos, { knownNuclei: [r.pos] }), "_blank", "noopener");
+      });
+      /* TARGET stays null: this builds a NEW cell rather than adding to something. joinAll() runs
+         after every build and will match this nucleus to it on its own, which is why the button
+         does not have to say anything about the nucleus at all. */
+      root.querySelector(".seed-add").addEventListener("click", function(){
+        buildHere(r);
+      });
+      return;
+    }
     root.querySelector(".seed-open").addEventListener("click", function(e){
       e.preventDefault();
       /* Centred on the SOMA, which is the whole point of having resolved the coordinate frame:
@@ -7336,10 +7537,46 @@ UJ.app = (function(){
       });
       if (k){ markVisited(k, d.added ? "found" : "empty"); STORE.visit(k, d.added ? "found" : "empty", d.added); }
       el("nuc-paste").value = "";
+      /* The new nuclei are cells now, so everything drawn from the universe has to be redrawn.
+         readNuclei does not go through render(), which is where those calls normally live. */
+      invalidateUniverse(); refreshFilterControls(); renderSeeds(); renderRandomButtons();
       renderExplore(); renderBox();
       joinAll();
     }).catch(failed("nuc-msg", "Recording the nuclei"));
   }
+
+  /* ── A MARKED NUCLEUS IS AN UNASSIGNED CELL ──────────────────────────────────────────────
+     Søren, 2026-09-02: "I would like them to show as unassigned cells."
+
+     cb2 publishes no cell list -- the thing that makes this tool unlike the other eight -- so a
+     marked nucleus is the closest this volume comes to "here is a cell, nobody has assembled it
+     yet", and it is the best piece of work the page can hand somebody. Until now marking one
+     produced two numbers in a summary line and nothing else.
+
+     SHAPED LIKE A SEED ROW, deliberately: key, name, label, position, a fragment count of zero.
+     Every consumer downstream -- the universe, the type tally, the layer counts, the search, the
+     list, the exports -- already knows how to read a cell row, and none of them has to learn a
+     second shape. `nucleus: true` is the one field that tells them apart, and it is what the four
+     places that must behave differently switch on.
+
+     ONLY THE FREE ONES. A nucleus joinAll() has matched to a cell IS that cell; listing it
+     separately would put two rows in the filter for one object and double every assembled cell in
+     the counts. Nuclei leave this list the moment somebody builds the cell around them, which is
+     behaviour the page already had. */
+  var NUC_LABEL = "unassigned cell";
+  function freeNuclei(){
+    return (((STATE.explore || {}).nuclei) || []).filter(function(n){ return n.pos && !n.cell; });
+  }
+  function nucleusRows(){
+    return freeNuclei().map(function(n){
+      return { key: n.id, name: n.id, type: "nuc", label: NUC_LABEL, whole: true,
+               odd: false, zOdd: false, annotator: "", pos: n.pos, count: 0, enc: "",
+               nucleus: true, box: n.box || "" };
+    });
+  }
+  /* Everything the filter, the list and the search work over: the published cells plus the nuclei
+     nobody has built a cell around. */
+  function listRows(){ return seeds().concat(nucleusRows()); }
 
   function renderExplore(){
     var n = el("explore-stats"); if (!n) return;
@@ -7817,6 +8054,8 @@ UJ.app = (function(){
     if (el("randomUntouched"))
       el("randomUntouched").addEventListener("click", showRandomUntouched);
     if (el("randomBuilt")) el("randomBuilt").addEventListener("click", showRandomBuilt);
+    if (el("randomUnassigned"))
+      el("randomUnassigned").addEventListener("click", showRandomUnassigned);
     if (el("navBackBtn")) el("navBackBtn").addEventListener("click", function(){ goTo(AT - 1); });
     if (el("navFwdBtn")) el("navFwdBtn").addEventListener("click", function(){ goTo(AT + 1); });
     if (el("randomOfType")) el("randomOfType").addEventListener("click", function(){
@@ -7908,6 +8147,9 @@ UJ.app = (function(){
            findByCoord:findByCoord, renderRandomButtons:renderRandomButtons,
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
            showRandomUntouched:showRandomUntouched, showRandomBuilt:showRandomBuilt,
+           showRandomUnassigned:showRandomUnassigned, nucleusRows:nucleusRows,
+           refreshFilterControls:refreshFilterControls,
+           landOnNucleus:landOnNucleus, buildHere:buildHere,
            showFound:showFound, layerLine:layerLine, showPlaceholder:showPlaceholder,
            history:function(){ return { trail:HIST, at:AT }; }, goTo:goTo,
            box:function(){ return BOX; },
