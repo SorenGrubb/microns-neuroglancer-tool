@@ -339,6 +339,14 @@ try{var _t=localStorage.getItem("ujump_theme");
  /* And the name itself stays on one line: it is a flex item beside the box and the count, so it
     shrinks before they do unless it is told not to. */
  .toggles label>.fname{white-space:nowrap}
+ /* core/organellefilter.js writes plain <label> elements, and this file's base rule uppercases
+    every label with letter-spacing -- right for a field caption, wrong for "Nucleoplasmic
+    reticulum (type II)", which came out as a shouted line of 61. The module is shared with seven
+    other tools and must not be edited for one page's stylesheet, so the reset is here. */
+ .orgf-list label{text-transform:none;letter-spacing:0;color:var(--ink);font-weight:400;margin:0}
+ .orgf-list input[type=checkbox]{width:auto;flex:none;padding:0;margin:0}
+ /* The topic headings inside it are <div>s, not labels; they keep the quiet uppercase look. */
+ #filterOrganelleBox select{margin-bottom:8px}
  .nsub{font-family:var(--mono);font-size:11px;color:var(--mut)}
  /* A group of ticks inside the scrolling type box. */
  .fgroup{margin-top:8px} .fgroup:first-child{margin-top:0}
@@ -385,7 +393,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 06:39</span></p>
+ctrl-shift-R.">build 2026-09-02 07:00</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -583,11 +591,25 @@ named yet. They have no kind, so no tickbox above can reach them."><input type="
     <p class="hint" id="filterLayerNote"></p>
   </details>
 
+  <!-- µJump's own section, rendered by core/organellefilter.js against χJump's own counts. It
+       said "cb2 carries no organelle annotations" until 2026-09-02, which was true of the DATA and
+       had stopped being a reason: Søren asked for the reporting as well as the filter, so the
+       vocabulary is µJump's 61 kinds and what is empty is a dataset nobody has annotated yet.
+       Kinds at zero are dimmed rather than hidden, which is that module's own rule and the whole
+       reason it shows counts: "Nucleolus (0)" tells you before you filter that the answer will be
+       empty, and why. -->
+  <details class="rv-panel filter-section" id="filterSecOrganelle">
+    <summary>Has the cell been annotated with a specific organelle or extracellular
+      structure?</summary>
+    <div id="filterOrganelleBox" style="margin-top:8px"></div>
+    <p class="hint" id="filterOrganelleNote"></p>
+  </details>
+
   <details class="rv-panel filter-section" id="filterSecAnnot">
-    <summary>Has the cell been annotated here?</summary>
-    <p class="hint" style="margin-top:8px">cb2 carries no organelle annotations, so there is no
-    organelle vocabulary to filter on &mdash; what this tool records about a cell is who assembled
-    it, what they called it, and whether a nucleus has been joined to it.</p>
+    <summary>Has the cell been annotated here in any other way?</summary>
+    <p class="hint" style="margin-top:8px">What this tool records about a cell besides its
+    organelles: who assembled it, what they called it, and whether the published table
+    contradicts itself about it.</p>
     <div class="toggles" id="filterAnnot" style="margin-top:8px"></div>
   </details>
 
@@ -615,6 +637,9 @@ sends it switched off, so you can turn it back on in the viewer without rebuildi
       <label style="font-size:12px" title="The six boundaries Søren traced, as line annotations on
 the section they were drawn on."><input type="checkbox" id="filterBordersOn"> The traced
         cerebellar layer borders</label>
+      <label style="font-size:12px" title="Every organelle and extracellular structure logged on a
+matched cell, as points in their own layer."><input type="checkbox" id="filterOrgOn"> Organelles
+        and extracellular structures</label>
       <label style="font-size:12px"><input type="checkbox" id="filterNucOn"> The nuclei marked
         here</label>
     </div>
@@ -1041,6 +1066,24 @@ UJ.cfg.explore = {
   topK: 8
 };
 
+/* ── organelles ─────────────────────────────────────────────────────────────────────────────
+   Søren, 2026-09-02: "We should build the organelle reporting like in uJump and then also
+   implement the filter."
+
+   The 61 KINDS ARE NOT HERE. They are generated from core/ontology.js into
+   xjump_organelle_data.js at build time -- see src/organelle_data.py for why copying them would
+   be the wrong reading of "like µJump". This block is only the two things that are cb2's own:
+   what the annotation layer is called, and what colour it is.
+
+   AMBER for a fresh mark and GREY for one on record, matching the nuclei pair above: neuroglancer
+   colours per layer rather than per annotation, so the only way to tell "about to be logged" from
+   "already logged" is to put them in different layers. */
+UJ.cfg.organelles = {
+  layerName: "organelles",
+  colour: "#f59e0b",
+  recordedColour: "#9aa4b2"
+};
+
 UJ.cfg.tabs = { lsKey: "xjump_active_tab", urlParam: "tab" };
 /* core/stepthrough.js. Its tab half is NOT used -- χJump has its own tab machinery, which also
    redraws the statistics on open -- only initStepThrough/stepGoTo. nucPanelId names the element
@@ -1102,6 +1145,19 @@ UJ.cfg.mesh = {};
      mean everywhere: the same fix made in one tool's own chip reached that tool only, and
      Søren's next screenshot was the next tool still showing 1786.5000000000002. -->
 <script src="core/points.js"></script>
+<!-- µJump's organelle reporting. The 61 kinds are GENERATED from core/ontology.js into
+     xjump_organelle_data.js (never hand-copied -- see src/organelle_data.py); core/organelles.js
+     is the form's logic, shared with ωJump since 2026-09-02; core/organellefilter.js is the
+     grouped, counted filter control the whole family now uses. -->
+<script>/* GENERATED by build_xjump.py from core/ontology.js -- DO NOT EDIT.
+   µJump's organelle ontology, verbatim: 61 kinds in 13 topic groups, 2 of them
+   two-point (vector) kinds. Regenerate by re-running the build; the check suite
+   fails if this file and ontology.js ever disagree. */
+window.UJ = window.UJ || {};
+UJ.organelleData = { source: "core/ontology.js", groups: [{"label": "Not sure what this is?", "kinds": [{"value": "ask_expert", "label": "What the… is this? (ask an expert)", "short": "flagged: ask expert", "vector": false}]}, {"label": "Nucleus", "kinds": [{"value": "nucleolus", "label": "Nucleolus", "short": "nucleolus", "vector": false}, {"value": "chromatin", "label": "Chromatin", "short": "chromatin", "vector": false}, {"value": "nuclear_pore", "label": "Nuclear pore", "short": "nuclear pore", "vector": false}, {"value": "nucleoplasmic_reticulum_1", "label": "Nucleoplasmic reticulum (type I)", "short": "NR type I", "vector": false}, {"value": "nucleoplasmic_reticulum_2", "label": "Nucleoplasmic reticulum (type II)", "short": "NR type II", "vector": true, "pointLabels": ["Coordinate 1", "Coordinate 2"]}]}, {"label": "Centriole & cilium", "kinds": [{"value": "centriole", "label": "Centriole / centrosome", "short": "centriole", "vector": false}, {"value": "cilium", "label": "Primary cilium (base + tip)", "short": "cilium", "vector": true, "pointLabels": ["Base", "Tip"]}]}, {"label": "Endomembrane system", "kinds": [{"value": "er_rough", "label": "Rough endoplasmic reticulum", "short": "rough ER", "vector": false}, {"value": "er_smooth", "label": "Smooth endoplasmic reticulum", "short": "smooth ER", "vector": false}, {"value": "golgi", "label": "Golgi apparatus", "short": "Golgi apparatus", "vector": false}, {"value": "lysosome", "label": "Lysosome", "short": "lysosome", "vector": false}, {"value": "peroxisome", "label": "Peroxisome", "short": "peroxisome", "vector": false}, {"value": "mitochondria", "label": "Mitochondria", "short": "mitochondrion", "vector": false}, {"value": "mvb", "label": "Multivesicular body", "short": "MVB", "vector": false}, {"value": "endosome", "label": "Endosome", "short": "endosome", "vector": false}]}, {"label": "Vesicles & trafficking", "kinds": [{"value": "pinocytic_vesicle", "label": "Pinocytic vesicle", "short": "pinocytic vesicle", "vector": false}, {"value": "caveolae", "label": "Caveolae", "short": "caveolae", "vector": false}, {"value": "secretory_vesicle", "label": "Secretory vesicle", "short": "secretory vesicle", "vector": false}, {"value": "transport_vesicle", "label": "Transport vesicle", "short": "transport vesicle", "vector": false}, {"value": "autophagosome", "label": "Autophagosome", "short": "autophagosome", "vector": false}, {"value": "phagosome", "label": "Phagosome", "short": "phagosome", "vector": false}, {"value": "weibel_palade_body", "label": "Weibel-Palade body", "short": "Weibel-Palade body", "vector": false}, {"value": "synaptic_vesicle", "label": "Synaptic vesicle", "short": "synaptic vesicle", "vector": false}, {"value": "extracellular_vesicle", "label": "Extracellular vesicle", "short": "extracellular vesicle", "vector": false}]}, {"label": "Cytoskeleton", "kinds": [{"value": "microtubules", "label": "Microtubules", "short": "microtubules", "vector": false}, {"value": "microfilaments", "label": "Microfilaments", "short": "microfilaments", "vector": false}, {"value": "intermediate_filaments", "label": "Intermediate filaments", "short": "intermediate filaments", "vector": false}, {"value": "contractile_elements", "label": "Contractile elements", "short": "contractile elements", "vector": false}, {"value": "gfap", "label": "GFAP", "short": "GFAP", "vector": false}]}, {"label": "Cell junctions", "kinds": [{"value": "adherens_junction", "label": "Adherens junction", "short": "adherens junction", "vector": false}, {"value": "gap_junction", "label": "Gap junction", "short": "gap junction", "vector": false}, {"value": "tight_junction", "label": "Tight junction", "short": "tight junction", "vector": false}, {"value": "tunneling_nanotube", "label": "Tunneling nanotube", "short": "tunneling nanotube", "vector": false}]}, {"label": "Vascular & perivascular contacts", "kinds": [{"value": "peg_and_socket_junction", "label": "Peg-and-socket junction", "short": "peg-and-socket junction", "vector": false}, {"value": "myoendothelial_junction", "label": "Myoendothelial junction", "short": "myoendothelial junction", "vector": false}, {"value": "tripartite_junction", "label": "Tripartite junction", "short": "tripartite junction", "vector": false}, {"value": "astrocyte_endfoot", "label": "Astrocyte endfoot", "short": "astrocyte endfoot", "vector": false}, {"value": "microglia_plug", "label": "Microglia plug", "short": "microglia plug", "vector": false}, {"value": "perivascular_debris", "label": "Perivascular debris", "short": "perivascular debris", "vector": false}]}, {"label": "Cytoplasmic inclusions", "kinds": [{"value": "lipid_droplet", "label": "Lipid droplet", "short": "lipid droplet", "vector": false}, {"value": "glycogen", "label": "Glycogen", "short": "glycogen", "vector": false}, {"value": "ribosome", "label": "Ribosome", "short": "ribosome", "vector": false}, {"value": "lipofuscin_granule", "label": "Lipofuscin granule", "short": "lipofuscin granule", "vector": false}, {"value": "corpora_amylacea", "label": "Corpora amylacea", "short": "corpora amylacea", "vector": false}]}, {"label": "Surface & membrane specializations", "kinds": [{"value": "microvillus", "label": "Microvillus", "short": "microvillus", "vector": false}, {"value": "glycocalyx", "label": "Glycocalyx", "short": "glycocalyx", "vector": false}, {"value": "myelin_sheath", "label": "Myelin sheath", "short": "myelin sheath", "vector": false}]}, {"label": "Synaptic structures", "kinds": [{"value": "synapse", "label": "Synapse", "short": "synapse", "vector": false}, {"value": "dendritic_spine", "label": "Dendritic spine", "short": "dendritic spine", "vector": false}, {"value": "axonal_bouton", "label": "Axonal bouton", "short": "axonal bouton", "vector": false}]}, {"label": "Extracellular matrix & structures", "kinds": [{"value": "elastin", "label": "Elastin", "short": "elastin", "vector": false}, {"value": "fibrin", "label": "Fibrin", "short": "fibrin", "vector": false}, {"value": "collagen", "label": "Collagen", "short": "collagen", "vector": false}, {"value": "extracellular_space", "label": "Extracellular space", "short": "extracellular space", "vector": false}, {"value": "glia_limitans", "label": "Glia limitans", "short": "glia limitans", "vector": false}, {"value": "basement_membrane", "label": "Basement membrane", "short": "basement membrane", "vector": false}]}, {"label": "Pathology", "kinds": [{"value": "amyloid_beta_plaque", "label": "Amyloid beta plaque", "short": "amyloid-β plaque", "vector": false}, {"value": "tau_tangle", "label": "Tau tangle", "short": "tau tangle", "vector": false}, {"value": "dystrophic_neurite", "label": "Dystrophic neurite", "short": "dystrophic neurite", "vector": false}, {"value": "swelling", "label": "Swelling", "short": "swelling", "vector": false}]}] };
+</script>
+<script src="core/organelles.js"></script>
+<script src="core/organellefilter.js"></script>
 <!-- The filter panel's shared halves: the bounding-box rows and preview, the per-box Colab
      notebook they generate, and the step-through. Same files µJump, λJump and ωJump load, so a
      fix to any of them reaches every tool rather than the one it was found in. core/tree.js,
@@ -1650,6 +1706,32 @@ UJ.xjump = (function(){
                         source: { url:"local://annotations", transform:{ outputDimensions: dims } },
                         tab:"source", annotationColor:"#66ff00", annotations: segsOut });
       }
+    }
+    /* ── the organelle layers ─────────────────────────────────────────────────────────────────
+       Søren, 2026-09-02: "We should build the organelle reporting like in uJump."
+
+       Two layers again, and for the reason the nucleus pair has two: neuroglancer colours per
+       LAYER, not per annotation, so a mark you are about to make and one already on record have
+       to be in different layers to look different. The armed one is opt-in -- a link that just
+       shows a cell should not hand you a loaded annotation tool -- but the RECORDED one rides
+       along whenever there is anything to draw, because seeing what has already been logged is
+       the point of asking for the layer at all. */
+    if (o.organellePoints && o.organellePoints.length){
+      var oc = (UJ.cfg.organelles || {});
+      layers.push({ type:"annotation", name: (oc.layerName || "organelles") + " (recorded)",
+                    source: { url:"local://annotations", transform:{ outputDimensions: dims } },
+                    tab:"source", annotationColor: oc.recordedColour || "#9aa4b2",
+                    annotations: o.organellePoints.slice(0, 5000).map(function(p, i){
+                      var pt = p.pos || p;
+                      return { type:"point", id:"org" + i, point: pt.map(Number),
+                               description: p.label || undefined }; }) });
+    }
+    if (o.organelles){
+      var oc2 = (UJ.cfg.organelles || {});
+      layers.push({ type:"annotation", name: oc2.layerName || "organelles",
+                    source: { url:"local://annotations", transform:{ outputDimensions: dims } },
+                    tab:"annotations", annotationColor: oc2.colour || "#f59e0b",
+                    annotations: [] });
     }
     /* The matched somata, as points. What makes "open all matches in the viewer" mean anything
        when the matches are five hundred cells: their fragments would be a link nobody's browser
@@ -2207,6 +2289,31 @@ UJ.xjump = (function(){
              recorded: recorded, position: readPosition(st.state) };
   }
 
+  /* Every point annotation in one layer of a pasted state, undeduplicated.
+
+     parseNuclei() above is the nucleus loop's own reader and cannot serve this: it insists on the
+     nuclei layer by name, and it DEDUPLICATES within 2 µm, which is right for nuclei and wrong for
+     organelles -- two mitochondria really can sit half a micrometre apart, and silently dropping
+     one of them would make the form quietly disagree with what the person marked.
+
+     No layer name means "any annotation layer", because a person Ctrl+clicking in a viewer link
+     this page did not build has no reason to have used our layer names. */
+  function parsePoints(text, layerName){
+    var st = decodeState(text);
+    if (!st.ok) return st;
+    var pts = [];
+    (st.state.layers || []).forEach(function(l){
+      if (!l || l.type !== "annotation") return;
+      if (layerName && l.name !== layerName) return;
+      (l.annotations || []).forEach(function(a){
+        if (a && a.point && a.point.length === 3
+            && a.point.every(function(v){ return isFinite(Number(v)); }))
+          pts.push(a.point.map(Number));
+      });
+    });
+    return { ok:true, points: pts, position: readPosition(st.state) };
+  }
+
   /* ── the box grid ────────────────────────────────────────────────────────────────────────
      Boxes are addressed by integer index, and the KEY is the index triple as a string, so a box
      means the same thing to every user and to the sheet for ever. Deriving them from the volume
@@ -2327,7 +2434,7 @@ UJ.xjump = (function(){
            newCell:newCell, claimsFor:claimsFor, addToCell:addToCell, removeFromCell:removeFromCell,
            tallySummary:tallySummary, settledLabel:settledLabel, nameSuggestions:nameSuggestions,
            localDims:localDims, buildState:buildState, viewerUrl:viewerUrl, centreVox:centreVox,
-           parseNuclei:parseNuclei,
+           parseNuclei:parseNuclei, parsePoints:parsePoints,
            decodeSeed:decodeSeed, seedKey:seedKey, isSeedKey:isSeedKey, seedName:seedName,
            seedList:seedList, seedSegments:seedSegments, seedSearch:seedSearch,
            seedIndex:seedIndex, seedOwnerOf:seedOwnerOf, seedClaimsFor:seedClaimsFor,
@@ -3751,6 +3858,7 @@ UJ.app = (function(){
                  + "<button class='frag-x' data-seg='" + esc(s) + "' data-id='" + esc(c.id)
                  + "' title='Take this fragment off this cell'>&times;</button></span>"; }).join("")
       +   "</div></details>"
+      + organSectionHtml(c.id)
       + "</div>";
   }
 
@@ -3886,6 +3994,7 @@ UJ.app = (function(){
         c.rejects = (c.rejects || 0) + 1; render();
       }).catch(function(e){ note(esc("Saving that failed: " + e.message), false); });
     });
+    wireOrganSection(root, c.id);
   }
 
   function renderStats(){
@@ -3967,8 +4076,9 @@ UJ.app = (function(){
                         + " built from loose fragments, " + (c.cells - c.built)
                         + " extended from the published reconstructions — with "
                         + c.fragments + " fragment" + (c.fragments === 1 ? "" : "s")
-                        + " added in total, " + c.nuclei + " nuclei marked and "
-                        + c.names + " names given." };
+                        + " added in total, " + c.nuclei + " nuclei marked, "
+                        + c.names + " names given and " + (c.organelles || 0)
+                        + " organelle" + ((c.organelles || 0) === 1 ? "" : "s") + " logged." };
       });
     return whoRows.concat(here).sort(function(a, b){ return b.n - a.n; });
   }
@@ -4486,6 +4596,7 @@ UJ.app = (function(){
       + "</div>"
       + "<div class='mesh3d-host'></div>"
       + "<div class='hint mesh-out' style='margin-top:6px'></div>"
+      + organSectionHtml(row.key)
       + "</div>";
   }
 
@@ -4705,6 +4816,7 @@ UJ.app = (function(){
         try { navigator.clipboard.writeText(v.getAttribute("data-c")); } catch(e){}
       });
     });
+    wireOrganSection(root, row.key);
   }
 
   /* ── the volume, drawn ────────────────────────────────────────────────────────────────────
@@ -5065,6 +5177,358 @@ UJ.app = (function(){
       + "</div>";
   }
 
+  /* ══ ORGANELLES ═══════════════════════════════════════════════════════════════════════════
+     Søren, 2026-09-02: "We should build the organelle reporting like in uJump and then also
+     implement the filter."
+
+     µJump's report, on χJump's cells. The 61 kinds are generated from core/ontology.js into
+     xjump_organelle_data.js and the form's own logic is core/organelles.js, shared with ωJump --
+     so "the same organelles as µJump" is enforced by the build rather than by anybody
+     remembering. Same `organelle_location` POST, same sheet, same columns, same points: doPost
+     routes on `ds`, so the row lands in χJump's spreadsheet and no new backend code writes it.
+
+     THE THING AN ORGANELLE IS LOGGED AGAINST IS A CELL, not a nucleus. µJump reports against a
+     published nucleus id and ωJump against a nucleusKey the community made; here the unit of work
+     is an assembly, so it is the cell key -- "cb2/htem/pc_0" for a proofread reconstruction,
+     "cb2:41" for one built here. Both carry their dataset in the string, which is what makes them
+     safe in a sheet with no dataset column. The column is still called `nucleusId`, because it is
+     µJump's column and renaming it would fork this sheet from the handler that writes it.
+
+     COORDINATES ARE VOXELS, the frame every χJump link and BossDB's own viewer show.
+
+     ONE ADDITION µJump CANNOT MAKE, taken from ωJump: this page can read Ctrl+clicked markers out
+     of a pasted viewer link, so the coordinates can be POINTED AT rather than typed. Typing still
+     works and is still the default; the paste box only ever ADDS rows. */
+  /* RESOLVED AT CALL TIME, not captured. core/organelles.js is a <script src> and this file is
+     inlined, so a page that loaded them in the other order -- or a check harness that evaluates
+     the module after the app -- would capture null once and never recover, and the organelle
+     section would silently not exist. One function, and the ordering stops mattering. */
+  function organ(){ return window.UJ.organelles || null; }
+  var VOX = "voxel";
+
+  /* "2× centriole · 1× mitochondrion", or an honest nothing. */
+  function organKnownText(cellKey){
+    if (!organ()) return "";
+    var parts = organ().countParts(organellesOf(cellKey));
+    if (!parts.length) return "nothing logged yet";
+    return parts.map(function(p){ return p.n + "× " + esc(p.short); }).join(" · ");
+  }
+  /* What the store knows about a cell's organelles. A proofread cell that nobody has touched has
+     no store record at all, which is not the same as "no organelles" only in the sense that both
+     answers are the empty list -- so one lookup serves both. */
+  function organellesOf(cellKey){
+    var c = byId(cellKey);
+    return (c && c.organelles) || [];
+  }
+  function organPointsOf(cellKey){
+    var c = byId(cellKey);
+    return (c && c.organellePoints) || [];
+  }
+
+  /* The collapsed section, appended to whichever panel is showing a cell. A <details> and not an
+     always-open block: the identity card is already the densest thing on the page, and somebody
+     who came to see what a cell is has not asked to fill in a form. */
+  function organSectionHtml(cellKey){
+    if (!organ()) return "";
+    return "<details class='organ-details' data-cell='" + esc(cellKey) + "'"
+      + " style='margin-top:12px;border-top:1px dashed var(--line);padding-top:10px'>"
+      + "<summary><span class='lbl'>Also log an organelle here</span> "
+      + "<span class='hint organ-known'>" + esc(organKnownText(cellKey)) + "</span></summary>"
+      + "<div class='organ-body'></div></details>";
+  }
+
+  /* Wired lazily on first open, for the reason ωJump wires it lazily: the form is 61 options in a
+     dropdown per row, and building it for every cell card on the page would be building it dozens
+     of times for the one somebody eventually opens. */
+  function wireOrganSection(root, cellKey){
+    if (!organ() || !root) return;
+    var d = root.querySelector(".organ-details"); if (!d) return;
+    d.addEventListener("toggle", function(){
+      var body = d.querySelector(".organ-body");
+      if (d.open && body && !body.innerHTML) renderOrganBody(d, cellKey);
+    });
+  }
+
+  function coordRow(g){
+    return "<div class='row' style='gap:8px;margin-top:2px'>"
+      + ["x","y","z"].map(function(ax){
+          return "<input type='text' class='o" + g + ax + "' inputmode='decimal' placeholder='"
+            + ax + "' style='flex:1 1 70px'>"; }).join("")
+      + "<button type='button' class='organ-jump' data-g='" + g
+      + "' style='padding:6px 10px;font-size:12.5px;width:auto'>Jump &#8599;</button></div>";
+  }
+  function organRowHtml(){
+    return "<div class='organ-row' style='border:1px solid var(--line);border-radius:8px;"
+      +   "padding:10px;margin-top:8px'>"
+      + "<div class='row' style='justify-content:space-between;align-items:center'>"
+      +   "<span class='hint'>Structure <b class='organ-n'>1</b></span>"
+      +   "<button type='button' class='organ-del' title='Remove this structure' "
+      +     "style='background:none;border:none;color:var(--mut);font-size:17px;line-height:1;"
+      +     "padding:0 4px;cursor:pointer;width:auto'>&times;</button>"
+      + "</div>"
+      + "<label style='margin-top:6px'>What is this?</label>"
+      + "<select class='organ-kind'>" + organ().optionsHtml() + "</select>"
+      + "<div class='organ-a' style='margin-top:8px'>"
+      +   "<label class='organ-la'>Approx. location (" + VOX + ")</label>" + coordRow("a")
+      + "</div>"
+      + "<div class='organ-b' style='margin-top:8px;display:none'>"
+      +   "<label class='organ-lb'>Point 2 (" + VOX + ")</label>" + coordRow("b")
+      + "</div>"
+      + "<p class='hint' style='margin:4px 0 0'>Paste &ldquo;x, y, z&rdquo; into an x field "
+      +   "&mdash; it splits itself.</p>"
+      + "</div>";
+  }
+
+  function renderOrganBody(d, cellKey){
+    var body = d.querySelector(".organ-body"); if (!body) return;
+    var known = organKnownText(cellKey);
+    body.innerHTML =
+        "<p class='hint' style='margin-top:0'>Mark where an organelle or extracellular structure "
+      + "sits in this cell &mdash; the same list µJump uses, generated from the same ontology so "
+      + "the two tools cannot drift apart. One row per structure; log several of the same kind if "
+      + "the cell has several. <b>Coordinates here are " + VOX + "s</b>, the frame every χJump "
+      + "link and BossDB&rsquo;s own viewer show, so a coordinate copied from either drops "
+      + "straight in.</p>"
+      + "<div class='callout' style='margin:0 0 10px;border:1px solid var(--line);"
+      +   "border-radius:8px;padding:10px'>"
+      +   "<span class='hint'>Or point at them instead: open the cell, <b>Ctrl</b>+click each "
+      +   "structure in the <code>organelles</code> layer, and paste the link here &mdash; one row "
+      +   "per marker, ready to label.</span>"
+      +   "<div class='row' style='margin-top:8px'>"
+      +     "<button type='button' class='organ-open' style='width:auto'>Open this cell with the "
+      +       "organelle layer &#8599;</button>"
+      +   "</div>"
+      +   "<div class='row' style='margin-top:8px'>"
+      +     "<input type='text' class='organ-paste' placeholder='paste the link back here' "
+      +       "style='flex:1 1 240px'>"
+      +     "<button type='button' class='organ-from-link' style='width:auto'>Add a row per "
+      +       "marker</button>"
+      +   "</div></div>"
+      + "<div class='organ-rows'></div>"
+      + "<button type='button' class='organ-add' style='margin-top:8px;width:auto;font-size:13px;"
+      +   "padding:6px 10px'>+ Add another structure</button>"
+      + "<div style='margin-top:12px'><label>Comments (optional)</label>"
+      +   "<input type='text' class='organ-comment' placeholder='e.g. cilium is short, hard to "
+      +   "trace to a clear tip'></div>"
+      + "<div class='row' style='margin-top:10px'>"
+      +   "<button class='primary organ-submit'>Submit organelle report</button></div>"
+      + "<p class='hint organ-msg' style='margin:10px 0 0'></p>"
+      + (known && known !== "nothing logged yet"
+          ? "<p class='hint' style='margin:6px 0 0'>Already on record here: " + esc(known)
+            + ".</p>"
+          : "");
+    addOrganRow(d, cellKey);
+    d.querySelector(".organ-add").addEventListener("click", function(){ addOrganRow(d, cellKey); });
+    d.querySelector(".organ-from-link").addEventListener("click", function(){
+      rowsFromLink(d, cellKey); });
+    d.querySelector(".organ-submit").addEventListener("click", function(){
+      submitOrganelles(d, cellKey); });
+    d.querySelector(".organ-open").addEventListener("click", function(){
+      openForMarking(cellKey);
+    });
+  }
+
+  function organSay(d, html, good){
+    var m = d.querySelector(".organ-msg"); if (!m) return;
+    m.innerHTML = html;
+    m.style.color = good === undefined ? "" : (good ? "var(--ok)" : "var(--bad)");
+  }
+
+  /* The cell, with the organelle annotation tool armed and whatever is already logged drawn
+     beside it in its own layer. Two layers because neuroglancer colours per layer: a mark you are
+     about to make and one already on record have to look different. */
+  function openForMarking(cellKey){
+    var segs = segsForCell(cellKey), pos = posForCell(cellKey);
+    window.open(X.viewerUrl(segs, pos, {
+      organelles: true,
+      organellePoints: organPointsOf(cellKey).map(function(p){
+        return { pos: p.pos, label: O ? organ().shortOf(p.kind) : p.kind }; }),
+      nuclei: false
+    }), "_blank", "noopener");
+  }
+  /* A cell key can name a proofread reconstruction or one assembled here; both have fragments and
+     a position, and every caller wants them the same way. */
+  function segsForCell(cellKey){
+    var c = byId(cellKey);
+    if (c) return allSegs(c);
+    var row = seeds().filter(function(r){ return r.key === cellKey; })[0];
+    return row ? X.seedSegments(row) : [];
+  }
+  function posForCell(cellKey){
+    var c = byId(cellKey);
+    if (c && (c.position || nucleusOf(c))) return nucleusOf(c) || c.position;
+    var row = seeds().filter(function(r){ return r.key === cellKey; })[0];
+    return (row && row.pos) || null;
+  }
+
+  function addOrganRow(d, cellKey, kindValue, posVox){
+    var rows = d.querySelector(".organ-rows"); if (!rows) return null;
+    var wrap = document.createElement("div");
+    wrap.innerHTML = organRowHtml();
+    var row = wrap.firstChild;
+    rows.appendChild(row);
+    var kind = row.querySelector(".organ-kind");
+    /* µJump's defaults, and for its reason: a centriole is annotated first and the cilium right
+       after, because they are the same organelle system. Set EXPLICITLY rather than relying on
+       list order -- µJump had exactly that bug the day "ask_expert" became the first option. */
+    kind.value = kindValue || (rows.children.length === 1 ? "centriole" : "cilium");
+    row.querySelector(".organ-del").addEventListener("click", function(){
+      if (rows.children.length <= 1){
+        organSay(d, "At least one structure is needed. Collapse the section to drop the whole "
+          + "report instead.", false);
+        return;
+      }
+      row.remove(); renumberOrganRows(d);
+    });
+    kind.addEventListener("change", function(){ syncOrganRow(row); });
+    ["a","b"].forEach(function(g){
+      var xs = row.querySelector(".o" + g + "x");
+      xs.addEventListener("input", function(){
+        var p = organ().splitPaste(xs.value);
+        if (!p) return;
+        xs.value = p[0];
+        row.querySelector(".o" + g + "y").value = p[1];
+        row.querySelector(".o" + g + "z").value = p[2];
+      });
+    });
+    Array.prototype.forEach.call(row.querySelectorAll(".organ-jump"), function(b){
+      b.addEventListener("click", function(){
+        var p = readOrganCoord(row, b.getAttribute("data-g"));
+        if (!p){ organSay(d, "Fill in x, y and z first.", false); return; }
+        window.open(X.viewerUrl(segsForCell(cellKey), p, { organelles: true, nuclei: false }),
+                    "_blank", "noopener");
+      });
+    });
+    if (posVox) ["x","y","z"].forEach(function(ax, i){
+      row.querySelector(".oa" + ax).value = String(Math.round(posVox[i])); });
+    syncOrganRow(row); renumberOrganRows(d);
+    return row;
+  }
+  function renumberOrganRows(d){
+    var rows = d.querySelector(".organ-rows"); if (!rows) return;
+    Array.prototype.forEach.call(rows.children, function(r, i){
+      var n = r.querySelector(".organ-n"); if (n) n.textContent = String(i + 1);
+    });
+  }
+  /* Which coordinate fields a row shows is asked of the KIND DATA, never of the kind's name.
+     µJump learned this one the hard way: a hardcoded cilium check meant nucleoplasmic reticulum
+     type II silently got a single point when it was added as the second vector kind. */
+  function syncOrganRow(row){
+    var v = row.querySelector(".organ-kind").value;
+    var vec = organ().isVector(v), lbl = organ().pointLabels(v);
+    row.querySelector(".organ-b").style.display = vec ? "" : "none";
+    row.querySelector(".organ-la").textContent =
+      (vec ? lbl[0] : "Approx. location") + " (" + VOX + ")";
+    row.querySelector(".organ-lb").textContent = lbl[1] + " (" + VOX + ")";
+  }
+  function readOrganCoord(row, g){
+    var v = ["x","y","z"].map(function(ax){
+      return row.querySelector(".o" + g + ax).value.trim(); });
+    return v.every(function(t){ return t !== "" && !isNaN(Number(t)); }) ? v.map(Number) : null;
+  }
+
+  function rowsFromLink(d, cellKey){
+    var box = d.querySelector(".organ-paste");
+    var oc = (UJ.cfg.organelles || {});
+    var r = X.parsePoints(box.value, oc.layerName || "organelles");
+    if (!r.ok){ organSay(d, esc(r.error || "that link could not be read"), false); return; }
+    if (!r.points.length){
+      /* Said precisely: "no markers" and "markers in the wrong layer" are different mistakes with
+         different fixes, and the second is the likely one when somebody Ctrl+clicks in a link
+         this page did not build. */
+      var any = X.parsePoints(box.value, null);
+      organSay(d, any.ok && any.points.length
+        ? "That link has " + any.points.length + " marker" + (any.points.length === 1 ? "" : "s")
+          + ", but none in the <code>" + esc(oc.layerName || "organelles") + "</code> layer. Use "
+          + "the button above to open the cell with that layer already armed."
+        : "That link has no markers on it. <b>Ctrl</b>+click the structures in the viewer first.",
+        false);
+      return;
+    }
+    /* Only ever ADDS. A paste that replaced the rows would throw away whatever was already typed,
+       and the first row arrives pre-filled with a default kind rather than empty. */
+    var rows = d.querySelector(".organ-rows");
+    var onlyEmpty = rows.children.length === 1 && !readOrganCoord(rows.children[0], "a");
+    if (onlyEmpty) rows.innerHTML = "";
+    r.points.forEach(function(p){ addOrganRow(d, cellKey, "centriole", p); });
+    box.value = "";
+    organSay(d, r.points.length + " row" + (r.points.length === 1 ? "" : "s")
+      + " added from the link. Set what each one is, then submit.", true);
+  }
+
+  function submitOrganelles(d, cellKey){
+    if (!STORE.canWrite()){
+      organSay(d, "Sign in with Google first — reading is public, adding to the record is not.",
+               false);
+      return;
+    }
+    var rows = Array.prototype.map.call(d.querySelector(".organ-rows").children, function(row){
+      return { kind: row.querySelector(".organ-kind").value,
+               a: readOrganCoord(row, "a"), b: readOrganCoord(row, "b") };
+    });
+    var built = organ().buildSubs(rows);
+    if (!built.ok){ organSay(d, esc(built.error), false); return; }
+
+    var note = d.querySelector(".organ-comment") ? d.querySelector(".organ-comment").value.trim() : "";
+    var gid = organ().groupId(cellKey, new Date().getTime());
+    var btn = d.querySelector(".organ-submit"); btn.disabled = true;
+    var pos = posForCell(cellKey);
+    var total = built.subs.length, done = 0;
+    organSay(d, "saving structure 1 of " + total + "…");
+    /* Sequential and progress-reported, the same as the nucleus batch and for the same reason:
+       each is a round trip of roughly a second, and a page that says one thing and then sits
+       there is indistinguishable from a hung one. */
+    built.subs.reduce(function(pr, sub, i){
+      return pr.then(function(){
+        return STORE.organelle(cellKey, {
+          coord: pos ? pos.map(Math.round).join(",") : "",
+          groupId: gid, subIndex: i + 1, subCount: total,
+          kind: sub.kind, pointA: sub.pointA, pointB: sub.pointB,
+          identified: identityOf(cellKey), comment: note
+        }).then(function(){
+          done++;
+          if (done < total) organSay(d, "saving structure " + (done + 1) + " of " + total + "…");
+        });
+      });
+    }, Promise.resolve())
+      .then(function(){ return LIVE ? STORE.load() : Promise.resolve(); })
+      .then(function(){
+        invalidateUniverse();
+        var body = d.querySelector(".organ-body");
+        if (body) body.innerHTML =
+            "<div style='border:1px solid var(--ok);border-radius:8px;padding:10px'>"
+          + "<b style='color:var(--ok)'>" + total + " structure" + (total === 1 ? "" : "s")
+          + " logged against this cell.</b><br><span class='hint'>Now on record here: "
+          + esc(organKnownText(cellKey)) + ". Written to <code>Organelle locations</code> "
+          + "&mdash; the same sheet, columns and scoring µJump uses.</span>"
+          + "<div class='row' style='margin-top:10px'>"
+          + "<button type='button' class='organ-again' style='width:auto'>Log another</button>"
+          + "</div></div>";
+        var k = d.querySelector(".organ-known");
+        if (k) k.textContent = organKnownText(cellKey);
+        var again = d.querySelector(".organ-again");
+        if (again) again.addEventListener("click", function(){ renderOrganBody(d, cellKey); });
+        /* The filter's counts moved, so its section has to be rebuilt -- but NOT the whole page:
+           render() would rewrite the panel this section is sitting in and snap it shut the moment
+           it succeeded, which is the one thing a form must not do on success. */
+        if (el("filterCard")) buildOrganelleFilter();
+      })
+      .catch(function(e){
+        btn.disabled = false;
+        organSay(d, "could not save that: " + esc(e.message), false);
+      });
+  }
+  /* What the cell is called, for the sheet's `identified` column. The community's settled name if
+     there is one, otherwise the published type -- both are real answers and an empty column is
+     not, since the whole point of that column is to say what the organelle was found inside. */
+  function identityOf(cellKey){
+    var c = byId(cellKey);
+    var settled = c ? X.settledLabel(c) : "";
+    if (settled) return settled;
+    var row = seeds().filter(function(r){ return r.key === cellKey; })[0];
+    return row ? row.label : "";
+  }
+
   /* ══ THE FILTER ═══════════════════════════════════════════════════════════════════════════
      Søren, 2026-09-02: "I want the Filter and show to be more like uJump." What follows is
      µJump's panel over cb2's own facts -- the same sections in the same order, the same match
@@ -5214,6 +5678,46 @@ UJ.app = (function(){
     { id:"nodepth",   label:"its recorded z is the stand-in value, not a depth",
       test: function(u){ return !!u.zOdd; } }
   ];
+  /* ── the organelle filter ─────────────────────────────────────────────────────────────────
+     µJump's section, rendered by core/organellefilter.js -- the same grouped, counted control
+     every tool in the family now carries. The counts are of THIS dataset: a kind nobody has
+     logged in cb2 shows 0 and is dimmed rather than hidden, which is that module's own rule and
+     the reason it shows counts at all. "Nucleolus (0)" tells you before you filter that the
+     answer will be empty and why, which is the difference between a filter that seems broken and
+     a dataset nobody has annotated yet.
+
+     The mode selector is the half only the old dropdown version had, and it is a real question:
+     "which cells has nobody checked for a cilium yet" is how you find work to do. */
+  function buildOrganelleFilter(){
+    var host = el("filterOrganelleBox");
+    if (!host || !window.UJ.organelleFilter) return;
+    var rows = filterable(), counts = {}, logged = 0;
+    rows.forEach(function(u){
+      var os = (u.cell && u.cell.organelles) || [];
+      if (os.length) logged++;
+      os.forEach(function(o){ counts[o.kind] = (counts[o.kind] || 0) + 1; });
+    });
+    UJ.organelleFilter.render(host, {
+      counts: counts,
+      /* The vocabulary is µJump's, generated into this page from the same ontology. Passed
+         explicitly rather than left to the module's global lookup, so a page that failed to load
+         xjump_organelle_data.js renders nothing and says so instead of quietly offering a shorter
+         list somebody else defined. */
+      groups: (window.UJ.organelles && UJ.organelles.GROUPS) || null,
+      cls: "forgfilter", modeId: "filterOrganelleMode",
+      onChange: invalidatePreview
+    });
+    if (el("filterOrganelleNote"))
+      el("filterOrganelleNote").innerHTML = logged
+        ? logged.toLocaleString() + " cell" + (logged === 1 ? " has" : "s have")
+          + " at least one structure logged, out of " + rows.length.toLocaleString()
+          + ". Counts are of CELLS, not of structures &mdash; a cell with six mitochondria counts "
+          + "once for <code>mitochondria</code>."
+        : "Nothing has been logged in cb2 yet. Every kind reads 0 because nobody has reported "
+          + "one, not because this volume cannot have them &mdash; open a cell on the Jump tab "
+          + "and use <b>Also log an organelle here</b>.";
+  }
+
   function buildAnnotChecks(){
     var host = el("filterAnnot"); if (!host) return;
     var rows = filterable();
@@ -5285,6 +5789,11 @@ UJ.app = (function(){
         unnamed = !!(el("filterIncludeUnnamed") && el("filterIncludeUnnamed").checked);
     var boxes = (REGION && el("filterRegionOn") && el("filterRegionOn").checked)
       ? REGION.getBoxesNM() : [];
+    var obox = el("filterOrganelleBox");
+    var orgWant = (obox && window.UJ.organelleFilter)
+      ? UJ.organelleFilter.checked(obox, "forgfilter") : [];
+    var orgMode = (obox && window.UJ.organelleFilter)
+      ? UJ.organelleFilter.mode(obox, "filterOrganelleMode") : "";
     var rows = filterable();
 
     function keep(u){
@@ -5305,6 +5814,12 @@ UJ.app = (function(){
       if (annots.length){
         for (var i = 0; i < ANNOT.length; i++)
           if (annots.indexOf(ANNOT[i].id) >= 0 && !ANNOT[i].test(u)) return false;
+      }
+      /* The organelle clause, and the MATCHING RULE IS NOT HERE: core/organellefilter.js owns it,
+         so "has any of these" / "has none of these" means the same thing in all eight tools. */
+      if (orgMode){
+        var have = ((u.cell && u.cell.organelles) || []).map(function(o){ return o.kind; });
+        if (!UJ.organelleFilter.matches(have, orgWant, orgMode)) return false;
       }
       if (boxes.length){
         var nm = X.toNm(u.pos);
@@ -5332,6 +5847,7 @@ UJ.app = (function(){
     }
     RESULT = { matches: hits, types: types, layers: layers, annots: annots, limb: limb,
                boxes: boxes.length, near: (nearOn && nearTypes.length) ? nearTypes : null,
+               orgWant: orgWant, orgMode: orgMode,
                nearUm: nearDistNm() / 1000,
                dropped: universe().length - rows.length };
     return RESULT;
@@ -5389,7 +5905,17 @@ UJ.app = (function(){
       { header:"added_here",   get: function(u){ return u.added; } },
       { header:"fragments_now", get: function(u){ return u.frags; } },
       { header:"proofread_by",  get: function(u){ return u.annotator || ""; } },
-      { header:"identity_given_here", get: function(u){ return u.here || ""; } }
+      { header:"identity_given_here", get: function(u){ return u.here || ""; } },
+      /* "2x mitochondria; 1x centriole" in one cell rather than 61 mostly-empty columns. The
+         sheet is for reading and pivoting; a column per kind would be a spreadsheet nobody can
+         scroll and would grow every time µJump's ontology does. */
+      { header:"organelles_logged_here", get: function(u){
+          var os = (u.cell && u.cell.organelles) || [];
+          return os.map(function(o){ return o.n + "× " + (organ() ? organ().shortOf(o.kind) : o.kind); })
+                   .join("; "); } },
+      { header:"organelle_reports", get: function(u){
+          return ((u.cell && u.cell.organelles) || [])
+            .reduce(function(a, o){ return a + o.n; }, 0); } }
     ];
   }
   function matchRows(){
@@ -5420,6 +5946,20 @@ UJ.app = (function(){
       knownNuclei: ((STATE.explore || {}).nuclei || []).map(function(n){ return n.pos; })
     };
   }
+  /* Every structure logged on a matched cell, as points. Off the MATCHES rather than off the
+     whole dataset: the layer answers "what has been found in the cells I just asked for", which
+     is a different and more useful question from "everything ever logged in cb2". */
+  function matchedOrganellePoints(){
+    if (!RESULT) return [];
+    var out = [];
+    RESULT.matches.forEach(function(u){
+      ((u.cell && u.cell.organellePoints) || []).forEach(function(p){
+        if (out.length < 5000)
+          out.push({ pos: p.pos, label: (organ() ? organ().shortOf(p.kind) : p.kind) + " · " + u.name });
+      });
+    });
+    return out;
+  }
   function openMatchesInViewer(){
     if (!RESULT || !RESULT.matches.length) return;
     var us = RESULT.matches;
@@ -5427,6 +5967,8 @@ UJ.app = (function(){
        would accept; a point on every soma is the map of the answer, and clicking one in the
        viewer selects the segment under it. */
     var o = viewerExtras();
+    if (el("filterOrgOn") && el("filterOrgOn").checked)
+      o.organellePoints = matchedOrganellePoints();
     o.markers = (el("filterMarkOn") && el("filterMarkOn").checked)
       ? us.map(function(u){ return { pos: u.pos, name: u.name }; }) : null;
     o.markerName = us.length.toLocaleString() + " matched cells";
@@ -5438,7 +5980,9 @@ UJ.app = (function(){
     buildTypeChecksInto(el("filterTypes"), "ftype");
     buildTypeChecksInto(el("filterNearTypes"), "fneartype");
     buildLayerChecks();
+    buildOrganelleFilter();
     buildAnnotChecks();
+    if (el("filterOrgOn")) el("filterOrgOn").addEventListener("change", function(){});
     if (el("filterUniverse"))
       el("filterUniverse").textContent =
         filterable().length.toLocaleString() + " cells with a soma position";
@@ -5763,6 +6307,35 @@ UJ.app = (function(){
     who: "you (harness)",
     canWrite: function(){ return true; },
     load: function(){ return Promise.resolve({ cells: STATE.cells }); },
+    /* The harness keeps organelles in memory in exactly the shape xjumpState sends them back --
+       {kind, n} counts plus the points -- so the panel, the filter and the viewer layer are
+       exercised here against the same structure the live page gets. A harness whose data has a
+       different shape from the server's tests the harness. */
+    organelle: function(cellKey, sub){
+      var c = byId(cellKey);
+      if (!c){
+        /* A proofread cell nobody has touched has no store record yet. Organelles are a reason to
+           create one: the cell exists in the seed list, and this is the page recording that
+           somebody looked inside it. */
+        c = X.newCell(cellKey, [], MemStore.who);
+        c.organelles = []; c.organellePoints = []; c.organelleReporters = 1;
+        STATE.cells.push(c);
+      }
+      c.organelles = c.organelles || [];
+      var hit = null;
+      c.organelles.forEach(function(o){ if (o.kind === sub.kind) hit = o; });
+      if (hit) hit.n++; else c.organelles.push({ kind: sub.kind, n: 1 });
+      c.organelles.sort(function(a, b){
+        return b.n - a.n || (a.kind < b.kind ? -1 : (a.kind > b.kind ? 1 : 0)); });
+      if (sub.pointA){
+        var p = String(sub.pointA).split(",").map(Number);
+        if (p.length === 3 && p.every(isFinite)){
+          c.organellePoints = c.organellePoints || [];
+          c.organellePoints.push({ kind: sub.kind, pos: p, by: MemStore.who });
+        }
+      }
+      return Promise.resolve({ ok:true });
+    },
     build: function(ids, position, key){
       /* Local numbering is correct HERE and only here: the harness has exactly one user. */
       var n = 0;
@@ -5891,7 +6464,15 @@ UJ.app = (function(){
           STATE.cells = (d.cells || []).map(function(c){
             return { id: c.id, segments: (c.segments || []).slice(), names: c.names || {},
                      totalVotes: c.totalVotes || 0, rejects: c.rejects || 0,
-                     unsure: c.unsure || 0, builtBy: c.builtBy || "", position: c.position || null };
+                     unsure: c.unsure || 0, builtBy: c.builtBy || "", position: c.position || null,
+                     /* Organelles ride along on the cell rather than in a second map, because
+                        every consumer -- the panel's "2× centriole", the filter, the viewer's
+                        recorded layer -- already has the cell in hand. An older deployment sends
+                        neither field and both read empty, which is the same answer as "nobody
+                        has logged one" and is the honest thing for the page to show. */
+                     organelles: (c.organelles || []).slice(),
+                     organellePoints: (c.organellePoints || []).slice(),
+                     organelleReporters: c.organelleReporters || 0 };
           });
           STATE.claimed = d.claimed || {};
           /* WHAT THIS DEPLOYMENT CAN DO. An older XJumpCells.gs has no `can` field at all, and the
@@ -5907,7 +6488,8 @@ UJ.app = (function(){
              shows the paper's nine, which is what it showed before. */
           STATE.contributors = (d.contributors || []).map(function(c){
             return { name: c.name || "", cells: c.cells || 0, built: c.built || 0,
-                     fragments: c.fragments || 0, nuclei: c.nuclei || 0, names: c.names || 0 };
+                     fragments: c.fragments || 0, nuclei: c.nuclei || 0, names: c.names || 0,
+                     organelles: c.organelles || 0 };
           });
           /* Cleared HERE rather than at the call site: a load that succeeded is the definition of
              "the backend is reachable", and there is more than one caller. Clearing it only in
@@ -5915,6 +6497,19 @@ UJ.app = (function(){
           backendNote("");
           return STATE;
         });
+    },
+    /* µJump's OWN POST type, unchanged, and no new backend code writes it: doPost routes on
+       `ds`, so this lands in χJump's spreadsheet in an "Organelle locations" tab with µJump's
+       exact columns, created on first write, scored by the FLAT_RATE entry that already exists.
+       That is the strongest available reading of "build the organelle reporting like in uJump".
+       `nucleusId` carries a CELL key here -- see the note at organSectionHtml. */
+    organelle: function(cellKey, sub){
+      return this._post({ type:"organelle_location",
+                          nucleusId: cellKey, rootId: "", coord: sub.coord || "",
+                          groupId: sub.groupId, subIndex: sub.subIndex, subCount: sub.subCount,
+                          kind: sub.kind, pointA: sub.pointA, pointB: sub.pointB,
+                          identified: sub.identified || "", comment: sub.comment || "",
+                          path: "" });
     },
     build: function(ids, position, key){
       var p = { type:"xjump_cell_build", segments: ids };
@@ -6129,6 +6724,7 @@ UJ.app = (function(){
            seeds:seeds, renderSeeds:renderSeeds, seedCsv:seedCsv,
            universe:universe, filterable:filterable, runFilter:runFilter,
            previewFilter:previewFilter, filterResult:filterResult,
+           organKnownText:organKnownText, buildOrganelleFilter:buildOrganelleFilter,
            matchRows:matchRows, wireFilter:wireFilter,
            findByCoord:findByCoord, renderRandomButtons:renderRandomButtons,
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,

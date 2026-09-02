@@ -1346,32 +1346,33 @@ UJ.cfg.backend = {
 window.UJ = window.UJ || {};
 UJ.organelleData = { source: "core/ontology.js", groups: [{"label": "Not sure what this is?", "kinds": [{"value": "ask_expert", "label": "What the… is this? (ask an expert)", "short": "flagged: ask expert", "vector": false}]}, {"label": "Nucleus", "kinds": [{"value": "nucleolus", "label": "Nucleolus", "short": "nucleolus", "vector": false}, {"value": "chromatin", "label": "Chromatin", "short": "chromatin", "vector": false}, {"value": "nuclear_pore", "label": "Nuclear pore", "short": "nuclear pore", "vector": false}, {"value": "nucleoplasmic_reticulum_1", "label": "Nucleoplasmic reticulum (type I)", "short": "NR type I", "vector": false}, {"value": "nucleoplasmic_reticulum_2", "label": "Nucleoplasmic reticulum (type II)", "short": "NR type II", "vector": true, "pointLabels": ["Coordinate 1", "Coordinate 2"]}]}, {"label": "Centriole & cilium", "kinds": [{"value": "centriole", "label": "Centriole / centrosome", "short": "centriole", "vector": false}, {"value": "cilium", "label": "Primary cilium (base + tip)", "short": "cilium", "vector": true, "pointLabels": ["Base", "Tip"]}]}, {"label": "Endomembrane system", "kinds": [{"value": "er_rough", "label": "Rough endoplasmic reticulum", "short": "rough ER", "vector": false}, {"value": "er_smooth", "label": "Smooth endoplasmic reticulum", "short": "smooth ER", "vector": false}, {"value": "golgi", "label": "Golgi apparatus", "short": "Golgi apparatus", "vector": false}, {"value": "lysosome", "label": "Lysosome", "short": "lysosome", "vector": false}, {"value": "peroxisome", "label": "Peroxisome", "short": "peroxisome", "vector": false}, {"value": "mitochondria", "label": "Mitochondria", "short": "mitochondrion", "vector": false}, {"value": "mvb", "label": "Multivesicular body", "short": "MVB", "vector": false}, {"value": "endosome", "label": "Endosome", "short": "endosome", "vector": false}]}, {"label": "Vesicles & trafficking", "kinds": [{"value": "pinocytic_vesicle", "label": "Pinocytic vesicle", "short": "pinocytic vesicle", "vector": false}, {"value": "caveolae", "label": "Caveolae", "short": "caveolae", "vector": false}, {"value": "secretory_vesicle", "label": "Secretory vesicle", "short": "secretory vesicle", "vector": false}, {"value": "transport_vesicle", "label": "Transport vesicle", "short": "transport vesicle", "vector": false}, {"value": "autophagosome", "label": "Autophagosome", "short": "autophagosome", "vector": false}, {"value": "phagosome", "label": "Phagosome", "short": "phagosome", "vector": false}, {"value": "weibel_palade_body", "label": "Weibel-Palade body", "short": "Weibel-Palade body", "vector": false}, {"value": "synaptic_vesicle", "label": "Synaptic vesicle", "short": "synaptic vesicle", "vector": false}, {"value": "extracellular_vesicle", "label": "Extracellular vesicle", "short": "extracellular vesicle", "vector": false}]}, {"label": "Cytoskeleton", "kinds": [{"value": "microtubules", "label": "Microtubules", "short": "microtubules", "vector": false}, {"value": "microfilaments", "label": "Microfilaments", "short": "microfilaments", "vector": false}, {"value": "intermediate_filaments", "label": "Intermediate filaments", "short": "intermediate filaments", "vector": false}, {"value": "contractile_elements", "label": "Contractile elements", "short": "contractile elements", "vector": false}, {"value": "gfap", "label": "GFAP", "short": "GFAP", "vector": false}]}, {"label": "Cell junctions", "kinds": [{"value": "adherens_junction", "label": "Adherens junction", "short": "adherens junction", "vector": false}, {"value": "gap_junction", "label": "Gap junction", "short": "gap junction", "vector": false}, {"value": "tight_junction", "label": "Tight junction", "short": "tight junction", "vector": false}, {"value": "tunneling_nanotube", "label": "Tunneling nanotube", "short": "tunneling nanotube", "vector": false}]}, {"label": "Vascular & perivascular contacts", "kinds": [{"value": "peg_and_socket_junction", "label": "Peg-and-socket junction", "short": "peg-and-socket junction", "vector": false}, {"value": "myoendothelial_junction", "label": "Myoendothelial junction", "short": "myoendothelial junction", "vector": false}, {"value": "tripartite_junction", "label": "Tripartite junction", "short": "tripartite junction", "vector": false}, {"value": "astrocyte_endfoot", "label": "Astrocyte endfoot", "short": "astrocyte endfoot", "vector": false}, {"value": "microglia_plug", "label": "Microglia plug", "short": "microglia plug", "vector": false}, {"value": "perivascular_debris", "label": "Perivascular debris", "short": "perivascular debris", "vector": false}]}, {"label": "Cytoplasmic inclusions", "kinds": [{"value": "lipid_droplet", "label": "Lipid droplet", "short": "lipid droplet", "vector": false}, {"value": "glycogen", "label": "Glycogen", "short": "glycogen", "vector": false}, {"value": "ribosome", "label": "Ribosome", "short": "ribosome", "vector": false}, {"value": "lipofuscin_granule", "label": "Lipofuscin granule", "short": "lipofuscin granule", "vector": false}, {"value": "corpora_amylacea", "label": "Corpora amylacea", "short": "corpora amylacea", "vector": false}]}, {"label": "Surface & membrane specializations", "kinds": [{"value": "microvillus", "label": "Microvillus", "short": "microvillus", "vector": false}, {"value": "glycocalyx", "label": "Glycocalyx", "short": "glycocalyx", "vector": false}, {"value": "myelin_sheath", "label": "Myelin sheath", "short": "myelin sheath", "vector": false}]}, {"label": "Synaptic structures", "kinds": [{"value": "synapse", "label": "Synapse", "short": "synapse", "vector": false}, {"value": "dendritic_spine", "label": "Dendritic spine", "short": "dendritic spine", "vector": false}, {"value": "axonal_bouton", "label": "Axonal bouton", "short": "axonal bouton", "vector": false}]}, {"label": "Extracellular matrix & structures", "kinds": [{"value": "elastin", "label": "Elastin", "short": "elastin", "vector": false}, {"value": "fibrin", "label": "Fibrin", "short": "fibrin", "vector": false}, {"value": "collagen", "label": "Collagen", "short": "collagen", "vector": false}, {"value": "extracellular_space", "label": "Extracellular space", "short": "extracellular space", "vector": false}, {"value": "glia_limitans", "label": "Glia limitans", "short": "glia limitans", "vector": false}, {"value": "basement_membrane", "label": "Basement membrane", "short": "basement membrane", "vector": false}]}, {"label": "Pathology", "kinds": [{"value": "amyloid_beta_plaque", "label": "Amyloid beta plaque", "short": "amyloid-β plaque", "vector": false}, {"value": "tau_tangle", "label": "Tau tangle", "short": "tau tangle", "vector": false}, {"value": "dystrophic_neurite", "label": "Dystrophic neurite", "short": "dystrophic neurite", "vector": false}, {"value": "swelling", "label": "Swelling", "short": "swelling", "vector": false}]}] };
 </script>
-<script>/* ── ωJump organelles ──────────────────────────────────────────────────────────────────────
-   µJump's organelle reporting, on ωJump's nuclei.
+<script>/* core/organelles.js -- µJump's organelle reporting, as a shared module.
+   Extracted from wjump_organelles.js on 2026-09-02, when Søren asked for the same reporting in
+   χJump: "We should build the organelle reporting like in uJump and then also implement the
+   filter."
 
-   The 61 kinds are NOT restated here. wjump_organelle_data.js is generated from
-   core/ontology.js at build time and this file only derives from it, so ωJump cannot drift from
-   µJump the way hJump nearly did before that ontology was factored out. Everything below loops
-   over the groups generically: adding a 62nd kind in ontology.js and rebuilding is the whole
-   change, here and in µJump both.
+   THE EXTRACTION IS THE POINT, not a tidy-up. wjump_organelle_data.js's own header says why the
+   61-kind list is generated from core/ontology.js rather than copied: that list was factored out
+   in the first place so ηJump would stop "hand-duplicating a 61-kind list that would drift from
+   µJump's". Copying the CODE THAT READS IT into a third tool is the same mistake one level up --
+   the rule "a vector kind needs both points" would then exist in three places and be true in
+   however many of them somebody remembered to change. So ωJump and χJump load this one file, and
+   a fix to the validation reaches both.
 
-   ONE difference from µJump, and it is forced by the dataset rather than chosen:
+   NOTHING IN HERE KNOWS WHICH TOOL IT IS IN. The vocabulary arrives as UJ.organelleData, written
+   by each tool's own build from the same ontology; the thing an organelle is reported against is
+   a key the caller passes to groupId(). ωJump passes a nucleusKey it created
+   ("jrc_mus-meissner-corpuscle-1:7"); χJump passes a cell key ("cb2/htem/pc_0" or "cb2:41").
+   Both carry their dataset in the string, which is what makes them safe to write into a sheet
+   with no dataset column.
 
-     THE NUCLEUS IS ωJump'S OWN. µJump reports against a published nucleus id; ωJump reports
-        against a nucleusKey the community created, which carries its dataset in the string
-     ("jrc_mus-meissner-corpuscle-1:7"). That is what makes a multi-dataset tool safe to write
-     into a sheet with no dataset column.
+   COORDINATES ARE VOXELS in every tool that loads this. ωJump's were nanometres until 2026-08-31,
+   when Søren asked for voxels there too -- "a coordinate is only useful to the lab that published
+   the volume if it is in the frame their own viewer shows". χJump has been voxels from the start.
 
-   There used to be a second difference: ωJump's coordinates were NANOMETRES where µJump's are
-   voxels, because ωJump's viewer states declared 1e-9 m per unit. That ended on 2026-08-31 --
-   Søren asked for voxels here too, since a coordinate is only useful to the lab that published
-   the volume if it is in the frame their own viewer shows. Both tools now say voxels and mean the
-   same thing by it. The units still never meet in one column, because ωJump writes to its own
-   spreadsheet, but they no longer differ either.
-
-   Everything else is deliberately identical: the same `organelle_location` POST, the same
-   groupId/subIndex/subCount convention for one submission covering several structures, the same
-   two-point handling for vector kinds, the same sheet, the same points. */
+   Everything else is deliberately identical to µJump: the same `organelle_location` POST, the
+   same groupId/subIndex/subCount convention for one submission covering several structures, the
+   same two-point handling for vector kinds, the same sheet, the same points. */
 window.UJ = window.UJ || {};
 UJ.organelles = (function(){
   "use strict";
