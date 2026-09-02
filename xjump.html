@@ -164,13 +164,11 @@ try{var _t=localStorage.getItem("ujump_theme");
  /* Sign-in, top right with the theme button. Reading is public, so this is deliberately quiet. */
  .who{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
  #whoami{font-size:12px;color:var(--mut)}
- /* The points chip, ωJump's shape. It is EMPTY until somebody signs in and the first ?myStats=
-    lands, so it must not reserve space or draw a border of its own -- an empty pill next to the
-    theme button reads as something that failed to load. */
- .ptchip{display:inline-flex;align-items:center;gap:8px;background:var(--bg);
-   border:1px solid var(--accent);border-radius:20px;padding:6px 13px;font-size:13px}
- .ptchip .lvl{font-weight:650;color:var(--accent)}
- .ptchip .pts{color:var(--mut)}
+ /* The account chip. core/gamify.js styles it itself (see gamifyStyle()) from the same CSS
+    variables this file defines, so it arrives wearing χJump's green without being told. All that
+    is needed here is somewhere to put it: an empty slot that reserves no space until the chip
+    lands, because an empty pill beside the theme button reads as something that failed to load. */
+ #gameChipSlot{display:flex;align-items:center}
  /* This community's rows in the annotator ranking, told apart from the paper's proofreaders by
     the bar rather than by being moved into a list of their own -- being ON the same list next to
     them is the whole point of the chart. */
@@ -422,7 +420,7 @@ try{var _t=localStorage.getItem("ujump_theme");
       class="mu">&chi;</span><span class="jm">Jump</span></h1></a>
   </div>
   <div class="who">
-    <span id="pointsChip"></span><span id="whoami">not signed in</span><div id="gsiButton"></div>
+    <div id="gameChipSlot"></div><span id="whoami">not signed in</span>
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
             aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span>
       <span id="themeToggleLabel">Dark</span></button>
@@ -431,7 +429,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 08:24</span></p>
+ctrl-shift-R.">build 2026-09-02 08:56</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -1183,6 +1181,13 @@ UJ.cfg.mesh = {};
      mean everywhere: the same fix made in one tool's own chip reached that tool only, and
      Søren's next screenshot was the next tool still showing 1786.5000000000002. -->
 <script src="core/points.js"></script>
+<!-- core/gamify.js -- the account chip, the profile dashboard, the leaderboard and
+     "Download your work". Søren, 2026-09-02: "you can't click it to open the leaderboard
+     and your stats. It should be the same as in uJump." It is the same file six other
+     tools load. It resolves its host's globals (REPORT_ENDPOINT, GOOGLE_CREDENTIAL,
+     postReport, escHtml, handleGoogleCred) at CALL time, which is why they can be
+     declared below it rather than above. -->
+<script src="core/gamify.js"></script>
 <!-- µJump's organelle reporting. The 61 kinds are GENERATED from core/ontology.js into
      xjump_organelle_data.js (never hand-copied -- see src/organelle_data.py); core/organelles.js
      is the form's logic, shared with ωJump since 2026-09-02; core/organellefilter.js is the
@@ -1677,8 +1682,42 @@ UJ.xjump = (function(){
                    which fragments are in and which are not. */
                 tab: "segments" };
     if (eq.length) seg.equivalences = eq;
+    /* THE QUERY CELL, COLOURED. Neuroglancer colours a segmentation layer per SEGMENT, so an
+       assembly of 174 fragments needs 174 entries -- there is no "colour this layer" property. */
+    if (o.segColor && segs.length){
+      seg.segmentColors = {};
+      segs.forEach(function(sg){ seg.segmentColors[sg] = o.segColor; });
+    }
+    if (o.segLabel) seg.name = o.segLabel;
 
     var layers = [em, seg];
+    /* ── MORE SEGMENTATION LAYERS, each its own colour ────────────────────────────────────────
+       Søren, 2026-09-02, on the contacts link: it "is shown with a merged segmentation with all
+       the neighboring cells", where µJump puts the query cell in one layer and everything it
+       touches in another. A single layer holding both is a picture in which you cannot tell which
+       cell is which -- and "is that really a contact?" is the only question the link exists to
+       answer.
+
+       Each carries its own source rather than sharing the first one's: a layer with no source of
+       its own renders nothing, and the transform that shifts the segmentation onto the tissue has
+       to travel with every copy of it. */
+    (o.segLayers || []).forEach(function(L){
+      var ids = sortIds((L.segments || []).filter(isId));
+      if (!ids.length) return;
+      var lay = { type:"segmentation", name: L.name || "cells",
+                  source: { url: v.seg, transform: {
+                    matrix: [[1,0,0,0], [0,1,0,0], [0,0,1, v.segTranslateZ || 0]],
+                    outputDimensions: dims } },
+                  segments: ids, tab:"segments" };
+      if (L.color){
+        lay.segmentColors = {};
+        ids.forEach(function(sg){ lay.segmentColors[sg] = L.color; });
+      }
+      /* Slightly translucent, as µJump's are: two cells in apposition are inside one another's
+         bounding box, and an opaque near one hides the far one entirely. */
+      lay.objectAlpha = L.alpha == null ? 0.85 : L.alpha;
+      layers.push(lay);
+    });
     /* The meshes are a separate store with reversed axes -- see the config. Linked to the
        segmentation layer's selection so the 3D view follows what is selected without the caller
        having to keep two lists in step. */
@@ -1771,6 +1810,24 @@ UJ.xjump = (function(){
                     tab:"annotations", annotationColor: oc2.colour || "#f59e0b",
                     annotations: [] });
     }
+    /* ── ONE ANNOTATION LAYER PER SET OF POINTS ──────────────────────────────────────────────
+       Søren asked for µJump's arrangement, and µJump gives each contacting cell its own layer:
+       neuroglancer colours per LAYER, so points from three different pairs in one layer are three
+       findings you cannot tell apart. The colours come from the golden angle, which spreads any
+       number of layers around the wheel without a table to run out of. */
+    (o.markerLayers || []).forEach(function(L, li){
+      var pts = (L.points || []).filter(function(p){ return p && (p.pos || p.length === 3); });
+      if (!pts.length) return;
+      layers.push({ type:"annotation", name: L.name || ("points " + (li + 1)),
+                    source: { url:"local://annotations", transform:{ outputDimensions: dims } },
+                    tab:"annotations",
+                    annotationColor: L.colour || goldenAngleColour(li),
+                    annotations: pts.slice(0, 5000).map(function(p, i){
+                      var pt = p.pos || p;
+                      return { type:"point", id:"ml" + li + "_" + i, point: pt.map(Number),
+                               description: p.name || undefined }; }) });
+    });
+
     /* The matched somata, as points. What makes "open all matches in the viewer" mean anything
        when the matches are five hundred cells: their fragments would be a link nobody's browser
        would accept, and a point per soma is the map of the answer. */
@@ -1800,6 +1857,14 @@ UJ.xjump = (function(){
       crossSectionBackgroundColor: ngBg(),
       perspectiveViewBackgroundColor: ngBg()
     };
+  }
+  /* Distinct colours for an arbitrary number of layers, by the golden angle. Any fixed palette
+     runs out; 137.508 degrees per step keeps consecutive entries far apart however many there
+     are, which is the property that matters when the count is "however many cells touched this
+     one". Same constant µJump uses, for the same reason. */
+  function goldenAngleColour(i){
+    var h = (i * 137.508) % 360;
+    return "hsl(" + h.toFixed(1) + ", 72%, 58%)";
   }
   function centreVox(){ return extentVox().map(function(n){ return Math.round(n/2); }); }
   /* The z the caller is going to end up at, needed BEFORE `pos` is computed because the traced
@@ -2473,6 +2538,7 @@ UJ.xjump = (function(){
            tallySummary:tallySummary, settledLabel:settledLabel, nameSuggestions:nameSuggestions,
            localDims:localDims, buildState:buildState, viewerUrl:viewerUrl, centreVox:centreVox,
            parseNuclei:parseNuclei, parsePoints:parsePoints,
+           goldenAngleColour:goldenAngleColour,
            decodeSeed:decodeSeed, seedKey:seedKey, isSeedKey:isSeedKey, seedName:seedName,
            seedList:seedList, seedSegments:seedSegments, seedSearch:seedSearch,
            seedIndex:seedIndex, seedOwnerOf:seedOwnerOf, seedClaimsFor:seedClaimsFor,
@@ -2788,8 +2854,23 @@ UJ.mesh3d = (function(){
   /* Load an assembly's geometry without drawing it -- the join needs the triangles, not a canvas.
      Shares loadOne/combine with the panel, so what the join tests is exactly what the panel
      draws, and the two can never disagree about where a cell is. */
-  function geometryFor(ids){
-    return Promise.all((ids || []).map(loadOne)).then(function(loaded){
+  /* onProgress(done, total) as each fragment lands. Søren, 2026-09-02: µJump's check button
+     "shows the status while it is loading". µJump's mesh is one file per cell and its progress is
+     per cell; a cb2 cell is a median 116 files, so per-CELL progress here would sit on "checking
+     1 of 6" for half a minute and look hung. This is the sub-progress that makes the difference.
+
+     Counted as they RESOLVE rather than in order: Promise.all preserves the order of the results,
+     not of their arrival, and a counter that only moved when fragment 3 finished would stall
+     behind whichever one the bucket was slowest with. */
+  function geometryFor(ids, onProgress){
+    var total = (ids || []).length, done = 0;
+    return Promise.all((ids || []).map(function(id){
+      return loadOne(id).then(function(L){
+        done++;
+        if (onProgress){ try { onProgress(done, total); } catch (e){} }
+        return L;
+      });
+    })).then(function(loaded){
       var have = loaded.filter(function(L){ return L.state === "ok"; });
       /* "NO MESH" AND "COULD NOT FETCH" ARE KEPT APART, all the way out. loadOne has told them
          apart since it was written -- a 403/404 means the object is not published, anything else
@@ -3143,8 +3224,8 @@ UJ.mesh3d = (function(){
          a .glb of 9 pieces and a volume of 9 pieces. Every one of these returns `have`/`total` so
          the caller can say so, and the app does. A volume silently computed over two thirds of a
          cell is the worst thing on this page. */
-  function umGeometry(ids){
-    return geometryFor(ids).then(function(g){
+  function umGeometry(ids, onProgress){
+    return geometryFor(ids, onProgress).then(function(g){
       var out = { geo:null, have:g.have, total:g.total, none:g.none, unknown:g.unknown,
                   untestable:g.untestable };
       if (!g.geo) return out;
@@ -4254,117 +4335,37 @@ UJ.app = (function(){
   function whoami(){ return (STORE.who || "").trim(); }
 
   /* ── points ───────────────────────────────────────────────────────────────────────────────
-     Søren, 2026-09-01: "xJump does not have a point system."
+     Søren, 2026-09-02: "Points system in xJump also look different from uJump, and you can't
+     click it to open the leaderboard and your stats. It should be the same as in uJump."
 
-     The BACKEND has had one since the χJump handlers shipped -- Code.gs's FLAT_RATE map pays 8 a
-     cell built, 2 a name, 3 a box looked at, 5 a nucleus found, and pays NOTHING per fragment,
-     for the same reason the leaderboard above ranks in cells. What was missing was the page: this
-     tool never asked for the number, so a person could assemble twenty cells and see nothing.
+     So it is core/gamify.js now -- the same module µJump, δJump, πJump, ηJump, βJump and λJump
+     load -- and none of the chip lives here any more. What used to sit in this space was ωJump's
+     chip, ported on the reasoning that gamify "also carries a dashboard, a leaderboard and
+     browser storage χJump has no surface for". That inverted the request: the dashboard IS the
+     surface, and the chip's whole job is to be the door to it. ωJump made that trade for its own
+     reasons and χJump was handed ωJump's answer to ωJump's question.
 
-     Two calls, and the split matters:
-       ?myStats=       this dataset, live, correct the instant you submit
-       ?profileTotals= every dataset, from the sheet the four-hourly job rebuilds
+     What is left here is the one thing gamify does not do for itself: asking it to re-read after
+     a write. gamify refreshes on sign-in and when the dashboard opens; a person who has just
+     assembled a cell should see the number move without doing either.
 
-     The chip shows the OTHER tools from the snapshot plus THIS one live, which is the only
-     arrangement that is both continuous across the family and immediately right after a
-     submission. Ported from ωJump rather than taken from core/gamify.js on purpose: that file
-     also carries a dashboard, a favourites store and a leaderboard modal, none of which χJump has
-     a surface for -- its leaderboard is the annotator chart above, where the competition Søren
-     asked for actually belongs.
+     The globals gamify resolves at call time -- REPORT_ENDPOINT, GOOGLE_CLIENT_ID,
+     GOOGLE_VERIFIED, GOOGLE_CREDENTIAL, postReport, escHtml, handleGoogleCred -- are declared in
+     the page's own sign-in script, below the app. See build_xjump.py's SIGNIN_LIVE. */
 
-     NOTHING IN HERE MAY THROW. A chip stuck on "loading…" is indistinguishable from a backend
-     that never answered, and that is exactly how the perDataset shape mismatch presented across
-     this family for weeks -- as a performance problem rather than as a bug. */
-  var MYSTATS = null, TOTALS = null;
-
-  /* perDataset arrives as an ARRAY from a current Datasets.gs and as an OBJECT from an older one.
-     Accepting both keeps the page correct on either side of a redeploy, which this family has
-     been bitten by twice. */
-  function perList(t){
-    var p = t && t.perDataset;
-    if (!p) return [];
-    if (Object.prototype.toString.call(p) === "[object Array]")
-      return p.filter(function(e){ return !!e; });
-    var out = [];
-    for (var k in p) if (p.hasOwnProperty(k) && p[k]){ var e = p[k]; if (e.ds == null) e.ds = k; out.push(e); }
-    return out;
-  }
-  /* Name the level for the number actually on screen. The server's myStats level is computed from
-     THIS tool's points alone, which is why βJump once read "Contributor" while every other tool
-     read "Novice" for the same account. Pool the points and the ladder has to be pooled too. */
-  function levelName(points, levels){
-    if (!levels || !levels.length) return null;
-    var name = null;
-    for (var i = 0; i < levels.length; i++) if (points >= levels[i][0]) name = levels[i][1];
-    return name;
-  }
-  function combinedPoints(){
-    var live = (MYSTATS && MYSTATS.points) || 0;
-    if (!TOTALS || TOTALS.combinedPoints == null)
-      return { points: UJ.points.exact(live), combined: false, per: [] };
-    var ds = UJ.cfg.backend.ds, mine = 0, per = perList(TOTALS);
-    per.forEach(function(p){ if (p && p.ds === ds) mine = p.points || 0; });
-    /* Rounded where the noise is PRODUCED, not only where it is printed: points are genuinely
-       fractional (0.1 for a computed volume), and adding a live figure to a snapshot and
-       subtracting a third is three chances for 0.1's binary tail to surface. The level is then
-       taken from the exact value, so display rounding can never move somebody across a rung. */
-    var pts = UJ.points.exact(Math.max(live, (TOTALS.combinedPoints - mine) + live));
-    return { points: pts, combined: true, per: per, level: levelName(pts, TOTALS.levels) };
-  }
-  function renderPoints(){
-    var c = el("pointsChip"); if (!c) return;
-    if (!LIVE || !STORE.canWrite()){ c.innerHTML = ""; return; }
-    if (!MYSTATS){
-      c.innerHTML = "<div class='ptchip'><span class='pts'>points loading…</span></div>"; return;
-    }
-    var cp;
-    try { cp = combinedPoints(); }
-    catch (e){ cp = { points: UJ.points.exact(MYSTATS.points), combined:false, per:[] }; }
-    var tip = cp.combined
-      ? "Across every Jump tool: " + cp.per.map(function(p){
-          return (p.label || p.ds) + " " + UJ.points.text(p.points); }).join(" · ")
-        + ". χJump's own " + UJ.points.text(MYSTATS.points) + " update the moment you submit; the "
-        + "others come from the four-hourly rebuild. Here: 8 for a cell, 5 for a nucleus found, "
-        + "3 for a column looked at even when it is empty, 2 for a name — and nothing per "
-        + "fragment, because a fragment is a property of the segmentation, not of your work."
-      : "Points in χJump only. The combined cross-tool total appears once rebuildProfileTotals() "
-        + "has run in Apps Script — see installProfileTotalsTrigger() in Datasets.gs.";
-    c.innerHTML = "<div class='ptchip' title='" + esc(tip) + "'>"
-      + "<span>" + esc(MYSTATS.handle || "you") + "</span>"
-      + ((cp.level || MYSTATS.level)
-          ? "<span class='lvl'>" + esc(cp.level || MYSTATS.level) + "</span>" : "")
-      + "<span class='pts'>" + UJ.points.text(cp.points) + " pts</span>"
-      + (cp.combined ? "" : "<span class='chip' style='border-color:var(--warn);color:var(--warn)'>"
-                          + "this tool only</span>")
-      + "</div>";
-  }
   /* One recompute for a burst of writes. A paste of fifty nuclei is one action to the person and
      fifty posts to the sheet; asking the server to re-total the workbook fifty times would cost
      more than the writes did. */
   var PTS_T = null;
   function pointsSoon(){
     if (PTS_T) clearTimeout(PTS_T);
-    PTS_T = setTimeout(function(){ PTS_T = null; loadPoints(); }, 1500);
-  }
-  function loadPoints(){
-    if (!LIVE || !ApiStore.credential) return;
-    var base = UJ.cfg.backend.endpoint, ds = encodeURIComponent(UJ.cfg.backend.ds),
-        tok = encodeURIComponent(ApiStore.credential);
-    /* Fired together and each rendered as it lands: the combined total is one cheap sheet read,
-       myStats is a full recompute, and making the fast one wait for the slow one is how a page
-       ends up looking as though it never loads. */
-    /* d.points != null, not just !d.error: doPost's if/else chain ends with a catch-all
-       `return {ok:true,status:"ok"}`, so a deployment older than these handlers answers ANY
-       request with a cheerful success carrying nothing. Accepting that as a stats object puts
-       "you · 0 pts" on the chip -- which is not "loading", it is a wrong number, and a wrong
-       number is the one thing a points display must never show. */
-    fetch(base + "?myStats=" + tok + "&ds=" + ds).then(function(r){ return readJson(r, "your points"); })
-      .then(function(d){ if (d && !d.error && d.points != null) MYSTATS = d; renderPoints(); })
-      .catch(function(){ renderPoints(); });
-    fetch(base + "?profileTotals=" + tok + "&ds=" + ds)
-      .then(function(r){ return readJson(r, "your points across the family"); })
-      .then(function(d){ if (d && d.ok) TOTALS = d; renderPoints(); })
-      .catch(function(){ renderPoints(); });
+    PTS_T = setTimeout(function(){
+      PTS_T = null;
+      /* Guarded because the harness has no gamify and no backend, and because a page whose CDN
+         or module failed to load should still save cells. */
+      try { if (window.UJ && UJ.gamify && UJ.gamify.loadMyStats) UJ.gamify.loadMyStats(); }
+      catch (e){}
+    }, 1500);
   }
 
   /* ── which fragments actually have a mesh ────────────────────────────────────────────────
@@ -5665,6 +5666,28 @@ UJ.app = (function(){
   function loadHistory(root, cellKey){
     var wrap = root.querySelector(".chist"); if (!wrap) return;
     var host = wrap.querySelector(".chist-body");
+    /* A DEPLOYMENT THAT CANNOT ANSWER IS NOT AN ERROR. Søren, 2026-09-02, on a red
+       "Could not read this cell's history: could not read the history": "it should just say no
+       changes recorded or something like that."
+
+       He is right twice over. The message was doubled -- the fallback text repeated the sentence
+       it was falling back from -- and, more importantly, the condition was not a failure at all:
+       Code.gs had not been redeployed, so `?xjumpCellHistory=` fell through its route table and
+       came back as something this page could not read. That is a fact about the deployment, not
+       about the cell, and painting it in red beside a cell says the wrong thing about the cell.
+
+       So the capability is asked FIRST. xjumpState says what the deployment can do -- the same
+       `can` list that already gates adopting a seed and reading organelles back -- and when
+       history is not on it the panel shows the ordinary empty sentence with one quiet line saying
+       why, rather than an error nobody can act on from here. */
+    if (LIVE && STATE.can && STATE.can.history === false){
+      host.innerHTML =
+        "<p class='hint' style='margin:0'>No recorded changes or reports yet for this cell.</p>"
+      + "<p class='hint' style='margin:6px 0 0'>This deployment does not serve cell histories "
+      + "yet &mdash; paste <code>Code.gs</code> into the Apps Script project and "
+      + "Deploy &rarr; New version, and this fills in.</p>";
+      return;
+    }
     if (HIST_CACHE[cellKey]){ renderHistItems(host, HIST_CACHE[cellKey]); return; }
     /* A SEQUENCE NUMBER, not a comparison against the currently-shown cell. Stepping through
        matches can land on the same cell twice with a slow response in flight from the first
@@ -5679,8 +5702,11 @@ UJ.app = (function(){
       /* SAID, not swallowed. An empty history and a backend that could not be reached look
          identical on screen otherwise, and the first is a fact about the cell while the second
          is a fact about the page. */
+      /* ONE SENTENCE, not a message wrapping the message it is reporting. The first version
+         printed "Could not read this cell's history: could not read the history", which is the
+         fallback text of the layer below repeated by the layer above. */
       host.innerHTML = "<p class='hint' style='margin:0;color:var(--bad)'>Could not read this "
-        + "cell's history: " + esc(e.message) + "</p>";
+        + "cell's history &mdash; " + esc(e.message) + "</p>";
     });
   }
   /* The history of a cell somebody just changed is stale the moment they change it. Cheaper and
@@ -5851,9 +5877,9 @@ UJ.app = (function(){
 
   /* One cell's geometry in MICROMETRES, cached for the session. µm because that is what
      core/mesh.js's contact helpers speak, and what its own header calls the file's one unit. */
-  function ccGeometry(cellKey){
+  function ccGeometry(cellKey, onProgress){
     if (CC_GEO[cellKey]) return Promise.resolve(CC_GEO[cellKey]);
-    return UJ.mesh3d.umGeometry(segsForCell(cellKey)).then(function(g){
+    return UJ.mesh3d.umGeometry(segsForCell(cellKey), onProgress).then(function(g){
       var rec = { geo: g.geo, have: g.have, total: g.total,
                   /* Carried separately because they mean different things and the row says which:
                      `none` is "this fragment has no published mesh", `unknown` is "we could not
@@ -5885,11 +5911,24 @@ UJ.app = (function(){
     var controls = Array.prototype.slice.call(
       d.querySelectorAll(".cc-type,.cc-radius,.cc-gap,.cc-spacing,.cc-max,.cc-check"));
     controls.forEach(function(c){ c.disabled = true; });
-    var say = function(msg){ btn.textContent = msg; };
-    say("loading this cell…");
+    /* THE BUTTON IS THE PROGRESS BAR, as µJump's is: it is the thing you just pressed and the
+       thing you are looking at. A percentage as well as a count, because "checking 2 of 6" moves
+       once a minute on a cell of 116 fragments and a bar that does not move reads as a hang. */
+    var say = function(msg, frac){
+      btn.textContent = msg + (frac == null ? "" : " " + Math.round(frac * 100) + "%");
+    };
+    /* Sub-progress WITHIN one cell. Each candidate is a hundred-odd fragment fetches, so a
+       counter that only ticked per cell would sit still through the part that actually takes the
+       time. The fraction spans the whole run: cells done, plus how far into the current one. */
+    var frac = function(i, done, total){
+      return (i + (total ? done / total : 0)) / (take.length + 1);
+    };
+    say("loading this cell…", 0);
 
     var mine = null, rows = [];
-    ccGeometry(cellKey).then(function(g){
+    ccGeometry(cellKey, function(done, total){
+      say("loading this cell…", frac(0, done, total));
+    }).then(function(g){
       if (!g.geo) throw new Error("none of this cell's " + g.total
         + " fragments has a published mesh, so there is nothing to measure against");
       mine = g;
@@ -5899,8 +5938,10 @@ UJ.app = (function(){
          hundred in flight against one bucket. */
       return take.reduce(function(pr, cand, i){
         return pr.then(function(){
-          say("checking " + (i + 1) + " of " + take.length + "…");
-          return ccGeometry(cand.u.key).then(function(cg){
+          say("checking " + (i + 1) + " of " + take.length + "…", frac(i + 1, 0, 1));
+          return ccGeometry(cand.u.key, function(done, total){
+            say("checking " + (i + 1) + " of " + take.length + "…", frac(i + 1, done, total));
+          }).then(function(cg){
             if (!cg.geo){
               rows.push({ u:cand.u, distNm:null, points:[], have:0, total:cg.total,
                           unknown: cg.unknown, somaNm:cand.distNm });
@@ -5971,8 +6012,11 @@ UJ.app = (function(){
             /* THE COVERAGE IS ON EVERY ROW. "Not touching" over 8% of a cell is not a finding. */
             + " &middot; <span class='" + (r.have !== null && r.have < r.total ? "cc-part" : "")
             + "'>" + esc(cov) + "</span></span>"
-            + (ok ? "<button type='button' class='idbtn cc-one' data-key='" + esc(r.u.key)
-                    + "'>Open ↗</button>" : "")
+            /* ON EVERY ROW, not only the touching ones. "Not touching" is exactly the
+               answer you want to check by looking -- especially on a row whose mesh is partial --
+               and a row you cannot open is a row you have to take on trust. */
+            + "<button type='button' class='idbtn cc-one' data-key='" + esc(r.u.key)
+            + "'>Open in Neuroglancer</button>"
             + "</div>";
         }).join("");
     d.querySelector(".cc-ngl").disabled = !R.rows.length;
@@ -5989,31 +6033,57 @@ UJ.app = (function(){
     });
   }
 
-  /* The pair (or the whole set) in the viewer: this cell's fragments, the other cells', and the
-     touch points as their own annotation layer. */
+  /* THE LINK, and it is the whole point of the feature: a contact is a claim about two surfaces,
+     and the only way to check it is to look at them. Søren, 2026-09-02: χJump's first version
+     "is shown with a merged segmentation with all the neighboring cells, whereas in uJump the
+     target cell is shown in [red] and the contacting cells are shown in [green]. There are also
+     point annotations where the contacts are made."
+
+     He is right, and one merged layer was the wrong shape. Neuroglancer colours per LAYER for
+     annotations and per SEGMENT within a layer for segmentation, so:
+
+       - the query cell gets its own layer, RED, named for what it is;
+       - everything it was checked against gets a second layer, GREEN, named "(contacts checked)";
+       - every contacting cell gets its OWN annotation layer of touch points, in its own colour,
+         because points from three different pairs in one layer are three findings you cannot tell
+         apart.
+
+     Named, not just coloured, because the layer list is where you switch them on and off. */
   function ccViewer(d, cellKey, onlyKey){
     var R = CC_RESULT[cellKey]; if (!R) return;
     var rows = onlyKey ? R.rows.filter(function(r){ return r.u.key === onlyKey; }) : R.rows;
-    var segs = segsForCell(cellKey).slice();
-    var marks = [];
-    rows.forEach(function(r){
-      segsForCell(r.u.key).forEach(function(s){ if (segs.indexOf(s) < 0) segs.push(s); });
-      r.points.forEach(function(p){
-        /* `name`, not `label`: buildState's marker layer reads m.name for the annotation's
-           description. The organelle layer beside it reads m.label, which is exactly the kind of
-           near-miss that silently produces unlabelled points. */
-        marks.push({ pos: X.toVox([p.point[0]*1000, p.point[1]*1000, p.point[2]*1000])
-                            .map(Math.round),
-                     name: r.u.name + " · " + (p.dist * 1000).toFixed(0) + " nm" });
-      });
+    if (!rows.length) return;
+    var me = universe().filter(function(u){ return u.key === cellKey; })[0];
+    var others = [], markerLayers = [], all = [];
+    rows.forEach(function(r, i){
+      segsForCell(r.u.key).forEach(function(s){
+        if (others.indexOf(s) < 0) others.push(s); });
+      if (!r.points.length) return;
+      var pts = r.points.map(function(p){
+        return { pos: touchVox(p), name: (p.dist * 1000).toFixed(0) + " nm" }; });
+      pts.forEach(function(p){ all.push(p.pos); });
+      markerLayers.push({
+        name: r.u.name + " touch points (" + r.points.length + ")",
+        colour: X.goldenAngleColour(markerLayers.length),
+        points: pts });
     });
     /* Centred on the first touch point when there is one -- that is the thing you opened this to
        look at -- and on the cell otherwise. */
-    var centre = marks.length ? marks[0].pos : posForCell(cellKey);
-    window.open(X.viewerUrl(segs, centre, {
-      markers: marks, markerName: "touch points (" + marks.length + ")",
-      markerColour: "#f59e0b", nuclei: false
+    var centre = all.length ? all[0] : posForCell(cellKey);
+    window.open(X.viewerUrl(segsForCell(cellKey), centre, {
+      /* µJump's own two colours: the query cell red, everything checked against it green. */
+      segColor: "#ff3b3b",
+      segLabel: ((me && me.label) || "this cell") + " · " + (me ? me.name : cellKey),
+      segLayers: [{ name: R.label + " (contacts checked)", segments: others,
+                    color: "#3fb950" }],
+      markerLayers: markerLayers,
+      nuclei: false
     }), "_blank", "noopener");
+  }
+  /* µm out of the mesh, voxels into the viewer. The one conversion this feature makes, in one
+     place, so a touch point cannot be off by the voxel size in one caller and right in another. */
+  function touchVox(p){
+    return X.toVox([p.point[0] * 1000, p.point[1] * 1000, p.point[2] * 1000]).map(Math.round);
   }
 
   /* ONE ROW PER TOUCH POINT, as µJump's export is: a pair with three contacts is three rows, and
@@ -6043,7 +6113,7 @@ UJ.app = (function(){
                     r.have == null ? "" : r.have, r.total];
       if (!r.points.length){ data.push(common.concat(["", 0, "", "", ""])); return; }
       r.points.forEach(function(p, i){
-        var v = X.toVox([p.point[0]*1000, p.point[1]*1000, p.point[2]*1000]).map(Math.round);
+        var v = touchVox(p);
         data.push(common.concat([i + 1, r.points.length, v[0], v[1], v[2]]));
       });
     });
@@ -7031,7 +7101,7 @@ UJ.app = (function(){
              absence IS the answer -- see its own comment. Read as a map so the page asks
              `can.adopt === false` and a future capability needs no change here. */
           STATE.can = {};
-          ["adopt", "contributors"].forEach(function(k){
+          ["adopt", "contributors", "organelles", "history"].forEach(function(k){
             STATE.can[k] = (d.can || []).indexOf(k) >= 0;
           });
           /* Who has assembled what, HERE -- ranked in cells, the same currency the published
@@ -7071,7 +7141,12 @@ UJ.app = (function(){
             + "&ds=" + encodeURIComponent(UJ.cfg.backend.ds);
       return fetch(u).then(function(r){ return readJson(r, "this cell's history"); })
         .then(function(d){
-          if (!d || !d.ok) throw new Error((d && d.error) || "could not read the history");
+          /* The reason, not a restatement of the question. `d.error` when the server said why;
+             otherwise name what actually happened -- a response this page could not read -- so
+             the sentence that reports it is not repeating itself. */
+          if (!d || !d.ok) throw new Error((d && d.error)
+            || "the backend answered with something this page could not read, which usually "
+             + "means Code.gs has not been redeployed");
           return d.history || [];
         });
     },
@@ -7301,48 +7376,110 @@ UJ.app = (function(){
            box:function(){ return BOX; },
            setCredential: function(c, who){
              ApiStore.credential = c; ApiStore.who = who || ""; render();
-             /* The points are per-account, so they cannot be asked for before there is one. This
-                is the moment there is. */
-             loadPoints();
+             /* gamify does its own sign-in refresh through gamifyOnSignIn(), which the page's
+                Google callback calls; nothing to do here but redraw what depends on knowing who
+                you are. */
              /* And the leaderboard marks YOUR row, which it could not do a moment ago. */
              renderDashboard();
            },
-           points: function(){ return { my: MYSTATS, totals: TOTALS,
-                                        combined: combinedPoints() }; },
-           loadPoints: loadPoints, renderPoints: renderPoints };
+           pointsSoon: pointsSoon };
 })();
 </script>
 <script>UJ.app.init();</script>
 <script>
-/* Google Identity Services, the same module the other tools carry.
+/* SIGN-IN, AND THE ACCOUNT CHIP.                                                    2026-09-02
 
-   Reading the assembled cells is PUBLIC and happens before any of this: somebody who just wants
-   to see what has been put together should not have to identify themselves first. Only writing
-   needs a credential, and the write buttons stay live-looking and refuse with a reason rather
-   than sitting disabled with no explanation. */
-function xjumpGsi(retries){
-  if (!(window.google && google.accounts && google.accounts.id)){
-    if (retries > 0) return setTimeout(function(){ xjumpGsi(retries - 1); }, 300);
-    var w = document.getElementById("whoami");
-    if (w) w.textContent = "Google sign-in did not load — you can still read, not write";
-    return;
-  }
-  google.accounts.id.initialize({
-    client_id: UJ.cfg.backend.clientId,
-    callback: function(resp){
-      var who = "";
-      try { who = JSON.parse(atob(resp.credential.split(".")[1])).email || ""; } catch(e){}
-      UJ.app.setCredential(resp.credential, who);
-      document.getElementById("whoami").innerHTML =
-        "signed in as <b>" + who.replace(/</g, "&lt;") + "</b>";
-      var b = document.getElementById("gsiButton"); if (b) b.style.display = "none";
-    },
-    auto_select: true
+   Søren: "Points system in xJump also look different from uJump, and you can't click it to open
+   the leaderboard and your stats. It should be the same as in uJump."
+
+   So core/gamify.js owns this now, as it does in six other tools, and what is left here is the
+   handful of globals it resolves at CALL time. That resolution order is why they can be declared
+   below the module rather than above it, and why they are plain `function`/`var` declarations
+   rather than `const` -- gamifyInit() runs while this script is still executing, and a `const` in
+   the temporal dead zone would throw where a hoisted declaration does not. core/gamify.js's own
+   header says exactly this about GOOGLE_CLIENT_ID.
+
+   READING IS PUBLIC and happens before any of this: somebody who just wants to see what has been
+   assembled should not have to identify themselves first. Only writing needs a credential, and
+   the write buttons stay live-looking and refuse with a reason rather than sitting disabled with
+   no explanation.
+
+   THE CHIP IS THE SIGN-IN SURFACE. There is no separate button any more: signed out the chip
+   reads "Sign in to track progress" and renders Google's own button under it; signed in it shows
+   your handle, level and points, and opens the profile dashboard -- stats, the per-tool points
+   breakdown, the leaderboard, favourites, and "Download your work". */
+var REPORT_ENDPOINT = UJ.cfg.backend.endpoint;
+var GOOGLE_CLIENT_ID = UJ.cfg.backend.clientId;
+var GOOGLE_VERIFIED = false, GOOGLE_CREDENTIAL = "", REPORTER_NAME = "", REPORTER_EMAIL = "";
+
+/* gamify's own five-character escaper. Deliberately a SEPARATE function from the app's esc():
+   this one is a global the module reaches for, the app's lives inside its closure, and making one
+   of them call the other would tie a shared module's behaviour to this page's internals. */
+function escHtml(x){
+  return String(x == null ? "" : x).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
   });
-  google.accounts.id.renderButton(document.getElementById("gsiButton"),
-    { theme:"outline", size:"medium", type:"standard" });
-  try { google.accounts.id.prompt(); } catch(e){}
 }
-xjumpGsi(12);
+
+/* What gamify posts through: the display-name change, and adding or removing a favourite. µJump's
+   own types, so doPost routes them on `ds` into χJump's spreadsheet with no new handler -- the
+   same arrangement the organelle reports use.
+
+   RETURNS A BOOLEAN, synchronously, because that is what gamify's call sites test: they use it to
+   decide whether to reload the panel afterwards. The fetch itself is fire-and-forget in
+   `no-cors`, matching µJump, since Apps Script's redirect makes a readable response impossible
+   for a cross-origin POST anyway. */
+function postReport(payload, okMsg){
+  if (!GOOGLE_VERIFIED || !GOOGLE_CREDENTIAL){
+    if (window.google && google.accounts && google.accounts.id){
+      try { google.accounts.id.prompt(); } catch (e){}
+    }
+    alert("Please sign in with Google first — use the account button in the top-right "
+        + "corner, then try again.");
+    return false;
+  }
+  payload.ds = UJ.cfg.backend.ds;
+  payload.volume = UJ.cfg.volume.id;
+  payload.reporterName = REPORTER_NAME || "";
+  payload.reporterEmail = REPORTER_EMAIL || "";
+  payload.credential = GOOGLE_CREDENTIAL;
+  fetch(REPORT_ENDPOINT, { method:"POST", mode:"no-cors",
+                           body: JSON.stringify(payload) }).catch(function(){});
+  return true;
+}
+
+/* A JWT's payload is base64url of UTF-8, and atob() alone gives you the BYTES: "Søren" comes
+   back as "SÃ¸ren", which is this owner's own name mangled on his own page. So the bytes are
+   handed to a UTF-8 decoder rather than treated as characters. base64URL, too -- '-' and '_'
+   are legal in a JWT and are not legal base64, and a name containing one would throw rather
+   than merely look wrong. */
+function jwtBody(jwt){
+  var b = String(jwt).split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+  while (b.length % 4) b += "=";
+  var raw = atob(b), bytes = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+/* One callback for both halves: the app needs the credential to write cells, and gamify needs to
+   know it can start asking for stats. */
+function handleGoogleCred(resp){
+  if (!resp || !resp.credential) return;
+  GOOGLE_CREDENTIAL = resp.credential;
+  GOOGLE_VERIFIED = true;
+  try {
+    var p = JSON.parse(jwtBody(resp.credential));
+    REPORTER_EMAIL = p.email || "";
+    REPORTER_NAME = p.name || p.email || "";
+  } catch (e){}
+  UJ.app.setCredential(resp.credential, REPORTER_EMAIL);
+  var w = document.getElementById("whoami");
+  if (w) w.innerHTML = "signed in as <b>" + escHtml(REPORTER_EMAIL) + "</b>";
+  if (typeof gamifyOnSignIn === "function") gamifyOnSignIn();
+}
+
+/* gamifyInit retries while Google's script is still loading, then renders the chip either way --
+   a chip that says "sign in" is a better failure than no chip at all. */
+if (GOOGLE_CLIENT_ID) gamifyInit(12);
 </script>
 </body></html>
