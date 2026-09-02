@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 09:55</span></p>
+ctrl-shift-R.">build 2026-09-02 11:21</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -1757,6 +1757,15 @@ UJ.xjump = (function(){
         m.segmentColors = {};
         ids.forEach(function(sg){ m.segmentColors[sg] = colour; });
       }
+      /* SEE-THROUGH, as µJump's are and as the extra segmentation layers below already were.
+         Søren, 2026-09-02: "they need to be transparent, just like the uJump." Two cells in
+         apposition are inside one another's bounding box, so an opaque near one hides the far one
+         entirely -- on a contacts link that is precisely the thing you opened it to look at.
+
+         objectAlpha is the 3D opacity only; the cross-sections keep their own. 0.5 sits between
+         µJump's two: 0.35 on a cell it is showing you, 0.9 on its own contacts link. Half is
+         enough to see a red cell through a green one and still read either as a solid. */
+      m.objectAlpha = 0.5;
       layers.push(m);
     }
     meshLayerFor(segName, v.meshLayerName, o.segColor, segs);
@@ -3277,6 +3286,12 @@ UJ.mesh3d = (function(){
          origin, inside one another. Søren saw the result as a touch point outside the block.
          The offset travels now; positions stay centred, so nothing else changes. */
       out.midUm = [ g.geo.mid[0]/1000, g.geo.mid[1]/1000, g.geo.mid[2]/1000 ];
+      /* The absolute box as well, because a caller has to be able to ask WHERE this assembly is
+         before trusting a coordinate derived from it -- see ccFrameShift in the app, which uses
+         it to find out whether the mesh store is published in the viewer's frame or in the
+         segmentation's. */
+      out.loUm = [ g.geo.lo[0]/1000, g.geo.lo[1]/1000, g.geo.lo[2]/1000 ];
+      out.hiUm = [ g.geo.hi[0]/1000, g.geo.hi[1]/1000, g.geo.hi[2]/1000 ];
       return out;
     });
   }
@@ -5969,6 +5984,7 @@ UJ.app = (function(){
       /* midUm IS NOT OPTIONAL DETAIL. The positions are centred on this cell's own midpoint, so
          without it they are a shape and not a place, and two cells cannot be compared at all. */
       var rec = { geo: g.geo, have: g.have, total: g.total, midUm: g.midUm || [0,0,0],
+                  loUm: g.loUm, hiUm: g.hiUm,
                   /* Carried separately because they mean different things and the row says which:
                      `none` is "this fragment has no published mesh", `unknown` is "we could not
                      find out". A network failure reported as an unmeshed cell is exactly the
@@ -6004,6 +6020,36 @@ UJ.app = (function(){
     return true;
   }
 
+  /* IS THIS MESH IN THE VIEWER'S FRAME, OR THE SEGMENTATION'S?
+
+     cb2's EM is published at z 0..1200 and its segmentation at z -1280..-32 -- see segTranslateZ
+     in the config, which translates the segmentation SOURCE by +1216 so it lands on the tissue.
+     The meshes are the segmentation's meshes. Neuroglancer applies the mesh store's own `info`
+     when it draws them, so the picture is right; xjump_mesh.js decodes raw vertices through
+     meshVertexToNm and has no `info` to apply, so every coordinate the page derives from mesh
+     geometry is 1,216 sections low. Distances are unaffected -- they are differences -- which is
+     why the contacts were found and only their PLACE was wrong.
+
+     MEASURED, NOT ASSUMED. Zero unless the assembly's own bounding box is outside the block and
+     the documented translation brings it in: two comparisons against the block's published
+     extent, and if neither placement works this returns null and the caller says so instead of
+     inventing a correction. */
+  function ccFrameShift(g){
+    if (!g || !g.loUm || !g.hiUm) return [0, 0, 0];
+    var eUm = X.extentNm().map(function(n){ return n / 1000; });
+    function inBlock(dz){
+      for (var i = 0; i < 3; i++){
+        var lo = g.loUm[i] + (i === 2 ? dz : 0), hi = g.hiUm[i] + (i === 2 ? dz : 0);
+        if (hi < 0 || lo > eUm[i]) return false;
+      }
+      return true;
+    }
+    if (inBlock(0)) return [0, 0, 0];
+    var dz = (UJ.cfg.volume.segTranslateZ || 0) * X.resXYZ()[2] / 1000;   // voxels -> µm
+    if (dz && inBlock(dz)) return [0, 0, dz];
+    return null;
+  }
+
   function ccRun(d, cellKey){
     var sel = d.querySelector(".cc-type"), label = sel.value;
     if (!label) return;
@@ -6036,7 +6082,7 @@ UJ.app = (function(){
     };
     say("loading this cell…", 0);
 
-    var mine = null, rows = [], outside = 0;
+    var mine = null, rows = [], outside = 0, shift = [0,0,0], origin = null;
     ccGeometry(cellKey, function(done, total){
       say("loading this cell…", frac(0, done, total));
     }).then(function(g){
@@ -6044,8 +6090,16 @@ UJ.app = (function(){
         + " fragments has a published mesh, so there is nothing to measure against");
       mine = g;
       /* Everything below is in THIS cell's frame: its own vertices as they came, every candidate
-         translated to match, every point that comes out converted back with this offset. */
+         translated to match, every point that comes out converted back with this offset -- plus
+         whatever it takes to get from the mesh store's frame to the viewer's, measured once here
+         because it is a property of the store rather than of a cell. */
       var home = g.midUm || [0,0,0];
+      shift = ccFrameShift(g);
+      /* NOT `var`. This assigns the one declared beside `rows` above -- a second declaration here
+         would shadow it inside this function, so the guard below would use the corrected origin
+         while the RESULT kept the uncorrected one, and the panel would discard nothing and still
+         report the wrong coordinate. Which is exactly what it did for one run. */
+      origin = shift ? [home[0]+shift[0], home[1]+shift[1], home[2]+shift[2]] : home;
       var grid = UJ.mesh.buildContactGrid(g.geo.positions, gapUm);
       /* Sequential rather than parallel, and that is not timidity: each candidate is already a
          hundred-odd parallel fragment fetches, and running six of those at once would be six
@@ -6067,7 +6121,7 @@ UJ.app = (function(){
             var pts = UJ.mesh.allContactPointsWithinThreshold(
               g.geo.positions, grid, theirs, gapUm, spacingUm);
             /* The guard, applied where the points are made rather than where they are drawn. */
-            var kept = pts.filter(function(pt){ return ccInBlock(pt.point, home); });
+            var kept = pts.filter(function(pt){ return ccInBlock(pt.point, origin); });
             outside += pts.length - kept.length;
             pts = kept;
             /* NOTHING WITHIN THE GAP IS NOT AN ANSWER ON ITS OWN. Measure how close they DO come,
@@ -6109,8 +6163,11 @@ UJ.app = (function(){
                              checkedCap: cap, mine: mine,
                              /* The frame every point in `rows` is expressed in -- this cell's own
                                 midpoint. The exports and the viewer link add it back. */
-                             originUm: (mine && mine.midUm) || [0,0,0],
-                             outside: outside };
+                             originUm: origin || (mine && mine.midUm) || [0,0,0],
+                             /* Kept so the panel can say which frame it decided the mesh store is
+                                published in -- a silent 48 µm correction is not better than a
+                                silent 48 µm error. */
+                             shiftUm: shift, outside: outside };
       ccShowRows(d, cellKey);
     }).catch(function(e){
       d.querySelector(".cc-results").innerHTML =
@@ -6153,6 +6210,16 @@ UJ.app = (function(){
           + " would report it as a contact.</span>"
         : " The closest any of them comes is " + ccDist(tightest) + ".";
     }
+    /* WHICH FRAME THE MESH STORE TURNED OUT TO BE IN. Quiet, but said: the correction is 48.6 µm
+       and a silent one is not better than a silent error. */
+    if (R.shiftUm && R.shiftUm[2])
+      note += " <span class='hint'>The mesh store is published " + Math.round(R.shiftUm[2] * 1000
+            / X.resXYZ()[2]) + "&nbsp;sections below the EM, like the segmentation; the touch "
+            + "points are placed accordingly.</span>";
+    if (R.shiftUm === null)
+      note += " <span class='cc-part'>This cell's mesh does not fall inside the block at all, "
+            + "either as published or with the segmentation's own offset applied &mdash; the "
+            + "coordinates below cannot be trusted; please tell Søren.</span>";
     /* Said out loud rather than swallowed, and APPENDED -- the branch above assigns, so this has
        to come after it or a discarded point would be silently overwritten by the ordinary note.
        If this line ever appears the frames have come apart again, and the count is how badly. */
