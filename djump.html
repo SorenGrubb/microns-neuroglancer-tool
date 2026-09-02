@@ -507,7 +507,6 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 </script>
 <script src="core/mesh.js"></script>
-<script src="core/mesh3d.js"></script>
 <script src="core/colabexport.js"></script>
 <script src="core/organellefilter.js"></script>
 <script src="core/points.js"></script>
@@ -8973,13 +8972,17 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     "Pia mater fibroblast":["Pia mater Fibroblast"],
     "Pial sheath fibroblast":["Pial sheath Fibroblast"]
   };
-  const CATEGORY_ORDER=["Neurons","Glia","Vascular cells","Immune & perivascular cells","Leptomeninges"];
+  /* µJump's categories MINUS Leptomeninges. Søren, 2026-09-02: "the same cell types as in uJump,
+     except those related only to the leptomeninges". V1DD is a deep cortical volume -- no pia, no
+     arachnoid, no dura in the block -- so those six would be checkboxes that can never match, and
+     that is the 2026-08-20 complaint (a checkbox that silently returns nothing) in a new place.
+     µJump keeps the category: minnie65 really does contain those cells. */
+  const CATEGORY_ORDER=["Neurons","Glia","Vascular cells","Immune & perivascular cells"];
   const CATEGORY_MEMBERS={
     "Neurons":["L2P","L3P","4P","5P-IT","5P-ET","5P-NP","6P-IT","6P-CT","6P-SP","PTC","DTC","STC","ITC"],
     "Glia":["Astrocyte","Microglia","Oligodendrocyte","OPC"],
     "Vascular cells":["Endothelial cell","Smooth muscle cell","Pericyte","Venular smooth muscle cell"],
-    "Immune & perivascular cells":["Perivascular fibroblast","Macrophage","Lymphocyte","Dendritic cell"],
-    "Leptomeninges":["Arachnoid barrier cell","Fibroblast reticular cell","Inner arachnoid fibroblast","Dural border cell","Pia mater fibroblast","Pial sheath fibroblast"]
+    "Immune & perivascular cells":["Perivascular fibroblast","Macrophage","Lymphocyte","Dendritic cell"]
   };
 
   /* Only offer a cell type that actually EXISTS in this dataset, and show how many there are.
@@ -9031,10 +9034,30 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     const countFor=v=>{const al=TYPE_ALIASES[v]||[v];let n=0;for(const a of al)n+=(tally.get(a)||0);return n;};
     let html="";
     for(const cat of CATEGORY_ORDER){
-      const members=(CATEGORY_MEMBERS[cat]||[]).filter(n=>countFor(n)>0);
+      /* EVERY member, not only the ones with cells. Søren, 2026-09-02: "Even though they have not
+         been reported yet, they should be in the list." V1DD's nucleus table classifies neurons
+         and nothing else, so hiding the empty ones left a panel of thirteen checkboxes that
+         implied this volume contains no glia and no vasculature -- when in fact it contains both
+         and nobody had labelled them yet.
+
+         The 2026-08-20 rule this replaces was "only offer a type that EXISTS", and it was right
+         about the thing it was fixing: ticking a checkbox and getting nothing back, with no hint
+         why. That is still not allowed. An empty type is DIMMED and its count says 0 and its
+         tooltip says what that means -- shown, and shown to be empty. ηJump has drawn its own
+         zero-count pools this way since it was written (ALWAYS_SHOW_TYPES). */
+      const members=CATEGORY_MEMBERS[cat]||[];
       if(!members.length)continue;
       html+='<div style="margin-top:8px"><b style="font-size:12px;color:var(--mut)">'+cat+'</b><div class="toggles" style="margin-top:4px">';
-      for(const n of members)html+='<label style="font-size:12px" title="'+typeTitle(n)+'"><input type="checkbox" class="'+cls+'" value="'+n+'"> '+n+' <span class="nsub">'+countFor(n).toLocaleString()+'</span></label>';
+      for(const n of members){
+        const c=countFor(n), empty=!c;
+        const tip=empty
+          ? typeTitle(n)+" — no cell in V1DD carries this type yet. V1DD's own table classifies "
+            +"neurons only; this fills in as the community identifies them."
+          : typeTitle(n);
+        html+='<label style="font-size:12px'+(empty?';opacity:.55':'')+'" title="'+tip+'">'
+          +'<input type="checkbox" class="'+cls+'" value="'+n+'"> '+n
+          +' <span class="nsub">'+c.toLocaleString()+'</span></label>';
+      }
       html+="</div></div>";
     }
     container.innerHTML=html;
