@@ -1155,7 +1155,21 @@ UJ.mesh=(()=>{
      clusterUm grid so one broad contact patch yields ONE representative point rather than
      hundreds of near-duplicates. The reported position is the bucket's medoid -- a real observed
      point -- while the reported distance is the bucket's TIGHTEST gap, so sorting by "closest
-     touch" stays meaningful. */
+     touch" stays meaningful.
+
+     THE THRESHOLD IS ENFORCED, and until 2026-09-02 it was not. `threshold` was used for one
+     thing only -- the grid's cell size -- and nothing ever compared a pair's distance against it.
+     Since nearestInContactGrid searches a 3x3x3 neighbourhood, the effective reach was between
+     one and about two cell widths, so a pair 30 nm apart came back for a threshold of 20 nm.
+     Found by cccheck.js, which asked the one question the name makes a promise about: raise the
+     threshold and more should be found, lower it and less. Nothing changed either way.
+
+     It matters because every caller puts that number in front of a person as "max gap counted as
+     touching" and then prints what comes back as contacts. Over-reporting apposition is the worst
+     direction for this particular error: a contact that is not there is a claim about the tissue,
+     where a missed one is only a gap in the search. µJump is unaffected -- it still runs its own
+     inline copy of this function -- but βJump, ηJump and χJump read this one, and their contact
+     counts will fall for any pair that was being found beyond the gap that was asked for. */
   function allContactPointsWithinThreshold(posA,gridA,posB,threshold,clusterUm,minHits){
     const gridB=buildContactGrid(posB,threshold);
     const buckets=new Map(), nA=posA.length/3, tol=threshold*0.5, revCache=new Map();
@@ -1163,6 +1177,7 @@ UJ.mesh=(()=>{
       const ax=posA[v*3],ay=posA[v*3+1],az=posA[v*3+2];
       const r=nearestInContactGrid(gridB,ax,ay,az);
       if(!r)continue;
+      if(r.dist>threshold)continue;                 // the gap that was asked for, actually applied
       let rev=revCache.get(r.vertexIdx);
       if(rev===undefined){
         rev=nearestInContactGrid(gridA,posB[r.vertexIdx*3],posB[r.vertexIdx*3+1],posB[r.vertexIdx*3+2]);

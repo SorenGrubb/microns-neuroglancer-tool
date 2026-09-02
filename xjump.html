@@ -358,6 +358,44 @@ try{var _t=localStorage.getItem("ujump_theme");
     reflowing under it. */
  #filterRun{font-weight:600}
  #filterCard input[type=text],#filterCard input:not([type]){text-transform:none}
+
+ /* ── CELL HISTORY ────────────────────────────────────────────────────────────────────────
+    A feed, not a table: the rows are of different kinds and only two of the three columns are
+    ever the same width. The kind is a coloured pill because a rejection and a name are different
+    KINDS of claim about a cell, and a feed where they look identical is one you have to read word
+    by word to navigate. */
+ .chist{margin-top:6px}
+ .chist-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:baseline;
+   padding:5px 0;border-top:1px solid var(--line);font-size:13px}
+ .chist-row:first-child{border-top:none}
+ .chist-kind{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;
+   border:1px solid;border-radius:20px;padding:1px 8px;white-space:nowrap}
+ .hk-built{color:var(--accent);border-color:var(--accent)}
+ .hk-frag{color:var(--mut);border-color:var(--line)}
+ .hk-named{color:var(--ok);border-color:var(--ok)}
+ .hk-bad{color:var(--bad);border-color:var(--bad)}
+ .hk-warn{color:var(--warn);border-color:var(--warn)}
+ .hk-nuc{color:var(--ink);border-color:var(--line)}
+ .hk-org{color:var(--warn);border-color:var(--warn)}
+ .chist-comment{font-style:italic;color:var(--mut);font-size:12.5px;margin-top:2px}
+ .chist-who{white-space:nowrap;font-size:12px}
+ @media(max-width:640px){.chist-row{grid-template-columns:auto 1fr}.chist-who{grid-column:2}}
+
+ /* ── CELL CONTACTS ───────────────────────────────────────────────────────────────────────
+    The dot is the answer: green means these two surfaces come within the gap somewhere. The
+    coverage note beside it is the caveat, and it is amber when the mesh is partial, because
+    "not touching" over 8% of a cell is not a finding. */
+ .cc-row{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:5px 0;
+   border-top:1px solid var(--line);font-size:13px}
+ .cc-row:first-child{border-top:none}
+ .cc-dot{width:9px;height:9px;border-radius:50%;background:var(--mut);opacity:.45;flex:none}
+ .cc-dot.on{background:var(--ok);opacity:1}
+ .cc-jump{font-weight:600;text-decoration:none;color:var(--accent)}
+ .cc-jump:hover{text-decoration:underline}
+ .cc-part{color:var(--warn)}
+ .cc-row .idbtn{padding:3px 9px;font-size:12px;margin-left:auto}
+ /* The four number fields sit in .row, whose children stretch; these must not. */
+ .cc-body input[type=number]{text-transform:none}
  /* ── STATISTICS ──────────────────────────────────────────────────────────────────────────
     Bars in plain CSS rather than a charting library. χJump already carries 4.5 MB of seed data;
     a megabyte of Plotly to draw eleven horizontal bars would be the wrong trade, and these are
@@ -393,7 +431,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 07:00</span></p>
+ctrl-shift-R.">build 2026-09-02 08:24</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -2753,8 +2791,20 @@ UJ.mesh3d = (function(){
   function geometryFor(ids){
     return Promise.all((ids || []).map(loadOne)).then(function(loaded){
       var have = loaded.filter(function(L){ return L.state === "ok"; });
+      /* "NO MESH" AND "COULD NOT FETCH" ARE KEPT APART, all the way out. loadOne has told them
+         apart since it was written -- a 403/404 means the object is not published, anything else
+         means we do not know -- and until 2026-09-02 this function threw that distinction away
+         into one `untestable` list. That cost nothing while the only caller was a coverage line
+         saying "9 of 14 have a mesh", and it started costing something the moment the contacts
+         panel began printing "no published mesh at all" beside a cell: with the network down,
+         every candidate reads as an unmeshed cell rather than as a page that could not look.
+         Both counts now travel, and the caller says which it means. */
       return { geo: have.length ? combine(have) : null,
                have: have.length, total: (ids || []).length,
+               none: loaded.filter(function(L){ return L.state === "none"; })
+                           .map(function(L){ return L.id; }),
+               unknown: loaded.filter(function(L){ return L.state === "unknown"; })
+                              .map(function(L){ return L.id; }),
                untestable: loaded.filter(function(L){ return L.state !== "ok"; })
                                  .map(function(L){ return L.id; }) };
     });
@@ -3095,11 +3145,13 @@ UJ.mesh3d = (function(){
          cell is the worst thing on this page. */
   function umGeometry(ids){
     return geometryFor(ids).then(function(g){
-      if (!g.geo) return { geo:null, have:g.have, total:g.total };
+      var out = { geo:null, have:g.have, total:g.total, none:g.none, unknown:g.unknown,
+                  untestable:g.untestable };
+      if (!g.geo) return out;
       var nm = g.geo.pos, um = new Float32Array(nm.length);
       for (var i = 0; i < nm.length; i++) um[i] = nm[i] / 1000;
-      return { geo:{ positions:um, indices:g.geo.idx }, have:g.have, total:g.total,
-               untestable:g.untestable };
+      out.geo = { positions:um, indices:g.geo.idx };
+      return out;
     });
   }
   function core(){
@@ -3859,6 +3911,8 @@ UJ.app = (function(){
                  + "' title='Take this fragment off this cell'>&times;</button></span>"; }).join("")
       +   "</div></details>"
       + organSectionHtml(c.id)
+      + ccSectionHtml(c.id)
+      + histSectionHtml(c.id)
       + "</div>";
   }
 
@@ -3995,6 +4049,8 @@ UJ.app = (function(){
       }).catch(function(e){ note(esc("Saving that failed: " + e.message), false); });
     });
     wireOrganSection(root, c.id);
+    wireCcSection(root, c.id);
+    loadHistory(root, c.id);
   }
 
   function renderStats(){
@@ -4597,6 +4653,8 @@ UJ.app = (function(){
       + "<div class='mesh3d-host'></div>"
       + "<div class='hint mesh-out' style='margin-top:6px'></div>"
       + organSectionHtml(row.key)
+      + ccSectionHtml(row.key)
+      + histSectionHtml(row.key)
       + "</div>";
   }
 
@@ -4817,6 +4875,8 @@ UJ.app = (function(){
       });
     });
     wireOrganSection(root, row.key);
+    wireCcSection(root, row.key);
+    loadHistory(root, row.key);
   }
 
   /* ── the volume, drawn ────────────────────────────────────────────────────────────────────
@@ -5528,6 +5588,475 @@ UJ.app = (function(){
     var row = seeds().filter(function(r){ return r.key === cellKey; })[0];
     return row ? row.label : "";
   }
+
+  /* ══ CELL HISTORY ═════════════════════════════════════════════════════════════════════════
+     Søren, 2026-09-02: "Now I want to make the cell contacts and the cell history for the xJump
+     identification panel, like in uJump."
+
+     µJump merges TWO endpoints on the page -- ?classificationHistory= and ?annotationHistory= --
+     because its identity changes live somewhere other than its report log. χJump has one feed,
+     because everything that has ever happened to a cell is a timestamped row in one of six
+     sheets and there is nothing to reconcile. The merging happens server-side in
+     xjumpCellHistory; this renders it.
+
+     LOADED PER CELL, not with the page. See that handler's own comment: the timeline for five
+     thousand cells has no business riding on every page load. */
+
+  var HIST_SEQ = 0;                 // which request the panel is currently waiting for
+  var HIST_CACHE = {};              // cellKey -> items, so stepping back and forth is one fetch
+
+  /* One row's look, per kind. The pill colour is the only thing that varies, and it varies for a
+     reason: a rejection and a name are different KINDS of claim about a cell, and a feed where
+     they look identical is a feed you have to read word by word. */
+  var HIST_KIND = {
+    built:      { label:"built",      cls:"hk-built" },
+    fragments:  { label:"fragments",  cls:"hk-frag" },
+    named:      { label:"identified", cls:"hk-named" },
+    rejected:   { label:"rejected",   cls:"hk-bad" },
+    unsure:     { label:"unsure",     cls:"hk-warn" },
+    nucleus:    { label:"nucleus",    cls:"hk-nuc" },
+    organelles: { label:"organelles", cls:"hk-org" }
+  };
+
+  function histTime(ts){
+    if (!ts) return "";
+    try {
+      return new Date(ts).toLocaleString(undefined, { year:"numeric", month:"short",
+        day:"numeric", hour:"2-digit", minute:"2-digit" });
+    } catch (e){ return String(ts); }
+  }
+
+  function histSectionHtml(cellKey){
+    return "<div class='chist' data-cell='" + esc(cellKey) + "'>"
+      + "<label style='margin-top:14px'>Cell history</label>"
+      + "<div class='chist-body'><p class='hint' style='margin:0'>loading&hellip;</p></div>"
+      + "</div>";
+  }
+
+  function renderHistItems(host, items){
+    if (!items || !items.length){
+      /* µJump's own sentence, word for word. It is the right one: "no recorded changes" says the
+         record is empty, where "no history" would suggest the page failed to look. */
+      /* ONE STRING LITERAL, not two concatenated. The build asserts this sentence is in the
+         page, and a sentence split across a `+` is not in the page -- it is two halves with an
+         operator between them, which greps as absent and reads as present. */
+      host.innerHTML =
+        "<p class='hint' style='margin:0'>No recorded changes or reports yet for this cell.</p>";
+      return;
+    }
+    host.innerHTML = items.map(function(h){
+      var k = HIST_KIND[h.kind] || { label: h.kind || "change", cls:"hk-built" };
+      return "<div class='chist-row'>"
+        + "<span class='chist-kind " + k.cls + "'>" + esc(k.label) + "</span>"
+        + "<span class='chist-what'>" + esc(h.detail || "")
+        + (h.certainty ? " <span class='hint'>&middot; certainty " + esc(h.certainty)
+                         + "/5</span>" : "")
+        + (h.comment ? "<div class='chist-comment'>&ldquo;" + esc(h.comment) + "&rdquo;</div>" : "")
+        + "</span>"
+        /* The separator only when there is something on both sides of it. A row with no
+           timestamp -- which is every row in the harness, and any row a future writer forgets to
+           stamp -- otherwise ends in a dangling middle dot that reads as a rendering failure. */
+        + "<span class='chist-who hint'>" + esc(h.who || "someone")
+        + (h.timestamp ? " &middot; " + esc(histTime(h.timestamp)) : "") + "</span>"
+        + "</div>";
+    }).join("");
+  }
+
+  function loadHistory(root, cellKey){
+    var wrap = root.querySelector(".chist"); if (!wrap) return;
+    var host = wrap.querySelector(".chist-body");
+    if (HIST_CACHE[cellKey]){ renderHistItems(host, HIST_CACHE[cellKey]); return; }
+    /* A SEQUENCE NUMBER, not a comparison against the currently-shown cell. Stepping through
+       matches can land on the same cell twice with a slow response in flight from the first
+       visit, and "is this still the cell on screen" would let that stale response paint. */
+    var seq = ++HIST_SEQ;
+    STORE.history(cellKey).then(function(items){
+      if (seq !== HIST_SEQ) return;
+      HIST_CACHE[cellKey] = items;
+      renderHistItems(host, items);
+    }).catch(function(e){
+      if (seq !== HIST_SEQ) return;
+      /* SAID, not swallowed. An empty history and a backend that could not be reached look
+         identical on screen otherwise, and the first is a fact about the cell while the second
+         is a fact about the page. */
+      host.innerHTML = "<p class='hint' style='margin:0;color:var(--bad)'>Could not read this "
+        + "cell's history: " + esc(e.message) + "</p>";
+    });
+  }
+  /* The history of a cell somebody just changed is stale the moment they change it. Cheaper and
+     more honest than re-fetching on every write: drop the entry and let the next view reload. */
+  function forgetHistory(cellKey){ delete HIST_CACHE[cellKey]; }
+
+
+  /* ══ CELL CONTACTS ════════════════════════════════════════════════════════════════════════
+     µJump's mesh-proximity panel, over cb2. Physical apposition of two reconstructed surfaces --
+     touching membranes -- and NOT synapses: cb2 publishes no synapse table, and calling a
+     membrane contact a synapse would be the single most misleading thing this page could do.
+
+     WHAT IS DIFFERENT HERE, and it governs the whole design. In µJump a cell is one root id and
+     one mesh fetch. In cb2 a cell is an ASSEMBLY: a granule cell is a median 116 published
+     fragments, each its own manifest and its own mesh file. Checking one candidate is therefore
+     of order two hundred requests, not two. So:
+
+       - the candidate cap defaults to SIX rather than µJump's sixty, and is a field;
+       - the panel states the cost in fragments BEFORE you press the button, because "this will
+         download about 1,400 mesh files" is something you want to know first;
+       - geometry is cached per cell for the session, so adjusting the gap and re-running -- which
+         is the actual workflow -- costs nothing.
+
+     AND COVERAGE IS REPORTED PER CANDIDATE. cb2 publishes geometry for some fragments and not
+     others. A candidate whose mesh is 9 pieces of 116 will read as "not touching" whatever the
+     truth is, and a "not touching" that is really "we could only look at 8% of it" is the worst
+     answer on this page. Every row carries its fraction.
+
+     THE GEOMETRY ITSELF is core/mesh.js's, shared with µJump -- buildContactGrid and
+     allContactPointsWithinThreshold, which do mutual-nearest filtering, cluster the hits and
+     report each patch's medoid at its tightest gap. Two implementations of "are these surfaces
+     touching" is two answers waiting to disagree. */
+
+  var CC_DEFAULTS = { radiusUm: 50, gapNm: 40, spacingNm: 1000, maxCells: 6 };
+  var CC_GEO = {};                  // cellKey -> {positions, indices, have, total}, this session
+  var CC_RESULT = {};               // cellKey -> the last computed rows, for the two exports
+
+  function ccSectionHtml(cellKey){
+    return "<details class='cc' data-cell='" + esc(cellKey) + "'"
+      + " style='margin-top:12px;border-top:1px dashed var(--line);padding-top:10px'>"
+      + "<summary><span class='lbl'>Cell contacts</span> "
+      + "<span class='hint' title='Physical mesh proximity — two reconstructed surfaces coming "
+      + "within a set gap of each other. NOT synapses: cb2 publishes no synapse table, and this "
+      + "measures membranes, not connections.'>(mesh proximity, not synapses)</span></summary>"
+      + "<div class='cc-body'></div></details>";
+  }
+
+  function wireCcSection(root, cellKey){
+    var d = root.querySelector(".cc"); if (!d) return;
+    d.addEventListener("toggle", function(){
+      var body = d.querySelector(".cc-body");
+      if (d.open && body && !body.innerHTML) renderCcBody(d, cellKey);
+    });
+  }
+
+  function ccNum(d, cls, fallback){
+    var e = d.querySelector("." + cls);
+    var v = e ? parseFloat(e.value) : NaN;
+    return isFinite(v) && v > 0 ? v : fallback;
+  }
+
+  /* Cells of one kind whose soma is within the radius, nearest first. The same universe the
+     filter and the list use, so "12 granule cells nearby" means the same thing on both. */
+  function ccCandidates(cellKey, label, radiusUm){
+    var me = posForCell(cellKey);
+    if (!me) return [];
+    var p = X.toNm(me), r = radiusUm * 1000, out = [];
+    filterable().forEach(function(u){
+      if (u.key === cellKey) return;
+      if ((u.label || "(unnamed)") !== label) return;
+      var q = X.toNm(u.pos);
+      var dx = q[0]-p[0], dy = q[1]-p[1], dz = q[2]-p[2];
+      var dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      if (dist <= r) out.push({ u: u, distNm: dist });
+    });
+    out.sort(function(a, b){ return a.distNm - b.distNm; });
+    return out;
+  }
+
+  function renderCcBody(d, cellKey){
+    var body = d.querySelector(".cc-body"); if (!body) return;
+    var labels = {};
+    filterable().forEach(function(u){
+      var l = u.label || "(unnamed)"; labels[l] = (labels[l] || 0) + 1; });
+    body.innerHTML =
+        "<select class='cc-type'><option value=''>Choose a cell type&hellip;</option>"
+      /* Sorted case-INSENSITIVELY. The published labels are a mix ("Purkinje cell", "granule
+         cell"), so a plain sort puts every capital ahead of every lower-case word and the list
+         reads as though it were in no order at all. */
+      +   Object.keys(labels).sort(function(a, b){
+            return a.toLowerCase() < b.toLowerCase() ? -1
+                 : a.toLowerCase() > b.toLowerCase() ? 1 : 0; }).map(function(l){
+            return "<option value='" + esc(l) + "'>" + esc(cap(l)) + " ("
+                 + labels[l].toLocaleString() + " in this list)</option>"; }).join("")
+      + "</select>"
+      + ccField("cc-radius", "Search radius", CC_DEFAULTS.radiusUm, "µm",
+          "How far from this cell's soma to look for cells of that type.")
+      /* 40 nm is not arbitrary and it carries over from µJump exactly, because cb2's voxel is
+         also 4 × 4 × 40 nm: two independently segmented touching cells rarely come closer than
+         one z-voxel even at a genuine apposition. */
+      + ccField("cc-gap", "Max gap counted as touching", CC_DEFAULTS.gapNm, "nm",
+          "cb2's voxel is 4 × 4 × 40 nm, so two independently segmented surfaces rarely come "
+        + "closer than one z-step even where they genuinely touch. 40 nm is that step.")
+      + ccField("cc-spacing", "Min. spacing between reported touch points", CC_DEFAULTS.spacingNm,
+          "nm", "One broad contact patch would otherwise report hundreds of near-identical "
+        + "points. Hits are bucketed on this spacing and each bucket reports one real point.")
+      + ccField("cc-max", "Most cells to check", CC_DEFAULTS.maxCells, "cells",
+          "Each cell checked means downloading every published fragment of it — a granule cell "
+        + "is a median 116 files. The nearest are checked first.")
+      + "<p class='hint cc-count' style='margin:8px 0 0'>Pick a cell type to see how many are "
+      +   "nearby.</p>"
+      + "<div class='row' style='margin-top:8px'>"
+      +   "<button type='button' class='idbtn cc-check' disabled>Check contacts with this "
+      +     "type</button>"
+      +   "<button type='button' class='idbtn cc-ngl' disabled>Open all in Neuroglancer</button>"
+      +   "<button type='button' class='idbtn cc-xlsx' disabled>Download as Excel</button>"
+      + "</div>"
+      + "<div class='cc-results' style='margin-top:10px'></div>";
+
+    var refresh = function(){ ccRefreshCount(d, cellKey); };
+    d.querySelector(".cc-type").addEventListener("change", refresh);
+    ["cc-radius", "cc-max"].forEach(function(c){
+      d.querySelector("." + c).addEventListener("input", refresh); });
+    d.querySelector(".cc-check").addEventListener("click", function(){ ccRun(d, cellKey); });
+    d.querySelector(".cc-ngl").addEventListener("click", function(){ ccViewer(d, cellKey); });
+    d.querySelector(".cc-xlsx").addEventListener("click", function(){ ccExcel(d, cellKey); });
+    if (CC_RESULT[cellKey]) ccShowRows(d, cellKey);
+  }
+
+  function ccField(cls, label, value, unit, title){
+    return "<div class='row' style='align-items:center;margin-top:8px'>"
+      + "<label style='flex:1 1 200px;margin:0' title='" + esc(title) + "'>" + esc(label)
+      + "</label>"
+      + "<input type='number' class='" + cls + "' value='" + value
+      + "' min='1' style='width:90px;flex:0 0 auto'>"
+      + "<span class='hint' style='flex:0 0 auto'>" + esc(unit) + "</span></div>";
+  }
+
+  /* THE COST, BEFORE THE BUTTON. Søren asked for µJump's panel, and µJump's says only how many
+     cells are nearby -- which in a dataset of one mesh per cell is the whole story. Here the
+     number that decides whether to press it is the FRAGMENT count. */
+  function ccRefreshCount(d, cellKey){
+    var sel = d.querySelector(".cc-type"), out = d.querySelector(".cc-count"),
+        btn = d.querySelector(".cc-check");
+    var label = sel.value;
+    if (!label){
+      out.textContent = "Pick a cell type to see how many are nearby.";
+      btn.disabled = true; return;
+    }
+    var radius = ccNum(d, "cc-radius", CC_DEFAULTS.radiusUm);
+    var cap = Math.max(1, Math.round(ccNum(d, "cc-max", CC_DEFAULTS.maxCells)));
+    var all = ccCandidates(cellKey, label, radius);
+    var take = all.slice(0, cap);
+    var frags = take.reduce(function(a, c){ return a + c.u.frags; }, 0);
+    var mine = segsForCell(cellKey).length;
+    btn.disabled = !take.length;
+    out.innerHTML = all.length
+      ? all.length.toLocaleString() + " " + esc(label) + (all.length === 1 ? "" : "s")
+        + " within " + radius + "&nbsp;µm"
+        + (all.length > take.length
+            ? " &mdash; the nearest <b>" + take.length + "</b> would be checked"
+            : " &mdash; <b>all</b> would be checked")
+        + ". That is about <b>" + (frags + (CC_GEO[cellKey] ? 0 : mine)).toLocaleString()
+        + "</b> mesh fragments to download"
+        + (CC_GEO[cellKey] ? " (this cell's " + mine + " are already loaded)." : ".")
+      : "No " + esc(label) + " has a soma within " + radius + "&nbsp;µm of this one.";
+  }
+
+  /* One cell's geometry in MICROMETRES, cached for the session. µm because that is what
+     core/mesh.js's contact helpers speak, and what its own header calls the file's one unit. */
+  function ccGeometry(cellKey){
+    if (CC_GEO[cellKey]) return Promise.resolve(CC_GEO[cellKey]);
+    return UJ.mesh3d.umGeometry(segsForCell(cellKey)).then(function(g){
+      var rec = { geo: g.geo, have: g.have, total: g.total,
+                  /* Carried separately because they mean different things and the row says which:
+                     `none` is "this fragment has no published mesh", `unknown` is "we could not
+                     find out". A network failure reported as an unmeshed cell is exactly the
+                     confident wrong answer this page exists not to give. */
+                  none: (g.none || []).length, unknown: (g.unknown || []).length };
+      /* NOT CACHED when the answer was "we could not tell". Caching a network failure means the
+         panel keeps reporting it after the network comes back, and the only way out is a reload. */
+      if (!rec.unknown) CC_GEO[cellKey] = rec;
+      return rec;
+    });
+  }
+
+  function ccRun(d, cellKey){
+    var sel = d.querySelector(".cc-type"), label = sel.value;
+    if (!label) return;
+    var radius = ccNum(d, "cc-radius", CC_DEFAULTS.radiusUm),
+        gapNm = ccNum(d, "cc-gap", CC_DEFAULTS.gapNm),
+        spacingNm = ccNum(d, "cc-spacing", CC_DEFAULTS.spacingNm),
+        cap = Math.max(1, Math.round(ccNum(d, "cc-max", CC_DEFAULTS.maxCells)));
+    /* ONE CONVERSION POINT, here: the three fields are in the units a person thinks in (µm for a
+       search radius, nm for a membrane gap) and everything below this line is µm, because that is
+       what the mesh is in. µJump does the same and in the same place. */
+    var gapUm = gapNm / 1000, spacingUm = spacingNm / 1000;
+    var all = ccCandidates(cellKey, label, radius), take = all.slice(0, cap);
+    if (!take.length) return;
+
+    var btn = d.querySelector(".cc-check"), orig = btn.textContent;
+    var controls = Array.prototype.slice.call(
+      d.querySelectorAll(".cc-type,.cc-radius,.cc-gap,.cc-spacing,.cc-max,.cc-check"));
+    controls.forEach(function(c){ c.disabled = true; });
+    var say = function(msg){ btn.textContent = msg; };
+    say("loading this cell…");
+
+    var mine = null, rows = [];
+    ccGeometry(cellKey).then(function(g){
+      if (!g.geo) throw new Error("none of this cell's " + g.total
+        + " fragments has a published mesh, so there is nothing to measure against");
+      mine = g;
+      var grid = UJ.mesh.buildContactGrid(g.geo.positions, gapUm);
+      /* Sequential rather than parallel, and that is not timidity: each candidate is already a
+         hundred-odd parallel fragment fetches, and running six of those at once would be six
+         hundred in flight against one bucket. */
+      return take.reduce(function(pr, cand, i){
+        return pr.then(function(){
+          say("checking " + (i + 1) + " of " + take.length + "…");
+          return ccGeometry(cand.u.key).then(function(cg){
+            if (!cg.geo){
+              rows.push({ u:cand.u, distNm:null, points:[], have:0, total:cg.total,
+                          unknown: cg.unknown, somaNm:cand.distNm });
+              return;
+            }
+            var pts = UJ.mesh.allContactPointsWithinThreshold(
+              g.geo.positions, grid, cg.geo.positions, gapUm, spacingUm);
+            rows.push({ u:cand.u, points:pts,
+                        distNm: pts.length ? pts[0].dist * 1000 : null,
+                        have:cg.have, total:cg.total, unknown:cg.unknown,
+                        somaNm:cand.distNm });
+          }).catch(function(){
+            /* A candidate that could not be fetched is REPORTED as such, not skipped: a row
+               missing from the answer is indistinguishable from a cell that is not touching. */
+            rows.push({ u:cand.u, distNm:null, points:[], have:null, total:cand.u.frags,
+                        somaNm:cand.distNm, failed:true });
+          });
+        });
+      }, Promise.resolve());
+    }).then(function(){
+      rows.sort(function(a, b){
+        if (a.distNm == null && b.distNm == null) return a.somaNm - b.somaNm;
+        if (a.distNm == null) return 1;
+        if (b.distNm == null) return -1;
+        return a.distNm - b.distNm;
+      });
+      CC_RESULT[cellKey] = { rows: rows, label: label, gapNm: gapNm, spacingNm: spacingNm,
+                             radiusUm: radius, checked: take.length, found: all.length,
+                             mine: mine };
+      ccShowRows(d, cellKey);
+    }).catch(function(e){
+      d.querySelector(".cc-results").innerHTML =
+        "<p class='hint' style='margin:0;color:var(--bad)'>" + esc(e.message) + "</p>";
+    }).then(function(){
+      btn.textContent = orig;
+      controls.forEach(function(c){ c.disabled = false; });
+      ccRefreshCount(d, cellKey);
+    });
+  }
+
+  function ccShowRows(d, cellKey){
+    var R = CC_RESULT[cellKey]; if (!R) return;
+    var host = d.querySelector(".cc-results"); if (!host) return;
+    var touching = R.rows.filter(function(r){ return r.points.length; }).length;
+    host.innerHTML =
+        "<p class='hint' style='margin:0 0 8px'><b>" + touching + "</b> of " + R.rows.length
+      + " checked " + esc(R.label) + (R.rows.length === 1 ? "" : "s") + " come within "
+      + R.gapNm + "&nbsp;nm of this cell"
+      + (R.mine ? " &mdash; measured against " + R.mine.have + " of this cell's " + R.mine.total
+                  + " fragments" : "") + ".</p>"
+      + R.rows.map(function(r){
+          var ok = r.points.length > 0;
+          var cov = r.failed ? "could not be fetched"
+                  : r.unknown ? r.unknown + " of " + r.total + " fragments could not be fetched"
+                  : r.have === 0 ? "no published mesh at all"
+                  : r.have < r.total ? r.have + " of " + r.total + " fragments have a mesh"
+                  : r.total + " fragments, all with a mesh";
+          return "<div class='cc-row'>"
+            + "<span class='cc-dot" + (ok ? " on" : "") + "'></span>"
+            + "<a class='cc-jump' href='#' data-key='" + esc(r.u.key) + "'>"
+            + esc(r.u.name) + "</a>"
+            + "<span class='hint'>"
+            + (ok ? "<b>" + r.points.length + " touch point"
+                    + (r.points.length === 1 ? "" : "s") + "</b>, closest "
+                    + r.distNm.toFixed(0) + " nm"
+                  : "not touching")
+            + " &middot; soma " + (r.somaNm / 1000).toFixed(1) + " µm away"
+            /* THE COVERAGE IS ON EVERY ROW. "Not touching" over 8% of a cell is not a finding. */
+            + " &middot; <span class='" + (r.have !== null && r.have < r.total ? "cc-part" : "")
+            + "'>" + esc(cov) + "</span></span>"
+            + (ok ? "<button type='button' class='idbtn cc-one' data-key='" + esc(r.u.key)
+                    + "'>Open ↗</button>" : "")
+            + "</div>";
+        }).join("");
+    d.querySelector(".cc-ngl").disabled = !R.rows.length;
+    d.querySelector(".cc-xlsx").disabled = !R.rows.length;
+    Array.prototype.forEach.call(host.querySelectorAll(".cc-jump"), function(a){
+      a.addEventListener("click", function(ev){
+        ev.preventDefault();
+        var p = posForCell(a.getAttribute("data-key"));
+        if (p){ writeCoord(p); findByCoord(); }
+      });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll(".cc-one"), function(b){
+      b.addEventListener("click", function(){ ccViewer(d, cellKey, b.getAttribute("data-key")); });
+    });
+  }
+
+  /* The pair (or the whole set) in the viewer: this cell's fragments, the other cells', and the
+     touch points as their own annotation layer. */
+  function ccViewer(d, cellKey, onlyKey){
+    var R = CC_RESULT[cellKey]; if (!R) return;
+    var rows = onlyKey ? R.rows.filter(function(r){ return r.u.key === onlyKey; }) : R.rows;
+    var segs = segsForCell(cellKey).slice();
+    var marks = [];
+    rows.forEach(function(r){
+      segsForCell(r.u.key).forEach(function(s){ if (segs.indexOf(s) < 0) segs.push(s); });
+      r.points.forEach(function(p){
+        /* `name`, not `label`: buildState's marker layer reads m.name for the annotation's
+           description. The organelle layer beside it reads m.label, which is exactly the kind of
+           near-miss that silently produces unlabelled points. */
+        marks.push({ pos: X.toVox([p.point[0]*1000, p.point[1]*1000, p.point[2]*1000])
+                            .map(Math.round),
+                     name: r.u.name + " · " + (p.dist * 1000).toFixed(0) + " nm" });
+      });
+    });
+    /* Centred on the first touch point when there is one -- that is the thing you opened this to
+       look at -- and on the cell otherwise. */
+    var centre = marks.length ? marks[0].pos : posForCell(cellKey);
+    window.open(X.viewerUrl(segs, centre, {
+      markers: marks, markerName: "touch points (" + marks.length + ")",
+      markerColour: "#f59e0b", nuclei: false
+    }), "_blank", "noopener");
+  }
+
+  /* ONE ROW PER TOUCH POINT, as µJump's export is: a pair with three contacts is three rows, and
+     a pair with none still gets one so the sheet records that it was checked and found nothing. */
+  function ccExcel(d, cellKey){
+    var R = CC_RESULT[cellKey]; if (!R) return;
+    var btn = d.querySelector(".cc-xlsx");
+    if (!window.XLSX){
+      btn.textContent = "Excel library did not load";
+      return;
+    }
+    var head = ["this cell", "this cell key", "this cell fragments with a mesh",
+                "contact cell", "contact cell key", "contact cell type",
+                "soma distance (um)", "closest mesh gap (nm)",
+                "touching (<" + R.gapNm + " nm)", "contact fragments with a mesh",
+                "contact fragments total",
+                "touch point index", "touch points on this pair",
+                "touch x_vox", "touch y_vox", "touch z_vox"];
+    var me = universe().filter(function(u){ return u.key === cellKey; })[0];
+    var data = [head];
+    R.rows.forEach(function(r){
+      var common = [me ? me.name : cellKey, cellKey, R.mine ? R.mine.have : "",
+                    r.u.name, r.u.key, r.u.label || "",
+                    Math.round(r.somaNm / 1000),
+                    r.distNm == null ? "" : Math.round(r.distNm),
+                    r.points.length ? "yes" : "no",
+                    r.have == null ? "" : r.have, r.total];
+      if (!r.points.length){ data.push(common.concat(["", 0, "", "", ""])); return; }
+      r.points.forEach(function(p, i){
+        var v = X.toVox([p.point[0]*1000, p.point[1]*1000, p.point[2]*1000]).map(Math.round);
+        data.push(common.concat([i + 1, r.points.length, v[0], v[1], v[2]]));
+      });
+    });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), "Contacts");
+    XLSX.writeFile(wb, "cb2_contacts_" + String(cellKey).replace(/[^a-zA-Z0-9]+/g, "-")
+      + "_vs_" + String(R.label).replace(/[^a-zA-Z0-9]+/g, "_") + ".xlsx");
+  }
+  /* Exposed for the checks: the compute is a promise chain over the network and the exports read
+     its result, so a check needs to be able to see and set what it produced. */
+  function ccResultFor(k){ return CC_RESULT[k]; }
+  function ccSetResultFor(k, v){ CC_RESULT[k] = v; }
+  function ccClearGeometry(){ CC_GEO = {}; }
 
   /* ══ THE FILTER ═══════════════════════════════════════════════════════════════════════════
      Søren, 2026-09-02: "I want the Filter and show to be more like uJump." What follows is
@@ -6311,6 +6840,24 @@ UJ.app = (function(){
        {kind, n} counts plus the points -- so the panel, the filter and the viewer layer are
        exercised here against the same structure the live page gets. A harness whose data has a
        different shape from the server's tests the harness. */
+    /* The harness has no sheet to read a timeline out of, and inventing one would be inventing
+       evidence. What it CAN say truthfully is what happened in this tab, which is what the store
+       already holds -- so the history it returns is built from the cell itself, undated. */
+    history: function(cellKey){
+      var c = byId(cellKey);
+      if (!c) return Promise.resolve([]);
+      var out = [];
+      if (c.builtBy || c.segments.length)
+        out.push({ kind:"built", who: c.builtBy || MemStore.who, timestamp: "",
+                   detail: c.segments.length + " fragment"
+                           + (c.segments.length === 1 ? "" : "s") });
+      Object.keys(c.names || {}).forEach(function(k){
+        out.push({ kind:"named", who:"someone", timestamp:"", detail: c.names[k].label }); });
+      (c.organelles || []).forEach(function(o){
+        out.push({ kind:"organelles", who: MemStore.who, timestamp:"",
+                   detail: o.n + "× " + o.kind }); });
+      return Promise.resolve(out);
+    },
     organelle: function(cellKey, sub){
       var c = byId(cellKey);
       if (!c){
@@ -6449,6 +6996,11 @@ UJ.app = (function(){
              batch of nuclei is one paste and fifty posts, and fifty recomputes for one action
              would make the tool feel broken while it was working. */
           pointsSoon();
+          /* The cached history of a cell somebody just changed is stale the moment they change
+             it. Dropped rather than re-fetched: the next view reloads it, and nobody is looking
+             at a timeline in the same instant they add to it. */
+          if (payload.cellKey) forgetHistory(payload.cellKey);
+          if (payload.nucleusId) forgetHistory(payload.nucleusId);
           return d;
         });
     },
@@ -6510,6 +7062,18 @@ UJ.app = (function(){
                           kind: sub.kind, pointA: sub.pointA, pointB: sub.pointB,
                           identified: sub.identified || "", comment: sub.comment || "",
                           path: "" });
+    },
+    /* ONE CELL'S TIMELINE. A separate read from xjumpState -- see xjumpCellHistory's own
+       comment for why the history of five thousand cells has no business riding on a page load.
+       No credential: reading is public here as everywhere else in this tool. */
+    history: function(cellKey){
+      var u = UJ.cfg.backend.endpoint + "?xjumpCellHistory=" + encodeURIComponent(cellKey)
+            + "&ds=" + encodeURIComponent(UJ.cfg.backend.ds);
+      return fetch(u).then(function(r){ return readJson(r, "this cell's history"); })
+        .then(function(d){
+          if (!d || !d.ok) throw new Error((d && d.error) || "could not read the history");
+          return d.history || [];
+        });
     },
     build: function(ids, position, key){
       var p = { type:"xjump_cell_build", segments: ids };
@@ -6725,6 +7289,9 @@ UJ.app = (function(){
            universe:universe, filterable:filterable, runFilter:runFilter,
            previewFilter:previewFilter, filterResult:filterResult,
            organKnownText:organKnownText, buildOrganelleFilter:buildOrganelleFilter,
+           ccCandidates:ccCandidates, ccResultFor:ccResultFor,
+           ccSetResultFor:ccSetResultFor, ccClearGeometry:ccClearGeometry,
+           loadHistory:loadHistory, forgetHistory:forgetHistory,
            matchRows:matchRows, wireFilter:wireFilter,
            findByCoord:findByCoord, renderRandomButtons:renderRandomButtons,
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
