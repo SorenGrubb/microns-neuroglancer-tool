@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 11:56</span></p>
+ctrl-shift-R.">build 2026-09-02 12:08</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -1032,9 +1032,24 @@ UJ.cfg.volume = {
      derive it from -- which is also why this is a lookup and not a flag. */
   meshCoverageUnknown: true,
 
-  /* Read off the same working state. Without it neuroglancer stretches the full 0-255 and the EM
-     reads flat -- the same reason ωJump's volumes carry em_range. */
-  em_range: [0, 210],
+  /* ── HOW THE EM IS SHOWN ──────────────────────────────────────────────────────────────────
+     TWO numbers and both of them matter, because either one alone leaves the imagery flat.
+
+     THE WINDOW. cb2's tissue occupies about 40..253 of the 8-bit range, and neuroglancer's
+     default invlerp stretches 0..255 over that -- so the whole picture sits in the middle greys
+     with nothing black and nothing white. The first version here said [0, 210], which is better
+     but still anchors the dark end at a value no voxel ever takes. [76, 217] is read off the
+     histogram in cb2's own Rendering tab, which is where Søren was when he said the contrast
+     needed fixing on 2026-09-02, and it is the range neuroglancer itself proposes for this
+     volume. Change it here and every link the page makes changes with it.
+
+     THE OPACITY, and this is the half that was missing. Neuroglancer's default for an IMAGE layer
+     is 0.5, so every grey the shader produces is then halved against a black background before
+     anybody sees it -- a correctly windowed image at half opacity still reads as washed out, and
+     no amount of adjusting the window fixes it. 1 is what you want for the layer you are reading
+     the tissue from; the segmentation on top has its own alpha. */
+  em_range: [76, 217],
+  em_opacity: 1,
 
   segLayerName: "seg",
   emLayerName: "em",
@@ -1682,6 +1697,9 @@ UJ.xjump = (function(){
 
     var em = { type:"image", name:v.emLayerName, source:v.em, tab:"source" };
     if (v.em_range) em.shaderControls = { normalized: { range: v.em_range } };
+    /* SET EXPLICITLY, because neuroglancer's default for an image layer is 0.5 -- see em_opacity
+       in the config. A windowed image at half opacity is still a washed-out image. */
+    if (v.em_opacity != null) em.opacity = v.em_opacity;
     /* The imagery can be turned OFF and still be in the state. Søren, 2026-09-02, listing what the
        filter's viewer section should offer: "where you can deselect the EM imagery". Deselected
        rather than omitted, deliberately -- a layer that is absent cannot be switched back on
