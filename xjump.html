@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 18:03</span></p>
+ctrl-shift-R.">build 2026-09-02 18:22</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -3598,6 +3598,44 @@ UJ.app = (function(){
     return c ? key + " (" + (X.settledLabel(c) || "unnamed") + ", " + c.segments.length
                + " fragments)" : key;
   }
+  /* ── AIMING THE PASTE BOX, AND GOING THERE ───────────────────────────────────────────────
+     Søren, 2026-09-02: "When pressing add fragments in xJump, it should jump to the field where
+     you can add fragments."
+
+     THE PASTE BOX IS ON THE JUMP TAB. Two of the three buttons that aim it are not: the master
+     cell list lives on the filter tab, and so does the step-through mount the identity card is
+     relocated into. focus() and scrollIntoView() on an element inside a display:none panel both
+     do nothing and both do it silently, so the button looked like it had no handler -- the aim
+     was taken, the banner was drawn, and all of it happened on a tab you were not looking at.
+
+     So: switch tabs, draw, then move. The tab function is the page's own -- the same one the tab
+     buttons call -- which also brings the identity card back from the step-through mount, so it
+     arrives sitting directly above the box it is aiming at. */
+  function goToPasteBox(){
+    if (typeof window.__xjumpActivateTab === "function") window.__xjumpActivateTab("jump");
+    var box = el("paste"); if (!box) return;
+    /* A tick, so the tab's display change and render()'s new banner are in the layout before
+       anything is measured. Without it the scroll aims at where the box was. */
+    setTimeout(function(){
+      try { box.focus({ preventScroll: true }); } catch(e){ box.focus(); }
+      if (box.scrollIntoView) box.scrollIntoView({ behavior:"smooth", block:"center" });
+    }, 0);
+  }
+  /* One function for all three "Add fragments" buttons. They were three copies of the same eight
+     lines, which is exactly how two of them could be wrong without the third ever showing it. */
+  function aimAt(key, shown){
+    TARGET = key;
+    LAST = null;
+    var box = el("paste");
+    if (box) box.value = "";
+    say("paste-msg", "Aiming at <code>" + esc(shown) + "</code> — click the extra fragments in "
+      + "the viewer and paste the link below.", true);
+    /* BEFORE the scroll: render() draws the banner above the box and rings the target's card, so
+       scrolling first would animate towards a position the redraw then moves. */
+    render();
+    goToPasteBox();
+  }
+
   function renderTargetBanner(){
     var n = el("target-note"); if (!n) return;
     if (!TARGET){ n.innerHTML = ""; return; }
@@ -4270,14 +4308,7 @@ UJ.app = (function(){
           .then(function(){ BUSY = false; });
       });
     root.querySelector(".addto-cell").addEventListener("click", function(){
-      TARGET = c.id;
-      var box = el("paste");
-      if (box){ box.value = ""; box.focus();
-        if (box.scrollIntoView) box.scrollIntoView({ behavior:"smooth", block:"center" }); }
-      LAST = null;
-      say("paste-msg", "Aiming at <code>" + esc(c.id) + "</code> — click the extra fragments in "
-        + "the viewer and paste the link below.", true);
-      render();
+      aimAt(c.id, c.id);          /* switches to the Jump tab and scrolls -- see aimAt() */
     });
     root.querySelector(".save-nm").addEventListener("click", function(){
       var v = root.querySelector(".nm").value.trim();
@@ -5069,14 +5100,7 @@ UJ.app = (function(){
     });
     meshActions(root, segs, row.name, cap(row.label), row.pos || null, note);
     root.querySelector("#found-add").addEventListener("click", function(){
-      TARGET = row.key;
-      var box = el("paste");
-      if (box){ box.value = ""; box.focus();
-        if (box.scrollIntoView) box.scrollIntoView({ behavior:"smooth", block:"center" }); }
-      LAST = null;
-      say("paste-msg", "Aiming at <code>" + esc(row.name) + "</code> — click the extra fragments "
-        + "in the viewer and paste the link below.", true);
-      render();
+      aimAt(row.key, row.name);          /* switches to the Jump tab and scrolls -- see aimAt() */
     });
     Array.prototype.forEach.call(root.querySelectorAll(".idval[data-c]"), function(v){
       v.addEventListener("click", function(){
@@ -7214,14 +7238,7 @@ UJ.app = (function(){
                               (b && nucleusOf(b)) || r.pos || null), "_blank", "noopener");
     });
     root.querySelector(".seed-add").addEventListener("click", function(){
-      TARGET = r.key;
-      var box = el("paste");
-      if (box){ box.value = ""; box.focus();
-        if (box.scrollIntoView) box.scrollIntoView({ behavior:"smooth", block:"center" }); }
-      LAST = null;
-      say("paste-msg", "Aiming at <code>" + esc(r.name) + "</code> — click the extra fragments "
-        + "in the viewer and paste the link below.", true);
-      render();
+      aimAt(r.key, r.name);          /* switches to the Jump tab and scrolls -- see aimAt() */
     });
   }
 
