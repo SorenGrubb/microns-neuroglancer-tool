@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 19:14</span></p>
+ctrl-shift-R.">build 2026-09-02 21:05</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -4350,7 +4350,8 @@ UJ.app = (function(){
     var fileName = (X.settledLabel(c) || "unnamed").replace(/[^a-zA-Z0-9]+/g, "_")
                  + "_" + String(c.id).replace(/[^a-zA-Z0-9]+/g, "-");
     meshActions(root, allSegs(c), fileName, X.settledLabel(c) || "cb2 cell",
-                nucleusOf(c), note);
+                nucleusOf(c), note, c.id, X.settledLabel(c) || "Unclassified");
+    if (volumeLine(c.id) && note) note(volumeLine(c.id), true);
     root.querySelector(".rej").addEventListener("click", function(){
       if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
       STORE.reject(c.id, "not_one_cell", "").then(function(){
@@ -5126,7 +5127,29 @@ UJ.app = (function(){
      geometry for some fragments and not others; a cell whose meshes are 9 of 14 gives a model of 9
      and a volume of 9. An unqualified volume computed over two thirds of a cell is the worst
      number this page could print, so the number never appears without the fraction beside it. */
-  function meshActions(root, segs, fileName, label, pos, note){
+  /* What has already been measured for this cell, and what the button should therefore say.
+     µJump's wording: once a value is known the button reads "Recalculate", so a second click is a
+     deliberate update rather than an accidental duplicate. */
+  function savedVolume(cellKey){
+    var v = (STATE.volumes || {})[cellKey];
+    return (typeof v === "number" && v > 0) ? v : null;
+  }
+  function volumeLine(cellKey){
+    var v = savedVolume(cellKey);
+    return v == null ? ""
+      : "&#8776; <b>" + Math.round(v).toLocaleString() + "&nbsp;µm³</b> — measured here and saved.";
+  }
+  function paintVolumeButton(root, cellKey){
+    var b = root.querySelector("#found-vol") || root.querySelector(".dl-vol");
+    if (!b) return;
+    var v = savedVolume(cellKey);
+    b.textContent = v == null ? "Compute volume" : "Recalculate volume";
+    if (v != null) b.title = "A volume of " + Math.round(v).toLocaleString()
+      + " µm³ is already saved for this cell. Recomputing overwrites it — the sheet keeps one row "
+      + "per cell, not one per click.";
+  }
+
+  function meshActions(root, segs, fileName, label, pos, note, cellKey, cellType){
     var all = root.querySelectorAll(".idbtn");
     function run(btn, label2, work){
       if (!btn) return;
@@ -5162,9 +5185,29 @@ UJ.app = (function(){
     run(root.querySelector("#found-vol") || root.querySelector(".dl-vol"),
         "Computing the volume", function(){
       return UJ.mesh3d.volume(segs).then(function(r){
-        r.msg = "&#8776; <b>" + Math.round(r.volumeUm3).toLocaleString() + "&nbsp;µm³</b>";
-        return r; });
+        var shown = "&#8776; <b>" + Math.round(r.volumeUm3).toLocaleString() + "&nbsp;µm³</b>";
+        /* THE MEASUREMENT IS REAL EITHER WAY. Whether it reached the sheet is a separate fact and
+           is reported as one -- a save that failed must never look like a measurement that
+           failed, and a measurement nobody is signed in for is still worth reading. */
+        if (!cellKey) { r.msg = shown; return r; }
+        if (!STORE.canWrite()){
+          r.msg = shown + " <span class='hint'>— sign in to save it</span>";
+          return r;
+        }
+        return STORE.saveVolume(cellKey, cellType, r).then(function(){
+          STATE.volumes = STATE.volumes || {};
+          STATE.volumes[cellKey] = Math.round(r.volumeUm3 * 100) / 100;
+          paintVolumeButton(root, cellKey);
+          r.msg = shown + " <span class='hint'>— saved</span>";
+          return r;
+        }).catch(function(e){
+          r.msg = shown + " <span class='bad'>— computed, but saving it failed: "
+                + esc(e.message) + "</span>";
+          return r;
+        });
+      });
     });
+    if (cellKey) paintVolumeButton(root, cellKey);
   }
 
   /* WHICH CELL THE PANEL IS SHOWING, so it can be redrawn when the store changes underneath it.
@@ -5199,7 +5242,12 @@ UJ.app = (function(){
     root.querySelector("#found-3d").addEventListener("click", function(){
       UJ.mesh3d.show(asCell, root.querySelector(".mesh3d-host"));
     });
-    meshActions(root, segs, row.name, cap(row.label), row.pos || null, note);
+    /* The community's name for it if there is one, else the published label -- the same
+       precedence every other reading of "what is this cell" on this page uses, so a volume is
+       bucketed under the same type the panel above it is showing. */
+    meshActions(root, segs, row.name, cap(row.label), row.pos || null, note, row.key,
+                (extra && X.settledLabel(extra)) || cap(row.label) || "Unclassified");
+    if (volumeLine(row.key) && note) note(volumeLine(row.key), true);
     root.querySelector("#found-add").addEventListener("click", function(){
       aimAt(row.key, row.name);          /* switches to the Jump tab and scrolls -- see aimAt() */
     });
@@ -7759,7 +7807,15 @@ UJ.app = (function(){
     },
     visit:  function(){ return Promise.resolve({ ok:true }); },
     join:   function(){ return Promise.resolve({ ok:true, joined:true }); },
-    loadExplore: function(){ return Promise.resolve(STATE.explore || { visited:{}, nuclei:[] }); }
+    loadExplore: function(){ return Promise.resolve(STATE.explore || { visited:{}, nuclei:[] }); },
+    /* The harness keeps volumes in memory, so a measurement made in the demo behaves the way it
+       does live -- shown back, and the button relabelled -- without a backend. */
+    saveVolume: function(cellKey, cellType, info){
+      STATE.volumes = STATE.volumes || {};
+      STATE.volumes[cellKey] = Math.round((info.volumeUm3 || 0) * 100) / 100;
+      return Promise.resolve({ ok:true });
+    },
+    volumes: function(){ return Promise.resolve(STATE.volumes || {}); }
   };
 
   /* Every call to Apps Script goes through here, and the reason is one message Søren saw on
@@ -7946,6 +8002,50 @@ UJ.app = (function(){
     nuclei: function(points, boxKey){
       return this._post({ type:"xjump_nuclei_found", points: points, boxKey: boxKey || "" });
     },
+    /* ── COMPUTED VOLUMES ────────────────────────────────────────────────────────────────────
+       Søren, 2026-09-02: "I computed the volume of 3 cells in xJump, but I don't see that it is
+       saved anywhere." It was not: the button computed the number and printed it.
+
+       µJump's own type, µJump's own sheet, no new backend code -- doPost routes on `ds`, so the
+       row lands in χJump's spreadsheet, and mlRecordReport's existing save_computed_volume case
+       puts it in the master cell list on the way. Exactly the arrangement the organelle reporting
+       uses, for the same reason.
+
+       A FAILED SAVE MUST NOT LOOK LIKE A FAILED MEASUREMENT. The volume is real whether or not it
+       reached the sheet, so the caller prints it either way and this only decides what the line
+       underneath says. */
+    saveVolume: function(cellKey, cellType, info){
+      return this._post({
+        type: "save_computed_volume",
+        /* The cell key twice, and the two columns have different jobs: rootId is what the handler
+           upserts on (one row per cell, rather than one per click), nucleusId is where the master
+           list looks for χJump's key. */
+        rootId: cellKey, nucleusId: cellKey,
+        cellType: cellType || "Unclassified",
+        volumeUm3: Math.round((info.volumeUm3 || 0) * 100) / 100,
+        vertices: info.vertices || 0,
+        fragmentCount: info.fragmentCount || 0,
+        /* cb2 publishes no nucleus volumes. Blank, not 0: a zero here would read as a measurement.
+           βJump sends its Hoechst-blob volume in this column. */
+        nucVolumeUm3: ""
+      });
+    },
+    /* Public, like every other read in this tool. One extra GET at load, against a sheet that
+       holds one row per cell -- and it is what turns "computed" into something you can see was
+       kept. */
+    volumes: function(){
+      var u = UJ.cfg.backend.endpoint + "?computedVolumes=1&ds="
+            + encodeURIComponent(UJ.cfg.backend.ds);
+      return fetch(u).then(function(r){ return readJson(r, "the computed volumes"); })
+        .then(function(d){
+          var by = {};
+          ((d && d.computedVolumes) || []).forEach(function(v){
+            var k = v.rootId || v.nucleusId;
+            if (k) by[String(k)] = Number(v.volumeUm3) || 0;
+          });
+          return by;
+        });
+    },
     visit:  function(boxKey, outcome, n){
       return this._post({ type:"xjump_box_visit", boxKey:boxKey, outcome:outcome, foundCount:n||0 });
     },
@@ -8128,6 +8228,13 @@ UJ.app = (function(){
     if (LIVE) try {
       STORE.load()
         .then(function(){ return STORE.loadExplore(); })
+        /* Not fatal. A deployment too old to answer ?computedVolumes=1 simply has none to show,
+           and a page that refused to load its cells over that would be trading the whole tool for
+           one label on one button. */
+        .then(function(){
+          return STORE.volumes().then(function(v){ STATE.volumes = v; })
+                                .catch(function(){ STATE.volumes = STATE.volumes || {}; });
+        })
         .then(function(){ render(); renderExplore(); })
         .catch(loadFailed);
     } catch (e){ loadFailed(e); }
