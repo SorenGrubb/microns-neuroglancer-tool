@@ -927,6 +927,8 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/organellefilter.js"></script>
 <script src="core/regionbox.js"></script>
 <script src="core/mesh.js"></script>
+<!-- Show in 3D. Installs itself onto the .meshdl[data-root] button above; needs core/mesh.js,
+     which is why it comes after it. Søren, 2026-09-02: "we need a show 3d model in bJump". -->
 <script src="core/mesh3d.js"></script>
 <script src="core/synmesh.js"></script>
 <script src="core/synvol.js"></script>
@@ -1548,7 +1550,12 @@ function showCell(i, distNm){
      Disable rather than let the download fail with a 404 the user cannot act on. */
   const dis=hasMesh(i)?"":" disabled";
   h+='<div class="row" style="margin-top:14px">'
-    +'<button class="idbtn meshdl" id="meshbtn" data-root="'+BSEG[i]+'" style="flex:1;min-width:150px"'+dis+'>&#8681; 3D model</button>'
+    /* `meshdl` and `data-root` are what core/mesh3d.js watches for; finding them it puts a
+       "Show in 3D" beside this button and draws the cell in the page. The root is BSEG[i], the
+       same string the click handler below hands to downloadRoot -- one source, so the picture and
+       the file can never be of different cells. */
+    +'<button class="idbtn meshdl" id="meshbtn" data-root="'+String(BSEG[i])+'"'
+    +' style="flex:1;min-width:150px"'+dis+'>&#8681; 3D model</button>'
     +'<button class="idbtn" id="pptxbtn" style="flex:1;min-width:150px"'+dis+'>&#8681; PowerPoint</button>'
     +'<button class="idbtn" id="volbtn"  style="flex:1;min-width:150px"'+dis+'>Compute volume</button></div>';
   h+='<p class="hint" id="meshmsg">'

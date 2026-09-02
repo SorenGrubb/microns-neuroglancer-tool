@@ -240,6 +240,31 @@ function downloadMyWork(){
       var sheets=d.sheets||{};
       var names=Object.keys(sheets);
       if(!names.length){alert("No annotations found for your account yet — nothing to download.");return;}
+      /* CSV WHEN THERE IS NO SheetJS. ωJump ships as one self-contained file and links no CDN
+         script at all (see its filterCsv comment), so an .xlsx button there would throw on a
+         global that is not there. One workbook cannot become one CSV without losing the sheet
+         boundaries, so the boundaries are written INTO it as a labelled block per sheet -- and
+         semicolon-separated, because Søren's Excel reads the comma as a decimal separator and a
+         comma-separated file opens there as a single column. */
+      if(!window.XLSX){
+        var q=function(v){var s=String(v==null?"":v);
+          return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+        var lines=[];
+        names.forEach(function(name,i){
+          if(i)lines.push("");
+          lines.push("== "+name+" ==");
+          lines.push(sheets[name].headers.map(q).join(";"));
+          sheets[name].rows.forEach(function(r){lines.push(r.map(q).join(";"));});
+        });
+        var blob=new Blob(["\ufeff"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
+        var a=document.createElement("a");
+        a.href=URL.createObjectURL(blob);
+        a.download="my_"+(dsName||"microns")+"_work_"
+          +(d.email||"me").replace(/[^a-z0-9]+/gi,"_")+".csv";
+        document.body.appendChild(a);a.click();a.remove();
+        setTimeout(function(){URL.revokeObjectURL(a.href);},30000);
+        return;
+      }
       var wb=XLSX.utils.book_new();
       names.forEach(function(name){
         var s=sheets[name];
