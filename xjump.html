@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 09:41</span></p>
+ctrl-shift-R.">build 2026-09-02 09:55</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -3262,11 +3262,21 @@ UJ.mesh3d = (function(){
   function umGeometry(ids, onProgress){
     return geometryFor(ids, onProgress).then(function(g){
       var out = { geo:null, have:g.have, total:g.total, none:g.none, unknown:g.unknown,
-                  untestable:g.untestable };
+                  untestable:g.untestable, midUm:null };
       if (!g.geo) return out;
       var nm = g.geo.pos, um = new Float32Array(nm.length);
       for (var i = 0; i < nm.length; i++) um[i] = nm[i] / 1000;
       out.geo = { positions:um, indices:g.geo.idx };
+      /* WHERE THIS CELL ACTUALLY IS. combine() centres the buffer on the assembly's own midpoint
+         -- see its comment for the float32 argument, and pointInGeometry for a caller that knows
+         and moves its query point to match. This function used to divide by 1000 and drop `mid`
+         on the floor, which is fine for the three callers that only ever look at ONE cell (a .glb,
+         a .pptx, a volume: all translation-invariant or centred on purpose) and wrong the moment
+         a caller compares TWO. The contacts panel does, and until 2026-09-02 it compared cell A
+         in A's frame against cell B in B's -- two cells 13 µm apart both arriving centred on the
+         origin, inside one another. Søren saw the result as a touch point outside the block.
+         The offset travels now; positions stay centred, so nothing else changes. */
+      out.midUm = [ g.geo.mid[0]/1000, g.geo.mid[1]/1000, g.geo.mid[2]/1000 ];
       return out;
     });
   }
@@ -5956,7 +5966,9 @@ UJ.app = (function(){
   function ccGeometry(cellKey, onProgress){
     if (CC_GEO[cellKey]) return Promise.resolve(CC_GEO[cellKey]);
     return UJ.mesh3d.umGeometry(segsForCell(cellKey), onProgress).then(function(g){
-      var rec = { geo: g.geo, have: g.have, total: g.total,
+      /* midUm IS NOT OPTIONAL DETAIL. The positions are centred on this cell's own midpoint, so
+         without it they are a shape and not a place, and two cells cannot be compared at all. */
+      var rec = { geo: g.geo, have: g.have, total: g.total, midUm: g.midUm || [0,0,0],
                   /* Carried separately because they mean different things and the row says which:
                      `none` is "this fragment has no published mesh", `unknown` is "we could not
                      find out". A network failure reported as an unmeshed cell is exactly the
@@ -5967,6 +5979,29 @@ UJ.app = (function(){
       if (!rec.unknown) CC_GEO[cellKey] = rec;
       return rec;
     });
+  }
+
+  /* ONE FRAME FOR TWO CELLS. Each assembly's vertices are centred on its own midpoint, so a
+     candidate has to be translated by the difference between the two midpoints before a single
+     distance between them means anything. Translating the CANDIDATE (rather than putting both in
+     world coordinates) keeps every number small, which is the whole reason combine() centres. */
+  function ccAlign(pos, dx, dy, dz){
+    if (!dx && !dy && !dz) return pos;
+    var out = new Float32Array(pos.length);
+    for (var i = 0; i < pos.length; i += 3){
+      out[i] = pos[i] + dx; out[i+1] = pos[i+1] + dy; out[i+2] = pos[i+2] + dz;
+    }
+    return out;
+  }
+  /* A POINT OUTSIDE THE BLOCK IS NOT A FINDING, whatever the arithmetic says -- the same kind of
+     guard as combine()'s "no assembly can be larger than the volume", and for the same reason: it
+     is a fact about the data that no coordinate frame can be right and violate. It is what the
+     frame bug looked like on screen, and the cheapest possible thing standing between a future
+     one and an annotation drawn in the corner of the dataset. */
+  function ccInBlock(pointUm, originUm){
+    var e = X.extentVox(), v = ccVox(pointUm, originUm);
+    for (var i = 0; i < 3; i++) if (!(v[i] >= 0 && v[i] <= e[i])) return false;
+    return true;
   }
 
   function ccRun(d, cellKey){
@@ -6001,13 +6036,16 @@ UJ.app = (function(){
     };
     say("loading this cell…", 0);
 
-    var mine = null, rows = [];
+    var mine = null, rows = [], outside = 0;
     ccGeometry(cellKey, function(done, total){
       say("loading this cell…", frac(0, done, total));
     }).then(function(g){
       if (!g.geo) throw new Error("none of this cell's " + g.total
         + " fragments has a published mesh, so there is nothing to measure against");
       mine = g;
+      /* Everything below is in THIS cell's frame: its own vertices as they came, every candidate
+         translated to match, every point that comes out converted back with this offset. */
+      var home = g.midUm || [0,0,0];
       var grid = UJ.mesh.buildContactGrid(g.geo.positions, gapUm);
       /* Sequential rather than parallel, and that is not timidity: each candidate is already a
          hundred-odd parallel fragment fetches, and running six of those at once would be six
@@ -6023,15 +6061,22 @@ UJ.app = (function(){
                           unknown: cg.unknown, somaNm:cand.distNm });
               return;
             }
+            var his = cg.midUm || [0,0,0];
+            var theirs = ccAlign(cg.geo.positions, his[0]-home[0], his[1]-home[1],
+                                                   his[2]-home[2]);
             var pts = UJ.mesh.allContactPointsWithinThreshold(
-              g.geo.positions, grid, cg.geo.positions, gapUm, spacingUm);
+              g.geo.positions, grid, theirs, gapUm, spacingUm);
+            /* The guard, applied where the points are made rather than where they are drawn. */
+            var kept = pts.filter(function(pt){ return ccInBlock(pt.point, home); });
+            outside += pts.length - kept.length;
+            pts = kept;
             /* NOTHING WITHIN THE GAP IS NOT AN ANSWER ON ITS OWN. Measure how close they DO come,
                so the row can say whether these two are 137 nm apart -- one decimated mesh away
                from a contact -- or 90 µm apart. The cost is one bounded pass and it is only paid
                on the rows that found nothing. */
             var near = null;
             if (!pts.length && UJ.mesh.nearestApproach){
-              try { near = UJ.mesh.nearestApproach(g.geo.positions, cg.geo.positions); }
+              try { near = UJ.mesh.nearestApproach(g.geo.positions, theirs); }
               catch (_e){ near = null; }
             }
             rows.push({ u:cand.u, points:pts,
@@ -6061,7 +6106,11 @@ UJ.app = (function(){
                              /* The CAP as typed, beside `checked` which is how many there were to
                                 check. Comparing the wrong one of those two is how "has anything
                                 changed?" quietly stops noticing. */
-                             checkedCap: cap, mine: mine };
+                             checkedCap: cap, mine: mine,
+                             /* The frame every point in `rows` is expressed in -- this cell's own
+                                midpoint. The exports and the viewer link add it back. */
+                             originUm: (mine && mine.midUm) || [0,0,0],
+                             outside: outside };
       ccShowRows(d, cellKey);
     }).catch(function(e){
       d.querySelector(".cc-results").innerHTML =
@@ -6104,6 +6153,13 @@ UJ.app = (function(){
           + " would report it as a contact.</span>"
         : " The closest any of them comes is " + ccDist(tightest) + ".";
     }
+    /* Said out loud rather than swallowed, and APPENDED -- the branch above assigns, so this has
+       to come after it or a discarded point would be silently overwritten by the ordinary note.
+       If this line ever appears the frames have come apart again, and the count is how badly. */
+    if (R.outside)
+      note += " <span class='cc-part'>" + R.outside + " computed point"
+            + (R.outside === 1 ? " was" : "s were") + " outside the block and discarded &mdash; "
+            + "that should not happen; please tell Søren.</span>";
     host.innerHTML =
         "<p class='hint' style='margin:0 0 8px'><b>" + touching + "</b> of " + R.rows.length
       + " checked " + esc(R.label) + (R.rows.length === 1 ? "" : "s") + " come within "
@@ -6186,17 +6242,18 @@ UJ.app = (function(){
         /* THE PLACE WHERE THEY COME CLOSEST, marked, on the rows that found no contact. It is the
            one spot on two whole cells worth looking at to decide whether the answer is right, and
            finding it by eye in a 998 µm block is not a thing anyone should be asked to do. */
-        if (r.nearPoint)
+        if (r.nearPoint && ccInBlock(r.nearPoint, R.originUm)){
           markerLayers.push({
             name: r.u.name + " · closest approach (" + ccDist(r.nearNm, r.nearApprox) + ")",
             colour: "#d29922",
-            points: [{ pos: touchVox({ point: r.nearPoint }),
+            points: [{ pos: touchVox({ point: r.nearPoint }, R),
                        name: "closest approach, " + ccDist(r.nearNm, r.nearApprox) }] });
-        if (r.nearPoint) nearAll.push(touchVox({ point: r.nearPoint }));
+          nearAll.push(touchVox({ point: r.nearPoint }, R));
+        }
         return;
       }
       var pts = r.points.map(function(p){
-        return { pos: touchVox(p), name: (p.dist * 1000).toFixed(0) + " nm" }; });
+        return { pos: touchVox(p, R), name: (p.dist * 1000).toFixed(0) + " nm" }; });
       pts.forEach(function(p){ all.push(p.pos); });
       markerLayers.push({
         name: r.u.name + " touch points (" + r.points.length + ")",
@@ -6217,9 +6274,19 @@ UJ.app = (function(){
     }), "_blank", "noopener");
   }
   /* µm out of the mesh, voxels into the viewer. The one conversion this feature makes, in one
-     place, so a touch point cannot be off by the voxel size in one caller and right in another. */
-  function touchVox(p){
-    return X.toVox([p.point[0] * 1000, p.point[1] * 1000, p.point[2] * 1000]).map(Math.round);
+     place, so a touch point cannot be off by the voxel size in one caller and right in another.
+
+     AND THE FRAME, which is the other half and was missing until 2026-09-02: the point is an
+     offset within the query cell's own centred geometry, so its midpoint has to go back on before
+     it means anything in the viewer. Without it every touch point landed near the corner of the
+     block. */
+  function ccVox(pointUm, originUm){
+    var o = originUm || [0,0,0];
+    return X.toVox([(pointUm[0] + o[0]) * 1000, (pointUm[1] + o[1]) * 1000,
+                    (pointUm[2] + o[2]) * 1000]).map(Math.round);
+  }
+  function touchVox(p, R){
+    return ccVox(p.point, R && R.originUm);
   }
 
   /* ONE ROW PER TOUCH POINT, as µJump's export is: a pair with three contacts is three rows, and
@@ -6256,7 +6323,7 @@ UJ.app = (function(){
                     r.have == null ? "" : r.have, r.total];
       if (!r.points.length){ data.push(common.concat(["", 0, "", "", ""])); return; }  // no touch points
       r.points.forEach(function(p, i){
-        var v = touchVox(p);
+        var v = touchVox(p, R);
         data.push(common.concat([i + 1, r.points.length, v[0], v[1], v[2]]));
       });
     });
