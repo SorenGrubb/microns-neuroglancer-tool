@@ -1170,6 +1170,66 @@ UJ.mesh=(()=>{
      where a missed one is only a gap in the search. µJump is unaffected -- it still runs its own
      inline copy of this function -- but βJump, ηJump and χJump read this one, and their contact
      counts will fall for any pair that was being found beyond the gap that was asked for. */
+  /* HOW CLOSE DO THESE TWO SURFACES ACTUALLY COME? -- the question "not touching" leaves open,
+     and the one that makes that answer checkable. Søren, 2026-09-02, on two cb2 cells the
+     sections show in contact: "I don't see any cell contacts, even though the cells are clearly
+     touching." A published mesh is DECIMATED, so a real apposition can sit further apart in
+     VERTICES than it does in membranes. Without a measured number, "not touching at 40 nm" and
+     "your threshold is below this mesh's vertex spacing" print identically, and only one of them
+     is a finding.
+
+     TWO PASSES, and the first one is deliberately NOT a grid search. Expanding
+     nearestInContactGrid's neighbourhood outwards until it finds something costs (2R+1)³ Map
+     lookups on string keys per query AND however many vertices that region holds -- 6.3 s for a
+     3 µm separation between two small slabs, and worse the further apart they are. Comparing
+     SUBSAMPLES of both clouds with plain arithmetic is 8 M float operations, bounded whatever
+     the separation. Subsampling can only overestimate the minimum, which is exactly what makes
+     the second pass exact: a grid sized to the estimate is at least as wide as the true nearest
+     pair, so one 3x3x3 sweep of every vertex of A finds it.
+
+     Micrometres in and out, like everything else in this file, plus the MIDPOINT of the closest
+     pair so the caller can drop a marker on it and go and look. */
+  function thinCloud(pos,cap){
+    const n=pos.length/3;
+    if(n<=cap)return pos;
+    const stride=Math.ceil(n/cap), out=new Float32Array(Math.ceil(n/stride)*3);
+    let k=0;
+    for(let v=0;v<n;v+=stride){out[k++]=pos[v*3];out[k++]=pos[v*3+1];out[k++]=pos[v*3+2];}
+    return out.subarray(0,k);
+  }
+  function nearestApproach(posA,posB,opts){
+    opts=opts||{};
+    const nA=posA.length/3,nB=posB.length/3;
+    if(!nA||!nB)return null;
+    const sa=thinCloud(posA,opts.samplesA||2000), sb=thinCloud(posB,opts.samplesB||4000);
+    let bestD2=Infinity,bi=0,bj=0;
+    for(let i=0;i<sa.length;i+=3){
+      const ax=sa[i],ay=sa[i+1],az=sa[i+2];
+      for(let j=0;j<sb.length;j+=3){
+        const dx=ax-sb[j],dy=ay-sb[j+1],dz=az-sb[j+2],d2=dx*dx+dy*dy+dz*dz;
+        if(d2<bestD2){bestD2=d2;bi=i;bj=j;}
+      }
+    }
+    let dist=Math.sqrt(bestD2), approx=(sa.length<posA.length)||(sb.length<posB.length);
+    let pA=[sa[bi],sa[bi+1],sa[bi+2]], pB=[sb[bj],sb[bj+1],sb[bj+2]];
+    /* The exact pass, and only where its grid is fine enough to be cheap: sized to a 5 µm
+       estimate the cells fill with thousands of vertices and this costs more than the contact
+       check it exists to explain. Past that the estimate travels marked as an estimate. */
+    if(approx&&dist<=(opts.refineMaxUm||1)){
+      const g=buildContactGrid(posB,Math.max(dist*1.2,1e-4));
+      for(let v=0;v<nA;v++){
+        const ax=posA[v*3],ay=posA[v*3+1],az=posA[v*3+2];
+        const r=nearestInContactGrid(g,ax,ay,az);
+        if(r&&r.dist<dist){
+          dist=r.dist;pA=[ax,ay,az];
+          pB=[posB[r.vertexIdx*3],posB[r.vertexIdx*3+1],posB[r.vertexIdx*3+2]];
+        }
+      }
+      approx=false;
+    }
+    return { dist:dist, approx:approx,
+             point:[(pA[0]+pB[0])/2,(pA[1]+pB[1])/2,(pA[2]+pB[2])/2] };
+  }
   function allContactPointsWithinThreshold(posA,gridA,posB,threshold,clusterUm,minHits){
     const gridB=buildContactGrid(posB,threshold);
     const buckets=new Map(), nA=posA.length/3, tol=threshold*0.5, revCache=new Map();
@@ -1211,6 +1271,7 @@ UJ.mesh=(()=>{
 
   return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache,currentFragmentCount,
           fetchCombinedMesh,buildContactGrid,nearestInContactGrid,allContactPointsWithinThreshold,
+          nearestApproach,
           /* The export half, for a tool that fetches its own geometry -- see its comment above. */
           saveGlb,savePptx,volumeOf,buildGLB};
 })();
