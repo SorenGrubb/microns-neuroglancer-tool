@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-02 21:05</span></p>
+ctrl-shift-R.">build 2026-09-03 09:08</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -2438,6 +2438,39 @@ UJ.xjump = (function(){
     return scored.slice(0, n || 5);
   }
 
+  /* ── "THE SAME CELL" ────────────────────────────────────────────────────────────────────
+     Søren, 2026-09-03: "if they are within 3 µm of an already existing cell, it should be assumed
+     that they are the same cell."
+
+     PHYSICAL micrometres, not voxels -- z voxels here are ten times deeper than x and y, so a
+     voxel radius would be a flat disc 3 µm wide and 30 µm tall, and would fold together two cells
+     stacked in z while separating one recorded twice.
+
+     THE NUMBER IS A CLAIM ABOUT THIS DATASET. Granule somata in cb2 sit of order 5-7 µm apart
+     centre to centre -- the densest packing in the brain -- so a 3 µm ball around one does not
+     reach its neighbour, and the rule separates "recorded twice" from "next door". There is no
+     such number in a denser tissue; if this volume ever gains one, this constant is where to
+     look. Exported so the page can state the threshold rather than hard-coding "3" in prose. */
+  var SAME_CELL_UM = 3;
+  function umBetween(aVox, bVox){
+    var a = toNm(aVox), b = toNm(bVox);
+    var dx = a[0]-b[0], dy = a[1]-b[1], dz = a[2]-b[2];
+    return Math.sqrt(dx*dx + dy*dy + dz*dz) / 1000;
+  }
+  /* The nearest row within the threshold, or null. Rows are anything carrying `pos` -- proofread
+     cells and marked nuclei alike, which is what lets one function answer both pairings the page
+     needs. NEAREST rather than first: with two cells inside 3 µm the answer must not depend on
+     the order the list happens to be in. */
+  function sameCellAs(posVox, rows){
+    var best = null;
+    (rows || []).forEach(function(r){
+      if (!r || !r.pos) return;
+      var um = umBetween(posVox, r.pos);
+      if (um <= SAME_CELL_UM && (!best || um < best.um)) best = { row: r, um: um };
+    });
+    return best;
+  }
+
   /* A random cell of a type, or of any type. `rnd` is injectable so a check can ask for a
      specific one rather than asserting something is random, which is not a thing a test can do. */
   function randomSeed(type, rnd){
@@ -2722,6 +2755,7 @@ UJ.xjump = (function(){
            seedSegments:seedSegments, seedSearch:seedSearch,
            seedIndex:seedIndex, seedOwnerOf:seedOwnerOf, seedClaimsFor:seedClaimsFor,
            parseCoord:parseCoord, seedsNear:seedsNear, randomSeed:randomSeed,
+           SAME_CELL_UM:SAME_CELL_UM, umBetween:umBetween, sameCellAs:sameCellAs,
            seedTypes:seedTypes, seedLabelFor:seedLabelFor, isWholeCell:isWholeCell,
            seedNameDisagrees:seedNameDisagrees, suspectZ:suspectZ,
            seedZSuspect:seedZSuspect, layerAt:layerAt, layerList:layerList,
@@ -4795,10 +4829,17 @@ UJ.app = (function(){
     render();
     goToPasteBox();
   }
-  function landOnNucleus(r, why){
+  /* `keepCoord` is set when this was reached from the coordinate box. Landing on an unassigned
+     cell from a random button should aim the boxes at it -- that is the whole point of the
+     button -- but a coordinate SEARCH must leave the fields saying what was searched for. The
+     nearest unassigned cell can be thirty micrometres away, and rewriting somebody's typed
+     coordinate to a different one is the page arguing with them about what they asked. */
+  function landOnNucleus(r, why, keepCoord){
     if (!r || !r.pos) return;
-    writeCoord(r.pos.map(function(v){ return Math.round(v); }));
-    drawMap(r.pos);
+    if (!keepCoord){
+      writeCoord(r.pos.map(function(v){ return Math.round(v); }));
+      drawMap(r.pos);
+    }
     var host = el("find-body"), card = el("cellPanelCard");
     if (!host) return;
     var near = X.seedsNear(r.pos, 5);
@@ -4881,6 +4922,20 @@ UJ.app = (function(){
     if (f[0] && f[1] && f[2]){ f[0].value = p[0]; f[1].value = p[1]; f[2].value = p[2]; }
   }
 
+  /* The nearest row of ANY kind to a point: proofread cells and unassigned cells together,
+     ranked by physical distance. seedsNear does the same over the proofread cells alone and is
+     still what the neighbour lists use -- those are headed "nearest proofread cells" and would be
+     lying if this fed them. */
+  function nearestAnything(posVox){
+    var best = null;
+    listRows().forEach(function(r){
+      if (!r.pos) return;
+      var um = X.umBetween(posVox, r.pos);
+      if (!best || um < best.um) best = { row: r, um: um };
+    });
+    return best;
+  }
+
   function findByCoord(){
     splitPaste();
     var p = readCoord();
@@ -4896,10 +4951,34 @@ UJ.app = (function(){
         + ext.join(" × ") + " voxels) — showing the nearest cells anyway.", false);
     else say("find-msg", "");
     drawMap(p);
-    /* The out-of-volume warning wins the line. showFound would otherwise overwrite it with
-       "nearest to …", which is true and much less useful than being told your coordinate is not
-       in this dataset. */
-    showFound(X.seedsNear(p, 6), oob ? null : "nearest to " + p.join(", "));
+    /* ── UNASSIGNED CELLS ARE FINDABLE HERE ─────────────────────────────────────────────────
+       Søren, 2026-09-03: "they do not exist if I search their coordinate. It just suggests the
+       nearest identified cell."
+
+       They existed everywhere else -- the filter, the list, the text search, the exports, the
+       random button all read listRows() -- and this was the one consumer still ranking over the
+       proofread cells alone. Pasting the position of a nucleus you had just marked returned a
+       proofread cell forty micrometres away, and nothing said the thing you searched for was
+       sitting at the coordinate you typed.
+
+       So the ranking is over listRows() now, and if the closest thing is an unassigned cell the
+       page opens the unassigned-cell panel -- which lists the nearest proofread cells underneath,
+       so the old answer is still there, one line down, instead of being the only answer.
+
+       WHEN THE COORDINATE IS ON A PROOFREAD CELL, his 3 µm rule is what the message reports:
+       "within 1.4 µm of pc_7 — assumed to be the same cell" says why the row you are looking at
+       is not the mark you searched for. Without it the page would silently show a different
+       object and look like it had ignored you. */
+    var hit = nearestAnything(p);
+    var why = oob ? null : "nearest to " + p.join(", ");
+    if (hit && hit.row.nucleus){ landOnNucleus(hit.row, why, true); return; }
+    /* showFound escapes `why`, correctly -- it is normally the coordinate somebody typed, and
+       that is untrusted text. This message carries markup and a cell NAME, so it is written
+       afterwards with only the name escaped, rather than by loosening the rule for everything. */
+    var same = (hit && !oob && hit.um <= X.SAME_CELL_UM) ? hit : null;
+    showFound(X.seedsNear(p, 6), same ? null : why);
+    if (same) say("find-msg", "within " + same.um.toFixed(1) + " µm of <b>"
+                 + esc(same.row.name) + "</b> &mdash; assumed to be the same cell");
   }
 
   /* ── the cell, in the family's identity-panel shape ───────────────────────────────────────
@@ -7612,9 +7691,40 @@ UJ.app = (function(){
      the counts. Nuclei leave this list the moment somebody builds the cell around them, which is
      behaviour the page already had. */
   var NUC_LABEL = "unassigned cell";
-  function freeNuclei(){
-    return (((STATE.explore || {}).nuclei) || []).filter(function(n){ return n.pos && !n.cell; });
+  /* WHICH MARKS ARE STILL THEIR OWN CELL, under Søren's 3 µm rule (2026-09-03: "if they are
+     within 3 µm of an already existing cell, it should be assumed that they are the same cell").
+
+     Three ways a mark stops being an unassigned cell, kept apart because they are different
+     statements and the summary line reports them differently:
+
+       joined   the mesh join matched it to a cell. That tested the point against the cell's own
+                surface, which is a stronger answer than any distance, so it is checked first and
+                never overridden here.
+       nearCell within 3 µm of a proofread cell's soma -- his rule, and the reason searching its
+                coordinate now lands on that cell instead of offering a duplicate beside it.
+       dup      within 3 µm of a mark already kept: the same nucleus marked twice, which is what
+                two people working the same column produce. The FIRST is kept, so the answer does
+                not depend on the order the backend returns them in.
+
+     Computed together in one pass because the summary line needs all four numbers and because
+     `dup` has to test against the survivors, not against every mark. Nothing is deleted and
+     nothing is posted -- this is a lens over what the backend holds, so it applies to marks made
+     before the rule existed and moving the threshold moves it for all of them. */
+  function classifyNuclei(){
+    var marked = (((STATE.explore || {}).nuclei) || []).filter(function(n){ return n.pos; });
+    var cells = seeds().filter(function(r){ return r.pos; });
+    var out = { free: [], joined: [], nearCell: [], dup: [] };
+    marked.forEach(function(n){
+      if (n.cell){ out.joined.push(n); return; }
+      var c = X.sameCellAs(n.pos, cells);
+      if (c){ n._sameAs = c; out.nearCell.push(n); return; }
+      var d = X.sameCellAs(n.pos, out.free);
+      if (d){ n._sameAs = d; out.dup.push(n); return; }
+      out.free.push(n);
+    });
+    return out;
   }
+  function freeNuclei(){ return classifyNuclei().free; }
   function nucleusRows(){
     return freeNuclei().map(function(n){
       return { key: n.id, name: n.id, type: "nuc", label: NUC_LABEL, whole: true,
@@ -7630,14 +7740,29 @@ UJ.app = (function(){
     var n = el("explore-stats"); if (!n) return;
     var ex = STATE.explore || { visited:{}, nuclei:[] };
     var seen = Object.keys(ex.visited).length, total = X.boxCount();
-    var joined = ex.nuclei.filter(function(x){ return !!x.cell; }).length;
+    var cl = classifyNuclei();
+    var joined = cl.joined.length;
+    /* A rule that removes rows without saying so is a rule nobody can check. These two spans
+       appear only when the rule has actually fired, so the line does not carry two permanent
+       zeroes -- but when a mark you made is not in the unassigned list, this is where the page
+       tells you what happened to it. */
+    var folded = (cl.nearCell.length
+      ? "<span title='Søren&rsquo;s rule: a marked nucleus within " + X.SAME_CELL_UM
+        + " µm of a proofread cell&rsquo;s soma is that cell, not a separate unassigned one. "
+        + "Nothing is deleted — the mark is still in the backend exactly as it was made.'>"
+        + "<b>" + cl.nearCell.length + "</b> assumed to be a cell already listed</span>" : "")
+      + (cl.dup.length
+      ? "<span title='Within " + X.SAME_CELL_UM + " µm of another mark — the same nucleus marked "
+        + "twice, which is what two people working the same column produce. The first is kept.'>"
+        + "<b>" + cl.dup.length + "</b> marked twice</span>" : "");
     /* COVERAGE IS COLUMNS, and it says so. "Nuclei found out of nuclei present" would need a
        denominator nobody has: cerebellar cortex is the densest neuropil in the brain and this
        block holds of order 10^4-10^5 of them. A progress bar against an unknown denominator is a
        bar that cannot be read, and one that only ever creeps is worse than none. */
     n.innerHTML = "<span><b>" + seen + "</b> of " + total + " columns looked at</span>"
       + "<span><b>" + ex.nuclei.length + "</b> nuclei marked</span>"
-      + "<span><b>" + joined + "</b> matched to a cell</span>";
+      + "<span><b>" + joined + "</b> matched to a cell</span>" + folded
+      + "<span><b>" + cl.free.length + "</b> unassigned</span>";
     n.className = "";
     n.setAttribute("id", "explore-stats");
     n.style.cssText = "display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--mut)";
@@ -8255,6 +8380,8 @@ UJ.app = (function(){
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
            showRandomUntouched:showRandomUntouched, showRandomBuilt:showRandomBuilt,
            showRandomUnassigned:showRandomUnassigned, nucleusRows:nucleusRows,
+           classifyNuclei:classifyNuclei, nearestAnything:nearestAnything,
+           renderExplore:renderExplore, invalidateUniverse:invalidateUniverse,
            refreshFilterControls:refreshFilterControls,
            landOnNucleus:landOnNucleus, buildHere:buildHere,
            showFound:showFound, layerLine:layerLine, showPlaceholder:showPlaceholder,
