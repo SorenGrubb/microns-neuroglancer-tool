@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-03 18:47</span></p>
+ctrl-shift-R.">build 2026-09-03 19:06</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -4852,6 +4852,26 @@ UJ.app = (function(){
     t.totalVotes = (t.totalVotes || 0) + 1;
     MYVOTE[cellKey] = k;
   }
+  /* The settled name for ANY key, whoever holds the tally -- a cell built here keeps its own,
+     a proofread cell or a marked nucleus keeps it in STATE.opinions. settledLabel answers only
+     when the votes agree or there is exactly one, so a contested cell settles on nothing and the
+     card keeps the published headline, which is the honest thing to show while people disagree. */
+  function settledHere(cellKey){
+    return X.settledLabel(opinionOf(cellKey));
+  }
+  /* What the card calls this cell: the settled community name if there is one, else the published
+     label. One function, so the headline, the file names and the cell type a computed volume is
+     filed under cannot drift apart. */
+  function headlineOf(row){
+    return settledHere(row.key) || row.label || "";
+  }
+  /* The settled name for ANY key, whoever holds the tally -- a cell built here keeps its own,
+     a proofread cell or a marked nucleus keeps it in STATE.opinions. settledLabel answers only
+     when the votes agree or there is exactly one, so a contested cell settles on nothing and the
+     card keeps the published headline, which is the honest thing to show while people disagree. */
+  function settledHere(cellKey){
+    return X.settledLabel(opinionOf(cellKey));
+  }
   function recordDoubt(cellKey, kind){
     var t = opinionRec(cellKey);
     if (kind === "unsure") t.unsure = (t.unsure || 0) + 1;
@@ -4894,9 +4914,9 @@ UJ.app = (function(){
       + "</div>"
       + "<p class='hint idf-why' style='margin:6px 0 0'>"
       +   (mode === "seed"
-            ? "Published as <b>" + esc(published || "unlabelled") + "</b>. What you write here is "
-              + "kept beside that and never over it &mdash; the line above goes on saying what "
-              + "the paper says, and the tally says what people here have called it."
+            ? "Published as <b>" + esc(published || "unlabelled") + "</b>, and that stays on "
+              + "the card whatever anybody writes here. Once the votes agree, the headline "
+              + "follows them and the published type moves to the line under it."
             : "A cell body with nothing assembled around it. You can say what it is from the soma "
               + "alone &mdash; building the fragments is a separate and much longer job, and this "
               + "does not wait for it.")
@@ -5221,6 +5241,20 @@ UJ.app = (function(){
     var extra = byId(row.key);
     var segs = X.seedSegments(row);
     if (extra) segs = allSegs(extra);
+    /* WHAT THIS COMMUNITY SETTLED ON, if it settled on anything. Søren, 2026-09-03: "I have
+       renamed this cell, but still it has the old name."
+
+       He had: he adopted pc_27 and called it a Purkinje cell dendrite, which is a correction of
+       the published record rather than a quibble with it -- the table types that record as a whole
+       Purkinje cell. His card at the bottom of the page said so; this panel went on printing the
+       paper's word, which made the rename look like it had not been saved.
+
+       settledLabel and not "the last name written": it answers only when the votes AGREE, or when
+       there is exactly one. A contested cell keeps the published headline, because the honest
+       thing to show while people here disagree is not the newest opinion. */
+    var mine = settledHere(row.key);
+    var renamed = !!mine && mine.toLowerCase() !== String(row.label || "").toLowerCase();
+    var headline = headlineOf(row);
     var url = X.viewerUrl(segs, row.pos || null);
     var pos = row.pos ? row.pos.map(function(v){ return Math.round(v); }) : null;
     /* Not for a cell whose recorded z is the stand-in value: the layer bands are fitted in x and
@@ -5237,6 +5271,10 @@ UJ.app = (function(){
       +   (extra ? "<span class='tag on'>extended here</span>" : "")
       +   (row.odd ? "<span class='tag warn' title='" + esc(ODD_TITLE)
                      + "'>type and name disagree</span>" : "")
+      +   (renamed ? "<span class='tag warn' title='" + esc("The published table types this "
+                     + "record “" + cap(row.label) + "”. People here have settled on “"
+                     + cap(mine) + "”, so that is the headline; the published type is on the "
+                     + "line below and in the record.") + "'>reclassified here</span>" : "")
       + "</div>"
       /* THE CELL TYPE IS THE HEADLINE AND THE LINK. Søren, 2026-09-01: "Instead of the cell number
          being the main thing with link, I think it should be the cell type, and then the cell
@@ -5250,7 +5288,7 @@ UJ.app = (function(){
          A real <a>, so it can be middle-clicked, copied and dragged into a message. */
       + "<div class='celltype'><a href='" + esc(url) + "' target='_blank' rel='noopener'"
       +   " title='Open in Neuroglancer, centred on the soma, all fragments merged into one object'>"
-      +   esc(cap(row.label)) + " <span class='ext'>&#8599;</span></a> "
+      +   esc(cap(headline)) + " <span class='ext'>&#8599;</span></a> "
       +   "<small class='cellref'>" + esc(row.name) + "</small></div>"
       + "<div class='meta'>"
       +   (extra
@@ -5258,6 +5296,11 @@ UJ.app = (function(){
             : segs.length + " fragment" + (segs.length === 1 ? "" : "s"))
       +   (nm ? " &middot; " + (nm / 1000).toFixed(1) + " &micro;m from your coordinate" : "")
       +   " &middot; proofread by " + esc(row.annotator || "—") + "</div>"
+      /* THE PUBLISHED TYPE IS STILL ON THE CARD, one line down and attributed. "Kept beside it"
+         has to mean this, or it means the card refusing to show what this community concluded. */
+      + (renamed ? "<div class='meta'>published as <b>" + esc(cap(row.label))
+                   + "</b> &middot; the headline follows what people here have settled on</div>"
+                 : "")
       /* Which layer this cell's soma is in, by the same bands the diagram below draws. Not a
          separate claim: it reads the same layerAt() the map does, so the two can never disagree. */
       + (lay ? "<div class='meta'>soma in the " + lay + "</div>" : "")
@@ -5545,8 +5588,8 @@ UJ.app = (function(){
     /* The community's name for it if there is one, else the published label -- the same
        precedence every other reading of "what is this cell" on this page uses, so a volume is
        bucketed under the same type the panel above it is showing. */
-    meshActions(root, segs, row.name, cap(row.label), row.pos || null, note, row.key,
-                (extra && X.settledLabel(extra)) || cap(row.label) || "Unclassified");
+    meshActions(root, segs, row.name, cap(headlineOf(row)), row.pos || null, note, row.key,
+                cap(headlineOf(row)) || "Unclassified");
     if (volumeLine(row.key) && note) note(volumeLine(row.key), true);
     root.querySelector("#found-add").addEventListener("click", function(){
       aimAt(row.key, row.name);          /* switches to the Jump tab and scrolls -- see aimAt() */
@@ -5922,7 +5965,7 @@ UJ.app = (function(){
     var b = builtOn(r.key);
     var n = b ? allSegs(b).length : r.count;
     var added = n - r.count;
-    var mine = b ? X.settledLabel(b) : "";
+    var mine = settledHere(r.key);
     return "<div class='seedrow' id='seed-" + cssId(r.key) + "'>"
       + "<a class='seed-open' href='#' data-key='" + esc(r.key) + "'>" + esc(r.name) + " &#8599;</a>"
       + "<span class='chips'><span class='chip"
@@ -7192,7 +7235,7 @@ UJ.app = (function(){
                  proofread:true, cell:b,
                  added: b ? allSegs(b).length - r.count : 0,
                  frags: b ? allSegs(b).length : r.count,
-                 here: b ? (X.settledLabel(b) || "") : "" });
+                 here: settledHere(r.key) });
     });
     /* A REMOVED RECORD COMES BACK IF SOMEBODY HERE HAS WORKED ON IT. X.misplacedSeeds() drops
        99 Purkinje records that are pieces of Purkinje cells (see its comment in xjump_logic.js),
@@ -7209,7 +7252,7 @@ UJ.app = (function(){
                  proofread:true, cell:b,
                  added: allSegs(b).length - r.count,
                  frags: allSegs(b).length,
-                 here: X.settledLabel(b) || "" });
+                 here: settledHere(r.key) });
     });
     /* THE NUCLEI NOBODY HAS BUILT A CELL AROUND. `row` is set, so the list under the filter
        renders them alongside everything else rather than dropping them from a preview whose count
@@ -7220,7 +7263,11 @@ UJ.app = (function(){
       seen[r.key] = 1;
       out.push({ key:r.key, name:r.name, label:r.label, type:r.type, whole:true,
                  pos:r.pos, zOdd:false, odd:false, annotator:"", row:r,
-                 proofread:false, nucleus:true, cell:null, added:0, frags:0, here:"" });
+                 /* A NAMED UNASSIGNED CELL IS FINDABLE BY THAT NAME. Identifying a soma
+                    without assembling it is the whole point of naming from that card; a name the
+                    filter cannot see would be a name that went nowhere. */
+                 proofread:false, nucleus:true, cell:null, added:0, frags:0,
+                 here: settledHere(r.key) });
     });
     STATE.cells.forEach(function(c){
       if (seen[c.id] || X.isSeedKey(c.id)) return;
@@ -7258,13 +7305,36 @@ UJ.app = (function(){
   /* Counted into a NESTED structure rather than a flat map keyed by "group + label": the labels
      contain spaces ("granule cell dendrite"), so any single-string key has to be split back apart
      and every separator that is not in a label today is one somebody adds tomorrow. */
+  /* EVERY NAME A CELL ANSWERS TO. Søren, 2026-09-03: "it does not show up when I filter for
+     Purkinje cell dendrite." It could not: the tally counted the published word and the filter
+     tested the published word, so a proofread cell renamed here was findable by the paper's name
+     and by nothing else, and the tickbox he wanted did not exist anywhere in the list.
+
+     Two labels, deliberately, and a renamed cell is counted under both -- "Whole cells / Purkinje
+     cell" and "Named here / Purkinje cell dendrite" are two different questions and this cell is
+     an honest answer to each. The groups are tickboxes with counts, not a partition. */
+  var NAMED_HERE = "Named here";
+  function labelsOf(u){
+    var out = [];
+    if (u.label) out.push(u.label);
+    if (u.here && u.here.toLowerCase() !== String(u.label || "").toLowerCase()) out.push(u.here);
+    if (!out.length) out.push("(unnamed)");
+    return out;
+  }
   function typeTally(){
     var groups = TYPE_GROUPS.map(function(G){ return { name:G.name, by:{} }; });
+    var mine = { name: NAMED_HERE, by:{} };
     filterable().forEach(function(u){
       var lab = u.label || "(unnamed)", gi = 0;
       TYPE_GROUPS.forEach(function(G, i){ if (G.test(u)) gi = i; });
       groups[gi].by[lab] = (groups[gi].by[lab] || 0) + 1;
+      /* Only when it DIFFERS. A cell somebody here named with the paper's own word is agreement,
+         not a second type, and listing it twice would put a tickbox in the panel for a question
+         nobody is asking. */
+      if (u.here && u.here.toLowerCase() !== String(u.label || "").toLowerCase())
+        mine.by[u.here] = (mine.by[u.here] || 0) + 1;
     });
+    groups.push(mine);
     return groups.map(function(g){
       return { name: g.name,
                items: Object.keys(g.by).map(function(k){ return { label:k, n:g.by[k] }; })
@@ -7467,7 +7537,9 @@ UJ.app = (function(){
 
     function keep(u){
       if (types.length){
-        if (types.indexOf(u.label || "(unnamed)") < 0 && !(unnamed && !u.label)) return false;
+        var mine = labelsOf(u), hit = false;
+        for (var t = 0; t < mine.length; t++) if (types.indexOf(mine[t]) >= 0) hit = true;
+        if (!hit && !(unnamed && !u.label)) return false;
       } else if (!unnamed && !u.proofread && !u.label) return false;
       if (layers.length || limb){
         var L = X.layerAt(u.pos);
@@ -7504,14 +7576,20 @@ UJ.app = (function(){
     var nearOn = !!(el("filterNearOn") && el("filterNearOn").checked);
     var nearTypes = checkedValues(".fneartype");
     if (nearOn && nearTypes.length){
-      var refs = rows.filter(function(u){
-        return nearTypes.indexOf(u.label || "(unnamed)") >= 0; });
+      /* The proximity list reads the same two names as the primary one. A reference set that
+         understood only the published word would answer "within 5 µm of a Purkinje cell dendrite"
+         with silence, having never found one. */
+      var isRef = function(u){
+        var mine = labelsOf(u);
+        for (var t = 0; t < mine.length; t++) if (nearTypes.indexOf(mine[t]) >= 0) return true;
+        return false;
+      };
+      var refs = rows.filter(isRef);
       var d = nearDistNm(),
           keepRef = !!(el("filterNearIncludeRef") && el("filterNearIncludeRef").checked);
       var grid = buildGrid(refs, d);
       hits = hits.filter(function(u){
-        var isRef = nearTypes.indexOf(u.label || "(unnamed)") >= 0;
-        return anyWithin(grid, X.toNm(u.pos), d, u.key) || (keepRef && isRef);
+        return anyWithin(grid, X.toNm(u.pos), d, u.key) || (keepRef && isRef(u));
       });
     }
     RESULT = { matches: hits, types: types, layers: layers, annots: annots, limb: limb,
