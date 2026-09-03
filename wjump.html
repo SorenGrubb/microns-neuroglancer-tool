@@ -119,7 +119,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-03 06:39</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-03 08:49</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -3427,6 +3427,40 @@ UJ.wjump = (function(){
     var g = groupedDatasets().groups;
     return (g.length && g[0].datasets.length) ? g[0].datasets[0] : smallestDataset();
   }
+  /* WHICH DATASET A LINK ASKS FOR.                                                  2026-09-03
+
+     Søren, seeing the index tables: "I see the links in the table all go to wJump, but not with
+     the correct dataset selected. Is it possible to get that?" It is: `wjump.html?ds=jrc_mus-liver-3`
+     opens on that volume instead of the default.
+
+     PURE, AND HERE RATHER THAN IN THE PAGE, because everything a URL can carry is attacker-typed
+     -- it is the one input to this tool that arrives from outside it. The resolution rules are
+     therefore stated once, checkable without a browser:
+
+       - an id that is not in the registry, or is disabled, or has no measured resolution, opens
+         the default. It does NOT error and it does NOT open a broken dataset: a stale link from a
+         paper or an old table should land somewhere usable, not on a dead page.
+       - matching is exact and case-sensitive against `d.id`. No prefix or fuzzy matching -- the
+         roster contains wk-ppc and wk-ppc2, and "closest match" would silently open the wrong
+         volume for a link that named the right one.
+       - the query string is parsed here rather than trusted from a caller, so the same string the
+         browser saw is the string these rules ran on.
+
+     Takes the raw query ("?ds=x&foo=1"), returns a dataset object -- never null unless the whole
+     registry is unusable, which is defaultDataset's problem, not this one. */
+  function datasetFromQuery(query){
+    var want = null;
+    String(query || "").replace(/^[?#]/, "").split("&").forEach(function(pair){
+      var i = pair.indexOf("=");
+      if (i < 0) return;
+      if (decodeURIComponent(pair.slice(0, i)) !== "ds") return;
+      try { want = decodeURIComponent(pair.slice(i + 1).replace(/\+/g, " ")).trim(); }
+      catch (e) { want = null; }               /* a malformed %-escape is not an id */
+    });
+    var d = want ? byId(want) : null;
+    return (d && usable(d)) ? d : defaultDataset();
+  }
+
   /* Still exported and still used: the check measures the default against it. */
   function smallestDataset(){
     var best = null, bestN = Infinity;
@@ -4315,7 +4349,7 @@ UJ.wjump = (function(){
            dataBox:dataBox,
            resXYZ:resXYZ, toVox:toVox, toNm:toNm, voxOf:voxOf,
            groupIndex:groupIndex, groupedDatasets:groupedDatasets, smallestDataset:smallestDataset,
-           defaultDataset:defaultDataset,
+           defaultDataset:defaultDataset, datasetFromQuery:datasetFromQuery,
            speciesMark:speciesMark, speciesLegend:speciesLegend,
            provider:provider,
            grid:grid, rankUnvisited:rankUnvisited,
@@ -5990,6 +6024,17 @@ UJ.app = (function(){
        not an agreement. One writer for both, so they cannot drift apart again. */
     var sel = el("dataset");
     if (sel && sel.value !== id) sel.value = id;
+    /* THE URL FOLLOWS THE PICKER, so the address bar is always a link to what is on screen and
+       a reload keeps the volume instead of dropping back to the default. replaceState, not
+       pushState: switching datasets is changing what you are looking at, not navigating, and
+       pushing would make Back walk the picker one dataset at a time instead of leaving the page.
+       Guarded because file:// has an opaque origin in some browsers and throws here -- a failed
+       cosmetic URL update must not take the dataset switch down with it. */
+    try {
+      if (window.history && history.replaceState)
+        history.replaceState(null, "", location.pathname + "?ds=" + encodeURIComponent(id)
+                                       + location.hash);
+    } catch (e) { /* the page works; only the address bar is stale */ }
     /* A skip is "not this one, right now" -- it is about the sitting, not about the nucleus, and
        carrying it across a dataset switch would silently hide nuclei in the new one. */
     SKIPPED = {}; CURID = null; REVEALED = false; WALK = { mode:"needs", ids:[], i:0 };
@@ -6065,7 +6110,11 @@ UJ.app = (function(){
     /* THE one decision about which dataset the page opens on -- previously made twice, once here
        as enabled()[0] (the smallest) and once above as W.defaultDataset() (the first of the first
        group). They agreed by accident until the default changed. */
-    var opening = W.defaultDataset();
+    /* A link may name the volume: wjump.html?ds=<id>. The index page's dataset table sends every
+       row here that way, so "cortex (LPtA)" in the table opens cortex (LPtA) rather than the
+       choroid plexus and a hunt through the picker. An unknown, disabled or unmeasured id falls
+       back to the default -- see datasetFromQuery, which is where all of that is decided. */
+    var opening = W.datasetFromQuery(location.search);
     if (!opening){ msg("No dataset in the registry has a measured resolution yet.", false); return; }
     selectDataset(opening.id);
   }
