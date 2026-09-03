@@ -436,7 +436,24 @@ function loadCommunityReports(nid,cellPos){
       window.CUR_COMMUNITY_IDS=Array.from(new Set(reports.map(function(r){return r.identified;}).filter(Boolean).map(String)));
       try{var _myn=String((typeof REPORTER_NAME!=="undefined"&&REPORTER_NAME)||"").trim().toLowerCase();var _mine={};if(_myn){reports.forEach(function(r){if(r&&r.identified&&String(r.reporterName||"").trim().toLowerCase()===_myn)_mine[String(r.identified).toLowerCase()]=1;});}window.MY_PROPOSED_IDS=_mine;}catch(_mp){window.MY_PROPOSED_IDS={};}
       if(typeof loadIdentityVotesPanel==="function")loadIdentityVotesPanel(nid,window.__idvBase||[]);
-      if(!reports.length&&!mergedGroups.length&&!notNucleusReports.length&&!organelleGroups.length)return;
+      /* NO EARLY RETURN ANY MORE.                                                2026-09-03
+
+         Søren: "I want the same function on the identity cards of all the other tools, so that
+         you don't have to run through the guided identification before you can report
+         organelles."
+
+         This line used to return here when the cell had no reports of any kind -- and it took the
+         "Report an organelle" link down with it, because the link is appended to the same html.
+         So the one way into organelle reporting that did NOT require finishing a guided cell-type
+         identification was available only on cells somebody had already written about, and absent
+         on every fresh cell: exactly the cell you are looking at when you want to log the first
+         organelle on it.
+
+         `empty` is kept as a flag rather than a return, because the reports block below still has
+         nothing to say and should not draw a heading over nothing. What changes is that the
+         organelle affordance is no longer part of that block's fate. */
+      const empty=!reports.length&&!mergedGroups.length&&!notNucleusReports.length
+                  &&!organelleGroups.length;
       let html="";
       if(reports.length){
         /* CONSENSUS NAMING. Previously this was a flat tally -- "3 reports: Astrocyte (2 users),
@@ -573,18 +590,36 @@ function loadCommunityReports(nid,cellPos){
          only one of them correctly wired -- the same trap already documented for
          organReporterInput vs reporterInput. */
       const already=organelleGroups.length;
-      html+=(html?'<br>':'')+'<span class="hint">'
-        +(already?'Think an organelle sits somewhere else? ':'Know where an organelle sits on this cell? ')
-        +'<span class="idf-back" id="commOrganelleToggle" style="margin:0">'
-        +(already?'Suggest a different location':'Report an organelle')+' &rarr;</span></span>'
+      /* χJUMP'S WORDING, because Søren named it: "Also log an organelle here", with what is
+         already on file beside it. The label used to switch between "Report an organelle" and
+         "Suggest a different location" depending on whether anything was logged; the count says
+         the same thing and says how much, and one label across the family means somebody who has
+         learned χJump recognises this. The second-opinion behaviour is unchanged -- every
+         submission is its own group server-side, so a different location sits alongside the
+         first rather than overwriting it. */
+      /* WHAT GOES BESIDE THE LABEL depends on whether the line above already said it. When the
+         cell has organelle reports, the summary two lines up has just listed them ("2 users have
+         logged organelle locations for this cell -- 2x centriole, 1x mitochondrion") and every
+         one is drawn underneath with its coordinate, so repeating the tally here is the same
+         sentence twice. What is worth saying in that case is the thing the old label said: a
+         second opinion is welcome and does not overwrite the first. With nothing on file the
+         count is the useful half, in χJump's own words. */
+      const knownTxt=already?"add another, or suggest a different location"
+                            :"nothing logged yet";
+      html+=(html?'<br>':'')+'<span class="hint">Also log an organelle here'
+        +' <span style="opacity:.75">&mdash; '+knownTxt+'</span> '
+        +'<span class="idf-back" id="commOrganelleToggle" style="margin:0">Log one &rarr;</span></span>'
         +'<div id="commOrganelleBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div>';
       el.innerHTML=html+organRowsHtml;
+      /* A card with nothing on file is now one line offering the form, rather than nothing at
+         all. Marked so a check can tell the two states apart without parsing prose. */
+      el.setAttribute("data-empty",empty?"1":"0");
       const cTog=el.querySelector("#commOrganelleToggle"),cBody=el.querySelector("#commOrganelleBody");
       if(cTog&&cBody){
         let cWired=false;
         cTog.addEventListener("click",()=>{
           const showing=cBody.style.display!=="none";
-          if(showing){cBody.style.display="none";cTog.innerHTML=(already?"Suggest a different location":"Report an organelle")+" &rarr;";return;}
+          if(showing){cBody.style.display="none";cTog.innerHTML="Log one &rarr;";return;}
           cBody.style.display="";cTog.innerHTML="Hide organelle form &uarr;";
           if(!cWired){
             /* The form reads ID_CTX for the nucleus/root/coordinate it should file against. Coming

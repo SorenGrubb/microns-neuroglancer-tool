@@ -433,7 +433,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-02 20:52</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-03 11:19</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1132,9 +1132,23 @@ function showCell(i, distNm, fromHistory){
             :'Not sure, or think H01 got it wrong? Take the guided identification.')
     +'</span><button class="idbtn" id="idfgo">'+(noCall?'Start guided identification':'Guided identification')+' &rarr;</button></div></div>';
 
+  /* ORGANELLES WITHOUT THE GUIDED IDENTIFICATION (Søren, 2026-09-03). Under the guided-ID
+     call to action, because these are the two ways of contributing to a cell and neither should
+     be a precondition for the other -- knowing there is a cilium on this cell is not the same
+     knowledge as knowing what kind of cell it is, and the page should not demand the second
+     before accepting the first. */
+  h+=organelleFlagHtml("nuc");
+
   h+='<div class="idcta-search" style="margin-top:10px">'+leafSearchHtml("mainLeaf")+'</div>';
 
   panel.innerHTML=h;
+  /* ID_CTX is what the form files against, and coming from here no guided run has populated it.
+     Seeded from the cell on screen, with NO leaf slug: looking at a cell is not a claim about
+     what it is, and organelleFormHtml prints "Identified as:" only when a slug is passed. */
+  ID_CTX={i:i, seg:seg, body:String(HSB[i]), pos:pos,
+          layer:(volLayer(i)!=="no-layer"?volLayer(i):tagLayer(i)), depth:depthUm(i),
+          published:H01_NO_CALL[t]?null:t};
+  wireOrganelleFlag(null,"nuc");
   const idfBtn=panel.querySelector("#idfgo");
   if(idfBtn) idfBtn.addEventListener("click",function(){ openIdentify(i); });
   wireLeafSearch("mainLeaf",function(slug){ openIdentify(i); renderResult(slug); });
@@ -1503,19 +1517,36 @@ function galleryHtml(slugs){
    button for an unauthenticated reporter) -- hJump has no per-form GSI wiring anywhere else on
    this page either, so an anonymous report here is simply anonymous, same as an anonymous vote;
    whoever wants credit can use the page-level sign-in button before reporting. */
-function organelleFlagHtml(){
-  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Also want to log an organelle\'s location on this cell? <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Report an organelle &rarr;</span></span>'
-    +'<div id="organelleInlineBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
+/* TWO MOUNTS, TWO SETS OF IDS.                                                    2026-09-03
+
+   Søren: "I want the same function on the identity cards of all the other tools, so that you
+   don't have to run through the guided identification before you can report organelles."
+
+   Until now this pair was mounted once, at the bottom of renderResult() -- the guided-ID RESULT
+   screen -- so logging an organelle meant first answering "what kind of cell is this?", which is
+   a different question and often one you cannot answer. It is now mounted on the CELL CARD too.
+
+   Both panels (#nucpanel and #idfpanel) can be in the DOM at once, so the second mount cannot
+   reuse the first's element ids: whichever wired last would win and the other toggle would be
+   dead. `pfx` gives each its own, exactly as core/panel.js keeps commOrganelle* apart from
+   idfOrganelle* for the identical reason. The FORM's inner ids (organRows/organSubmit/...) are
+   left alone -- wireOrganelleForm scopes every lookup to its container, so two forms open at
+   once already behave. */
+function organelleFlagHtml(pfx){
+  pfx=pfx||"idf";
+  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Also log an organelle here <span class="idf-back" id="'+pfx+'OrganelleToggle" style="margin:0">Log one &rarr;</span></span>'
+    +'<div id="'+pfx+'OrganelleInlineBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
 }
-function wireOrganelleFlag(slug){
-  const toggle=document.getElementById("idfOrganelleToggle"),body=document.getElementById("organelleInlineBody");
+function wireOrganelleFlag(slug,pfx){
+  pfx=pfx||"idf";
+  const toggle=document.getElementById(pfx+"OrganelleToggle"),body=document.getElementById(pfx+"OrganelleInlineBody");
   if(!toggle||!body)return;
   let wired=false;
   toggle.addEventListener("click",()=>{
     const showing=body.style.display!=="none";
     if(showing){
       body.style.display="none";
-      toggle.innerHTML="Report an organelle &rarr;";
+      toggle.innerHTML="Log one &rarr;";
       return;
     }
     body.style.display="";
