@@ -119,7 +119,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-02 20:52</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-02 21:34</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -308,9 +308,9 @@ try{var _t=localStorage.getItem("ujump_theme");
        has been wrong twice: it said twenty-six volumes and 2,922 boxes while the roster was 41
        and 14,532, because prose is the one thing in this file nothing checks. Now the numbers
        come from the same array the picker reads, so they cannot drift again. -->
-  <p class="hint">46 volumes are open, listed smallest first with the number of
+  <p class="hint">59 volumes are open, listed smallest first with the number of
   40&nbsp;&micro;m boxes each one takes &mdash; 1 for the smallest, 3,672 for the
-  largest, 11,707 across the roster. The map above sizes itself to whichever volume you pick
+  largest, 11,855 across the roster. The map above sizes itself to whichever volume you pick
   and keeps one scale across its panels, so a distance in one is the same distance in another.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
@@ -522,6 +522,54 @@ var PROV_WANNER = {
   doi: "https://doi.org/10.1038/nn.4290",
   terms: { basis: "the dataset record itself carries this citation in its own description field",
            verifiedFrom: "https://doi.org/10.1038/nn.4290", note: WK_NOTE } };
+
+/* ── providers for the BossDB-hosted rows ─────────────────────────────────────────────────────
+   Three projects, three credit lines, and unlike every WEBKNOSSOS row above these state a real
+   reuse licence: each BossDB project page carries "Creative Commons Attribution 4.0
+   International" as a field of its own. So there is no `terms.basis` here -- the escape hatch
+   exists for datasets whose terms have to be argued, and arguing about a licence that is written
+   down would be worse than useless.
+
+   CC-BY IS AN ATTRIBUTION LICENCE, so the attribution is the condition of use rather than a
+   courtesy: every block carries the dataset DOI, the paper it belongs to, and the project page a
+   reader can check both against. The bytes come from BossDB's own public S3 bucket; ωJump
+   redistributes nothing, exactly as with the WEBKNOSSOS rows. */
+var BOSS_NOTE = "\u03c9Jump links to BossDB's own public bucket and redistributes nothing";
+var PROV_WILDENBERG23 = {
+  name: "Kasthuri lab (UChicago / Argonne), via BossDB",
+  licence: "CC-BY-4.0",
+  licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
+  portal: "https://bossdb.org/project/wildenberg2023",
+  bucket: "bossdb-open-data",
+  citation: "Wildenberg, Sorokina, Koranda, Monical, Heer, Sheffield, Cai, Kasthuri et al., " +
+            "\u201cIsochronic development of cortical synapses in primates and mice\u201d; " +
+            "dataset Wildenberg et al. 2023, BossDB",
+  doi: "https://doi.org/10.60533/boss-2023-0s41",
+  terms: { note: BOSS_NOTE } };
+var PROV_WILDENBERG21 = {
+  name: "Kasthuri lab (UChicago / Argonne), via BossDB",
+  licence: "CC-BY-4.0",
+  licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
+  portal: "https://bossdb.org/project/wildenberg2021",
+  bucket: "bossdb-open-data",
+  citation: "Wildenberg et al., \u201cPartial connectomes of labeled dopaminergic circuits " +
+            "reveal non-synaptic communication and axonal remodeling after exposure to " +
+            "cocaine\u201d; dataset Wildenberg et al. 2021, BossDB",
+  doi: "https://doi.org/10.60533/BOSS-2021-YA04",
+  terms: { note: BOSS_NOTE } };
+var PROV_ISHIBASHI = {
+  /* Collected at OHSU, analysed at UTHealth Houston -- both are named on the project page, and a
+     credit line that dropped either would be crediting the wrong lab for half the work. */
+  name: "Massey & Ribelayga labs (UTHealth Houston) with OHSU, via BossDB",
+  licence: "CC-BY-4.0",
+  licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
+  portal: "https://bossdb.org/project/ishibashi2021",
+  bucket: "bossdb-open-data",
+  citation: "Ishibashi, Ribelayga, Massey et al., \u201cAnalysis of Rod/Cone Gap Junctions from " +
+            "the Reconstruction of Mouse Photoreceptor Terminals\u201d; dataset Ishibashi " +
+            "et al. 2021, BossDB",
+  doi: "https://doi.org/10.60533/BOSS-2021-4MZE",
+  terms: { note: BOSS_NOTE } };
 
 UJ.cfg.datasets = [
   { id:"jrc_mus-meissner-corpuscle-1", tissue:"Meissner corpuscle", species:"mouse",
@@ -1228,7 +1276,131 @@ UJ.cfg.datasets = [
     doi: "https://doi.org/10.1371/journal.pbio.0020329",
     terms: { basis: "the dataset is marked public on webknossos.org (isPublic: true; its metadata and Zarr stream both read without an account) and its own WEBKNOSSOS record cites the publication below; note PLoS Biology's CC-BY covers the article, not this re-hosted volume",
              verifiedFrom: "https://webknossos.org/datasets/denk2004-5bfd0b1c0100003f3574cc8e/view",
-             note: WK_NOTE } } }
+             note: WK_NOTE } } },
+
+  /* ══ BossDB ═══════════════════════════════════════════════════════════════════════════════
+     A THIRD SOURCE FAMILY, and it needed no code: these are Neuroglancer PRECOMPUTED volumes on
+     S3 rather than OME-Zarr, and buildState has always passed `source` through untouched.
+
+     WILDENBERG 2023 IS A TIME COURSE, which nothing else here is. Mouse V1 at P6, P14, P105 and
+     P523 against macaque V1 at P7, P75 and P3000 -- two species whose lifespans differ tenfold,
+     imaged to ask whether synapse accumulation and pruning are timed to lifespan rather than to
+     the clock. For a tool about identifying cells that matters twice over: P6 mouse cortex is a
+     different identification problem from the same cortex at P523, and the macaque rows are the
+     only primate cortex on the roster besides the WEBKNOSSOS macaque blocks.
+
+     Every shape and res_nm below is that volume's own precomputed `info` (scale s0), read live on
+     2026-09-02 -- not copied from the project page, which for mouse_v1_l4_p14 quotes the aligned
+     stack and for mouse_v1_l4_p105 the unaligned one. See src/wjump_bossdb.py. */
+
+  /* SIX DAYS OLD. The youngest cortex on the roster by a fortnight, and the
+     one where the developmental question is sharpest: at P6 synapses are still being made. */
+  { id:"bd-wb23-mouse-v1-l4-p6", tissue:"cortex L4 (V1, P6)", species:"mouse",
+    shape:[468,22766,20997], res_nm:[40,6,6], tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p6/em",
+    provider:PROV_WILDENBERG23 },
+
+  /* COLLECTED AND SEGMENTED BY A DIFFERENT HAND. The project page says p14
+     and p105 L4 were collected and automatically segmented by HL and error-checked by AS and VS,
+     where GW collected everything else -- which is also why these two are the only ones here with
+     a segmentation to look at. */
+  { id:"bd-wb23-mouse-v1-l4-p14", tissue:"cortex L4 (V1, P14)", species:"mouse",
+    shape:[1344,20800,15000], res_nm:[40,6,6], tier:"inf", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p14/em_aligned",
+    /* em_aligned, not em, and the segmentation is why: saturated_autoseg is 1,344 sections
+       deep, which is the ALIGNED stack's depth (the unaligned em is 812). Labels drawn over the
+       wrong stack sit beside the structures they name, which is worse than no labels.
+       psd_autoseg and vesicle_autoseg are the automatic postsynaptic-density and vesicle
+       predictions from the same pipeline -- ultrastructure evidence, offered to disagree with. */
+    extraLayers:[
+      { name:"saturated_autoseg", type:"segmentation",
+        source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p14/saturated_autoseg" },
+      { name:"psd_autoseg", type:"image",
+        source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p14/psd_autoseg" },
+      { name:"vesicle_autoseg", type:"image",
+        source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p14/vesicle_autoseg" }],
+    provider:PROV_WILDENBERG23 },
+
+    { id:"bd-wb23-mouse-v1-l4-p105", tissue:"cortex L4 (V1, P105)", species:"mouse",
+    shape:[960,23232,21016], res_nm:[40,6,6], tier:"inf", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p105/em_aligned",
+    /* em_aligned again, and here the two stacks disagree in every axis -- em is
+       23237 x 21020 x 913, em_aligned 21016 x 23232 x 960, transposed and deeper. The
+       segmentation's 960 sections settle which one is meant. */
+    extraLayers:[
+      { name:"saturated_autoseg", type:"segmentation",
+        source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p105/saturated_autoseg" },
+      { name:"psd_autoseg", type:"image",
+        source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p105/psd_autoseg" },
+      { name:"vesicle_autoseg", type:"image",
+        source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p105/vesicle_autoseg" }],
+    provider:PROV_WILDENBERG23 },
+
+    { id:"bd-wb23-mouse-v1-l4-p523", tissue:"cortex L4 (V1, P523)", species:"mouse",
+    shape:[563,15872,13792], res_nm:[40,6,6], tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l4_p523/em",
+    provider:PROV_WILDENBERG23 },
+
+    { id:"bd-wb23-mouse-v1-l23-p105", tissue:"cortex L2/3 (V1, P105)", species:"mouse",
+    shape:[749,17938,16623], res_nm:[40,6,6], tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l23_p105/em",
+    provider:PROV_WILDENBERG23 },
+
+    { id:"bd-wb23-mouse-v1-l23-p523", tissue:"cortex L2/3 (V1, P523)", species:"mouse",
+    shape:[561,18624,15936], res_nm:[40,6,6], tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/mouse_v1_l23_p523/em",
+    provider:PROV_WILDENBERG23 },
+
+  /* THE MACAQUE ARM OF THE SAME QUESTION. A week-old macaque against a
+     week-old mouse is the comparison the study was built on: same postnatal day, tenfold
+     different lifespan ahead of it. */
+  { id:"bd-wb23-primate-v1-l23-p7", tissue:"cortex L2/3 (V1, P7)", species:"macaque",
+    shape:[400,20232,20592], res_nm:[40,6,6], tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/primate_v1_l23_p7/em",
+    provider:PROV_WILDENBERG23 },
+
+    { id:"bd-wb23-primate-v1-l23-p75", tissue:"cortex L2/3 (V1, P75)", species:"macaque",
+    shape:[949,22464,20520], res_nm:[40,6,6], tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/primate_v1_l23_p75/em",
+    provider:PROV_WILDENBERG23 },
+
+  /* P3000 is a macaque of about eight years -- adult, and the far end of the
+     series. */
+  { id:"bd-wb23-primate-v1-l23-p3000", tissue:"cortex L2/3 (V1, P3000)", species:"macaque",
+    shape:[674,15876,15141], res_nm:[40,6,6], tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/primate_v1_l23_p3000/em",
+    provider:PROV_WILDENBERG23 },
+
+    { id:"bd-wb23-primate-v1-l4-p3000", tissue:"cortex L4 (V1, P3000)", species:"macaque",
+    shape:[364,20078,20784], res_nm:[40,6,6], tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2023/primate_v1_l4_p3000/em",
+    provider:PROV_WILDENBERG23 },
+
+  /* A SUBCORTICAL VOLUME WITH A GENETIC LABEL, which nothing else here has.
+     DAT-Cre APEX2 darkens the dopaminergic axons, so this block carries molecular identity in
+     the pixels themselves -- the same kind of evidence βJump's Hoechst channel gives, in a
+     region (nucleus accumbens) no other dataset on the roster covers. This is the COCAINE arm;
+     the project publishes saline controls beside it if the comparison is ever wanted. */
+  { id:"bd-wb21-nac-dopamine-cocaine", tissue:"nucleus accumbens (dopamine axons, cocaine)", species:"mouse",
+    shape:[744,24142,17885], res_nm:[40,4,4], tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/wildenberg2021/NAc_dat30_cocaine_axons_1stmouse_20nm_aligned/image",
+    provider:PROV_WILDENBERG21 },
+
+  /* THE TWO SMALLEST VOLUMES ON THE ROSTER, and the joint finest: FIB-SEM
+     at 4 nm ISOTROPIC, where the previous smallest (jrc_mus-pancreas-2) is 1.2 x 10^4 um^3 and
+     these are 1.8 x 10^3 and 2.6 x 10^3. Small is the point -- the question they were collected
+     for is the size of rod/cone gap junctions, which needs isotropic nanometres and not much
+     tissue. Also the roster's first retina. */
+  { id:"bd-ish21-retina-opl-em1", tissue:"retina, outer plexiform layer (EM1)", species:"mouse",
+    shape:[1136,4096,6144], res_nm:4, tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/Ishibashi2021/EM1/em",
+    provider:PROV_ISHIBASHI },
+
+    { id:"bd-ish21-retina-opl-em2", tissue:"retina, outer plexiform layer (EM2)", species:"mouse",
+    shape:[1344,4608,6656], res_nm:4, tier:"em", enabled:true,
+    source:"precomputed://s3://bossdb-open-data/Ishibashi2021/EM2/em",
+    provider:PROV_ISHIBASHI },
+
 ];
 
 /* ── species marks ─────────────────────────────────────────────────────────────────────────────
@@ -1277,8 +1449,13 @@ UJ.cfg.species = {
    picker while staying in the registry, countable and documented and completely unreachable,
    which is the worst of both. */
 UJ.cfg.groups = [
+  /* "nucleus accumbens" added 2026-09-02 with BossDB's dopamine-axon block. It is ventral
+     striatum -- brain, and nobody would look for it anywhere else -- and without the prefix the
+     row would have been usable, countable, documented and absent from the picker, which is the
+     failure the guard below exists for and which it duly caught. */
   { label: "Brain",                     match: ["cortex", "olfactory bulb", "choroid plexus",
-                                                  "hippocampus", "thalamus", "HVC"] },
+                                                  "hippocampus", "thalamus", "HVC",
+                                                  "nucleus accumbens"] },
   /* Retina is CNS -- it develops from the diencephalon -- but it reads as its own thing to
      anyone looking for it, and there are now three of them. Same for the spinal cord and the
      cochlea: nervous tissue, not brain, and nobody looks for "cochlea" under "Brain". */
