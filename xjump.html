@@ -227,6 +227,14 @@ try{var _t=localStorage.getItem("ujump_theme");
  .placeholder{border:1px dashed var(--line);border-radius:10px;padding:16px;background:var(--inset);
    color:var(--mut);font-size:13px}
  .nuc{border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--inset)}
+ /* Saying what a cell is, from the card -- see idfSectionHtml. `.lbl` is used as a plain caption
+    by the organelle summary and had no rule at all in this file, so it inherited the body size
+    and read as another line of prose next to the tally it is labelling. */
+ .idf-sec .lbl{font-weight:600;font-size:13px}
+ /* The base rule is `input,select,textarea{width:100%}`, which would put the certainty menu on a
+    line of its own and push the buttons down with it. */
+ .idf-sec select{width:auto;flex:0 0 auto;padding:7px 9px;font-size:13px}
+ .idf-sec .chip{margin:2px 2px 0 0}
  .nuc.oob{border-color:var(--warn)}
  .tag{display:inline-block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
    padding:3px 9px;border-radius:20px;font-weight:600;border:1px solid var(--line);color:var(--mut)}
@@ -441,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-03 12:01</span></p>
+ctrl-shift-R.">build 2026-09-03 18:47</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -3537,7 +3545,11 @@ UJ.app = (function(){
   "use strict";
   var X = UJ.xjump;
   var LIVE = !!window.XJUMP_LIVE;
-  var STATE = { cells: [], claimed: {}, contributors: [] };
+  /* `opinions` holds what people have called cells that were never BUILT here -- a proofread
+     reconstruction, or a marked nucleus. Same four fields a built cell carries, so votesHtml and
+     opinionOf read one shape for both. Empty against a deployment that does not send it yet,
+     which reads as "nobody has said anything", and is the honest answer for that page. */
+  var STATE = { cells: [], claimed: {}, contributors: [], opinions: {} };
   var LAST = null;            // the most recent paste: { ids, groups, position, … }
   /* Which cell the next paste is FOR, set by a cell's own "Add fragments" button. null means
      "build a new one". Kept as page state rather than as a dropdown value because the choice is
@@ -4791,6 +4803,205 @@ UJ.app = (function(){
      the nearest proofread cell into the navigation history, which is a different cell from the one
      you asked for. So this is its own headline with the neighbours underneath, using the same row
      markup and the same wiring as everywhere else. */
+  /* ── SAYING WHAT A CELL IS, FROM THE IDENTITY CARD ────────────────────────────────────────
+     Søren, 2026-09-03: "I'm missing an option in xJump to reclassify or identify unclassified
+     cells in xJump."
+
+     One section, two cards, two different sentences -- because the two claims are different. On a
+     proofread cell you are DISAGREEING with a published label, and what you write is recorded
+     beside it rather than over it: the headline above goes on saying what the paper says. On an
+     unassigned cell there is no label at all, and naming it is the first thing anybody has said
+     about it.
+
+     Not a <details> like the organelle form. That one is a long form somebody opts into; this is
+     one line and a button, and folding away the only way to disagree with a published label would
+     be hiding the thing he asked for. */
+  var MYVOTE = {};
+
+  /* What a cell has been called, whoever holds the record. A built cell keeps its own tally; a
+     proofread cell or a bare nucleus keeps it in STATE.opinions. */
+  function opinionOf(cellKey){
+    var c = byId(cellKey);
+    if (c) return { names: c.names || {}, totalVotes: c.totalVotes || 0,
+                    rejects: c.rejects || 0, unsure: c.unsure || 0 };
+    return (STATE.opinions || {})[cellKey]
+        || { names: {}, totalVotes: 0, rejects: 0, unsure: 0 };
+  }
+  function opinionRec(cellKey){
+    var c = byId(cellKey);
+    if (c) return c;
+    STATE.opinions = STATE.opinions || {};
+    if (!STATE.opinions[cellKey])
+      STATE.opinions[cellKey] = { names: {}, totalVotes: 0, rejects: 0, unsure: 0 };
+    return STATE.opinions[cellKey];
+  }
+  /* ONE VOTE PER PERSON PER CELL, because that is what the sheet keeps: xjumpCellName deletes your
+     earlier row for this key before appending. A page that added a second tick every time you
+     changed your mind would drift from the record it is displaying. */
+  function recordOpinion(cellKey, label){
+    var t = opinionRec(cellKey), was = MYVOTE[cellKey];
+    t.names = t.names || {};
+    if (was && t.names[was]){
+      t.names[was].n--;
+      t.totalVotes = Math.max(0, (t.totalVotes || 0) - 1);
+      if (t.names[was].n <= 0) delete t.names[was];
+    }
+    var k = String(label).toLowerCase();
+    if (!t.names[k]) t.names[k] = { label: label, n: 0 };
+    t.names[k].n++;
+    t.totalVotes = (t.totalVotes || 0) + 1;
+    MYVOTE[cellKey] = k;
+  }
+  function recordDoubt(cellKey, kind){
+    var t = opinionRec(cellKey);
+    if (kind === "unsure") t.unsure = (t.unsure || 0) + 1;
+    else t.rejects = (t.rejects || 0) + 1;
+  }
+  /* The tally, as chips. "Not one cell" is coloured like the contested status chip because it is
+     the same claim in a smaller place -- and it is shown next to the names rather than instead of
+     them, since a cell with three names and two rejections is exactly the cell somebody should
+     look at next. */
+  function votesHtml(cellKey){
+    var op = opinionOf(cellKey), names = op.names || {};
+    var ks = Object.keys(names).sort(function(a, b){ return names[b].n - names[a].n; });
+    if (!ks.length && !op.rejects && !op.unsure) return "nobody here has named it yet";
+    var out = ks.map(function(k){
+      return "<span class='chip'>" + esc(names[k].label) + " &times;" + names[k].n + "</span>";
+    });
+    if (op.unsure)
+      out.push("<span class='chip'>can&rsquo;t tell &times;" + op.unsure + "</span>");
+    if (op.rejects)
+      out.push("<span class='chip st-contested'>not one cell &times;" + op.rejects + "</span>");
+    return out.join(" ");
+  }
+  /* mode "seed": a published reconstruction. mode "nuc": a marked nucleus with nothing built. */
+  function idfSectionHtml(cellKey, mode, published){
+    var live = STATE.cells.filter(function(c){ return allSegs(c).length > 0; });
+    return "<div class='idf-sec' data-cell='" + esc(cellKey) + "' style='margin-top:12px;"
+      +   "border-top:1px dashed var(--line);padding-top:10px'>"
+      /* Its own datalist rather than the cell list's `cellnames`: that one is written by
+         renderCells and does not exist on a page where nobody has built anything -- which is
+         every page where somebody is looking at a proofread cell for the first time. */
+      + "<datalist id='idfnames'>"
+      +   X.nameSuggestions(live).map(function(n){
+            return "<option value=\"" + esc(n) + "\">"; }).join("")
+      + "</datalist>"
+      + "<div class='row' style='gap:8px;align-items:baseline'>"
+      +   "<span class='lbl'>"
+      +     (mode === "seed" ? "Do you read it differently?" : "What kind of cell is this?")
+      +   "</span>"
+      +   "<span class='hint idf-votes'>" + votesHtml(cellKey) + "</span>"
+      + "</div>"
+      + "<p class='hint idf-why' style='margin:6px 0 0'>"
+      +   (mode === "seed"
+            ? "Published as <b>" + esc(published || "unlabelled") + "</b>. What you write here is "
+              + "kept beside that and never over it &mdash; the line above goes on saying what "
+              + "the paper says, and the tally says what people here have called it."
+            : "A cell body with nothing assembled around it. You can say what it is from the soma "
+              + "alone &mdash; building the fragments is a separate and much longer job, and this "
+              + "does not wait for it.")
+      + "</p>"
+      + "<div class='row' style='margin-top:8px;gap:8px'>"
+      +   "<input list='idfnames' class='idf-nm' style='flex:1 1 200px' placeholder='"
+      +     (mode === "seed" ? "what you think it is" : "what kind of cell is this?") + "'>"
+      /* Certainty is RECORDED AND NOT WEIGHTED -- the same rule as ωJump and µJump. A confident
+         vote and a guess count one each; the difference is kept so somebody can look at whether
+         it predicts anything, which is a question, not an assumption to build the tally on. */
+      +   "<select class='idf-cert' title='Recorded with your answer. It does not weight the "
+      +     "tally — a confident vote and a guess count the same — but it is kept, so how sure "
+      +     "people were can be looked at later'>"
+      +     "<option value='5'>certain</option>"
+      +     "<option value='4'>fairly sure</option>"
+      +     "<option value='3' selected>could be</option>"
+      +     "<option value='2'>a guess</option>"
+      +     "<option value='1'>no idea, but</option></select>"
+      +   "<button class='idf-save'>Save identity</button>"
+      +   "<button class='idf-unsure' title='It is one cell and you cannot name it. Recorded as "
+      +     "evidence about the QUESTION, not against the cell'>Can&rsquo;t tell</button>"
+      +   (mode === "seed"
+          ? "<button class='idf-split' title='These fragments are not all the same cell — "
+            + "evidence against the published assembly, not about what it is'>Not one cell"
+            + "</button>"
+          : "")
+      + "</div>"
+      + "<div class='hint idf-msg' style='margin-top:6px'></div>"
+      + "</div>";
+  }
+
+  function wireIdfSection(root, cellKey, mode){
+    if (!root) return;
+    var sec = root.querySelector(".idf-sec"); if (!sec) return;
+    var input = sec.querySelector(".idf-nm"), cert = sec.querySelector(".idf-cert");
+    function tell(html, good){
+      var m = sec.querySelector(".idf-msg"); if (!m) return;
+      m.innerHTML = html;
+      m.style.color = good === undefined ? "" : (good ? "var(--ok)" : "var(--bad)");
+    }
+    function signedIn(){
+      if (STORE.canWrite()) return true;
+      tell("Sign in with Google first &mdash; reading is public, adding to the record is not.",
+           false);
+      return false;
+    }
+    function busy(on){
+      Array.prototype.forEach.call(sec.querySelectorAll("button"), function(b){
+        b.disabled = on; });
+    }
+    /* THE SECTION THIS HANDLER IS BOUND TO MAY NOT EXIST BY THE TIME THE ANSWER ARRIVES. render()
+       redraws the proofread-cell panel in place -- that is how the fragment counts stay honest --
+       so `sec` is detached the moment the store changes. The confirmation is written into
+       whichever section is on the page NOW, which is the same one visually and a different node.
+       The unassigned-cell panel is not redrawn by render(), so there it is the same node, and one
+       path serves both. */
+    function done(html){
+      render();
+      var host = el("find-body"); if (!host) return;
+      var fresh = host.querySelector(".idf-sec"); if (!fresh) return;
+      var votes = fresh.querySelector(".idf-votes");
+      if (votes) votes.innerHTML = votesHtml(cellKey);
+      var m = fresh.querySelector(".idf-msg");
+      if (m){ m.innerHTML = html; m.style.color = "var(--ok)"; }
+    }
+    var save = sec.querySelector(".idf-save");
+    if (save) save.addEventListener("click", function(){
+      var v = (input.value || "").trim();
+      if (!v){ tell("Say what you think it is first.", false); if (input) input.focus(); return; }
+      if (!signedIn()) return;
+      busy(true);
+      /* sawTally TRUE, and not as a convenience: the tally is printed directly above this box, so
+         anybody typing here has seen it. That column measures whether an answer was given blind,
+         and claiming blindness for an answer given under a visible tally would poison the one
+         field that could ever detect anchoring. */
+      STORE.name(cellKey, v, cert ? cert.value : "", true, "").then(function(){
+        recordOpinion(cellKey, v);
+        if (input) input.value = "";
+        done("Recorded as <b>" + esc(v) + "</b>"
+             + (mode === "seed" ? ", beside the published type." : "."));
+      }).catch(function(e){ tell(esc("Saving that failed: " + e.message), false); })
+        .then(function(){ busy(false); });
+    });
+    var uns = sec.querySelector(".idf-unsure");
+    if (uns) uns.addEventListener("click", function(){
+      if (!signedIn()) return;
+      busy(true);
+      STORE.reject(cellKey, "unsure", "").then(function(){
+        recordDoubt(cellKey, "unsure");
+        done("Recorded: it is one cell, and you could not name it.");
+      }).catch(function(e){ tell(esc("Saving that failed: " + e.message), false); })
+        .then(function(){ busy(false); });
+    });
+    var spl = sec.querySelector(".idf-split");
+    if (spl) spl.addEventListener("click", function(){
+      if (!signedIn()) return;
+      busy(true);
+      STORE.reject(cellKey, "not_one_cell", "").then(function(){
+        recordDoubt(cellKey, "not_one_cell");
+        done("Recorded: these fragments are not all the same cell.");
+      }).catch(function(e){ tell(esc("Saving that failed: " + e.message), false); })
+        .then(function(){ busy(false); });
+    });
+  }
+
   function nucPanelHtml(r){
     var pos = r.pos.map(function(v){ return Math.round(v); });
     var lay = layerLine(pos);
@@ -4815,6 +5026,7 @@ UJ.app = (function(){
       + "<p class='hint'>A cell body somebody found and nobody has assembled. Click its fragments "
       + "in the viewer, paste the link into the box on this tab, and press <b>Build cell</b> "
       + "&mdash; the join runs by itself and this stops being unassigned.</p>"
+      + idfSectionHtml(r.key, "nuc", "")
       + "</div>";
   }
   /* Aim the paste box at a NEW cell and go there. TARGET null is "build one", which is the whole
@@ -4853,6 +5065,14 @@ UJ.app = (function(){
     if (card) card.classList.add("show");
     near.forEach(function(h){ wireSeedRow(h.row); });
     if (el("nuc-build")) el("nuc-build").addEventListener("click", function(){ buildHere(r); });
+    wireIdfSection(host, r.key, "nuc");
+    /* AND THE PROOFREAD PANEL IS NO LONGER THE ONE ON SCREEN. SHOWN is what refreshFound redraws,
+       and it was left pointing at whatever cell was shown before this nucleus -- so the first
+       render() after landing here (building a cell, saving a name, anything that touches the
+       store) replaced the unassigned-cell panel with the previous cell's. Clearing it makes
+       refreshFound a no-op while this panel is up, which is correct: nothing on it is derived
+       from the cell store. */
+    SHOWN = null;
     Array.prototype.forEach.call(host.querySelectorAll(".idval[data-c]"), function(v){
       v.addEventListener("click", function(){
         try { navigator.clipboard.writeText(v.getAttribute("data-c")); } catch(e){}
@@ -5073,6 +5293,7 @@ UJ.app = (function(){
       + "</div>"
       + "<div class='mesh3d-host'></div>"
       + "<div class='hint mesh-out' style='margin-top:6px'></div>"
+      + idfSectionHtml(row.key, "seed", cap(row.label))
       + organSectionHtml(row.key)
       + ccSectionHtml(row.key)
       + histSectionHtml(row.key)
@@ -5335,6 +5556,7 @@ UJ.app = (function(){
         try { navigator.clipboard.writeText(v.getAttribute("data-c")); } catch(e){}
       });
     });
+    wireIdfSection(root, row.key, "seed");
     wireOrganSection(root, row.key);
     wireCcSection(root, row.key);
     loadHistory(root, row.key);
@@ -8083,11 +8305,16 @@ UJ.app = (function(){
                      organelleReporters: c.organelleReporters || 0 };
           });
           STATE.claimed = d.claimed || {};
+          /* WHAT PEOPLE HAVE CALLED CELLS NOBODY BUILT -- a proofread reconstruction somebody
+             disagreed with, a nucleus named from its soma. An older deployment sends nothing and
+             every one of those cards reads "nobody here has named it yet", which is the same
+             sentence it showed before the section existed. */
+          STATE.opinions = d.opinions || {};
           /* WHAT THIS DEPLOYMENT CAN DO. An older XJumpCells.gs has no `can` field at all, and the
              absence IS the answer -- see its own comment. Read as a map so the page asks
              `can.adopt === false` and a future capability needs no change here. */
           STATE.can = {};
-          ["adopt", "contributors", "organelles", "history"].forEach(function(k){
+          ["adopt", "contributors", "organelles", "history", "opinions"].forEach(function(k){
             STATE.can[k] = (d.can || []).indexOf(k) >= 0;
           });
           /* Who has assembled what, HERE -- ranked in cells, the same currency the published
@@ -8425,6 +8652,7 @@ UJ.app = (function(){
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
            showRandomUntouched:showRandomUntouched, showRandomBuilt:showRandomBuilt,
            showRandomUnassigned:showRandomUnassigned, nucleusRows:nucleusRows,
+           opinionOf:opinionOf, votesHtml:votesHtml,
            classifyNuclei:classifyNuclei, nearestAnything:nearestAnything,
            renderExplore:renderExplore, invalidateUniverse:invalidateUniverse,
            refreshFilterControls:refreshFilterControls,
