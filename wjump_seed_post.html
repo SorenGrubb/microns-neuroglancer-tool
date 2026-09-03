@@ -1,0 +1,4832 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ωJump — load Søren's annotations</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!--
+  A ONE-OFF LOADER, not a tool.                                                      2026-09-03
+
+  Søren annotated 191 mural cells and fibroblasts across twelve ωJump volumes in a spreadsheet and
+  asked for them as cells in the datasets. He chose to post them through the LIVE BACKEND rather
+  than import a CSV into the sheet, and that choice buys three things a paste into Google Sheets
+  would not:
+
+    - the 5 µm dedup runs, so re-running this page cannot double a cell. A nucleus already there
+      comes back `merged:true` with the key it already has, and the name and organelles attach to
+      that one.
+    - the nucleusKey is assigned by the backend, in its own sequence, so nothing here has to guess
+      a key and collide with one somebody else creates tomorrow.
+    - the points are awarded and the rows are shaped by the same handlers everybody else's work
+      goes through. There is no second write path to keep in step.
+
+  The cost is ~600 round trips at roughly a second each, so this runs for about ten minutes. It is
+  RESUMABLE: every cell that lands is recorded in localStorage under its dataset+row, and a reload
+  skips them. Stopping it half way and picking it up tomorrow is fine.
+
+  SIGN IN FIRST. doPost rejects anything without a valid Google ID token before writing a row, and
+  attributes every row to the verified identity rather than to whatever the client claims. These
+  are Søren's annotations, so they should be posted as Søren.
+
+  DRY RUN is the default. It walks every cell and shows exactly what would be sent without sending
+  it — 191 nuclei, 191 names, 366 organelle records — so the coordinates can be read against the
+  spreadsheet before anything is written.
+
+  WHERE THE DATA COMES FROM: wjump_seed_cells.json, built by src/wjump_seed_annotations.py from
+  his workbook. The dataset mapping and the nanometres-versus-voxels question are settled there,
+  with the reasoning; this page does no arithmetic on coordinates at all.
+-->
+<style>
+  :root{ --bg:#fbfaf8; --ink:#1b1e22; --mut:#5f6873; --line:#e4e1da; --card:#fff;
+         --ok:#12a67f; --bad:#c0392b; --warn:#b7791f; --accent:#2f6f8f; }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#14171b; --ink:#e8e6e3; --mut:#9aa3ad; --line:#2a2f36; --card:#1a1e24;
+           --ok:#27e0b3; --bad:#e07a6a; --warn:#e0b45c; --accent:#7db3d6; } }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,
+       "Segoe UI",Roboto,sans-serif;padding:28px 20px 60px}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:21px;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--mut);font-size:14px;margin:0 0 20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;
+        margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid var(--line);
+         background:var(--card);color:var(--ink);cursor:pointer}
+  button.primary{background:var(--ok);border-color:var(--ok);color:#08231c;font-weight:600}
+  button[disabled]{opacity:.45;cursor:not-allowed}
+  label{font-size:13px;color:var(--mut)}
+  .bar{height:8px;border-radius:6px;background:var(--line);overflow:hidden;margin:12px 0 6px}
+  .bar>i{display:block;height:100%;background:var(--ok);width:0}
+  #log{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
+       max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:10px;
+       background:var(--bg)}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)} .mut{color:var(--mut)}
+  table{border-collapse:collapse;font-size:13px;width:100%}
+  td,th{text-align:left;padding:3px 10px 3px 0}
+  th{color:var(--mut);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}
+</style>
+
+<div class="wrap">
+<h1>Load the annotation spreadsheet into ωJump</h1>
+<p class="sub">191 cells across 12 volumes, each with a cell type and up to two organelles.
+Posted through the live backend, so the 5&nbsp;µm dedup runs and re-running is safe.</p>
+
+<div class="card">
+  <div class="row"><b>1.</b> <span>Sign in — every write needs a verified Google identity.</span></div>
+  <div id="origin" style="display:none;margin-top:10px;border:1px solid var(--warn);
+       border-radius:8px;padding:12px;color:var(--warn)"></div>
+  <div id="gsi" style="margin-top:10px"></div>
+  <p id="who" class="sub" style="margin:8px 0 0">not signed in</p>
+</div>
+
+<div class="card">
+  <div class="row"><b>2.</b> <span id="summary" class="mut">loading wjump_seed_cells.json…</span></div>
+  <div id="bydataset" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <b>3.</b>
+    <button id="dry" class="primary">Dry run — show what would be sent</button>
+    <button id="go" disabled>Post them for real</button>
+    <button id="forget">Forget progress</button>
+  </div>
+  <div class="bar"><i id="prog"></i></div>
+  <p id="stat" class="sub" style="margin:0 0 10px">idle</p>
+  <div id="log"></div>
+</div>
+</div>
+
+<script type="application/json" id="seeddata">{
+ "built": "src/wjump_seed_annotations.py",
+ "source": "wJump data.xlsx",
+ "backend": {
+  "endpoint": "https://script.google.com/macros/s/AKfycby2n1bN6NzYJuQc_EwbZeLRxOW1p9_7bs0ljxs4CpL2FMsyXnXmwm2AFjeCME41eUVP/exec",
+  "ds": "wjump",
+  "clientId": "240227117082-gmiv0s37qdqngo3t3ph0lmthg4t4t47p.apps.googleusercontent.com"
+ },
+ "cells": [
+  {
+   "row": 2,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    8559,
+    7253,
+    9017
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8403,7600,9290",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8393,7623,9322",
+     "pointB": "8508,7623,9591"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 3,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    14488,
+    8560,
+    4837
+   ],
+   "organelles": [],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 4,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    7721,
+    10008,
+    4553
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7890,10077,4528",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7923,10122,4519",
+     "pointB": "8068,10503,4512"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 5,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    9882,
+    9354,
+    2962
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9452,9691,2824",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9392,9726,2812",
+     "pointB": "9169,9870,2634"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 6,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    11208,
+    15032,
+    7370
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "11168,14892,7535",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "11110,14914,7505",
+     "pointB": "10914,15077,7300"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 7,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    11593,
+    13810,
+    10434
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "11754,12942,10173",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "11713,13017,10165",
+     "pointB": "11651,13141,10338"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 8,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    14470,
+    5846,
+    11482
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "14560,5517,11025",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "14510,5565,11015",
+     "pointB": "14350,5700,11080"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 9,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    7472,
+    4109,
+    13184
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7728,3609,13084",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7696,3656,13031",
+     "pointB": "7517,3735,12789"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 10,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    4221,
+    14450,
+    8111
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4247,14869,7986",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4288,14827,7964",
+     "pointB": "4305,14723,7708"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 11,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    7054,
+    4991,
+    10744
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7779,5460,10469",
+     "pointB": ""
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 12,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    17928,
+    8635,
+    10075
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "17791,8617,10501",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "17858,8599,10521",
+     "pointB": "17900,8819,10446"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 13,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    16468,
+    6319,
+    10322
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "16468,6817,10327",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "16479,6828,10372",
+     "pointB": "16393,6923,10615"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 14,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    14219,
+    7156,
+    10752
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "14185,7573,10871",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "14151,7567,10922",
+     "pointB": "14095,7566,11116"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 15,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    4805,
+    11258,
+    7665
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "5134,11198,7831",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "5160,11142,7843",
+     "pointB": "5248,10915,7758"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 16,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    9828,
+    5740,
+    9704
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9667,5984,9438",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9680,6042,9431",
+     "pointB": "9697,6130,9642"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 17,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    2743,
+    6977,
+    8975
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2926,7335,9050",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2917,7382,9061",
+     "pointB": "2964,7544,9229"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 18,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    8785,
+    13784,
+    11606
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8583,13700,12083",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8606,13626,12070",
+     "pointB": "8676,13448,11778"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 19,
+   "dataset": "jrc_mus-heart-1",
+   "label": "mus-heart-1 mouse heart",
+   "identity": "Mural cell",
+   "nucleus": [
+    7218,
+    7403,
+    2023
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7338,7528,1667",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7355,7595,1662",
+     "pointB": "7286,7872,1536"
+    }
+   ],
+   "note": "mus-heart-1 capillary"
+  },
+  {
+   "row": 20,
+   "dataset": "wk-mk1-f6-l23",
+   "label": "Macaque S1",
+   "identity": "Mural cell",
+   "nucleus": [
+    6808,
+    12612,
+    2396
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6941,12835,2340",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7005,12859,2370",
+     "pointB": "6988,12782,2448"
+    }
+   ],
+   "note": "Macaque S1 brain capillary"
+  },
+  {
+   "row": 21,
+   "dataset": "wk-mk1-f6-l23",
+   "label": "Macaque S1",
+   "identity": "Mural cell",
+   "nucleus": [
+    12847,
+    5507,
+    3052
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "13097,5535,3022",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "13134,5478,3022",
+     "pointB": "13168,5273,3016"
+    }
+   ],
+   "note": "Macaque S1 brain capillary"
+  },
+  {
+   "row": 22,
+   "dataset": "wk-mk1-f6-l23",
+   "label": "Macaque S1",
+   "identity": "Mural cell",
+   "nucleus": [
+    17361,
+    6475,
+    2880
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "17392,6277,2836",
+     "pointB": ""
+    }
+   ],
+   "note": "Macaque S1 brain capillary"
+  },
+  {
+   "row": 23,
+   "dataset": "wk-mk1-f6-l23",
+   "label": "Macaque S1",
+   "identity": "Mural cell",
+   "nucleus": [
+    12428,
+    14786,
+    1604
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12416,14497,1556",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12407,14488,1580",
+     "pointB": "12513,14438,1604"
+    }
+   ],
+   "note": "Macaque S1 brain capillary"
+  },
+  {
+   "row": 24,
+   "dataset": "wk-mk1-f6-l23",
+   "label": "Macaque S1",
+   "identity": "Mural cell",
+   "nucleus": [
+    12598,
+    7151,
+    1804
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12601,6939,1800",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12608,6880,1800",
+     "pointB": "12621,6736,1761"
+    }
+   ],
+   "note": "Macaque S1 brain capillary"
+  },
+  {
+   "row": 25,
+   "dataset": "wk-mk1-f6-l23",
+   "label": "Macaque S1",
+   "identity": "Mural cell",
+   "nucleus": [
+    8639,
+    8437,
+    1181
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8474,8244,1145",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8498,8245,1169",
+     "pointB": "8543,8380,1255"
+    }
+   ],
+   "note": "Macaque S1 brain capillary"
+  },
+  {
+   "row": 26,
+   "dataset": "wk-mk1-f6-l23",
+   "label": "Macaque S1",
+   "identity": "Mural cell",
+   "nucleus": [
+    3616,
+    13806,
+    912
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3659,13826,836",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3622,13897,842",
+     "pointB": "3659,14029,860"
+    }
+   ],
+   "note": "Macaque S1 brain capillary"
+  },
+  {
+   "row": 27,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    9408,
+    17553,
+    2679
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9508,17794,2700",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9483,17761,2724",
+     "pointB": "9559,17712,2798"
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 28,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    5941,
+    16225,
+    2196
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "5957,16007,2134",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6009,16033,2153",
+     "pointB": "6059,16119,2229"
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 29,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    1724,
+    13683,
+    2224
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1670,14078,2145",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1738,14076,2153",
+     "pointB": "1814,14280,2201"
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 30,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    9358,
+    18270,
+    401
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9296,18763,386",
+     "pointB": ""
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 31,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    8958,
+    16696,
+    315
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9044,16585,358",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9045,16556,375",
+     "pointB": "8874,16399,433"
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 32,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    12537,
+    6009,
+    2835
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12475,6112,2837",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12436,6150,2850",
+     "pointB": "12378,6253,2868"
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 33,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    9215,
+    10336,
+    1681
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9142,10521,1550",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9121,10451,1570",
+     "pointB": "9137,10218,1620"
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 34,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    6321,
+    5239,
+    1589
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6098,5334,1702",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6050,5300,1704",
+     "pointB": "6126,5119,1691"
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 35,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    11932,
+    2735,
+    1258
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "11703,2735,1201",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "11667,2757,1212",
+     "pointB": "11572,2902,1269"
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 36,
+   "dataset": "wk-mk1-t2-stg",
+   "label": "Macaque STG",
+   "identity": "Mural cell",
+   "nucleus": [
+    6728,
+    989,
+    1166
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6852,1246,1289",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6796,1187,1285",
+     "pointB": "6699,999,1253"
+    }
+   ],
+   "note": "Macaque STG brain capillary"
+  },
+  {
+   "row": 37,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    2586,
+    4815,
+    1468
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2146,4878,1156",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2195,4880,1171",
+     "pointB": "2494,4958,950"
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 38,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    2856,
+    3658,
+    2286
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2722,3228,1864",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2764,3168,1870",
+     "pointB": "2878,2970,1980"
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 39,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    3248,
+    1192,
+    3076
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3472,1014,3189",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3532,991,3196",
+     "pointB": "4028,753,3276"
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 40,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    2517,
+    5142,
+    3410
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2142,5538,3377",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2096,5590,3423",
+     "pointB": "1798,5898,3641"
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 41,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    1050,
+    6885,
+    4441
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1028,7058,4119",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1026,7100,4157",
+     "pointB": "1016,7332,4345"
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 42,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    4097,
+    1147,
+    4725
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4150,971,3740",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4169,924,3736",
+     "pointB": "4250,815,3928"
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 43,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    2807,
+    2303,
+    4672
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2385,2742,4744",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2325,2780,4700",
+     "pointB": "2229,2828,4535"
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 44,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    1509,
+    4654,
+    5198
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1857,4372,4924",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1815,4349,4890",
+     "pointB": "1694,4569,4634"
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 45,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    4718,
+    328,
+    5903
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4681,9,6017",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4705,36,6008",
+     "pointB": "4846,157,5730"
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 46,
+   "dataset": "jrc_mus-choroid-plexus-3",
+   "label": "Mouse choroid plexus",
+   "identity": "Mural cell",
+   "nucleus": [
+    1314,
+    3582,
+    5814
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1383,3600,5480",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse choroid plexus capillary"
+  },
+  {
+   "row": 47,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    10142,
+    7935,
+    4328
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9801,7730,4197",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9767,7723,4190",
+     "pointB": "9415,7638,4214"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 48,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    10238,
+    4925,
+    4689
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "10533,4776,4526",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "10549,4713,4511",
+     "pointB": "10701,4564,4377"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 49,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    6706,
+    2929,
+    4875
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6984,2782,5172",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7022,2745,5198",
+     "pointB": "6831,2486,5448"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 50,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    1648,
+    3087,
+    2191
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1323,2836,2124",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1279,2880,2115",
+     "pointB": "1267,2892,2115"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 51,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    1698,
+    11181,
+    3155
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2163,10880,3144",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2176,10944,3134",
+     "pointB": "2371,11209,3083"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 52,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    904,
+    5940,
+    6550
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1317,5841,6360",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1385,5889,6368",
+     "pointB": "1425,5899,6347"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 53,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    10273,
+    11451,
+    6052
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9150,11798,5784",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9167,11816,5838",
+     "pointB": "9440,11830,6129"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 54,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    7472,
+    11235,
+    7850
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7374,11291,7509",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7310,11347,7520",
+     "pointB": "7097,11370,7716"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 55,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    11257,
+    751,
+    8019
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "11548,372,7886",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "11536,358,7834",
+     "pointB": "11510,479,7594"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 56,
+   "dataset": "jrc_mus-liver",
+   "label": "Mouse liver",
+   "identity": "Mural cell",
+   "nucleus": [
+    3894,
+    6953,
+    2774
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3146,6981,2987",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3160,6926,2992",
+     "pointB": "3462,6717,2985"
+    }
+   ],
+   "note": "Mouse liver"
+  },
+  {
+   "row": 57,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    2571,
+    10259,
+    2174
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2905,9688,2601",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2877,9738,2560",
+     "pointB": "2859,9948,2262"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 58,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    8200,
+    2099,
+    6456
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8000,2040,6241",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7990,2031,6210",
+     "pointB": "8137,1986,6082"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 59,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    4373,
+    2126,
+    6912
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3881,2054,6668",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3949,2027,6695",
+     "pointB": "4210,2003,6676"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 60,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    1766,
+    4292,
+    6614
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1888,4122,6894",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1887,4202,6899",
+     "pointB": "1784,4452,6771"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 61,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    2728,
+    8573,
+    10880
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2910,8452,11022",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2940,8370,11038",
+     "pointB": "3040,8184,10955"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 62,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    5641,
+    13210,
+    9032
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6133,13360,9106",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6059,13323,9076",
+     "pointB": "5813,13039,9104"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 63,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    13087,
+    10175,
+    10156
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "13039,10634,9944",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "13026,10566,9958",
+     "pointB": "13023,10349,9760"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 64,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    12734,
+    12805,
+    6090
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12509,12753,6142",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12532,12754,6200",
+     "pointB": "12581,12655,6334"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 65,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    13336,
+    5628,
+    5569
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "13480,5664,5449",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "13423,5610,5431",
+     "pointB": "13372,5554,5309"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 66,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    2553,
+    12807,
+    7046
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2322,13154,6962",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2373,13193,6996",
+     "pointB": "2475,13319,7139"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 67,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    2024,
+    15492,
+    6296
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2430,15284,6152",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2392,15343,6149",
+     "pointB": "2341,15415,6166"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 68,
+   "dataset": "jrc_mus-guard-hair-follicle",
+   "label": "Mouse hair follicle",
+   "identity": "Mural cell",
+   "nucleus": [
+    1828,
+    8580,
+    6393
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1821,8895,6251",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1864,8872,6289",
+     "pointB": "2364,8900,6584"
+    }
+   ],
+   "note": "Mouse hair follicle"
+  },
+  {
+   "row": 69,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    11219,
+    9020,
+    12332
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "10959,9229,12218",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "10957,9200,12176",
+     "pointB": "10988,9028,12020"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 70,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    13342,
+    11145,
+    14548
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "13294,10982,14330",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "13254,10920,14349",
+     "pointB": "13199,10800,14289"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 71,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    8018,
+    5736,
+    9770
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7975,6141,9766",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7937,6077,9781",
+     "pointB": "7810,5894,9716"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 72,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    6633,
+    4747,
+    9188
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6187,4737,9098",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6194,4718,9068",
+     "pointB": "5950,4654,8958"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 73,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    4749,
+    1298,
+    10059
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4571,1473,9965",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4554,1466,9911",
+     "pointB": "4616,1416,9650"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 74,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    3297,
+    11711,
+    9428
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3117,12415,9400",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3066,12341,9400",
+     "pointB": "2987,12095,9389"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 75,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    12730,
+    10573,
+    11351
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12567,10426,10921",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12527,10441,10904",
+     "pointB": "12390,10442,10718"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 76,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    13403,
+    6554,
+    9964
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12538,6672,9823",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12605,6653,9812",
+     "pointB": "12774,6583,9837"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 77,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    12583,
+    1414,
+    11624
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "13070,1683,11518",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "13061,1698,11480",
+     "pointB": "12817,1710,11418"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 78,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    7437,
+    926,
+    11833
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7831,1328,11893",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7801,1297,11905",
+     "pointB": "7586,1170,12010"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 79,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    6807,
+    2802,
+    10939
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7237,3339,10730",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7213,3285,10704",
+     "pointB": "7135,3097,10593"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 80,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    5714,
+    12186,
+    13376
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "5493,12160,13691",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "5449,12123,13718",
+     "pointB": "5336,12040,13913"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 81,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    3640,
+    7055,
+    17233
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3994,7244,17654",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4017,7276,17698",
+     "pointB": "4089,7439,17882"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 82,
+   "dataset": "jrc_mus-skin-1",
+   "label": "Mouse skin",
+   "identity": "Mural cell",
+   "nucleus": [
+    5656,
+    8574,
+    19304
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4399,8155,19243",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4440,8199,19219",
+     "pointB": "4554,8251,19061"
+    }
+   ],
+   "note": "Mouse skin"
+  },
+  {
+   "row": 83,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    7249,
+    9445,
+    770
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7252,8967,510",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7261,9031,494",
+     "pointB": "7362,9214,330"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 84,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    5142,
+    9911,
+    1419
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "5244,10084,920",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "5248,10027,901",
+     "pointB": "5114,9870,1076"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 85,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    14370,
+    6904,
+    1070
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "14577,7142,1202",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "14509,7134,1162",
+     "pointB": "14368,7205,1016"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 86,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    6811,
+    5502,
+    1819
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7409,5280,1423",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7376,5335,1430",
+     "pointB": "7234,5512,1305"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 87,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    2283,
+    833,
+    1535
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2612,599,889",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2655,614,911",
+     "pointB": "3007,598,1164"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 88,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    8904,
+    2936,
+    1978
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8769,2914,2220",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8741,2948,2243",
+     "pointB": "8544,2988,2438"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 89,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    2000,
+    8230,
+    2396
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2295,7611,2083",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2241,7629,2060",
+     "pointB": "2052,7760,1927"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 90,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    11488,
+    11669,
+    1932
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12439,10807,1649",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12408,10858,1645",
+     "pointB": "12189,11121,1755"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 91,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    11851,
+    6537,
+    1904
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "11588,6189,1643",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "11565,6229,1631",
+     "pointB": "11400,6430,1564"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 92,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    15331,
+    6414,
+    2026
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "15143,6426,2050",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "15161,6442,2112",
+     "pointB": "15221,6566,2289"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 93,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    8736,
+    10622,
+    4679
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8620,10804,5260",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8676,10827,5237",
+     "pointB": "8831,10903,5078"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 94,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    15730,
+    8350,
+    5543
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "15515,8228,5779",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "15453,8198,5794",
+     "pointB": "15303,8080,5744"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 95,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    8342,
+    6445,
+    5498
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8600,6400,5472",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8641,6452,5484",
+     "pointB": "8735,6543,5614"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 96,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    13131,
+    4523,
+    5024
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "13145,4371,5516",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "13170,4368,5577",
+     "pointB": "13212,4311,5863"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 97,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    4009,
+    8732,
+    2757
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4046,8074,2786",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4010,8078,2730",
+     "pointB": "3960,8048,2362"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 98,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    5297,
+    10656,
+    3934
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "5017,10378,3748",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "5043,10323,3707",
+     "pointB": "5095,10170,3485"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 99,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    3256,
+    9161,
+    3071
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2922,9420,3014",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2910,9392,2978",
+     "pointB": "2807,9314,2806"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 100,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    11904,
+    2598,
+    2826
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "11958,2517,3425",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12004,2520,3478",
+     "pointB": "12166,2502,3677"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 101,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    4689,
+    6766,
+    3162
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4189,6737,2991",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4164,6799,2994",
+     "pointB": "4122,6924,3018"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 102,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    12590,
+    7512,
+    3445
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12780,7888,3448",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12756,7942,3421",
+     "pointB": "12683,8021,3232"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 103,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    8240,
+    5679,
+    3711
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8114,5816,3822",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8178,5852,3854",
+     "pointB": "8349,5878,4099"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 104,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    9255,
+    9635,
+    4292
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9558,9396,4606",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9530,9444,4607",
+     "pointB": "9452,9636,4688"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 105,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    8736,
+    10624,
+    4693
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8617,10808,5262",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8674,10819,5235",
+     "pointB": "8831,10906,5079"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 106,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    1546,
+    4371,
+    4222
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1336,4790,4115",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1347,4755,4162",
+     "pointB": "1403,4669,4342"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 107,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    13120,
+    11563,
+    6018
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12787,11610,5918",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12734,11565,5904",
+     "pointB": "12606,11440,5853"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 108,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    3108,
+    4850,
+    5701
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2726,5009,6200",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2783,4998,6222",
+     "pointB": "2973,4938,6077"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 109,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    2828,
+    3509,
+    6277
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2099,3789,6670",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2143,3744,6692",
+     "pointB": "2334,3706,6768"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 110,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    5882,
+    4898,
+    6768
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6164,4463,6899",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6213,4448,6899",
+     "pointB": "6402,4340,6981"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 111,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    1537,
+    7934,
+    6856
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1251,8056,6256",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1300,8065,6293",
+     "pointB": "1357,8118,6470"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 112,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    3871,
+    2801,
+    6147
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3118,3007,5757",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3157,3022,5793",
+     "pointB": "3263,3020,6007"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 113,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    12584,
+    7546,
+    3377
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12781,7885,3448",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12759,7939,3420",
+     "pointB": "12686,8024,3228"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 114,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    3632,
+    8401,
+    3508
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3362,8545,4058",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3356,8496,4094",
+     "pointB": "3258,8374,4250"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 115,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    2571,
+    7130,
+    1193
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2124,7383,1096",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2164,7341,1067",
+     "pointB": "2262,7258,1121"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 116,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    1953,
+    6257,
+    1810
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2054,6301,2175",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2035,6320,2133",
+     "pointB": "2020,6347,2079"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 117,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    2153,
+    7248,
+    4057
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2400,7144,3744",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2452,7110,3744",
+     "pointB": "2564,7048,3622"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 118,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    2038,
+    7264,
+    6150
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1810,7080,6092",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1847,7036,6067",
+     "pointB": "1900,7005,5876"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 119,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    1663,
+    6953,
+    7802
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1420,6723,7723",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1406,6700,7714",
+     "pointB": "1400,6694,7525"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 120,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    2027,
+    5472,
+    9039
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2364,5462,9118",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2395,5482,9101",
+     "pointB": "2500,5570,9029"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 121,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    2691,
+    5864,
+    10712
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2471,5805,10733",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2458,5841,10694",
+     "pointB": "2471,5922,10485"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 122,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    1749,
+    6152,
+    12368
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1438,6071,12553",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1484,6090,12553",
+     "pointB": "1618,6127,12637"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 123,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    3056,
+    1516,
+    12890
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2679,1978,12917",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2629,2028,12925",
+     "pointB": "2468,2119,12876"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 124,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    14706,
+    5930,
+    7818
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "14510,5982,7740",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "14490,6038,7744",
+     "pointB": "14470,6195,7879"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 125,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    13151,
+    8210,
+    10046
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "13187,8337,9811",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "13186,8280,9764",
+     "pointB": "13222,8140,9622"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 126,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    12779,
+    11704,
+    9368
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "12569,11610,9523",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "12594,11563,9538",
+     "pointB": "12612,11338,9610"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 127,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    13356,
+    5612,
+    10429
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "13690,5779,10399",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "13655,5762,10441",
+     "pointB": "13522,5753,10679"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 128,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    6758,
+    9642,
+    10300
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6570,9817,10217",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6535,9830,10265",
+     "pointB": "6471,9837,10441"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 129,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    7765,
+    9232,
+    11449
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8256,9315,11239",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8296,9290,11253",
+     "pointB": "8447,9359,11339"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 130,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    8829,
+    6576,
+    9349
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8636,6790,9377",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8694,6782,9375",
+     "pointB": "8891,6822,9477"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 131,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    7266,
+    8614,
+    7283
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7678,8506,7260",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7711,8576,7260",
+     "pointB": "7740,8739,7169"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 132,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    4850,
+    7424,
+    6389
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4580,7722,6306",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4528,7706,6303",
+     "pointB": "4329,7689,6165"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 133,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    4252,
+    7347,
+    4727
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4480,7288,4486",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4520,7270,4460",
+     "pointB": "4686,7176,4244"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 134,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    3362,
+    5368,
+    7911
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3350,4738,7854",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3355,4792,7890",
+     "pointB": "3319,4925,7995"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 135,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    3343,
+    2926,
+    11048
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3360,3013,10915",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3412,3036,10924",
+     "pointB": "3633,3063,10888"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 136,
+   "dataset": "jrc_mus-pancreas-4",
+   "label": "Mouse pancreas",
+   "identity": "Mural cell",
+   "nucleus": [
+    17031,
+    5091,
+    4117
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "16848,5412,4326",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "16863,5368,4279",
+     "pointB": "16926,5207,4086"
+    }
+   ],
+   "note": "Mouse pancreas"
+  },
+  {
+   "row": 137,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    9755,
+    4667,
+    4840
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9895,3980,4500",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9892,3936,4531",
+     "pointB": "9868,3737,4636"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 138,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    7233,
+    6236,
+    5414
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7176,6264,5728",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7233,6300,5744",
+     "pointB": "7412,6404,5665"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 139,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    14674,
+    11386,
+    9938
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "14858,11409,10274",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "14845,11356,10267",
+     "pointB": "14649,11172,10276"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 140,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    13889,
+    7688,
+    6711
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "14610,7906,6801",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "14583,7947,6811",
+     "pointB": "14345,7950,6840"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 141,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    15921,
+    6842,
+    5160
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "16068,6712,4952",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "16043,6651,4963",
+     "pointB": "16034,6523,5110"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 142,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    13974,
+    9410,
+    1109
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "14448,9542,942",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "14438,9504,990",
+     "pointB": "14317,9436,1141"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 143,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    8891,
+    4093,
+    9609
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9163,3828,9255",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9184,3797,9241",
+     "pointB": "9358,3670,9154"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 144,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    2731,
+    9837,
+    1594
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2645,9481,2034",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2685,9470,2000",
+     "pointB": "2773,9455,1895"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 145,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    1288,
+    7504,
+    3833
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1076,7766,3872",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1043,7738,3873",
+     "pointB": "893,7680,3910"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 146,
+   "dataset": "jrc_mus-thymus-1",
+   "label": "Mouse thymus",
+   "identity": "Mural cell",
+   "nucleus": [
+    6499,
+    10706,
+    6137
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6525,10358,6114",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6463,10358,6106",
+     "pointB": "6258,10347,6147"
+    }
+   ],
+   "note": "Mouse thymus"
+  },
+  {
+   "row": 147,
+   "dataset": "jrc_mus-meissner-corpuscle-1",
+   "label": "Mouse Meissners corpuscle",
+   "identity": "Mural cell",
+   "nucleus": [
+    3182,
+    5618,
+    2212
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3168,5961,2596",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3239,5900,2612",
+     "pointB": "3334,5754,2596"
+    }
+   ],
+   "note": "Mouse Meissners corpuscle"
+  },
+  {
+   "row": 148,
+   "dataset": "jrc_mus-meissner-corpuscle-1",
+   "label": "Mouse Meissners corpuscle",
+   "identity": "Mural cell",
+   "nucleus": [
+    3673,
+    5625,
+    3711
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3481,5416,4201",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3531,5410,4131",
+     "pointB": "3650,5426,3923"
+    }
+   ],
+   "note": "Mouse Meissners corpuscle"
+  },
+  {
+   "row": 149,
+   "dataset": "jrc_mus-meissner-corpuscle-1",
+   "label": "Mouse Meissners corpuscle",
+   "identity": "Mural cell",
+   "nucleus": [
+    3337,
+    5193,
+    5868
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3360,5464,5449",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3351,5395,5414",
+     "pointB": "3382,5226,5368"
+    }
+   ],
+   "note": "Mouse Meissners corpuscle"
+  },
+  {
+   "row": 150,
+   "dataset": "jrc_mus-meissner-corpuscle-1",
+   "label": "Mouse Meissners corpuscle",
+   "identity": "Mural cell",
+   "nucleus": [
+    2192,
+    4648,
+    8247
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2199,3651,8214",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2140,3736,8232",
+     "pointB": "2020,3881,8148"
+    }
+   ],
+   "note": "Mouse Meissners corpuscle"
+  },
+  {
+   "row": 151,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    9585,
+    3496,
+    10753
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9431,3683,10568",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9390,3651,10599",
+     "pointB": "9106,3526,10583"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 152,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    9003,
+    3542,
+    3738
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "9334,3252,3742",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "9311,3201,3682",
+     "pointB": "9211,3104,3467"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 153,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    8732,
+    2914,
+    3448
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8878,2418,3394",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8807,2380,3384",
+     "pointB": "8621,2195,3224"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 154,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    7731,
+    5894,
+    3309
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7300,5666,3466",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7286,5676,3390",
+     "pointB": "7201,5766,3164"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 155,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    8251,
+    4676,
+    4212
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8340,5034,3889",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8282,5000,3873",
+     "pointB": "8120,4922,3696"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 156,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    9893,
+    4644,
+    4425
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "10221,5081,4340",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "10252,5135,4363",
+     "pointB": "10295,5130,4626"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 157,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    4501,
+    6274,
+    4830
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4182,6528,4746",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4253,6550,4744",
+     "pointB": "4410,6611,4596"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 158,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    6457,
+    4204,
+    4771
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6366,4709,4745",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6424,4728,4702",
+     "pointB": "6618,4832,4688"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 159,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3419,
+    1277,
+    5314
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4163,1033,5604",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4114,997,5582",
+     "pointB": "3936,866,5449"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 160,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    1459,
+    591,
+    5662
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1850,1069,5479",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1780,1107,5512",
+     "pointB": "1534,1151,5716"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 161,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    1238,
+    1713,
+    6239
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "953,1831,6424",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1014,1813,6444",
+     "pointB": "1231,1676,6590"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 162,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    5274,
+    7212,
+    5248
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "5406,7236,5119",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "5462,7242,5118",
+     "pointB": "5661,7229,5182"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 163,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    5678,
+    1968,
+    5320
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "5763,2418,5297",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "5724,2490,5322",
+     "pointB": "5726,2697,5307"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 164,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    6028,
+    4110,
+    8690
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "6349,4536,8822",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "6324,4548,8759",
+     "pointB": "6329,4604,8426"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 165,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    6200,
+    2572,
+    10995
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7201,2680,10998",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7266,2699,10976",
+     "pointB": "7422,2816,10807"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 166,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    2103,
+    2026,
+    11736
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2071,2138,11660",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2105,2201,11654",
+     "pointB": "2207,2268,11634"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 167,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    10516,
+    5079,
+    12678
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "10415,5971,12600",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "10440,5913,12640",
+     "pointB": "10498,5776,12844"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 168,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    1881,
+    5562,
+    13868
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1729,5784,14128",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1748,5729,14126",
+     "pointB": "1851,5564,14318"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 169,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    10201,
+    3723,
+    16252
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "10734,3923,16015",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "10753,3935,15950",
+     "pointB": "10826,3878,15766"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 170,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    9982,
+    760,
+    16214
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "10392,580,16396",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "10443,628,16385",
+     "pointB": "10520,750,16520"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 171,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    2188,
+    6445,
+    16781
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1644,6000,16676",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1659,6019,16604",
+     "pointB": "1788,6055,16394"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 172,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    7567,
+    5170,
+    16873
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "7535,5988,17188",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "7610,5977,17195",
+     "pointB": "7836,5932,17328"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 173,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    8338,
+    909,
+    17917
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "8415,718,17421",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "8395,650,17411",
+     "pointB": "8263,432,17338"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 174,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    4323,
+    2664,
+    17033
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4047,2405,17346",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "4098,2440,17360",
+     "pointB": "4181,2448,17445"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 175,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3777,
+    3306,
+    18325
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3945,2999,18142",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3863,2950,18139",
+     "pointB": "3673,2788,18240"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 176,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3052,
+    1749,
+    18400
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2575,1838,18632",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2588,1897,18630",
+     "pointB": "2671,2092,18625"
+    }
+   ],
+   "note": "Mouse Kidney"
+  },
+  {
+   "row": 177,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3345,
+    677,
+    6816
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3077,670,7000",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 178,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3059,
+    1181,
+    6613
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2721,1316,6396",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 179,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3044,
+    1602,
+    6798
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2752,1478,6523",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "2758,1422,6506",
+     "pointB": "2759,1414,6486"
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 180,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    1656,
+    1818,
+    6614
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2042,1745,6503",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 181,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    1521,
+    1925,
+    7372
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1800,1918,7304",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1795,1978,7346",
+     "pointB": "1798,1976,7379"
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 182,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    1463,
+    2108,
+    8191
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2038,2085,8342",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 183,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3233,
+    2976,
+    7939
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3042,2928,7594",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 184,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3350,
+    3827,
+    7962
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3308,4194,7912",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 185,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3024,
+    4160,
+    8393
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "2838,4024,8490",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 186,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Fibroblast",
+   "nucleus": [
+    3549,
+    4282,
+    8414
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3400,4376,8421",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3365,4340,8384",
+     "pointB": "3331,4316,8284"
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 187,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Fibroblast",
+   "nucleus": [
+    3871,
+    4194,
+    8689
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3830,4423,8609",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3810,4415,8662",
+     "pointB": "3822,4463,8835"
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 188,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    4070,
+    6837,
+    8364
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3868,6558,8136",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "3861,6500,8136",
+     "pointB": "3852,6471,8117"
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 189,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    4762,
+    6683,
+    8100
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4826,6640,8228",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 190,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    4400,
+    7189,
+    6084
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "4115,7626,6488",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 191,
+   "dataset": "jrc_mus-kidney",
+   "label": "Mouse Kidney",
+   "identity": "Mural cell",
+   "nucleus": [
+    3919,
+    5378,
+    9101
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "3752,5359,8891",
+     "pointB": ""
+    }
+   ],
+   "note": "Mouse Kidney arteriole"
+  },
+  {
+   "row": 192,
+   "dataset": "jrc_mus-pacinian-corpuscle",
+   "label": "Mouse Pacinian corpuscle",
+   "identity": "Mural cell",
+   "nucleus": [
+    2392,
+    9462,
+    44167
+   ],
+   "organelles": [
+    {
+     "kind": "centriole",
+     "pointA": "1890,9513,43779",
+     "pointB": ""
+    },
+    {
+     "kind": "cilium",
+     "pointA": "1965,9535,43809",
+     "pointB": "2101,9561,43949"
+    }
+   ],
+   "note": "Mouse Pacinian corpuscle"
+  }
+ ]
+}</script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+var DATA = null, CRED = "", WHO = "";
+var LS = "wjump_seed_done_v1";
+
+function log(msg, cls){
+  var el = document.getElementById("log");
+  var s = document.createElement("div");
+  if (cls) s.className = cls;
+  s.textContent = msg;
+  el.appendChild(s); el.scrollTop = el.scrollHeight;
+}
+function setStat(t){ document.getElementById("stat").textContent = t; }
+function done(){ try { return JSON.parse(localStorage.getItem(LS) || "{}"); } catch(e){ return {}; } }
+function markDone(k, key){
+  var d = done(); d[k] = key;
+  try { localStorage.setItem(LS, JSON.stringify(d)); } catch(e){}
+}
+var keyOf = c => c.dataset + "#" + c.row;
+
+/* ── the payload ─────────────────────────────────────────────────────────────────────────── */
+/* INLINE, not fetched. This page is opened from a folder as often as from the server, and
+   fetch() on a file:// URL is blocked by every browser -- the first version read
+   wjump_seed_cells.json beside itself and showed "Failed to fetch" the moment it was opened by
+   double-clicking. Inlining it costs 78 KB and removes the failure mode along with the second
+   file somebody has to remember to copy. Written by src/wjump_seed_annotations.py. */
+(function(){
+  var d = JSON.parse(document.getElementById("seeddata").textContent);
+  DATA = d;
+  var n = d.cells.length, org = d.cells.reduce((a,c)=>a+c.organelles.length, 0);
+  document.getElementById("summary").innerHTML =
+    "<b>" + n + "</b> cells and <b>" + org + "</b> organelle records, from <code>"
+    + d.source + "</code>. That is <b>" + (n*2 + org) + "</b> posts.";
+  var by = {};
+  d.cells.forEach(c => { by[c.dataset] = by[c.dataset] || {n:0, o:0, label:c.label};
+                         by[c.dataset].n++; by[c.dataset].o += c.organelles.length; });
+  var rows = Object.keys(by).sort().map(k =>
+    "<tr><td><code>" + k + "</code></td><td class='mut'>" + by[k].label + "</td><td><b>"
+    + by[k].n + "</b> cell" + (by[k].n===1?"":"s") + "</td><td class='mut'>"
+    + by[k].o + " organelle" + (by[k].o===1?"":"s") + "</td></tr>").join("");
+  document.getElementById("bydataset").innerHTML =
+    "<table><tr><th>dataset</th><th>your label</th><th></th><th></th></tr>" + rows + "</table>";
+  var already = Object.keys(done()).length;
+  if (already) log(already + " cells already posted in an earlier run — they will be skipped.", "warn");
+})();
+
+/* ── sign-in ─────────────────────────────────────────────────────────────────────────────── */
+/* OPENED FROM A FOLDER, GOOGLE SAYS NO -- and says it in a way that sounds like the app is broken.
+
+   Google Identity Services will only run on an origin listed in the OAuth client's authorised
+   JavaScript origins, and a page opened by double-clicking it has no origin at all: the browser
+   sends `null`. What comes back is "Adgangen er blokeret: Godkendelsesfejl / Fejl 400:
+   invalid_request" and a paragraph about the app not complying with Google's OAuth policy, which
+   reads as a fault in the tool rather than as "this file needs to be on the website".
+
+   So the page checks its own protocol first and says the actual thing. It cannot be fixed from
+   here -- no amount of client-side code gives a file:// page an origin -- and registering `null`
+   as an origin is not something Google allows, nor something anybody should want. */
+function originProblem(){
+  if (location.protocol === "https:" || location.hostname === "localhost") return null;
+  if (location.protocol === "file:")
+    return "<b>This page is open from a folder, not from the website.</b><br><br>"
+      + "Google sign-in refuses a <code>file://</code> page — it has no origin to check against "
+      + "the ones registered for ωJump, so it answers <i>Fejl 400: invalid_request</i> and a "
+      + "paragraph about OAuth policy. Nothing is wrong with the loader.<br><br>"
+      + "Put this file in the served repo beside <code>wjump.html</code> and open "
+      + "<code>https://grubblab.com/wjump_seed_post.html</code> instead.";
+  return "This page is on <code>" + location.protocol + "//" + location.host + "</code>. Google "
+    + "sign-in only runs on an origin registered for ωJump — open it from "
+    + "<code>https://grubblab.com/</code>.";
+}
+
+window.onload = function(){
+  var trouble = originProblem();
+  if (trouble){
+    var box = document.getElementById("origin");
+    box.style.display = ""; box.innerHTML = trouble;
+    document.getElementById("who").textContent =
+      "sign-in unavailable here — the dry run below still works, and shows exactly what would "
+      + "be sent.";
+    return;
+  }
+  var tries = 0;
+  (function arm(){
+    if (!window.google || !google.accounts || !google.accounts.id){
+      if (++tries < 40) return setTimeout(arm, 150);
+      return log("Google sign-in did not load — check the network.", "bad");
+    }
+    var cid = (DATA && DATA.backend && DATA.backend.clientId) || "";
+    if (!cid){ return setTimeout(arm, 200); }
+    google.accounts.id.initialize({ client_id: cid, callback: function(resp){
+      CRED = resp.credential;
+      try {
+        var p = JSON.parse(atob(CRED.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
+        WHO = p.name + " <" + p.email + ">";
+      } catch(e){ WHO = "signed in"; }
+      document.getElementById("who").textContent = "signed in as " + WHO
+        + " — every row will be attributed to this identity.";
+      document.getElementById("go").disabled = false;
+    }});
+    google.accounts.id.renderButton(document.getElementById("gsi"),
+      { theme:"outline", size:"large", text:"signin_with" });
+  })();
+};
+
+/* ── posting ─────────────────────────────────────────────────────────────────────────────── */
+/* text/plain, deliberately: it does not send a CORS preflight, which Apps Script answers with a
+   redirect and fails. The same trick every tool in this family uses. */
+function post(payload){
+  payload.ds = DATA.backend.ds;
+  payload.credential = CRED;
+  payload.timestamp = new Date().toISOString();
+  return fetch(DATA.backend.endpoint, { method:"POST", body: JSON.stringify(payload) })
+    .then(r => r.text())
+    .then(function(t){
+      var j; try { j = JSON.parse(t); }
+      catch(e){ throw new Error("the backend replied with something that is not JSON — "
+                                + t.slice(0,120)); }
+      if (!j.ok) throw new Error(j.error || "refused");
+      return j;
+    });
+}
+
+var STOP = false;
+function run(dry){
+  if (!DATA) return;
+  if (!dry && !CRED) return log("sign in first.", "bad");
+  STOP = false;
+  document.getElementById("log").innerHTML = "";
+  document.getElementById("dry").disabled = true;
+  document.getElementById("go").disabled = true;
+  var cells = DATA.cells, skipped = done();
+  var i = 0, posted = 0, merged = 0, failed = 0, orgs = 0, skip = 0;
+
+  function finish(){
+    setStat((dry ? "dry run finished — nothing was written. " : "finished. ")
+      + posted + " cells, " + orgs + " organelle records, " + merged + " merged into an existing "
+      + "nucleus, " + skip + " skipped as already done, " + failed + " failed.");
+    document.getElementById("dry").disabled = false;
+    document.getElementById("go").disabled = !CRED;
+  }
+
+  function step(){
+    if (STOP || i >= cells.length) return finish();
+    var c = cells[i++], k = keyOf(c);
+    document.getElementById("prog").style.width = (i / cells.length * 100) + "%";
+    setStat("cell " + i + " of " + cells.length + " — " + c.dataset);
+    if (!dry && skipped[k]){ skip++; return step(); }
+
+    var head = "[" + c.dataset + " row " + c.row + "] " + c.identity
+             + " at " + c.nucleus.join(", ")
+             + (c.organelles.length ? "  + " + c.organelles.map(o => o.kind).join(", ") : "  (no organelles)");
+    if (dry){ log(head, "mut"); posted++; orgs += c.organelles.length; return setTimeout(step, 0); }
+
+    log(head);
+    post({ type:"wjump_nucleus_found", dataset:c.dataset, boxKey:"",
+           x_vox:c.nucleus[0], y_vox:c.nucleus[1], z_vox:c.nucleus[2] })
+      .then(function(r){
+        var key = r.nucleusKey;
+        if (r.merged){ merged++; log("   merged into " + key + " (a nucleus was already within "
+                                     + "5 µm)", "warn"); }
+        else log("   " + key, "ok");
+        /* THE NAME. certainty 5 and sawTally false: these are his own measurements, made from the
+           imagery rather than from a crowd tally he was shown. */
+        return post({ type:"wjump_nucleus_name", dataset:c.dataset, nucleusKey:key,
+                      identity:c.identity, certainty:5, sawTally:false,
+                      comment:(c.note || "") })
+          .then(function(){ return key; });
+      })
+      .then(function(key){
+        /* THE KEY IS RETURNED EVEN WITH NOTHING TO ATTACH. The first version returned null here
+           for a cell with no organelles, and the step below only records a cell as done when it
+           has a key -- so those cells were re-posted on every run. The backend's 5 µm dedup
+           merged them rather than doubling them, which is exactly why it would have gone
+           unnoticed: the sheet stays right and the run gets slower every time. */
+        if (!c.organelles.length) return key;
+        /* ONE GROUP PER CELL, µJump's convention -- groupId + subIndex/subCount, so a centriole
+           and its cilium read as one visit rather than two unrelated rows. */
+        var gid = key + "_" + Date.now() + "_org";
+        var coord = c.nucleus.join(",");
+        return c.organelles.reduce(function(pr, sub, n){
+          return pr.then(function(){
+            return post({ type:"organelle_location", nucleusId:key, rootId:"", coord:coord,
+                          groupId:gid, subIndex:n+1, subCount:c.organelles.length,
+                          kind:sub.kind, pointA:sub.pointA, pointB:sub.pointB,
+                          identified:c.identity, comment:(c.note || ""), path:"" })
+              .then(function(){ orgs++; });
+          });
+        }, Promise.resolve()).then(function(){ return key; });
+      })
+      .then(function(key){
+        posted++;
+        if (key) markDone(k, key);
+        setTimeout(step, 120);
+      })
+      .catch(function(e){
+        failed++;
+        log("   FAILED: " + e.message, "bad");
+        /* Kept going rather than stopping: one refused row should not strand the other 190, and
+           the failures are all in the log with their dataset and spreadsheet row. Re-running
+           retries only what did not land. */
+        setTimeout(step, 300);
+      });
+  }
+  step();
+}
+
+document.getElementById("dry").addEventListener("click", function(){ run(true); });
+document.getElementById("go").addEventListener("click", function(){
+  if (!confirm("This writes " + DATA.cells.length + " cells into the ωJump sheet, as "
+      + WHO + ".\n\nIt takes about ten minutes. You can close the tab and re-open it to resume."))
+    return;
+  run(false);
+});
+document.getElementById("forget").addEventListener("click", function(){
+  try { localStorage.removeItem(LS); } catch(e){}
+  log("progress forgotten — the next run starts from the first cell. The backend's own 5 µm "
+      + "dedup still stops anything being doubled.", "warn");
+});
+</script>
