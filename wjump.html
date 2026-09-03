@@ -119,7 +119,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-02 21:34</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-03 06:39</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -308,9 +308,9 @@ try{var _t=localStorage.getItem("ujump_theme");
        has been wrong twice: it said twenty-six volumes and 2,922 boxes while the roster was 41
        and 14,532, because prose is the one thing in this file nothing checks. Now the numbers
        come from the same array the picker reads, so they cannot drift again. -->
-  <p class="hint">59 volumes are open, listed smallest first with the number of
+  <p class="hint">61 volumes are open, listed smallest first with the number of
   40&nbsp;&micro;m boxes each one takes &mdash; 1 for the smallest, 3,672 for the
-  largest, 11,855 across the roster. The map above sizes itself to whichever volume you pick
+  largest, 13,031 across the roster. The map above sizes itself to whichever volume you pick
   and keeps one scale across its panels, so a distance in one is the same distance in another.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
@@ -536,6 +536,9 @@ var PROV_WANNER = {
    redistributes nothing, exactly as with the WEBKNOSSOS rows. */
 var BOSS_NOTE = "\u03c9Jump links to BossDB's own public bucket and redistributes nothing";
 var PROV_WILDENBERG23 = {
+  /* Stated, not parsed: these citations name a BossDB dataset release rather than a journal
+     line, so there is no "(YYYY)" in them for the index table to read. */
+  year: 2023,
   name: "Kasthuri lab (UChicago / Argonne), via BossDB",
   licence: "CC-BY-4.0",
   licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
@@ -547,6 +550,9 @@ var PROV_WILDENBERG23 = {
   doi: "https://doi.org/10.60533/boss-2023-0s41",
   terms: { note: BOSS_NOTE } };
 var PROV_WILDENBERG21 = {
+  /* Stated, not parsed: these citations name a BossDB dataset release rather than a journal
+     line, so there is no "(YYYY)" in them for the index table to read. */
+  year: 2021,
   name: "Kasthuri lab (UChicago / Argonne), via BossDB",
   licence: "CC-BY-4.0",
   licenceUrl: "https://creativecommons.org/licenses/by/4.0/",
@@ -558,6 +564,9 @@ var PROV_WILDENBERG21 = {
   doi: "https://doi.org/10.60533/BOSS-2021-YA04",
   terms: { note: BOSS_NOTE } };
 var PROV_ISHIBASHI = {
+  /* Stated, not parsed: these citations name a BossDB dataset release rather than a journal
+     line, so there is no "(YYYY)" in them for the index table to read. */
+  year: 2021,
   /* Collected at OHSU, analysed at UTHealth Houston -- both are named on the project page, and a
      credit line that dropped either would be crediting the wrong lab for half the work. */
   name: "Massey & Ribelayga labs (UTHealth Houston) with OHSU, via BossDB",
@@ -892,6 +901,53 @@ UJ.cfg.datasets = [
     /* 290.9 × 622.4 × 396.8 µm, 9600 boxes */
     source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd4380100004f6f8c2784/color",
     provider:PROV_KARIMI },
+  /* ── THE OTHER TWO OF KARIMI'S SIX ─────────────────────────────────────────────────────────
+     Søren, 2026-09-02, with the apical-tuft paper's own list of six WEBKNOSSOS links. Four
+     (V2, PPC, ACC, PPC-2) were already here; these two were not. Matched by DATASET ID rather
+     than by name -- the roster carries two other rows whose tissue says "S1" and neither is this
+     one, so a name check would have answered "already there" and been wrong. */
+  { id:"wk-karimi-s1", tissue:"cortex (S1)", species:"mouse",
+    /* MEASURED 2026-09-02 (probe method, level 32 read whole): imagery 101.4 x 67.3 x 218.6 µm
+       inside a declared 105.0 x 73.4 x 218.6 -- barely padded, unlike its siblings. 36 boxes. */
+    shape:[7808, 5984, 9024], origin:[0, 128, 0],
+    res_nm:[28, 11.239999771118164, 11.239999771118164], tier:"em", enabled:true,
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1cd439010000e66f8c2787/color",
+    provider:PROV_KARIMI },
+  /* THE PADDED ONE, and the best argument on this roster for measuring rather than reading. Its
+     declared array is 60,000 x 60,000 x 26,000 voxels -- 674 x 674 x 780 µm, three round numbers
+     and mostly empty. The imagery is 391 x 230 x 737 µm: 1,140 boxes instead of 5,780, and none
+     of the 4,640 that would have gone nowhere.
+
+     Measured at level 64 by lattice then line scan (11,700 chunks is 375 MB, which is not a thing
+     to pull through somebody's laptop), rounded outward to whole chunks -- 23 µm in x and y,
+     61 µm in z. Slightly too big by construction, which is the direction that costs a few empty
+     boxes rather than hiding tissue nobody would know was missing.
+
+     tier "em": the array carries a segmentation layer, but it is the FluoEM reconstruction of a
+     different sub-volume and is not offered here. */
+  { id:"wk-karimi-lpta", tissue:"cortex (LPtA)", species:"mouse",
+    shape:[24576, 20480, 34816], origin:[0, 12288, 10240],
+    res_nm:[30, 11.239999771118164, 11.239999771118164], tier:"em", enabled:true,
+    source:"zarr://https://demo.wk1.connectomics.hpccloud.mpg.de/data/zarr/5c1ede340100007c838c3579/color",
+    provider:{
+    name: "MPI for Brain Research (Helmstaedter lab), via WEBKNOSSOS",
+    licence: "publicly released — no reuse licence stated",
+    licenceUrl: "https://doi.org/10.7554/eLife.46876",
+    portal: "https://webknossos.org/annotations/5e57f1a50100009900c94414",
+    bucket: "demo.wk1.connectomics.hpccloud.mpg.de",
+    citation: "Karimi, Odenthal, Drawitsch, Boergens & Helmstaedter, “Cell-type specific " +
+              "innervation of cortical pyramidal cells at their apical dendrites”, " +
+              "eLife 9, e46876 (2020)",
+    doi: "https://doi.org/10.7554/eLife.46876",
+    /* Unlike the other five, this dataset record carries no description of its own. What
+       establishes it is the PAPER: its data-availability section names this exact short link as
+       the LPtA sample, and the annotation behind the link is called "LPtA_public". That is a
+       stronger basis than a description field anyway -- it is the authors saying which volume is
+       which, in the publication. */
+    terms: { basis: "the paper's own data-availability list names wklink.org/8912 as its LPtA " +
+                    "sample, and the public annotation behind that link is titled LPtA_public on " +
+                    "this dataset",
+             verifiedFrom: "https://doi.org/10.7554/eLife.46876", note: WK_NOTE } } },
   { id:"wk-ex145-l4-s1", tissue:"cortex L4 (S1)", species:"mouse",
     shape:[3306, 8431, 5496], origin:[118, 103, 103],
     res_nm:[28, 11.239999771118164, 11.239999771118164], tier:"inf", enabled:true,
