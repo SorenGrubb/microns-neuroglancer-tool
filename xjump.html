@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-03 19:40</span></p>
+ctrl-shift-R.">build 2026-09-03 21:07</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -3545,6 +3545,14 @@ UJ.app = (function(){
   "use strict";
   var X = UJ.xjump;
   var LIVE = !!window.XJUMP_LIVE;
+  /* HOW MUCH OF THE PAGE IS ACTUALLY HERE. "loading" until the backend read lands, then "ok" or
+     "failed". The harness has nothing to read, so it starts finished.
+
+     This exists because a panel that looks finished while it is still half-built is worse than one
+     that is visibly empty: on 2026-09-03 a screenshot of the filter taken during the read showed
+     the published counts with no community cells in them, and two rounds of work went into a fix
+     that was already live. */
+  var LOAD_STATE = LIVE ? "loading" : "ok";
   /* `opinions` holds what people have called cells that were never BUILT here -- a proofread
      reconstruction, or a marked nucleus. Same four fields a built cell carries, so votesHtml and
      opinionOf read one shape for both. Empty against a deployment that does not send it yet,
@@ -7766,9 +7774,22 @@ UJ.app = (function(){
         if (was[sel].indexOf(i.value) >= 0) i.checked = true;
       });
     });
-    if (el("filterUniverse"))
-      el("filterUniverse").textContent =
-        filterable().length.toLocaleString() + " cells with a soma position";
+    paintUniverseLine();
+  }
+
+  /* The one line under the tickboxes that says what they were counted over -- and, when that is
+     not everything, why. */
+  function paintUniverseLine(){
+    var n = el("filterUniverse"); if (!n) return;
+    n.textContent = filterable().length.toLocaleString() + " cells with a soma position"
+      + (LOAD_STATE === "loading"
+          ? " — still reading what people here have built and re-identified, so these are the "
+            + "published cells only, so far"
+          : LOAD_STATE === "failed"
+            ? " — the community's cells could not be read (see the message at the top of the "
+              + "page), so these are the published cells only"
+            : "");
+    n.style.color = LOAD_STATE === "ok" ? "" : "var(--warn)";
   }
 
   function wireFilter(){
@@ -7779,9 +7800,7 @@ UJ.app = (function(){
     buildOrganelleFilter();
     buildAnnotChecks();
     if (el("filterOrgOn")) el("filterOrgOn").addEventListener("change", function(){});
-    if (el("filterUniverse"))
-      el("filterUniverse").textContent =
-        filterable().length.toLocaleString() + " cells with a soma position";
+    paintUniverseLine();
     ["filterNearOn", "filterNearDist", "filterNearIncludeRef", "filterIncludeUnnamed",
      "filterLayerNear", "filterRegionOn"].forEach(function(id){
       var e = el(id); if (e) e.addEventListener("change", invalidatePreview);
@@ -8426,6 +8445,7 @@ UJ.app = (function(){
              "the backend is reachable", and there is more than one caller. Clearing it only in
              init() left the banner standing after a later load had proved it wrong. */
           backendNote("");
+          LOAD_STATE = "ok";
           return STATE;
         });
     },
@@ -8616,6 +8636,11 @@ UJ.app = (function(){
       : "";
   }
   function loadFailed(e){
+    /* The banner at the top says what went wrong. This makes the FILTER say what it means for the
+       filter, where somebody reading counts will see it -- a panel whose numbers are missing the
+       community's cells must not look like a panel whose numbers are complete. */
+    LOAD_STATE = "failed";
+    if (el("filterCard")) refreshFilterControls();
     /* On file:// the protocol IS the cause, whatever the error text happens to say -- the request
        could not have succeeded from there. Letting a less informative message overwrite that
        diagnosis is how a page ends up reporting "fetch is not defined" to somebody whose actual
