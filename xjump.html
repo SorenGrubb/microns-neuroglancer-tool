@@ -441,7 +441,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-03 09:47</span></p>
+ctrl-shift-R.">build 2026-09-03 12:01</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -5849,11 +5849,21 @@ UJ.app = (function(){
       +       "organelle layer &#8599;</button>"
       +   "</div>"
       +   "<div class='row' style='margin-top:8px'>"
+      /* THE KIND, CHOSEN ONCE, BEFORE THE PASTE (Søren, 2026-09-03). Every pasted row used to
+         arrive as a centriole and had to be relabelled one dropdown at a time -- the same
+         complaint he made about ωJump, in the tool he was holding up as the example. */
+      +     "<label class='hint' style='align-self:center;margin:0'>What are these?</label>"
+      +     "<select class='organ-paste-kind' style='flex:1 1 220px;width:auto'>"
+      +       organ().optionsHtml() + "</select>"
+      +   "</div>"
+      +   "<div class='row' style='margin-top:8px'>"
       +     "<input type='text' class='organ-paste' placeholder='paste the link back here' "
       +       "style='flex:1 1 240px'>"
       +     "<button type='button' class='organ-from-link' style='width:auto'>Add a row per "
       +       "marker</button>"
-      +   "</div></div>"
+      +   "</div>"
+      +   "<p class='hint organ-paste-note' style='margin:6px 0 0'></p>"
+      +   "</div>"
       + "<div class='organ-rows'></div>"
       + "<button type='button' class='organ-add' style='margin-top:8px;width:auto;font-size:13px;"
       +   "padding:6px 10px'>+ Add another structure</button>"
@@ -5869,6 +5879,12 @@ UJ.app = (function(){
           : "");
     addOrganRow(d, cellKey);
     d.querySelector(".organ-add").addEventListener("click", function(){ addOrganRow(d, cellKey); });
+    var pk = d.querySelector(".organ-paste-kind");
+    if (pk){
+      pk.value = "centriole";
+      pk.addEventListener("change", function(){ syncPasteNote(d); });
+      syncPasteNote(d);
+    }
     d.querySelector(".organ-from-link").addEventListener("click", function(){
       rowsFromLink(d, cellKey); });
     d.querySelector(".organ-submit").addEventListener("click", function(){
@@ -5911,7 +5927,9 @@ UJ.app = (function(){
     return (row && row.pos) || null;
   }
 
-  function addOrganRow(d, cellKey, kindValue, posVox){
+  /* posBVox is a vector kind's second point, filled when a paste paired the markers up.
+     Ignored by a point kind, whose second field is hidden by syncOrganRow anyway. */
+  function addOrganRow(d, cellKey, kindValue, posVox, posBVox){
     var rows = d.querySelector(".organ-rows"); if (!rows) return null;
     var wrap = document.createElement("div");
     wrap.innerHTML = organRowHtml();
@@ -5951,6 +5969,8 @@ UJ.app = (function(){
     });
     if (posVox) ["x","y","z"].forEach(function(ax, i){
       row.querySelector(".oa" + ax).value = String(Math.round(posVox[i])); });
+    if (posBVox && organ().isVector(kind.value)) ["x","y","z"].forEach(function(ax, i){
+      row.querySelector(".ob" + ax).value = String(Math.round(posBVox[i])); });
     syncOrganRow(row); renumberOrganRows(d);
     return row;
   }
@@ -5977,6 +5997,21 @@ UJ.app = (function(){
     return v.every(function(t){ return t !== "" && !isNaN(Number(t)); }) ? v.map(Number) : null;
   }
 
+  /* What the markers will become, said BEFORE they are pasted. For a vector kind the click
+     order carries meaning and an error message teaches it too late. The names are the kind's own
+     pointLabels, never a hardcoded base/tip. */
+  function syncPasteNote(d){
+    var sel = d.querySelector(".organ-paste-kind"), note = d.querySelector(".organ-paste-note");
+    if (!sel || !note) return;
+    var O = organ(), k = sel.value, lbl = O.pointLabels(k);
+    note.innerHTML = O.isVector(k)
+      ? "<b>" + esc(O.labelOf(k)) + "</b> takes two markers per structure &mdash; "
+        + "<b>Ctrl</b>+click them in pairs, " + esc(lbl[0]).toLowerCase() + " then "
+        + esc(lbl[1]).toLowerCase() + ", and each pair becomes one row."
+      : "Each marker becomes one <b>" + esc(O.labelOf(k)) + "</b> row. Anything you mis-labelled "
+        + "can still be changed row by row below.";
+  }
+
   function rowsFromLink(d, cellKey){
     var box = d.querySelector(".organ-paste");
     var oc = (UJ.cfg.organelles || {});
@@ -6000,10 +6035,20 @@ UJ.app = (function(){
     var rows = d.querySelector(".organ-rows");
     var onlyEmpty = rows.children.length === 1 && !readOrganCoord(rows.children[0], "a");
     if (onlyEmpty) rows.innerHTML = "";
-    r.points.forEach(function(p){ addOrganRow(d, cellKey, "centriole", p); });
+    var sel = d.querySelector(".organ-paste-kind");
+    var kind = sel ? sel.value : "centriole";
+    /* The pairing is the ontology's arithmetic, not this page's -- see rowsFromPoints. */
+    var made = organ().rowsFromPoints(kind, r.points);
+    made.rows.forEach(function(row){ addOrganRow(d, cellKey, kind, row.a, row.b); });
     box.value = "";
-    organSay(d, r.points.length + " row" + (r.points.length === 1 ? "" : "s")
-      + " added from the link. Set what each one is, then submit.", true);
+    var n = made.rows.length;
+    organSay(d, n + " " + esc(organ().labelOf(kind)) + " row" + (n === 1 ? "" : "s")
+      + " added from " + r.points.length + " marker" + (r.points.length === 1 ? "" : "s")
+      + (made.odd
+          ? ". The last one is missing its second point &mdash; there was an odd marker, so fill "
+            + "it in or delete the row."
+          : ". Check them and submit."),
+      !made.odd);
   }
 
   function submitOrganelles(d, cellKey){

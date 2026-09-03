@@ -433,7 +433,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-03 11:19</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-03 12:05</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -867,6 +867,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/organellefilter.js"></script>
 <script src="core/points.js"></script>
 <script src="core/gamify.js"></script>
+<script src="core/organelles.js"></script>
 <script src="core/ontology.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -1558,6 +1559,21 @@ function organelleFormHtml(slug){
   const name=(slug&&typeof LEAF_NAMES!=="undefined")?LEAF_NAMES[slug]:null;
   let h='<p class="hint">Mark where an organelle or extracellular structure sits on this cell — centriole, primary cilium, or any of the others in the topic-organized list below. Add one row per structure — mix and match freely, and log more than one of the same kind if the cell has more than one (e.g. two centrioles, or several mitochondria).</p>';
   h+='<div class="meta">'+(name?"Identified as: <b>"+escHtml(name)+"</b> &middot; ":"")+(ID_CTX.body?"cell body "+ID_CTX.body:"no cell body id on file")+(ID_CTX.seg?" &middot; c3 segment "+ID_CTX.seg:"")+(ID_CTX.pos?" &middot; voxel ("+ID_CTX.pos.join(", ")+")":"")+'</div>';
+  /* PICK THE KIND, PASTE THE LINK, GET A ROW PER MARKER (Søren, 2026-09-03: "I also wanted the
+     option to paste url, like in xJump where you can log a lot of organelles of the same type
+     quickly"). Markup mirrors core/panel.js's organellePasteHtml() for the reason the whole form
+     mirrors it -- so the three read alike if anyone compares them -- while the parsing and the
+     marker-to-row arithmetic come from the shared module. */
+  h+='<div class="organ-paste-box" style="border:1px dashed var(--line);border-radius:8px;'
+    +'padding:10px;margin:0 0 10px">'
+    +'<div class="hint" style="margin:0">Or point at them instead: Ctrl+click each structure in the '
+    +'viewer, then paste that link here &mdash; every marker becomes a row of the kind you pick.</div>'
+    +'<div style="margin-top:8px"><label for="organPasteKind">What are these?</label>'
+    +'<select id="organPasteKind">'+ORGANELLE_KIND_OPTIONS_HTML+'</select></div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
+    +'<input type="text" id="organPasteLink" placeholder="paste a Neuroglancer link" style="flex:1 1 240px">'
+    +'<button type="button" class="idbtn" id="organPasteGo" style="width:auto">Add a row per marker</button>'
+    +'</div><div class="hint" id="organPasteNote" style="margin:6px 0 0"></div></div>';
   h+='<div id="organRows"></div>';
   h+='<button type="button" class="idbtn" id="organAddRow" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another structure</button>';
   h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:14px">Comments (optional)</label>'
@@ -1591,7 +1607,7 @@ function wireOrganelleForm(container,slug){
       window.open(viewerUrl([+x,+y,+z],ID_CTX.seg),"_blank","noopener");
     });
   }
-  function addRow(){
+  function addRow(kindValue,ptA,ptB){
     const isFirstRow=rowsEl.children.length===0;
     const row=document.createElement("div");
     row.className="merged-row";
@@ -1635,7 +1651,9 @@ function wireOrganelleForm(container,slug){
     const kindEl=row.querySelector(".organ-row-kind");
     const centrioleFields=row.querySelector(".organ-centriole-fields"),ciliumFields=row.querySelector(".organ-cilium-fields");
     const pointLabelA=row.querySelector(".organ-point-label-a"),pointLabelB=row.querySelector(".organ-point-label-b");
-    kindEl.addEventListener("change",()=>{
+    /* Extracted from the change listener so a row created BY A PASTE reaches the same state
+       without faking an event. Which fields show is asked of the kind's own `vector` flag. */
+    function syncFields(){
       const info=ORGANELLE_KIND_BY_VALUE[kindEl.value];
       const isCilium=!!(info&&info.vector);
       centrioleFields.style.display=isCilium?"none":"";
@@ -1643,7 +1661,8 @@ function wireOrganelleForm(container,slug){
       const pl=organReportPointLabels(kindEl.value);
       if(pointLabelA)pointLabelA.textContent=pl[0]+" (voxel)";
       if(pointLabelB)pointLabelB.textContent=pl[1]+" (voxel)";
-    });
+    }
+    kindEl.addEventListener("change",syncFields);
     if(isFirstRow){
       kindEl.value="centriole";
     }else{
@@ -1654,6 +1673,13 @@ function wireOrganelleForm(container,slug){
     const cx=row.querySelector(".orx"),cy=row.querySelector(".ory"),cz=row.querySelector(".orz");
     const bx=row.querySelector(".orbx"),by=row.querySelector(".orby"),bz=row.querySelector(".orbz");
     const tx=row.querySelector(".ortx"),ty=row.querySelector(".orty"),tz=row.querySelector(".ortz");
+    if(kindValue){kindEl.value=kindValue;syncFields();}
+    const fill=(p,a,b,c)=>{if(!p)return;a.value=p[0];b.value=p[1];c.value=p[2];};
+    if(ptA){
+      const vinfo=ORGANELLE_KIND_BY_VALUE[kindEl.value];
+      if(vinfo&&vinfo.vector){fill(ptA,bx,by,bz);fill(ptB,tx,ty,tz);}
+      else fill(ptA,cx,cy,cz);
+    }
     wirePasteSplit(cx,cy,cz);wireJump(row.querySelector(".organ-jump-c"),cx,cy,cz);
     wirePasteSplit(bx,by,bz,tx);wireJump(row.querySelector(".organ-jump-base"),bx,by,bz);
     wirePasteSplit(tx,ty,tz);wireJump(row.querySelector(".organ-jump-tip"),tx,ty,tz);
@@ -1661,6 +1687,54 @@ function wireOrganelleForm(container,slug){
   }
   addRow();
   container.querySelector("#organAddRow").addEventListener("click",()=>addRow());
+  /* The paste, wired the same way and against the same shared functions as core/panel.js's. */
+  (function(){
+    const O=(window.UJ&&UJ.organelles)||null;
+    const box=container.querySelector("#organPasteLink");
+    const kindSel=container.querySelector("#organPasteKind");
+    const go=container.querySelector("#organPasteGo");
+    const note=container.querySelector("#organPasteNote");
+    if(!box||!kindSel||!go)return;
+    if(!O||!O.markersFromLink||!O.rowsFromPoints){
+      const wrap=go.closest(".organ-paste-box"); if(wrap)wrap.remove(); return;
+    }
+    kindSel.value="centriole";
+    function syncNote(){
+      const k=kindSel.value,info=ORGANELLE_KIND_BY_VALUE[k],lbl=organReportPointLabels(k);
+      const nm=escHtml((info&&info.label)||k);
+      note.innerHTML=(info&&info.vector)
+        ? "<b>"+nm+"</b> takes two markers per structure &mdash; Ctrl+click them in pairs, "
+          +escHtml(lbl[0]).toLowerCase()+" then "+escHtml(lbl[1]).toLowerCase()
+          +", and each pair becomes one row."
+        : "Each marker becomes one <b>"+nm+"</b> row. Anything you mis-labelled can still be "
+          +"changed row by row below.";
+    }
+    kindSel.addEventListener("change",syncNote); syncNote();
+    go.addEventListener("click",()=>{
+      const r=O.markersFromLink(box.value,null);
+      if(!r.ok){note.innerHTML='<span style="color:var(--bad)">'+escHtml(r.error)+'</span>';return;}
+      if(!r.points.length){
+        note.innerHTML='<span style="color:var(--bad)">That link has no markers on it. '
+          +'Ctrl+click the structures in the viewer first, then copy the whole address bar.</span>';
+        return;
+      }
+      const kind=kindSel.value;
+      const first=rowsEl.children[0];
+      const untouched=rowsEl.children.length===1&&first
+        &&![...first.querySelectorAll("input")].some(i=>i.value.trim()!=="");
+      if(untouched)rowsEl.innerHTML="";
+      const made=O.rowsFromPoints(kind,r.points);
+      made.rows.forEach(row=>addRow(kind,row.a,row.b));
+      box.value="";
+      const info=ORGANELLE_KIND_BY_VALUE[kind], n=made.rows.length;
+      note.innerHTML=n+" "+escHtml((info&&info.label)||kind)+" row"+(n===1?"":"s")
+        +" added from "+r.points.length+" marker"+(r.points.length===1?"":"s")
+        +(made.odd
+           ? '. <span style="color:var(--warn)">The last one is missing its second point &mdash; '
+             +'there was an odd marker, so fill it in or delete the row.</span>'
+           : ". Check them and submit.");
+    });
+  })();
   const submitBtn=container.querySelector("#organSubmit");
   submitBtn.addEventListener("click",()=>{
     const rows=[...rowsEl.children];

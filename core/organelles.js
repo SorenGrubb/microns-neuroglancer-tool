@@ -51,10 +51,63 @@ UJ.organelles = (function(){
   /* "is this kind the two-point shape", asked of the DATA rather than by name. µJump learned this
      the hard way: a hardcoded ===\"cilium\" check meant nucleoplasmic reticulum type II silently
      got one coordinate field when it was added as the second vector kind. */
-  function isVector(v){ var k = BY_VALUE[v]; return !!(k && k.vector); }
+  function isVector(v){
+    var k = BY_VALUE[v];
+    if (k) return !!k.vector;
+    /* No UJ.organelleData on this page: the µJump family carries the same ontology as
+       core/ontology.js's ORGANELLE_KIND_BY_VALUE. Read rather than assumed false -- answering
+       "not a vector" for a cilium would pair nothing and make half-filled rows. */
+    var o = (typeof ORGANELLE_KIND_BY_VALUE !== "undefined") ? ORGANELLE_KIND_BY_VALUE[v] : null;
+    return !!(o && o.vector);
+  }
   function pointLabels(v){ var k = BY_VALUE[v]; return (k && k.pointLabels) || ["Point 1", "Point 2"]; }
   function labelOf(v){ var k = BY_VALUE[v]; return (k && k.label) || v; }
   function shortOf(v){ var k = BY_VALUE[v]; return (k && k.short) || v; }
+
+  /* THE MARKERS IN A PASTED VIEWER LINK.                                          2026-09-03
+
+     Søren: "I also wanted the option to paste url, like in xJump where you can log a lot of
+     organelles of the same type quickly."
+
+     Decoding a Neuroglancer state and pulling the point annotations out of it is not page
+     knowledge -- it is the same six lines wherever it happens -- and the µJump family had no copy
+     of it at all, so the alternative to putting it here was writing one into core/panel.js and a
+     second into hjump.html. χJump keeps its own X.parsePoints, which does more (it reads the
+     position too, and its callers need to tell "no markers" from "markers in the wrong layer"
+     apart); this is the smaller shared thing the other forms need.
+
+     THE LAYER NAME IS OPTIONAL and the µJump family passes nothing. χJump filters to its
+     `organelles` layer because its own button arms exactly that layer, so a marker dropped
+     elsewhere means something else. No other tool has that convention, and being fussy about a
+     layer name nobody was told to use would reject the links people actually paste.
+
+     A point is kept only if it is three finite numbers. Neuroglancer's annotation list also holds
+     lines, boxes and ellipsoids, and a half-written point annotation can carry nulls. */
+  function markersFromLink(text, layerName){
+    if (!text || !String(text).trim()) return { ok:false, error:"nothing pasted", points:[] };
+    var t = String(text).trim();
+    var hash = t.indexOf("#!");
+    if (hash >= 0) t = t.slice(hash + 2);
+    if (/%7B|%22/i.test(t)){ try { t = decodeURIComponent(t); } catch (e){} }
+    t = t.trim();
+    if (t.charAt(0) !== "{")
+      return { ok:false, error:"that does not look like a Neuroglancer link", points:[] };
+    var st;
+    try { st = JSON.parse(t); }
+    catch (e){ return { ok:false, points:[],
+      error:"that link's state is not valid JSON \u2014 copy the whole address bar, not part of it" }; }
+    var pts = [];
+    (st.layers || []).forEach(function(l){
+      if (!l || l.type !== "annotation") return;
+      if (layerName && l.name !== layerName) return;
+      (l.annotations || []).forEach(function(a){
+        if (a && a.point && a.point.length === 3
+            && a.point.every(function(v){ return isFinite(Number(v)); }))
+          pts.push(a.point.map(Number));
+      });
+    });
+    return { ok:true, points: pts };
+  }
 
   /* ONE PASTE OF MARKERS, ONE KIND -- how many markers does a row of this kind take?
 
@@ -140,5 +193,5 @@ UJ.organelles = (function(){
   return { GROUPS:GROUPS, KINDS:KINDS, BY_VALUE:BY_VALUE, optionsHtml:optionsHtml,
            isVector:isVector, pointLabels:pointLabels, labelOf:labelOf, shortOf:shortOf,
            countParts:countParts, buildSubs:buildSubs, splitPaste:splitPaste, groupId:groupId,
-           rowsFromPoints:rowsFromPoints };
+           rowsFromPoints:rowsFromPoints, markersFromLink:markersFromLink };
 })();

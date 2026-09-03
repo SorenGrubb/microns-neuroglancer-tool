@@ -658,7 +658,7 @@ function loadCommunityReports(nid,cellPos){
    showing its own identity block, and duplicate ids would mean only one of the two ever gets
    wired correctly. */
 function organelleFlagHtml(){
-  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Also want to log an organelle\'s location on this cell? <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Report an organelle &rarr;</span></span>'
+  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Also log an organelle here <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Log one &rarr;</span></span>'
     +'<div id="organelleInlineBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
 }
 function wireOrganelleFlag(slug){
@@ -669,7 +669,7 @@ function wireOrganelleFlag(slug){
     const showing=body.style.display!=="none";
     if(showing){
       body.style.display="none";
-      toggle.innerHTML="Report an organelle &rarr;";
+      toggle.innerHTML="Log one &rarr;";
       return;
     }
     body.style.display="";
@@ -677,10 +677,38 @@ function wireOrganelleFlag(slug){
     if(!wired){body.innerHTML=organelleFormHtml(slug);wireOrganelleForm(body,slug);wired=true;}
   });
 }
+/* PICK THE KIND, PASTE THE LINK, GET A ROW PER MARKER.                            2026-09-03
+
+   Søren: "I also wanted the option to paste url, like in xJump where you can log a lot of
+   organelles of the same type quickly."
+
+   Typing was the only way in here: three fields per structure, "+ Add another structure", repeat.
+   Twelve mitochondria is thirty-six numbers read off a screen and typed back, and the numbers are
+   already in the address bar of the viewer tab you Ctrl+clicked them in.
+
+   THE KIND IS CHOSEN BEFORE THE PASTE, which is the half ωJump learned this morning: a bulk action
+   that fills in the coordinates and leaves you to open twelve dropdowns has handed most of the
+   work back. Rows arrive labelled and submittable.
+
+   The parsing and the marker-to-row arithmetic are both core/organelles.js's -- markersFromLink
+   and rowsFromPoints. Nothing about how many markers a cilium takes is decided here. */
+function organellePasteHtml(){
+  return '<div class="organ-paste-box" style="border:1px dashed var(--line);border-radius:8px;'
+    +'padding:10px;margin:0 0 10px">'
+    +'<div class="hint" style="margin:0">Or point at them instead: Ctrl+click each structure in the '
+    +'viewer, then paste that link here &mdash; every marker becomes a row of the kind you pick.</div>'
+    +'<div style="margin-top:8px"><label for="organPasteKind">What are these?</label>'
+    +'<select id="organPasteKind">'+ORGANELLE_KIND_OPTIONS_HTML+'</select></div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
+    +'<input type="text" id="organPasteLink" placeholder="paste a Neuroglancer link" style="flex:1 1 240px">'
+    +'<button type="button" class="idbtn" id="organPasteGo" style="width:auto">Add a row per marker</button>'
+    +'</div><div class="hint" id="organPasteNote" style="margin:6px 0 0"></div></div>';
+}
 function organelleFormHtml(slug){
   const name=(slug&&typeof LEAF_NAMES!=="undefined")?LEAF_NAMES[slug]:null;
   let h='<p class="hint">Mark where an organelle or extracellular structure sits on this cell — centriole, primary cilium, or any of the others in the topic-organized list below. Add one row per structure — mix and match freely, and log more than one of the same kind if the cell has more than one (e.g. two centrioles, or several mitochondria).</p>';
   h+='<div class="meta">'+(name?"Identified as: <b>"+name+"</b> &middot; ":"")+(ID_CTX.nucId?"nucleus "+ID_CTX.nucId:"no nucleus ID on file")+(ID_CTX.root?" &middot; root "+ID_CTX.root:"")+(ID_CTX.pos?" &middot; voxel ("+coordSpan(ID_CTX.pos[0],ID_CTX.pos[1],ID_CTX.pos[2])+")":"")+'</div>';
+  h+=organellePasteHtml();
   h+='<div id="organRows"></div>';
   h+='<button type="button" class="idbtn" id="organAddRow" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another structure</button>';
   h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:14px">Comments (optional)</label>'
@@ -695,6 +723,73 @@ function organelleFormHtml(slug){
   h+='<div class="idf-actions"><button class="idbtn idbtn-submit" id="organSubmit">Submit organelle report</button></div>'
     +'<div id="organThanks"></div>';
   return h;
+}
+/* WHAT THE PASTE DOES.                                                            2026-09-03
+
+   Reads the markers out of the pasted state (UJ.organelles.markersFromLink), turns them into rows
+   of the chosen kind (UJ.organelles.rowsFromPoints -- which pairs them up for a vector kind, so a
+   cilium's six markers make three rows and not six half-filled ones), and appends.
+
+   ONLY EVER ADDS. A paste that replaced the rows would throw away whatever was already typed. The
+   one exception is the single untouched default row the form opens with: replacing that is not
+   losing anything, and leaving it would put an empty centriole row above every pasted one.
+
+   THE NOTE UNDER THE PICKER is written before the pasting, not after, because for a vector kind
+   the click ORDER carries meaning -- base then tip -- and somebody who learns that from an error
+   message has already clicked in the wrong order. The names are the kind's own pointLabels.
+
+   DEGRADES QUIETLY. core/organelles.js is loaded by the tools that have this form; if a page ever
+   carries panel.js without it, the callout is removed rather than left as a button that does
+   nothing. */
+function wireOrganellePaste(container,rowsEl,addRow){
+  const O=(window.UJ&&UJ.organelles)||null;
+  const box=container.querySelector("#organPasteLink");
+  const kindSel=container.querySelector("#organPasteKind");
+  const go=container.querySelector("#organPasteGo");
+  const note=container.querySelector("#organPasteNote");
+  if(!box||!kindSel||!go)return;
+  if(!O||!O.markersFromLink||!O.rowsFromPoints){
+    const wrap=go.closest(".organ-paste-box"); if(wrap)wrap.remove();
+    return;
+  }
+  kindSel.value="centriole";
+  function syncNote(){
+    const k=kindSel.value,info=ORGANELLE_KIND_BY_VALUE[k],lbl=organReportPointLabels(k);
+    const nm=escHtml((info&&info.label)||k);
+    note.innerHTML=(info&&info.vector)
+      ? "<b>"+nm+"</b> takes two markers per structure &mdash; Ctrl+click them in pairs, "
+        +escHtml(lbl[0]).toLowerCase()+" then "+escHtml(lbl[1]).toLowerCase()
+        +", and each pair becomes one row."
+      : "Each marker becomes one <b>"+nm+"</b> row. Anything you mis-labelled can still be "
+        +"changed row by row below.";
+  }
+  kindSel.addEventListener("change",syncNote);
+  syncNote();
+  go.addEventListener("click",()=>{
+    const r=O.markersFromLink(box.value,null);
+    if(!r.ok){note.innerHTML='<span style="color:var(--bad)">'+escHtml(r.error)+'</span>';return;}
+    if(!r.points.length){
+      note.innerHTML='<span style="color:var(--bad)">That link has no markers on it. '
+        +'Ctrl+click the structures in the viewer first, then copy the whole address bar.</span>';
+      return;
+    }
+    const kind=kindSel.value;
+    const first=rowsEl.children[0];
+    const untouched=rowsEl.children.length===1&&first
+      &&![...first.querySelectorAll("input")].some(i=>i.value.trim()!=="");
+    if(untouched)rowsEl.innerHTML="";
+    const made=O.rowsFromPoints(kind,r.points);
+    made.rows.forEach(row=>addRow(kind,row.a,row.b));
+    box.value="";
+    const info=ORGANELLE_KIND_BY_VALUE[kind];
+    const n=made.rows.length;
+    note.innerHTML=n+" "+escHtml((info&&info.label)||kind)+" row"+(n===1?"":"s")
+      +" added from "+r.points.length+" marker"+(r.points.length===1?"":"s")
+      +(made.odd
+         ? '. <span style="color:var(--warn)">The last one is missing its second point &mdash; '
+           +'there was an odd marker, so fill it in or delete the row.</span>'
+         : ". Check them and submit.");
+  });
 }
 function wireOrganelleForm(container,slug){
   const name=(slug&&typeof LEAF_NAMES!=="undefined")?LEAF_NAMES[slug]:null;
@@ -729,7 +824,7 @@ function wireOrganelleForm(container,slug){
       if(url)window.open(url,"_blank","noopener");
     });
   }
-  function addRow(){
+  function addRow(kindValue,ptA,ptB){
     // The very first row defaults to "Centriole / centrosome" (the more common starting point).
     // Every row added afterward via "+ Add another structure" defaults to "Primary cilium"
     // instead -- in practice a centriole is annotated first and the cilium right after (they're
@@ -787,7 +882,11 @@ function wireOrganelleForm(container,slug){
     // 2026-08-07 nucleoplasmic_reticulum_2 is the 2nd, which is exactly why the two field labels
     // are no longer hardcoded "Base"/"Tip" -- organReportPointLabels() reads each kind's own
     // pointLabels (cilium: Base/Tip, NR type II: Coordinate 1/Coordinate 2).
-    kindEl.addEventListener("change",()=>{
+    /* Extracted from the change listener so a row created BY A PASTE can be brought into the
+       same state without faking an event. Which fields a row shows is asked of the kind's own
+       `vector` flag, never of its name -- the reason is two comments up and cost this family a
+       real bug once. */
+    function syncFields(){
       const info=ORGANELLE_KIND_BY_VALUE[kindEl.value];
       const isCilium=!!(info&&info.vector);
       centrioleFields.style.display=isCilium?"none":"";
@@ -795,7 +894,8 @@ function wireOrganelleForm(container,slug){
       const pl=organReportPointLabels(kindEl.value);
       if(pointLabelA)pointLabelA.textContent=pl[0]+" (voxel)";
       if(pointLabelB)pointLabelB.textContent=pl[1]+" (voxel)";
-    });
+    }
+    kindEl.addEventListener("change",syncFields);
     /* First row defaults to Centriole, every row added after that defaults to Primary cilium, per
        Søren's explicit request -- previously relied on "centriole" simply being the browser's
        default first <option>, which broke silently once "ask_expert" became the true first entry
@@ -811,6 +911,17 @@ function wireOrganelleForm(container,slug){
     const cx=row.querySelector(".orx"),cy=row.querySelector(".ory"),cz=row.querySelector(".orz");
     const bx=row.querySelector(".orbx"),by=row.querySelector(".orby"),bz=row.querySelector(".orbz");
     const tx=row.querySelector(".ortx"),ty=row.querySelector(".orty"),tz=row.querySelector(".ortz");
+    /* A row asked for by name overrides the positional default above, and a row asked for WITH
+       coordinates arrives filled. ptB is a vector kind's second point and is ignored by a point
+       kind, whose second set of fields is hidden anyway -- the same rule buildSubs applies when
+       it refuses to write a stale hidden coordinate. */
+    if(kindValue){kindEl.value=kindValue;syncFields();}
+    const fill=(p,a,b,c)=>{if(!p)return;a.value=p[0];b.value=p[1];c.value=p[2];};
+    if(ptA){
+      const info=ORGANELLE_KIND_BY_VALUE[kindEl.value];
+      if(info&&info.vector){fill(ptA,bx,by,bz);fill(ptB,tx,ty,tz);}
+      else fill(ptA,cx,cy,cz);
+    }
     wirePasteSplit(cx,cy,cz);wireJump(row.querySelector(".organ-jump-c"),cx,cy,cz);
     wirePasteSplit(bx,by,bz,tx);wireJump(row.querySelector(".organ-jump-base"),bx,by,bz);
     wirePasteSplit(tx,ty,tz);wireJump(row.querySelector(".organ-jump-tip"),tx,ty,tz);
@@ -818,6 +929,7 @@ function wireOrganelleForm(container,slug){
   }
   addRow();
   container.querySelector("#organAddRow").addEventListener("click",()=>addRow());
+  wireOrganellePaste(container,rowsEl,addRow);
   const submitBtn=container.querySelector("#organSubmit");
   submitBtn.addEventListener("click",()=>{
     if(!REPORT_ENDPOINT){alert("Reporting isn't wired up yet — set REPORT_ENDPOINT near the top of the script (see the comment above it) to a Google Apps Script web app URL.");return;}
