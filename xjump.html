@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-03 19:06</span></p>
+ctrl-shift-R.">build 2026-09-03 19:40</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -5970,13 +5970,15 @@ UJ.app = (function(){
       + "<a class='seed-open' href='#' data-key='" + esc(r.key) + "'>" + esc(r.name) + " &#8599;</a>"
       + "<span class='chips'><span class='chip"
       + (r.odd ? " st-contested' title='" + esc(ODD_TITLE) : "")
-      + "'>" + esc(r.label) + "</span>"
-      /* A community identity is shown only when it DISAGREES with the published type. Repeating
-         the same word twice on every touched row would say nothing and cost the width the
-         fragment counts need. */
+      + "'>" + esc(mine || r.label) + "</span>"
+      /* THE PUBLISHED WORD, KEPT, as the second chip rather than the first. Søren, 2026-09-03:
+         "my rename overrules the original name." It does -- on the row, in the filter and in the
+         counts -- and the record of what the paper said is exactly the thing that must not
+         disappear when it does, so it stays here in grey with its own tooltip. */
       + (mine && mine.toLowerCase() !== String(r.label || "").toLowerCase()
-          ? "<span class='chip st-contested' title='" + esc("Called “" + mine + "” here; the "
-              + "published table types it “" + r.label + "”.") + "'>" + esc(mine) + "</span>"
+          ? "<span class='chip' title='" + esc("Re-identified here as “" + mine + "”. The "
+              + "published table types this record “" + r.label + "”.") + "'>was "
+              + esc(r.label) + "</span>"
           : "")
       + "</span>"
       + "<span class='hint'>" + (extra ? esc(extra) + " · " : "")
@@ -6575,7 +6577,7 @@ UJ.app = (function(){
     var p = X.toNm(me), r = radiusUm * 1000, out = [];
     filterable().forEach(function(u){
       if (u.key === cellKey) return;
-      if ((u.label || "(unnamed)") !== label) return;
+      if (labelOf(u) !== label) return;
       var q = X.toNm(u.pos);
       var dx = q[0]-p[0], dy = q[1]-p[1], dz = q[2]-p[2];
       var dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
@@ -6589,7 +6591,7 @@ UJ.app = (function(){
     var body = d.querySelector(".cc-body"); if (!body) return;
     var labels = {};
     filterable().forEach(function(u){
-      var l = u.label || "(unnamed)"; labels[l] = (labels[l] || 0) + 1; });
+      var l = labelOf(u); labels[l] = (labels[l] || 0) + 1; });
     body.innerHTML =
         "<select class='cc-type'><option value=''>Choose a cell type&hellip;</option>"
       /* Sorted case-INSENSITIVELY. The published labels are a mix ("Purkinje cell", "granule
@@ -7178,7 +7180,7 @@ UJ.app = (function(){
     var data = [head];
     R.rows.forEach(function(r){
       var common = [me ? me.name : cellKey, cellKey, R.mine ? R.mine.have : "",
-                    r.u.name, r.u.key, r.u.label || "",
+                    r.u.name, r.u.key, labelOf(r.u),
                     Math.round(r.somaNm / 1000),
                     r.distNm == null ? "" : Math.round(r.distNm),
                     /* Two columns, not one filled from two sources: a touch-point gap and a
@@ -7305,41 +7307,50 @@ UJ.app = (function(){
   /* Counted into a NESTED structure rather than a flat map keyed by "group + label": the labels
      contain spaces ("granule cell dendrite"), so any single-string key has to be split back apart
      and every separator that is not in a label today is one somebody adds tomorrow. */
-  /* EVERY NAME A CELL ANSWERS TO. Søren, 2026-09-03: "it does not show up when I filter for
-     Purkinje cell dendrite." It could not: the tally counted the published word and the filter
-     tested the published word, so a proofread cell renamed here was findable by the paper's name
-     and by nothing else, and the tickbox he wanted did not exist anywhere in the list.
+  /* ONE OFFICIAL NAME PER CELL. Søren, 2026-09-03, looking at two "Purkinje cell dendrite"
+     tickboxes: "Please keep one official name for each and my rename overrules the original name."
 
-     Two labels, deliberately, and a renamed cell is counted under both -- "Whole cells / Purkinje
-     cell" and "Named here / Purkinje cell dendrite" are two different questions and this cell is
-     an honest answer to each. The groups are tickboxes with counts, not a partition. */
-  var NAMED_HERE = "Named here";
-  function labelsOf(u){
-    var out = [];
-    if (u.label) out.push(u.label);
-    if (u.here && u.here.toLowerCase() !== String(u.label || "").toLowerCase()) out.push(u.here);
-    if (!out.length) out.push("(unnamed)");
-    return out;
+     The version before this one listed both names and matched either, on the argument that "what
+     the paper says" and "what people here say" are two questions. They are -- but they are not two
+     TYPES, and the panel it produced was unusable: the same words twice, both to be ticked, and
+     the number he actually wanted (18 dendrites) printed nowhere, because it was 15 in one box and
+     3 in another.
+
+     THE PUBLISHED WORD IS NOT LOST, which is what makes this safe: it is on the identity card
+     under the headline, on every row as a "was …" chip, in the cell history, and in the exports'
+     own `published_as` column. What it stops being is something you can FILTER by -- a record this
+     community has re-identified is not still that type, and offering it as a live category is an
+     invitation to count the same cell twice. */
+  function labelOf(u){
+    return u.here || u.label || "(unnamed)";
   }
+  /* ONE TICKBOX PER NAME, WHEREVER ITS CELLS SIT. "Purkinje cell dendrite" is 15 records the paper
+     filed as pieces plus 3 whole-cell records re-identified here. The groups come from the RECORD,
+     so those 18 cells fall in two of them -- and a box in each is the same fault in a new place.
+
+     So the tally is keyed by NAME first and the group is chosen afterwards: the box lives where
+     most of its cells sit, and its tooltip says how many were re-identified here, which is the
+     part a reader could not have worked out from the count. */
   function typeTally(){
-    var groups = TYPE_GROUPS.map(function(G){ return { name:G.name, by:{} }; });
-    var mine = { name: NAMED_HERE, by:{} };
+    var by = {};
     filterable().forEach(function(u){
-      var lab = u.label || "(unnamed)", gi = 0;
+      var lab = labelOf(u), gi = 0;
       TYPE_GROUPS.forEach(function(G, i){ if (G.test(u)) gi = i; });
-      groups[gi].by[lab] = (groups[gi].by[lab] || 0) + 1;
-      /* Only when it DIFFERS. A cell somebody here named with the paper's own word is agreement,
-         not a second type, and listing it twice would put a tickbox in the panel for a question
-         nobody is asking. */
-      if (u.here && u.here.toLowerCase() !== String(u.label || "").toLowerCase())
-        mine.by[u.here] = (mine.by[u.here] || 0) + 1;
+      if (!by[lab]) by[lab] = { label: lab, n: 0, gi: {}, renamed: 0 };
+      var e = by[lab];
+      e.n++;
+      e.gi[gi] = (e.gi[gi] || 0) + 1;
+      if (u.here && u.here.toLowerCase() !== String(u.label || "").toLowerCase()) e.renamed++;
     });
-    groups.push(mine);
-    return groups.map(function(g){
-      return { name: g.name,
-               items: Object.keys(g.by).map(function(k){ return { label:k, n:g.by[k] }; })
-                        .sort(function(a, b){ return b.n - a.n; }) };
-    }).filter(function(g){ return g.items.length; });
+    var groups = TYPE_GROUPS.map(function(G){ return { name: G.name, items: [] }; });
+    Object.keys(by).forEach(function(k){
+      var e = by[k], home = 0, best = -1;
+      Object.keys(e.gi).forEach(function(gi){
+        if (e.gi[gi] > best){ best = e.gi[gi]; home = +gi; } });
+      groups[home].items.push({ label: e.label, n: e.n, renamed: e.renamed });
+    });
+    groups.forEach(function(g){ g.items.sort(function(a, b){ return b.n - a.n; }); });
+    return groups.filter(function(g){ return g.items.length; });
   }
   function buildTypeChecksInto(host, cls){
     if (!host) return;
@@ -7348,8 +7359,18 @@ UJ.app = (function(){
       ? groups.map(function(g){
           return "<div class='fgroup'><b>" + esc(g.name) + "</b><div class='toggles'>"
             + g.items.map(function(it){
-                return "<label style='font-size:12px'><input type='checkbox' class='" + cls
+                /* A count that includes cells the published table types differently has to say so
+                   somewhere, or the number is a claim with no visible basis. */
+                var t = it.renamed
+                  ? esc(it.renamed + " of these " + (it.renamed === 1 ? "was" : "were")
+                        + " re-identified here — the published table types "
+                        + (it.renamed === 1 ? "it" : "them") + " differently, and the name people "
+                        + "here settled on is the one this page counts")
+                  : "";
+                return "<label style='font-size:12px'" + (t ? " title='" + t + "'" : "")
+                  + "><input type='checkbox' class='" + cls
                   + "' value='" + esc(it.label) + "'> <span class='fname'>" + esc(cap(it.label))
+                  + (it.renamed ? " <span class='nsub'>&#9998;</span>" : "")
                   + "</span> <span class='nsub'>" + it.n.toLocaleString() + "</span></label>";
               }).join("")
             + "</div></div>";
@@ -7537,9 +7558,7 @@ UJ.app = (function(){
 
     function keep(u){
       if (types.length){
-        var mine = labelsOf(u), hit = false;
-        for (var t = 0; t < mine.length; t++) if (types.indexOf(mine[t]) >= 0) hit = true;
-        if (!hit && !(unnamed && !u.label)) return false;
+        if (types.indexOf(labelOf(u)) < 0 && !(unnamed && !u.label)) return false;
       } else if (!unnamed && !u.proofread && !u.label) return false;
       if (layers.length || limb){
         var L = X.layerAt(u.pos);
@@ -7576,14 +7595,9 @@ UJ.app = (function(){
     var nearOn = !!(el("filterNearOn") && el("filterNearOn").checked);
     var nearTypes = checkedValues(".fneartype");
     if (nearOn && nearTypes.length){
-      /* The proximity list reads the same two names as the primary one. A reference set that
-         understood only the published word would answer "within 5 µm of a Purkinje cell dendrite"
-         with silence, having never found one. */
-      var isRef = function(u){
-        var mine = labelsOf(u);
-        for (var t = 0; t < mine.length; t++) if (nearTypes.indexOf(mine[t]) >= 0) return true;
-        return false;
-      };
+      /* The proximity list reads the same one name the primary list does, so "within 5 µm of a
+         Purkinje cell dendrite" means the same set of cells in both halves of the panel. */
+      var isRef = function(u){ return nearTypes.indexOf(labelOf(u)) >= 0; };
       var refs = rows.filter(isRef);
       var d = nearDistNm(),
           keepRef = !!(el("filterNearIncludeRef") && el("filterNearIncludeRef").checked);
@@ -7638,7 +7652,11 @@ UJ.app = (function(){
     return [
       { header:"name",  get: function(u){ return u.name; } },
       { header:"key",   get: function(u){ return u.key; } },
-      { header:"kind",  get: function(u){ return u.label || ""; } },
+      /* The name this page calls it, which is the community's when there is one. The paper's
+         own word keeps its own column beside it -- nothing is dropped from an export because the
+         page settled on a different name. */
+      { header:"kind",  get: function(u){ return labelOf(u); } },
+      { header:"published_as", get: function(u){ return u.label || ""; } },
       { header:"layer", get: function(u){ var l = L(u); return l ? l.layer : ""; } },
       { header:"limb",  get: function(u){ var l = L(u); return l ? l.limb : ""; } },
       { header:"near_boundary",
@@ -8730,7 +8748,8 @@ UJ.app = (function(){
            showRandom:showRandom, drawMap:drawMap, renderDashboard:renderDashboard,
            showRandomUntouched:showRandomUntouched, showRandomBuilt:showRandomBuilt,
            showRandomUnassigned:showRandomUnassigned, nucleusRows:nucleusRows,
-           opinionOf:opinionOf, votesHtml:votesHtml,
+           opinionOf:opinionOf, votesHtml:votesHtml, labelOf:labelOf,
+           matchColumns:matchColumns,
            classifyNuclei:classifyNuclei, nearestAnything:nearestAnything,
            renderExplore:renderExplore, invalidateUniverse:invalidateUniverse,
            refreshFilterControls:refreshFilterControls,
