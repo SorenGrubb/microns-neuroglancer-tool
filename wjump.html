@@ -119,7 +119,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-03 08:49</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-03 09:46</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -1644,6 +1644,33 @@ UJ.organelles = (function(){
   function labelOf(v){ var k = BY_VALUE[v]; return (k && k.label) || v; }
   function shortOf(v){ var k = BY_VALUE[v]; return (k && k.short) || v; }
 
+  /* ONE PASTE OF MARKERS, ONE KIND -- how many markers does a row of this kind take?
+
+     Søren, 2026-09-03: "we should be able to define what organelle you are submitting, so that
+     you will not have to choose which organelle each of the points are afterwards."
+
+     A point kind takes one marker per row, so N markers make N rows. A VECTOR kind takes two --
+     a cilium is base + tip -- so N markers make ceil(N/2) rows, consumed in click order. Without
+     that, choosing cilium and pasting six markers would make six half-filled rows and fail at the
+     submit button, which is a worse fault than the one this feature fixes.
+
+     ASKED OF isVector, not of the kind's name, for the reason written above it. And here rather
+     than in a page because it is ontology arithmetic: the day µJump grows a paste box it reads
+     this instead of restating the rule.
+
+     An odd marker is KEPT as a row with an empty second point and reported, not dropped -- losing
+     a click somebody made is worse than showing them an empty field they can see and fill. */
+  function rowsFromPoints(kind, points){
+    var pts = points || [], out = [];
+    if (!isVector(kind)){
+      pts.forEach(function(p){ out.push({ kind: kind, a: p, b: null }); });
+      return { rows: out, odd: false };
+    }
+    for (var i = 0; i < pts.length; i += 2)
+      out.push({ kind: kind, a: pts[i], b: (i + 1 < pts.length) ? pts[i + 1] : null });
+    return { rows: out, odd: pts.length % 2 === 1 };
+  }
+
   /* "2× centriole · 1× mitochondrion". Unrecognised kinds are shown rather than dropped -- a row
      written by an older build with a kind since renamed is still a real observation, and silently
      hiding it would make the read-back disagree with the sheet. */
@@ -1700,7 +1727,8 @@ UJ.organelles = (function(){
 
   return { GROUPS:GROUPS, KINDS:KINDS, BY_VALUE:BY_VALUE, optionsHtml:optionsHtml,
            isVector:isVector, pointLabels:pointLabels, labelOf:labelOf, shortOf:shortOf,
-           countParts:countParts, buildSubs:buildSubs, splitPaste:splitPaste, groupId:groupId };
+           countParts:countParts, buildSubs:buildSubs, splitPaste:splitPaste, groupId:groupId,
+           rowsFromPoints:rowsFromPoints };
 })();
 </script>
 <script>/* core/points.js -- how a points total is turned into something a person reads.
@@ -4928,14 +4956,29 @@ UJ.app = (function(){
       + "the cell has several. <b>Coordinates here are " + VOX + "</b> &mdash; the same frame "
       + "WEBKNOSSOS and every ωJump viewer link show, so a coordinate copied from either drops "
       + "straight in.</p>"
+      /* THE KIND IS CHOSEN ONCE, BEFORE THE PASTE. Søren, 2026-09-03: "we should be able to
+         define what organelle you are submitting, so that you will not have to choose which
+         organelle each of the points are afterwards." It used to make every row a centriole and
+         leave you to reset each dropdown -- a bulk action that saved the coordinates and handed
+         back the labelling. The line under it is rewritten by syncPasteKind for vector kinds,
+         where the markers pair up and the click ORDER carries meaning. */
       + "<div class='callout' style='margin:0 0 10px'>"
       +   "<span class='hint'>Or point at them instead: open the nucleus, <b>Ctrl</b>+click each "
-      +   "structure, and paste the link here &mdash; one row per marker, ready to label.</span>"
+      +   "structure, and paste the link here &mdash; every marker becomes a row of the kind you "
+      +   "pick, ready to submit.</span>"
+      +   "<div class='row' style='margin-top:8px'>"
+      +     "<label for='organ-paste-kind' class='hint' style='align-self:center;margin:0'>"
+      +       "What are these?</label>"
+      +     "<select id='organ-paste-kind' style='flex:1 1 220px;width:auto'>"
+      +       O.optionsHtml() + "</select>"
+      +   "</div>"
       +   "<div class='row' style='margin-top:8px'>"
       +     "<input type='text' id='organ-paste' placeholder='paste a Neuroglancer link' "
       +       "style='flex:1 1 240px'>"
       +     "<button type='button' id='organ-from-link' style='width:auto'>Add a row per marker</button>"
-      +   "</div></div>"
+      +   "</div>"
+      +   "<p class='hint' id='organ-paste-note' style='margin:6px 0 0'></p>"
+      +   "</div>"
       + "<div id='organ-rows'></div>"
       + "<button type='button' id='organ-add' style='margin-top:8px;width:auto;font-size:13px;"
       +   "padding:6px 10px'>+ Add another structure</button>"
@@ -4948,12 +4991,19 @@ UJ.app = (function(){
     ORGAN_ROWS = 0;
     addOrganRow();
     el("organ-add").addEventListener("click", function(){ addOrganRow(); });
+    /* Same default the first typed row gets, so the paste behaves as it always did until it is
+       told otherwise -- the change is that it CAN be told. */
+    el("organ-paste-kind").value = "centriole";
+    el("organ-paste-kind").addEventListener("change", syncPasteKind);
+    syncPasteKind();
     el("organ-from-link").addEventListener("click", rowsFromLink);
     el("organ-submit").addEventListener("click", submitOrganelles);
   }
 
   var ORGAN_ROWS = 0;
-  function addOrganRow(kindValue, posNm){
+  /* posBNm is the second point of a VECTOR kind, filled when a paste paired the markers up.
+     Ignored for point kinds, whose second field is hidden by syncOrganRow anyway. */
+  function addOrganRow(kindValue, posNm, posBNm){
     var rows = el("organ-rows"); if (!rows) return null;
     var wrap = document.createElement("div");
     wrap.innerHTML = organRowHtml(ORGAN_ROWS++);
@@ -4991,6 +5041,7 @@ UJ.app = (function(){
       });
     });
     if (posNm) writeCoord(row, "a", posNm);
+    if (posBNm && O.isVector(kind.value)) writeCoord(row, "b", posBNm);
     syncOrganRow(row); renumberOrganRows();
     return row;
   }
@@ -5026,6 +5077,23 @@ UJ.app = (function(){
     });
   }
 
+  /* WHAT THE MARKERS WILL BECOME, said before they are pasted rather than after. For a vector
+     kind the click ORDER carries meaning -- base then tip -- and somebody who learns that from an
+     error message has already clicked in the wrong order. The names are the kind's own
+     pointLabels, never a hardcoded "base"/"tip": nucleoplasmic reticulum type II calls them
+     Coordinate 1 and Coordinate 2, and µJump shipped that bug once already. */
+  function syncPasteKind(){
+    var sel = el("organ-paste-kind"), note = el("organ-paste-note");
+    if (!sel || !note) return;
+    var k = sel.value, lbl = O.pointLabels(k);
+    note.innerHTML = O.isVector(k)
+      ? "<b>" + esc(O.labelOf(k)) + "</b> takes two markers per structure &mdash; "
+        + "<b>Ctrl</b>+click them in pairs, " + esc(lbl[0]).toLowerCase() + " then "
+        + esc(lbl[1]).toLowerCase() + ", and each pair becomes one row."
+      : "Each marker becomes one <b>" + esc(O.labelOf(k)) + "</b> row. "
+        + "Anything you mis-labelled can still be changed row by row below.";
+  }
+
   function rowsFromLink(){
     var box = el("organ-paste"), r = W.parseFinds(DS, box.value, null);
     if (!r.ok){ say("organ-msg", r.error, false); return; }
@@ -5039,10 +5107,19 @@ UJ.app = (function(){
     var rows = el("organ-rows");
     var only = rows.children.length === 1 && !readCoord(rows.children[0], "a");
     if (only) rows.innerHTML = "";
-    r.points.forEach(function(p){ addOrganRow("centriole", p); });
+    var kind = el("organ-paste-kind").value;
+    /* The pairing is the ontology's arithmetic, not this page's -- see rowsFromPoints. */
+    var made = O.rowsFromPoints(kind, r.points);
+    made.rows.forEach(function(row){ addOrganRow(kind, row.a, row.b); });
     box.value = "";
-    say("organ-msg", r.points.length + " row" + (r.points.length === 1 ? "" : "s")
-      + " added from the link. Set what each one is, then submit.", true);
+    var n = made.rows.length, what = O.labelOf(kind);
+    say("organ-msg", n + " " + esc(what) + " row" + (n === 1 ? "" : "s")
+      + " added from " + r.points.length + " marker" + (r.points.length === 1 ? "" : "s")
+      + (made.odd
+          ? ". The last one is missing its second point &mdash; there was an odd marker, so fill "
+            + "it in or delete the row."
+          : ". Check them and submit."),
+      !made.odd);
   }
 
   function submitOrganelles(){

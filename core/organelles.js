@@ -56,6 +56,33 @@ UJ.organelles = (function(){
   function labelOf(v){ var k = BY_VALUE[v]; return (k && k.label) || v; }
   function shortOf(v){ var k = BY_VALUE[v]; return (k && k.short) || v; }
 
+  /* ONE PASTE OF MARKERS, ONE KIND -- how many markers does a row of this kind take?
+
+     Søren, 2026-09-03: "we should be able to define what organelle you are submitting, so that
+     you will not have to choose which organelle each of the points are afterwards."
+
+     A point kind takes one marker per row, so N markers make N rows. A VECTOR kind takes two --
+     a cilium is base + tip -- so N markers make ceil(N/2) rows, consumed in click order. Without
+     that, choosing cilium and pasting six markers would make six half-filled rows and fail at the
+     submit button, which is a worse fault than the one this feature fixes.
+
+     ASKED OF isVector, not of the kind's name, for the reason written above it. And here rather
+     than in a page because it is ontology arithmetic: the day µJump grows a paste box it reads
+     this instead of restating the rule.
+
+     An odd marker is KEPT as a row with an empty second point and reported, not dropped -- losing
+     a click somebody made is worse than showing them an empty field they can see and fill. */
+  function rowsFromPoints(kind, points){
+    var pts = points || [], out = [];
+    if (!isVector(kind)){
+      pts.forEach(function(p){ out.push({ kind: kind, a: p, b: null }); });
+      return { rows: out, odd: false };
+    }
+    for (var i = 0; i < pts.length; i += 2)
+      out.push({ kind: kind, a: pts[i], b: (i + 1 < pts.length) ? pts[i + 1] : null });
+    return { rows: out, odd: pts.length % 2 === 1 };
+  }
+
   /* "2× centriole · 1× mitochondrion". Unrecognised kinds are shown rather than dropped -- a row
      written by an older build with a kind since renamed is still a real observation, and silently
      hiding it would make the read-back disagree with the sheet. */
@@ -112,5 +139,6 @@ UJ.organelles = (function(){
 
   return { GROUPS:GROUPS, KINDS:KINDS, BY_VALUE:BY_VALUE, optionsHtml:optionsHtml,
            isVector:isVector, pointLabels:pointLabels, labelOf:labelOf, shortOf:shortOf,
-           countParts:countParts, buildSubs:buildSubs, splitPaste:splitPaste, groupId:groupId };
+           countParts:countParts, buildSubs:buildSubs, splitPaste:splitPaste, groupId:groupId,
+           rowsFromPoints:rowsFromPoints };
 })();
