@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-04 06:48</span></p>
+ctrl-shift-R.">build 2026-09-04 10:14</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -4062,7 +4062,7 @@ UJ.app = (function(){
   function doUndo(){
     if (!UNDO || BUSY) return;
     var u = UNDO;
-    if (!STORE.canWrite()){ say("paste-msg", "Sign in with Google first.", false); return; }
+    if (!STORE.canWrite()){ say("paste-msg", signInMsg(), false); return; }
     BUSY = true;
     say("paste-msg", "undoing…");
     STORE.remove(u.cellKey, u.ids).then(function(){
@@ -4306,7 +4306,7 @@ UJ.app = (function(){
     Array.prototype.forEach.call(root.querySelectorAll(".frag-x"), function(b){
       b.addEventListener("click", function(){
         var seg = b.getAttribute("data-seg");
-        if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
+        if (!STORE.canWrite()){ note(signInMsg(), false); return; }
         if (BUSY) return; BUSY = true;
         note("removing…");
         STORE.remove(c.id, [seg]).then(function(){
@@ -4352,7 +4352,7 @@ UJ.app = (function(){
         var r = resolveTarget(c.id, typed);
         if (!r.key){ note(esc(r.why), false); return; }
         var to = r.key;
-        if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
+        if (!STORE.canWrite()){ note(signInMsg(), false); return; }
         if (BUSY) return; BUSY = true;
         var moving = c.segments.slice();
         note("moving " + moving.length + "…");
@@ -4382,7 +4382,7 @@ UJ.app = (function(){
     root.querySelector(".save-nm").addEventListener("click", function(){
       var v = root.querySelector(".nm").value.trim();
       if (!v) return;
-      if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
+      if (!STORE.canWrite()){ note(signInMsg(), false); return; }
       STORE.name(c.id, v, 0, !!c.revealed, "").then(function(){
         /* Applied only after the server took it. A vote shown as counted and then lost on the
            next reload is worse than one that visibly failed. */
@@ -4411,7 +4411,7 @@ UJ.app = (function(){
                 nucleusOf(c), note, c.id, X.settledLabel(c) || "Unclassified");
     if (volumeLine(c.id) && note) note(volumeLine(c.id), true);
     root.querySelector(".rej").addEventListener("click", function(){
-      if (!STORE.canWrite()){ note("Sign in with Google first.", false); return; }
+      if (!STORE.canWrite()){ note(signInMsg(), false); return; }
       STORE.reject(c.id, "not_one_cell", "").then(function(){
         c.rejects = (c.rejects || 0) + 1; render();
       }).catch(function(e){ note(esc("Saving that failed: " + e.message), false); });
@@ -4971,7 +4971,7 @@ UJ.app = (function(){
     }
     function signedIn(){
       if (STORE.canWrite()) return true;
-      tell("Sign in with Google first &mdash; reading is public, adding to the record is not.",
+      tell(signInMsg(),
            false);
       return false;
     }
@@ -6389,7 +6389,7 @@ UJ.app = (function(){
 
   function submitOrganelles(d, cellKey){
     if (!STORE.canWrite()){
-      organSay(d, "Sign in with Google first — reading is public, adding to the record is not.",
+      organSay(d, signInMsg(),
                false);
       return;
     }
@@ -8063,7 +8063,7 @@ UJ.app = (function(){
           : "nothing marked here or nearby yet")
       + "</span></div>";
     if (el("box-empty")) el("box-empty").addEventListener("click", function(){
-      if (!STORE.canWrite()){ say("box-msg", "Sign in with Google first.", false); return; }
+      if (!STORE.canWrite()){ say("box-msg", signInMsg(), false); return; }
       var k = BOX.key;
       STORE.visit(k, "empty", 0).then(function(){
         markVisited(k, "empty");
@@ -8091,7 +8091,7 @@ UJ.app = (function(){
         + "and those are not re-read.)" : ""), false);
       return;
     }
-    if (!STORE.canWrite()){ say("nuc-msg", "Sign in with Google first.", false); return; }
+    if (!STORE.canWrite()){ say("nuc-msg", signInMsg(), false); return; }
     say("nuc-msg", "saving " + r.points.length + "…");
     var k = BOX && BOX.key;
     STORE.nuclei(r.points, k).then(function(d){
@@ -8430,8 +8430,16 @@ UJ.app = (function(){
   }
 
   var ApiStore = {
-    credential: null, who: "",
-    canWrite: function(){ return !!this.credential; },
+    credential: null, who: "", expires: 0,
+    /* GOOGLE'S TOKEN LASTS ABOUT AN HOUR. Søren, 2026-09-03, after a long session: "Adding to
+       cb2:3 failed: unauthenticated" -- while signed in, with his own name in the corner. The
+       page had taken the credential once and used it for as long as the tab was open.
+
+       A MINUTE OF MARGIN, so a request that leaves here while the token is alive does not arrive
+       after it is dead. `expires` is 0 for a page that has never signed in, and that case is the
+       ordinary signed-out one. */
+    expired: function(){ return !!this.expires && Date.now() > this.expires - 60000; },
+    canWrite: function(){ return !!this.credential && !this.expired(); },
     _post: function(payload){
       /* No Content-Type header, deliberately: that keeps the request "simple" so the browser sends
          no CORS preflight, which Apps Script would answer with a redirect and fail. Same trick
@@ -8446,7 +8454,25 @@ UJ.app = (function(){
         .then(function(d){
           /* An ok:false is a REFUSAL with a reason, and the reason is the useful part. Resolving
              it as though it had worked is how a write that never happened gets a green message. */
-          if (!d || !d.ok) throw new Error((d && d.error) || (what + " was refused"));
+          if (!d || !d.ok){
+            var why = (d && d.error) || (what + " was refused");
+            /* THE SERVER'S OWN WORD, TRANSLATED. verifyGoogleToken answers "unauthenticated" for
+               a token that has lapsed as well as for one that was never sent, and the page used
+               to print that verbatim: "Adding to cb2:3 failed: unauthenticated", to somebody
+               signed in. Tokens can also lapse between canWrite() and the request landing, which
+               is exactly the case no check on this side can catch. */
+            if (/unauthenticat|invalid[ _-]?token|token[ _-]?expired/i.test(why)){
+              ApiStore.expires = 1;      /* canWrite() is false from here until a fresh sign-in */
+              askSignInAgain();
+              /* AND NO render(): the caller is about to print this message into a panel that
+                 render() would rebuild, which is how "a refused save keeps the number and says
+                 what failed" started failing the moment this branch was added. */
+              throw new Error("your Google sign-in has expired — they last about an hour. Sign in "
+                + "again with the account chip at the top of the page and try again. Nothing you "
+                + "pasted is lost, and do not reload: that is what would lose it.");
+            }
+            throw new Error(why);
+          }
           /* THE NUMBER MOVES WHEN YOU EARN IT. myStats is a full recompute over the sheets, so it
              is asked for after a write rather than polled -- and only after one that SUCCEEDED,
              which is why this sits below the ok check rather than beside it. Coalesced because a
@@ -8649,10 +8675,47 @@ UJ.app = (function(){
 
   var STORE = LIVE ? ApiStore : MemStore;
 
+  /* WHICH OF THE TWO THINGS HAS HAPPENED. "Sign in with Google first" is the right sentence for
+     somebody who never signed in and the wrong one for somebody who signed in forty minutes ago
+     and is looking at their own name in the corner -- to them it reads as the page having lost
+     their work, and the natural next move is a reload, which is the one action that empties the
+     paste box. So the lapsed case names the hour, says where the button is, and says outright
+     that nothing pasted is lost. */
+  function signInMsg(){
+    return (STORE.expired && STORE.expired() && STORE.credential)
+      ? "Your Google sign-in has expired — Google's tokens last about an hour. Sign in again with "
+        + "the account chip at the top of the page, then press this again. Nothing you pasted is "
+        + "lost, and do not reload: that is what would lose it."
+      : "Sign in with Google first — reading is public, adding to the record is not.";
+  }
+  /* AND ASK FOR A NEW ONE. Google re-issues silently when the browser is still signed in to it,
+     so in the common case this repairs the tab without anybody being asked anything. Wrapped
+     because prompt() throws on a page where the library never loaded. */
+  function askSignInAgain(){
+    try {
+      if (window.google && google.accounts && google.accounts.id) google.accounts.id.prompt();
+    } catch (e){}
+  }
+  /* A minute before the token lapses, ask for a fresh one and redraw -- the buttons that need a
+     credential go quiet at the same moment the sentence above becomes true. */
+  var EXPIRY_TIMER = null;
+  function watchExpiry(){
+    if (EXPIRY_TIMER){ clearTimeout(EXPIRY_TIMER); EXPIRY_TIMER = null; }
+    if (!ApiStore.expires) return;
+    var ms = ApiStore.expires - Date.now() - 60000;
+    if (ms < 0) ms = 0;
+    if (ms > 86400000) return;          /* a clock so far out that the token is not the problem */
+    /* NO render() HERE. Redrawing wipes whatever message is on screen -- including the one
+       explaining why the last write failed, which is the message somebody is reading at exactly
+       this moment. Nothing on the page needs redrawing anyway: the buttons check canWrite() when
+       they are pressed. */
+    EXPIRY_TIMER = setTimeout(function(){ askSignInAgain(); }, ms);
+  }
+
   /* A write that cannot happen must say so BEFORE the optimistic update, not after. */
   function needSignIn(where){
     if (STORE.canWrite()) return false;
-    say(where, "Sign in with Google first — reading is public, adding to the record is not.",
+    say(where, signInMsg(),
         false);
     return true;
   }
@@ -8846,8 +8909,15 @@ UJ.app = (function(){
            showFound:showFound, layerLine:layerLine, showPlaceholder:showPlaceholder,
            history:function(){ return { trail:HIST, at:AT }; }, goTo:goTo,
            box:function(){ return BOX; },
-           setCredential: function(c, who){
-             ApiStore.credential = c; ApiStore.who = who || ""; render();
+           /* `expMs` is the JWT's own `exp`, in milliseconds, read by the page's Google
+              callback -- see handleGoogleCred. A caller that does not send it (an older page, or
+              the check harness) leaves expires at 0, which means "no known expiry" and behaves
+              exactly as this did before. */
+           setCredential: function(c, who, expMs){
+             ApiStore.credential = c; ApiStore.who = who || "";
+             ApiStore.expires = Number(expMs) || 0;
+             watchExpiry();
+             render();
              /* gamify does its own sign-in refresh through gamifyOnSignIn(), which the page's
                 Google callback calls; nothing to do here but redraw what depends on knowing who
                 you are. */
@@ -8883,6 +8953,8 @@ UJ.app = (function(){
 var REPORT_ENDPOINT = UJ.cfg.backend.endpoint;
 var GOOGLE_CLIENT_ID = UJ.cfg.backend.clientId;
 var GOOGLE_VERIFIED = false, GOOGLE_CREDENTIAL = "", REPORTER_NAME = "", REPORTER_EMAIL = "";
+/* Milliseconds, from the credential's own `exp` claim. 0 until somebody signs in. */
+var GOOGLE_EXP = 0;
 
 /* gamify's own five-character escaper. Deliberately a SEPARATE function from the app's esc():
    this one is a global the module reaches for, the app's lives inside its closure, and making one
@@ -8902,6 +8974,17 @@ function escHtml(x){
    `no-cors`, matching µJump, since Apps Script's redirect makes a readable response impossible
    for a cross-origin POST anyway. */
 function postReport(payload, okMsg){
+  /* The gamify half posts in no-cors and can never read a refusal, so a lapsed token here fails
+     silently -- a favourite that does not stick, a handle that does not change. Checked before
+     the post rather than discovered by its absence. */
+  if (GOOGLE_EXP && Date.now() > GOOGLE_EXP - 60000){
+    if (window.google && google.accounts && google.accounts.id){
+      try { google.accounts.id.prompt(); } catch (e){}
+    }
+    alert("Your Google sign-in has expired — they last about an hour. Sign in again with the "
+        + "account chip at the top of the page, then try again.");
+    return false;
+  }
   if (!GOOGLE_VERIFIED || !GOOGLE_CREDENTIAL){
     if (window.google && google.accounts && google.accounts.id){
       try { google.accounts.id.prompt(); } catch (e){}
@@ -8943,8 +9026,11 @@ function handleGoogleCred(resp){
     var p = JSON.parse(jwtBody(resp.credential));
     REPORTER_EMAIL = p.email || "";
     REPORTER_NAME = p.name || p.email || "";
+    /* WHEN THIS CREDENTIAL DIES. Google's ID tokens last about an hour; the page used to keep
+       using one until the backend refused it, and print the refusal as "unauthenticated". */
+    GOOGLE_EXP = (Number(p.exp) || 0) * 1000;
   } catch (e){}
-  UJ.app.setCredential(resp.credential, REPORTER_EMAIL);
+  UJ.app.setCredential(resp.credential, REPORTER_EMAIL, GOOGLE_EXP);
   var w = document.getElementById("whoami");
   if (w) w.innerHTML = "signed in as <b>" + escHtml(REPORTER_EMAIL) + "</b>";
   if (typeof gamifyOnSignIn === "function") gamifyOnSignIn();
