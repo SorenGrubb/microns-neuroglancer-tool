@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-03 21:07</span></p>
+ctrl-shift-R.">build 2026-09-03 21:22</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -5624,15 +5624,40 @@ UJ.app = (function(){
      actually contains, and marks the query point. Both views share one scale, which is what makes
      the side view worth having: cb2 is 998 x 922 x 48 µm, and seeing the third number as a sliver
      explains at a glance why its cells arrive as fragments rather than whole. */
-  /* The Purkinje somata the layer fit actually used -- 47 of the 154, the ones whose recorded z is
-     not the stand-in value. Plotting all 154 beside a band fitted to 47 would show a scatter that
-     visibly disagrees with the line drawn through it, for no reason a reader could work out. */
+  /* The Purkinje somata the layer fit actually used -- the ones whose recorded z is not the
+     stand-in value. Plotting all 154 beside a band fitted to 47 would show a scatter that visibly
+     disagrees with the line drawn through it, for no reason a reader could work out.
+
+     AND THEY FOLLOW THE CURRENT IDENTITIES. Søren, 2026-09-03: "The Purkinje somata should be
+     updated in this figure or removed." They were the published table's and frozen, while every
+     other part of this tool had moved to one official name per cell -- so the scattered dots in
+     the molecular layer went on being drawn as somata after he had re-identified eight of those
+     records as Purkinje cell dendrites. The caption underneath had already argued that a one-sided
+     scatter that far out "is what dendritic points catalogued as somata look like"; he went and
+     looked, and the drawing should show the answer rather than the guess.
+
+     Read off universe(), so this is the same set of cells and the same labelOf the filter, the
+     counts and the identity card use. A published record with a stand-in z, or one filed as a
+     piece rather than a whole cell, stays out however it is named: the fit never used those, and a
+     dot drawn from a placeholder depth is a position nobody measured. */
+  var PC_NAME = /^\s*purkinje cell\s*$/i;
   var PC_DOTS = null;
   function pcSomata(){
     if (PC_DOTS) return PC_DOTS;
-    PC_DOTS = (window.UJ.seeds ? X.seedList() : []).filter(function(r){
-      return r.pos && r.whole && r.type === "pc" && !r.zOdd;
-    }).map(function(r){ return X.toNm(r.pos); });
+    var pts = [], dropped = 0, added = 0;
+    universe().forEach(function(u){
+      if (!u.pos) return;
+      /* A published record only counts as a soma the fit could have used if it is a whole cell
+         with a real z. Community records carry a position somebody actually clicked. */
+      if (u.proofread && (!u.whole || u.zOdd)) return;
+      var was = u.proofread && PC_NAME.test(u.label || "");
+      var now = PC_NAME.test(labelOf(u));
+      if (was && !now){ dropped++; return; }
+      if (!now) return;
+      if (!was) added++;
+      pts.push(X.toNm(u.pos));
+    });
+    PC_DOTS = { pts: pts, dropped: dropped, added: added };
     return PC_DOTS;
   }
 
@@ -5719,7 +5744,7 @@ UJ.app = (function(){
       /* The traced boundaries speak voxels; everything drawn here speaks nanometres. */
       var fv = function(v, axis){ return f(v * r[axis]); };
       layers = topViewLayers(fv, X.extentVox()).svg;
-      dots = "<g class='lay-dot'>" + pcSomata().map(function(p){
+      dots = "<g class='lay-dot'>" + pcSomata().pts.map(function(p){
         return "<circle cx='" + f(p[ax]) + "' cy='" + f(p[ay]) + "' r='1.5'/>"; }).join("") + "</g>";
     }
     var pt = ptNm, mark = "";
@@ -5836,6 +5861,28 @@ UJ.app = (function(){
               + "reaching the molecular layer&rsquo;s own thickness is what dendritic points "
               + "catalogued as somata look like.</p>"
             : "")
+      /* WHAT THE COMMUNITY HAS SINCE DONE ABOUT IT. Only when something has actually moved -- the
+         sentence is about a difference, and printing "0 have been re-identified" on a fresh page
+         would be a permanent line about nothing. The figures ABOVE are deliberately not re-based:
+         they are the evidence for the tracing, and the tracing was checked against the published
+         table (see layerAgreement's own comment). This says how the drawing differs from them. */
+      +   ((function(){
+            var d = pcSomata();
+            if (!d.dropped && !d.added) return "";
+            var bits = [];
+            if (d.dropped) bits.push(d.dropped + " of those records "
+              + (d.dropped === 1 ? "has" : "have") + " since been re-identified here as something "
+              + "else, so " + (d.dropped === 1 ? "it is" : "they are") + " no longer drawn");
+            if (d.added) bits.push(d.added + " cell" + (d.added === 1 ? "" : "s")
+              + " the published table types differently " + (d.added === 1 ? "has" : "have")
+              + " been re-identified here as Purkinje cells and " + (d.added === 1 ? "is" : "are")
+              + " drawn now");
+            return "<p class='hint' style='margin:8px 0 0'><b>The dots follow what people here "
+              + "have settled on.</b> " + bits.join("; ") + ". The percentages above are "
+              + "deliberately left as they were &mdash; they are the check of the tracing against "
+              + "the published table, and re-basing them on the corrections would make them agree "
+              + "with it by construction.</p>";
+          })())
       +   "</div>";
   }
 
@@ -7233,7 +7280,10 @@ UJ.app = (function(){
      fail to add up. */
 
   var UNIVERSE = null;
-  function invalidateUniverse(){ UNIVERSE = null; }
+  /* PC_DOTS with it: the block diagram's somata are derived from the universe, and one that
+     outlived a re-identification would go on drawing a dot for a cell the page no longer calls a
+     Purkinje cell until somebody reloaded. */
+  function invalidateUniverse(){ UNIVERSE = null; PC_DOTS = null; }
   function universe(){
     if (UNIVERSE) return UNIVERSE;
     var out = [], seen = {};
