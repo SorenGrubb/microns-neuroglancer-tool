@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-03 21:22</span></p>
+ctrl-shift-R.">build 2026-09-04 06:48</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -4111,6 +4111,10 @@ UJ.app = (function(){
     invalidateUniverse();
     /* The filter's own tickboxes carry counts off that universe -- see refreshFilterControls. */
     refreshFilterControls();
+    /* And the block diagram, which is drawn from the same universe: its Purkinje somata follow
+       what people here have settled on, so a re-identification -- or the backend read landing
+       after the map was first drawn -- has to move the dots. */
+    redrawMap();
     renderSeeds();
     var host = el("cells"); if (!host) return;
     if (!STATE.cells.length){
@@ -5796,8 +5800,18 @@ UJ.app = (function(){
                           + "here is its end vertex held flat</span>" : "");
   }
 
+  /* WHERE THE CROSSHAIR IS, so the drawing can be rebuilt without being told again. Søren,
+     2026-09-03: "The model has not updated... there are still dendritic cells in the molecular
+     layer." The dots had been un-memoised the hour before, so the MODEL was right -- 44 Purkinje
+     cells -- while the SVG on screen still held the 47 circles it was built with at init, before
+     the backend read landed. A drawing nothing ever asks to redraw is a drawing that shows the
+     data as it was the first time somebody looked. */
+  var MAP_PT = null;
+  function redrawMap(){ if (el("dsmap")) drawMap(MAP_PT); }
+
   function drawMap(pt){
     var host = el("dsmap"); if (!host) return;
+    MAP_PT = pt || null;
     var ext = X.extentNm(), r = X.resXYZ();
     var ptNm = pt ? X.toNm(pt) : null;
     var range = X.tracedRange();
