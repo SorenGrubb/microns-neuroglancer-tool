@@ -479,7 +479,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 18:54</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 19:15</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -4462,9 +4462,14 @@ const IMG_DESC={"erythrocyte_01_TEM.png": "Anucleate, uniform hemoglobin fill", 
    the dashboard shows an explicit "Live data not available yet" placeholder rather than an error
    or stale numbers (see showLiveNotReady() in ujump_dashboard.html).
 
-   Note: the POST below uses mode:"no-cors" (required for a plain fetch to an Apps Script
-   web app without extra CORS setup), so the button shows a success message optimistically --
-   it can't read back a real success/failure. Check the sheet itself to confirm rows arrive.
+   Note (corrected 2026-09-04): this used to say mode:"no-cors" was "required for a plain fetch
+   to an Apps Script web app without extra CORS setup", and that the button therefore had to show
+   success optimistically. NEITHER WAS TRUE. Apps Script redirects a POST to
+   script.googleusercontent.com and that response carries Access-Control-Allow-Origin, so a
+   request simple enough to skip preflight -- which Content-Type: text/plain already makes this
+   one -- reads the body fine. Measured from grubblab.com: {status:200, type:"cors",
+   redirected:true, body:'{"ok":false,"error":"unauthenticated"}'}. The toast now says what the
+   server said; see postAndRead().
    Note: the GET requests used by loadCommunityReports() (below) read from this same /exec
    URL with a plain fetch (no no-cors needed for GET) to show how many people have logged a
    different identification for a nucleus -- counts and suggested names only, never who
@@ -4638,7 +4643,7 @@ function maybeSaveComputedVolume(rootId,cellType,info,nucVolUm3,nucleusId){
     vertices:info.vertices||0,fragmentCount:info.fragmentCount||1,
     reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
-  fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
+  noteSaveResult(payload);
   if(window._computedVolumesMap){
     const entry={volumeUm3:info.volumeUm3||0,nucVolumeUm3:nucVolUm3||0,cellType:cellType||"",fragmentCount:info.fragmentCount||1,timestamp:payload.timestamp};
     computedVolCacheKeys(rootId,nucleusId).forEach(function(key){window._computedVolumesMap[key]=entry;});
@@ -4802,6 +4807,61 @@ document.addEventListener("DOMContentLoaded",function(){
   });
   mo.observe(panel,{childList:true,subtree:true,attributes:true,attributeFilter:["disabled","data-vol-fresh"]});
 });
+/* ── ONE POST, AND WHAT THE SERVER SAID ABOUT IT ─────────────────────────────────  2026-09-04
+   Audit item 6. Every POST on this page used to go out mode:"no-cors", which makes the reply
+   opaque -- status 0, no body, and a promise that resolves whether the backend wrote the row,
+   refused it, or has never heard of the type. The success toast was therefore on a timer, not on
+   an answer, and said "Submitted — thank you" to a refusal.
+
+   no-cors was never required. Apps Script redirects a POST to script.googleusercontent.com and
+   that response carries Access-Control-Allow-Origin, so a request simple enough to skip preflight
+   -- which Content-Type: text/plain already makes this one -- can follow it and read the body.
+   Checked from this origin before the change: {status:200, type:"cors", redirected:true,
+   body:'{"ok":false,"error":"unauthenticated"}'}. Every other tool in the family has been reading
+   these replies for months.
+
+   Resolves to {ok:true} or {ok:false, error, offline}. It NEVER rejects, because three of its four
+   callers are best-effort saves whose whole contract is that they cannot fail loudly.
+
+   `offline` separates two things the old code could not tell apart and neither can a reader of a
+   toast: the request never arrived (say so, and say the report was not submitted) versus it
+   arrived and was refused (say what the server said, because that sentence is actionable -- it is
+   usually "re-paste Code.gs and Deploy → New version"). */
+var SAVE_LABEL={
+  save_computed_volume:"The computed volume",
+  connectivity_sample:"The connectivity sample",
+  cell_contacts_batch:"The contacts run",
+  mesh_proximity_batch:"The astrocyte–synapse run"
+};
+function postAndRead(payload){
+  return fetch(REPORT_ENDPOINT,{method:"POST",
+      headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)})
+    .then(function(r){ return r.text(); })
+    .then(function(t){
+      var d=null; try{ d=JSON.parse(t); }catch(_pe){}
+      if(d&&(d.ok===true||d.status==="ok"))return {ok:true};
+      var err=(d&&d.error)?String(d.error):("the server replied with something unreadable: "
+              +String(t||"").slice(0,120));
+      /* The one refusal worth rewording. "unauthenticated" is the server's word for a token that
+         has lapsed or was never sent, and it is not a sentence anybody can act on. */
+      if(/^unauthenticated$/i.test(err))
+        err="your Google sign-in has expired — sign in again and try once more; nothing was recorded";
+      return {ok:false,error:err};
+    })
+    .catch(function(e){ return {ok:false,offline:true,
+      error:"could not reach the server ("+((e&&e.message)||e)+")"}; });
+}
+/* The best-effort savers' shared ending: silent when it worked, a toast when it did not. Their
+   own return value was decided and printed long before this resolves (see saveGateNote), so this
+   is the only place a SERVER refusal can be said at all. */
+function noteSaveResult(payload){
+  return postAndRead(payload).then(function(res){
+    if(res.ok)return;
+    var what=SAVE_LABEL[payload&&payload.type]||"That measurement";
+    if(typeof showSubmitToast==="function")
+      showSubmitToast(false,what+" was not saved — "+res.error+".");
+  });
+}
 function postReport(payload,okMsg){
   if(!REPORT_ENDPOINT){alert("Reporting isn't wired up yet — set REPORT_ENDPOINT near the top of the script (see the comment above it) to a Google Apps Script web app URL.");return false;}
   if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){
@@ -4818,16 +4878,24 @@ function postReport(payload,okMsg){
   if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90){handleGoogleExpiry();alert("Your Google sign-in has expired. Please sign in with Google again, then resubmit.");return false;}
   payload.reporterName=REPORTER_NAME||"";payload.reporterEmail=REPORTER_EMAIL||"";
   payload.credential=GOOGLE_CREDENTIAL;
-  fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).then(function(){showSubmitToast(true,okMsg||"Submitted — thank you. Your identification was sent.");}).catch(function(){showSubmitToast(false,"Could not reach the server — your report was NOT submitted. Check your connection and try again.");});
+  postAndRead(payload).then(function(res){
+    if(res.ok){showSubmitToast(true,okMsg||"Submitted — thank you. Your identification was sent.");return;}
+    if(res.offline){showSubmitToast(false,"Could not reach the server — your report was NOT submitted. Check your connection and try again.");return;}
+    /* THE CASE THIS PAGE COULD NOT SEE UNTIL TODAY: the request arrived and the backend said no.
+       The server's own sentence is passed through because it is the actionable half -- an unknown
+       type names itself and says to re-paste Code.gs, which no wording invented here could. */
+    showSubmitToast(false,"The server did not record it — "+res.error+".");
+  });
   /* Refresh the "identified by the community / still unnamed" tally under the Random unassigned
-     button so the reporter sees their own contribution land. Deliberately delayed: the POST goes
-     out mode:"no-cors", so there is no readable response to wait on, and Apps Script needs a
-     moment to append the row before a re-read would include it. If it is still too early the
+     button so the reporter sees their own contribution land. Still delayed, for the half of the
+     old reason that survives: Apps Script needs a moment to append the row before a re-read would
+     include it. (The other half -- "no readable response to wait on" -- stopped being true on
+     2026-09-04; the reply is read now, but the row is not visible to a GET any sooner for it.) If it is still too early the
      count simply stays as it was until the next refresh -- no worse than before, and never wrong,
      since it always re-reads the real list rather than optimistically incrementing. */
   if(window.refreshUnclassifiedCounts)setTimeout(()=>window.refreshUnclassifiedCounts(true),2500);
   // 2026-08-09 (performance audit) -- same delayed-refetch reasoning as refreshUnclassifiedCounts
-  // above (no-cors POST has no readable response, and Apps Script needs a moment to write), but
+  // above (Apps Script needs a moment to write before a re-read sees the row), but
   // for NEW_CELL_REPORTS_CACHE/MERGED_SUB_REPORTS_CACHE specifically, which previously had no
   // invalidation at all -- see invalidateNewCellAndMergedSubCaches()'s own comment.
   if(window.invalidateNewCellAndMergedSubCaches)setTimeout(()=>window.invalidateNewCellAndMergedSubCaches(),2500);
@@ -5312,8 +5380,8 @@ function connRenderAllCharts(ids,points,colorField,showNoType){
    Colab re-run. Modeled directly on maybeSaveComputedVolume() (same file, near
    fetchComputedVolumesMap()): silently gated on sign-in (no alert() if the visitor isn't signed
    in -- unlike postReport(), this isn't a deliberate "Submit" click, so nagging someone to sign in
-   just for looking at connectivity would be poor UX), fire-and-forget mode:"no-cors" POST, no
-   toast on success or failure. inputCount/outputCount are the TOTAL synapse counts for THIS query
+   just for looking at connectivity would be poor UX), fire-and-forget POST, and no toast unless
+   the SERVER refuses it (2026-09-04: the reply is readable now -- see postAndRead/noteSaveResult). inputCount/outputCount are the TOTAL synapse counts for THIS query
    (every synapse the CAVE query returned for the cell whose panel this is, tagged by direction) --
    not a partner count, not an average across partners -- exactly what connRenderIODepthChart()
    computes for its own violin chart from the same allPoints array, just counted here instead of
@@ -5353,7 +5421,7 @@ function saveConnectivitySample(nucleusId,rootId,cellType,centerPos,allPoints){
     byType:JSON.stringify(byType),
     reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
-  fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
+  noteSaveResult(payload);
 }
 /* 2026-08-09 (Søren: "When a cell has a user reported root ID, that root ID should be also used in
    the connectivity") -- fetches this nucleus's community-proposed root IDs fresh (same ?rootIds=
@@ -7262,7 +7330,7 @@ function maybeSaveCellContacts(nucleusId,rootId,cellType,pairs,clusterUm,thresho
       touchPointCount:(p.touchPoints||[]).length};}),
     reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
-  fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
+  noteSaveResult(payload);
 }
 /* Live GET of already-known contacts for one nucleus (from EVERY user's past clicks, not just
    this session) -- public, no token needed, same convention as ?computedVolumes=1. Called on
@@ -8076,7 +8144,7 @@ function maybeSaveTripartite(nucleusId,rootId,cellType,rows,thresholdUm,radiusUm
     items:items,
     reporterName:REPORTER_NAME||"",reporterEmail:REPORTER_EMAIL||"",
     credential:GOOGLE_CREDENTIAL,timestamp:new Date().toISOString()};
-  fetch(REPORT_ENDPOINT,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)}).catch(function(){});
+  noteSaveResult(payload);
   return "";
 }
 function tripartiteRowHtml(r,idx,thresholdNm){
