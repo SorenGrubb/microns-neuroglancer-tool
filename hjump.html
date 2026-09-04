@@ -433,7 +433,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-03 12:05</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 15:44</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1215,6 +1215,24 @@ function wireMeshButtons(i){
      proposed already IS the "recalculate" action; no separate control was needed. */
   const vb=document.querySelector(".meshvol");
   const resultEl=document.getElementById("meshvolResult");
+  /* WHAT IS ALREADY KNOWN, before anybody clicks. The roster is read once and then this is free,
+     and it is what makes "it was saved" checkable without opening the spreadsheet. µJump's own
+     wording for the relabelled button, and its reason: with a value already on screen, a second
+     click is a deliberate update rather than an accidental duplicate. */
+  function paintSavedVolume(){
+    const um=hjumpSavedVolume(i);
+    if(!um) return;
+    if(vb) vb.textContent="\u2248 Recalculate volume";
+    if(resultEl && !resultEl.textContent){
+      resultEl.textContent="Cell volume (mesh): \u2248 "+Math.round(um).toLocaleString()
+        +" \u00b5m\u00b3 \u2014 measured here and saved";
+      resultEl.title="Read back from the shared “Computed volumes” sheet, which is also what "
+        +"fills the master cell list's computed_volume_um3 column. Recalculating overwrites this "
+        +"cell's row rather than adding a second one.";
+    }
+  }
+  paintSavedVolume();
+  fetchHjumpVolumes().then(paintSavedVolume);
   if(vb) vb.addEventListener("click",function(ev){
     run(vb,function(){
       return UJ.mesh.computeVolume(c3Id(i),prog,ev.shiftKey).then(function(info){
@@ -1225,7 +1243,20 @@ function wireMeshButtons(i){
           resultEl.textContent="Cell volume (mesh"+combinedStr+"): ≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"+fallbackStr;
           resultEl.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices) — small gaps at fragment boundaries aren't corrected for, so this is an estimate, not an exact figure. Recompute any time (e.g. after a new segment ID is proposed below) by clicking Compute volume again.";
         }
-        return info;
+        /* AND IT IS KEPT. Søren, 2026-09-03: "when I press compute volume in the tool, nothing
+           appears in the master cell list. I also don't see anywhere else it is saved." The
+           number is already printed above; this only decides what the line after it says, so a
+           failed save can never read as a failed measurement. */
+        const shown=resultEl?resultEl.textContent:"";
+        return hjumpSaveVolume(i,info).then(function(tail){
+          if(resultEl&&tail) resultEl.textContent=shown+tail;
+          /* AFTER run() HAS PUT THE LABEL BACK. run(btn,fn) captures the button's label at
+             click time and restores it when the work settles -- so relabelling inside the work is
+             undone a microtask later, which is precisely what happened the first time this was
+             written. A timeout puts the repaint after that restore. */
+          if(/saved to the master/.test(tail||"")) setTimeout(paintSavedVolume,0);
+          return info;
+        });
       });
     });
   });
@@ -2282,6 +2313,88 @@ function fetchHjumpIdentities(){
     .then(function(map){ HJUMP_IDENTITY_FETCH=null; return map; });
   return HJUMP_IDENTITY_FETCH;
 }
+/* ── COMPUTED VOLUMES: SAVED, AND SHOWN BACK ────────────────────────────────────  2026-09-03
+   Søren: "there is a computed_volume_um3 column, however, when I press compute volume in the
+   tool, nothing appears in the master cell list. I also don't see anywhere else it is saved."
+
+   It was not saved anywhere. The button decoded the meshes, integrated the geometry, printed the
+   number and posted nothing, so the column in the master cell list and the "Computed volumes"
+   sheet both stayed empty for H01 while µJump and χJump filled theirs.
+
+   No backend change: save_computed_volume has existed in doPost since 2026-07-31, upserts one row
+   per rootId, and calls upsertMasterCellComputedVolume() on the way. The missing piece was here.
+
+   The roster below is the public read (?computedVolumes=1, no credential -- reading is public in
+   every tool in this family), keyed BOTH ways: by c3 segment id, which is what the sheet upserts
+   on, and by cell body id, which is what survives somebody proposing a different c3 id for the
+   same cell. */
+let HJUMP_VOLS=null, HJUMP_VOLS_FETCH=null;
+function fetchHjumpVolumes(){
+  if(HJUMP_VOLS) return Promise.resolve(HJUMP_VOLS);
+  if(HJUMP_VOLS_FETCH) return HJUMP_VOLS_FETCH;
+  if(!REPORT_ENDPOINT){ HJUMP_VOLS={}; return Promise.resolve(HJUMP_VOLS); }
+  HJUMP_VOLS_FETCH=fetch(REPORT_ENDPOINT+"?computedVolumes=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(r=>r.json())
+    .then(function(d){
+      const map={};
+      ((d&&d.computedVolumes)||[]).forEach(function(v){
+        const um=Number(v.volumeUm3)||0; if(!um) return;
+        if(v.rootId) map[String(v.rootId)]=um;
+        if(v.nucleusId) map["N:"+String(v.nucleusId)]=um;
+      });
+      HJUMP_VOLS=map; return map;
+    })
+    /* An older deployment, or no backend at all, simply means nothing is known yet -- which is
+       the same thing the page showed before this existed. */
+    .catch(function(){ HJUMP_VOLS={}; return HJUMP_VOLS; })
+    .then(function(map){ HJUMP_VOLS_FETCH=null; return map; });
+  return HJUMP_VOLS_FETCH;
+}
+function hjumpSavedVolume(i){
+  if(!HJUMP_VOLS) return 0;
+  return HJUMP_VOLS[String(c3Id(i))] || HJUMP_VOLS["N:"+String(HSB[i])] || 0;
+}
+/* What the page is CALLING this cell right now: the community's settled identity when there is
+   one, else H01's own published classification. The same precedence every other tool sends with
+   this report, so one dashboard can bucket volumes from all of them. */
+function hjumpCellTypeFor(i){
+  return hjumpIdentityOf(i) || longName(typeName(i)) || "Unclassified";
+}
+/* The write. Returns a promise that resolves to a short sentence for the line under the button --
+   the volume itself is printed by the caller either way, because a save that failed must not look
+   like a measurement that failed. */
+function hjumpSaveVolume(i,info){
+  if(!REPORT_ENDPOINT) return Promise.resolve("");
+  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)
+    return Promise.resolve(" — sign in with Google to save it to the master cell list");
+  const um=Math.round((info.volumeUm3||0)*100)/100;
+  const payload={type:"save_computed_volume",
+    rootId:String(c3Id(i)),
+    /* THE CELL BODY ID, which is what ηJump keys every other report by -- the guided
+       identification, the organelle reports, the identity votes -- and what MasterList.gs turns
+       into the "N:<id>" row Søren is reading. */
+    nucleusId:String(HSB[i]),
+    cellType:hjumpCellTypeFor(i),
+    volumeUm3:um,
+    vertices:info.vertices||0,
+    fragmentCount:(info.rootIds&&info.rootIds.length)||info.fragmentCount||1,
+    /* H01's own precomputed SOMA volume for this same cell, already on screen two lines above the
+       button. Sent so a dashboard can plot soma as a share of the whole cell from one paired
+       measurement rather than two unrelated averages -- µJump sends the equivalent. */
+    nucVolumeUm3:(HVB[i]>0)?Math.round(HVB[i]*100)/100:"",
+    reporterName:REPORTER_NAME||"",
+    timestamp:new Date().toISOString()};
+  return postReport(payload,"Volume saved.")
+    .then(function(d){
+      if(!(d&&d.ok)) throw new Error((d&&d.error)||"the backend did not accept it");
+      if(HJUMP_VOLS){ HJUMP_VOLS[String(c3Id(i))]=um; HJUMP_VOLS["N:"+String(HSB[i])]=um; }
+      return " — saved to the master cell list";
+    })
+    .catch(function(e){
+      return " — computed, but saving it failed: "+((e&&e.message)||e);
+    });
+}
+
 const HJUMP_UNCLASSIFIED_SENTINEL="__unclassified__";
 function hjumpIdentityOf(i){
   const rec=HJUMP_IDENTITY_BY_NID&&HJUMP_IDENTITY_BY_NID[HSB[i]];
