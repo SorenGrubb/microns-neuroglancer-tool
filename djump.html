@@ -538,7 +538,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-03 12:02</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 18:30</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -4652,6 +4652,36 @@ function handleGoogleExpiry(){
   if(typeof showSubmitToast==="function")showSubmitToast(false,"Your Google sign-in expired — sign in again to keep your reports credited.");
   try{if(window.google&&google.accounts&&google.accounts.id)google.accounts.id.prompt();}catch(_){}
 }
+/* ── WHY A "BEST-EFFORT" SAVE WOULD NOT HAPPEN ──────────────────────────────────  2026-09-03
+   Three writes on this page are deliberately silent and best-effort: the computed volume, the
+   connectivity sample and the cell-contacts batch. All three compute first and save afterwards,
+   and all three simply returned when nobody was signed in.
+
+   That is the right BEHAVIOUR -- every row in these sheets names who put it there, so an
+   anonymous measurement has nowhere to go -- and the wrong SILENCE. Worse, the volume tooltip
+   said "Saved to the shared dashboard just now" whether or not it was.
+
+   One function decides, so the sentence and the behaviour cannot drift apart: "" means the write
+   is about to go out, anything else is what to tell the person. It runs the same 90-second expiry
+   check the writes themselves ran, in the same order, for the same reason. */
+function saveGateNote(){
+  if(!REPORT_ENDPOINT)return "Not saved: this page has no backend configured.";
+  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
+  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)
+    return "Not saved to the shared record \u2014 sign in with Google (top right) and run it again; "
+         + "every row names who measured it, so an anonymous one has nowhere to go.";
+  return "";
+}
+/* Said ONCE per session, as a toast, the first time anything is dropped. Somebody reading the
+   dataset signed out does not need telling on every click, and somebody signed in never sees it
+   at all -- but not knowing, once, is what makes a person redo an hour of work later. */
+var SAVE_GATE_TOLD=false;
+function noteNotSaved(note){
+  if(!note||SAVE_GATE_TOLD)return note;
+  SAVE_GATE_TOLD=true;
+  try{ if(typeof showSubmitToast==="function") showSubmitToast(false,note); }catch(e){}
+  return note;
+}
 /* Same 90-second-before-expiry buffer postReport() already used (a fresh token minted 90s from
    now during a slow multi-step form is still fine) -- shared here so a background/idle check and
    an explicit submit agree on the exact same cutoff. No-op whenever GOOGLE_VERIFIED is already
@@ -4706,9 +4736,11 @@ function computedVolCacheKeys(rootId,nucleusId){
   return keys;
 }
 function maybeSaveComputedVolume(rootId,cellType,info,nucVolUm3,nucleusId){
-  if(!REPORT_ENDPOINT)return;
-  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
-  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
+  /* Returns "" when it saved, or the sentence saying why it did not -- see saveGateNote(). The
+     caller prints it beside the number, which is the whole point: the measurement is real either
+     way, and only its fate is in question. */
+  var gate=noteNotSaved(saveGateNote());
+  if(gate)return gate;
   /* nucVolUm3, when known (only from the main nucleus display -- see meshDlButtonHtml's comment),
      is the PRECOMPUTED nucleus volume for this exact same cell, sent alongside the freshly
      computed mesh volume so the dashboard can plot nucleus-volume-as-a-share-of-the-whole-cell
@@ -5417,12 +5449,11 @@ function connRenderAllCharts(ids,points,colorField,showNoType){
    the bulk Filter-and-show export already uses, so renderSynapseIO()'s layer picker can filter
    live samples the same way it used to filter the static aggregate's precomputed breakdown. */
 function saveConnectivitySample(nucleusId,rootId,cellType,centerPos,allPoints){
-  if(!REPORT_ENDPOINT)return;
-  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
-  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
+  var gate=noteNotSaved(saveGateNote());
+  if(gate)return gate;
   const inputCount=allPoints.filter(function(p){return p.direction==="input";}).length;
   const outputCount=allPoints.filter(function(p){return p.direction==="output";}).length;
-  if(!inputCount&&!outputCount)return; // nothing to add -- an empty/failed query, not a real sample
+  if(!inputCount&&!outputCount)return ""; // nothing to add -- an empty/failed query, not a real sample
   let layer="";
   try{
     if(window.estimateLayerFast&&centerPos&&centerPos.length===3){
@@ -5664,7 +5695,7 @@ function renderConnectivityToggle(el,containerId,rootId,centerPos,cellType,nucle
         // and why it's silent/unattributed-in-the-UI (no toast, no sign-in prompt on failure).
         // queryRootId (not the possibly-empty rootId param) so an unsegmented cell that only has a
         // community-reported root ID still logs a real id here.
-        saveConnectivitySample(nucleusId,queryRootId,cellType,centerPos,allPoints);
+        const connGate=saveConnectivitySample(nucleusId,queryRootId,cellType,centerPos,allPoints);
         const shownIds=new Set(shown.map(p=>p.partner));
         const points=doSyn?allPoints.filter(p=>shownIds.has(p.partner)):[];
         const state=buildConnectivityState(centerPos,selfIds,shown,points);
@@ -5672,7 +5703,9 @@ function renderConnectivityToggle(el,containerId,rootId,centerPos,cellType,nucle
         const base=viewerEl?viewerEl.value:"https://spelunker.cave-explorer.org/";
         const url=base+"#!"+encodeURIComponent(JSON.stringify(state));
         lastUrl=url;
-        setStatus(shown.length+" of "+allPartners.length+" partners"+(points.length?", "+Math.min(points.length,CAVE_MAX_SYN_POINTS)+" synapse points":"")+" loaded"+(allPoints.length?" ("+allPoints.length+" total synapses in the graphs below)":"")+".","ok");
+        /* The same line that reports what loaded reports whether it was kept. A query nobody
+           saved is still a query worth reading -- it is just not one the graphs will grow from. */
+        setStatus(shown.length+" of "+allPartners.length+" partners"+(points.length?", "+Math.min(points.length,CAVE_MAX_SYN_POINTS)+" synapse points":"")+" loaded"+(allPoints.length?" ("+allPoints.length+" total synapses in the graphs below)":"")+"."+(connGate?" "+connGate:""),connGate?"":"ok");
         const rt=bod.querySelector("#connResults");
         if(rt){
           const rows2=[...allPartners].sort((a,b)=>b.syn_count-a.syn_count);
@@ -5823,15 +5856,22 @@ document.addEventListener("click",(e)=>{
         if(volEl){
           const valSpan=volEl.querySelector(".idval");
           const combinedStr=info.fragmentCount>1?" ("+info.fragmentCount+" fragments combined)":"";
+          /* ASKED BEFORE THE SAVE, so the tooltip written below states what is about to
+             happen rather than repeating a hope. The call itself is still made further down. */
+          const volGate=saveGateNote();
           if(valSpan){
-            valSpan.textContent="≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³";
+            valSpan.textContent="≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"
+              +(volGate?" — not saved":"");
             valSpan.dataset.c=String(Math.round(info.volumeUm3*100)/100);
             /* mainUnavailable (2026-08, Søren: main root ID's mesh was "cached unavailable" but a
                user-reported root ID for the same nucleus worked -- fetchCombinedMesh() now falls
                back to whichever proposed root IDs DO resolve instead of failing outright). Surfaced
                here rather than silently swapped in, so the estimate's provenance stays visible. */
             const fallbackStr=info.mainUnavailable?" — the main root ID's mesh wasn't found in the seg_m1300 snapshot; computed from a community-reported root ID for this nucleus instead.":"";
-            valSpan.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices)"+combinedStr+" — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure."+fallbackStr+" Saved to the shared dashboard just now. Click to copy.";
+            /* IT USED TO SAY "Saved to the shared dashboard just now" WHATEVER HAPPENED --
+               signed in or not, saved or dropped. That is the one sentence a page must not get
+               wrong: it removes the only reason somebody would sign in and do it again. */
+            valSpan.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices)"+combinedStr+" — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure."+fallbackStr+" "+(volGate||"Saved to the shared dashboard just now.")+" Click to copy.";
           }
           volEl.style.display="flex";
         }
@@ -7335,9 +7375,10 @@ async function fetchExtraRootIdsFor(nucleusId,mainRootIdStr){
    not) is still saved and still shown to this user individually -- same "always save, filter only
    at the point of use" principle as minDistanceNm's own "not touching" rows above. */
 function maybeSaveCellContacts(nucleusId,rootId,cellType,pairs,clusterUm,thresholdUm){
-  if(!REPORT_ENDPOINT||!pairs.length)return;
-  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90)handleGoogleExpiry();
-  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL)return;
+  /* No pairs is not a gate: there was nothing to save, and nothing to apologise for. */
+  if(!pairs.length)return "";
+  var gate=noteNotSaved(saveGateNote());
+  if(gate)return gate;
   const usedDefault=Math.abs((Number(clusterUm)||0)-CELL_CONTACT_POINT_CLUSTER_UM)<1e-9
     &&Math.abs((Number(thresholdUm)||0)-CELL_CONTACT_THRESHOLD_UM)<1e-9;
   const payload={type:"cell_contacts_batch",nucleusId:nucleusId||"",rootId:rootId||"",cellType:cellType||"",
@@ -7561,10 +7602,11 @@ function renderCellContactsPanel(el,known,i,rootIdStr,cellType,nucleusId){
         checkBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";
       });
       curRows=results;curThresholdNm=thresholdNm;
-      maybeSaveCellContacts(nucleusId,rootId0,cellType,results,clusterNm/1000,thresholdNm/1000);
+      const ccGate=maybeSaveCellContacts(nucleusId,rootId0,cellType,results,clusterNm/1000,thresholdNm/1000);
       resultsEl.innerHTML=results.length?results.map(cellContactCandidateRowHtml).join(''):'<div class="nsub">No cells of that type had a resolvable root ID to check.</div>';
       countEl.textContent=totalFound+" "+label+(totalFound===1?"":"s")+" found within "+radius+" µm"
-        +(checked<totalFound?" — checked nearest "+checked+" (limit "+CELL_CONTACT_TYPE_MAX_FETCH+")":" — all checked");
+        +(checked<totalFound?" — checked nearest "+checked+" (limit "+CELL_CONTACT_TYPE_MAX_FETCH+")":" — all checked")
+        +(ccGate?" — "+ccGate:"");
       nglBtn.disabled=!results.length;xlsxBtn.disabled=!results.length;
     }catch(err){
       console.warn("[uJump cell contacts by type]",err);

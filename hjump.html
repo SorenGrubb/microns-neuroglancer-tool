@@ -433,7 +433,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 15:44</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 18:30</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1306,19 +1306,67 @@ const REPORT_ENDPOINT = UJ.cfg.backend.endpoint;
 const GOOGLE_CLIENT_ID = UJ.cfg.backend.clientId;
 const OWNER_EMAIL = UJ.cfg.backend.ownerEmail;
 let GOOGLE_VERIFIED=false, GOOGLE_CREDENTIAL=null, REPORTER_NAME="";
+/* ── THE TOKEN'S OWN EXPIRY ──────────────────────────────────────────────────────  2026-09-03
+   Google's ID token lasts about an hour. Until today this page took it once and used it until the
+   tab closed, so every write after that hour came back "unauthenticated" -- which reads as "you
+   are not signed in" to somebody looking at their own name in the corner of the page.
+
+   Milliseconds, 0 until somebody signs in. A MINUTE OF MARGIN in googleExpired(), so a request
+   that leaves while the token is alive does not arrive after it is dead. */
+let GOOGLE_EXP=0, GOOGLE_EXP_TIMER=null;
+function googleExpired(){ return GOOGLE_EXP>0 && Date.now()>GOOGLE_EXP-60000; }
+/* Google re-issues silently when the browser is still signed in to it, so in the common case this
+   repairs the tab without anybody being asked anything. Wrapped: prompt() throws on a page where
+   the library never loaded. */
+function askSignInAgain(){
+  try{ if(window.google&&google.accounts&&google.accounts.id) google.accounts.id.prompt(); }
+  catch(e){}
+}
+/* Which of the two situations this is. The wrong sentence here is worse than none: told to "sign
+   in first", somebody who signed in forty minutes ago reads it as the page having lost their work
+   and reloads, which is the one action that throws away whatever is on screen. */
+function signInMsg(){
+  return googleExpired()
+    ? "Your Google sign-in has expired \u2014 Google's tokens last about an hour. Sign in again "
+      + "with the account chip at the top of the page, then try again. Nothing on this page is lost."
+    : "Sign in with Google first \u2014 reading is public, adding to the record is not.";
+}
 function handleGoogleCred(resp){
   try{
     const p=JSON.parse(atob(String(resp.credential).split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
     REPORTER_NAME=p.name||""; GOOGLE_CREDENTIAL=resp.credential; GOOGLE_VERIFIED=true;
+    GOOGLE_EXP=(Number(p.exp)||0)*1000;
+    /* A minute before it lapses, ask for a new one. No re-render: a redraw would wipe whatever
+       message is on screen, including the one explaining why the last write failed. */
+    if(GOOGLE_EXP_TIMER){ clearTimeout(GOOGLE_EXP_TIMER); GOOGLE_EXP_TIMER=null; }
+    if(GOOGLE_EXP>0){
+      const ms=Math.max(0, GOOGLE_EXP-Date.now()-60000);
+      if(ms<86400000) GOOGLE_EXP_TIMER=setTimeout(askSignInAgain, ms);
+    }
     if(typeof gamifyOnSignIn==="function") gamifyOnSignIn();
   }catch(e){ GOOGLE_VERIFIED=false; }
 }
 /* Every write carries ds so the backend routes it to the H01 spreadsheet. */
 function postReport(payload,okMsg){
+  /* REFUSED HERE, BEFORE THE ROUND TRIP, when the token is already dead -- and answered in the
+     shape every call site in this page already handles ({ok:false, error}), so the sentence
+     reaches every message line and every toast without one of them being edited. */
+  if(googleExpired()){
+    askSignInAgain();
+    if(typeof showSubmitToast==="function") showSubmitToast(false, "");
+    return Promise.resolve({ok:false, error:signInMsg()});
+  }
   payload.credential=GOOGLE_CREDENTIAL; payload.ds=UJ.cfg.backend.ds;
   return fetch(REPORT_ENDPOINT,{method:"POST",body:JSON.stringify(payload)})
     .then(r=>r.json())
     .then(function(d){
+      /* AND THE SERVER'S OWN WORD, TRANSLATED, for a token that lapsed between the check above and
+         this request landing -- the one case no check on this side can catch. */
+      if(d && d.ok===false && /unauthenticat|invalid[ _-]?token|token[ _-]?expired/i.test(String(d.error||""))){
+        GOOGLE_EXP=1;              /* googleExpired() is true from here until a fresh sign-in */
+        askSignInAgain();
+        d.error=signInMsg();
+      }
       /* NORMALISE THE TWO RESPONSE SHAPES (2026-08-28). Handlers with their own gJson() return
          {ok:true,...}; doPost's shared success return said only {status:"ok"} until this was
          found, so every identification filed through it came back looking like a failure -- the
@@ -2680,12 +2728,56 @@ function wireContacts(i){
         msg.textContent=touching.length+" of "+rows.length+" neighbouring cells touch this one.";
         const thNm=Math.round(threshUm*1000*10)/10, clNm=Math.round(clusterUm*1000);
         if(touching.length) saveContactRun(i,touching,thNm,clNm,radiusUm);
+        /* IN MEMORY FOR THIS TAB, AND IN THE SHEET FOR EVERYBODY. The line above keeps the decoded
+           geometry so the panel can redraw without re-fetching; this one records what was found. */
+        const ccGate=hjumpSaveContacts(i,touching,threshUm,clusterUm);
+        if(ccGate) msg.textContent=msg.textContent+" — "+ccGate;
         showContactResults(i,touching,thNm,clNm);
         renderPriorRunNote(i);
       })
       .catch(function(e){ btn.disabled=false; msg.textContent="failed: "+((e&&e.message)||e); });
   });
 }
+/* ── THE CONTACTS RUN, KEPT ──────────────────────────────────────────────────────  2026-09-03
+   Søren's write audit: this panel fetched and decoded every neighbour's mesh, measured real
+   contact points, and stored the result in a Map that dies with the tab.
+
+   `cell_contacts_batch` has existed in Code.gs since 2026-08-10 and four other tools send it; the
+   shape below is µJump's, field for field, so one "Mesh contacts" sheet holds every tool's rows
+   and ?meshContactTypeStats=1 can average across them.
+
+   ONLY THE TOUCHING PAIRS. µJump saves the non-touching ones too, because its run measures how
+   close they came; ηJump's does not, and the backend reads a missing minDistanceNm as 0 -- which
+   in this sheet means "touching perfectly". A number nobody measured is worse than no row. */
+function hjumpSaveContacts(i,rows,threshUm,clusterUm){
+  const touching=(rows||[]).filter(function(r){ return r.points && r.points.length; });
+  if(!touching.length) return "";            /* nothing found is not a refusal */
+  if(!REPORT_ENDPOINT) return "";
+  if(googleExpired()||!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL) return signInMsg();
+  const usedDefault=Math.abs(threshUm-CONTACT_THRESHOLD_UM)<1e-9
+    &&Math.abs(clusterUm-CONTACT_CLUSTER_UM)<1e-9;
+  const pairs=touching.map(function(r){
+    /* The nearest patch, and its coordinate in this page's voxel convention -- the sheet keeps one
+       representative point per pair plus the count, which is µJump's own arrangement. */
+    let best=r.points[0];
+    r.points.forEach(function(p){ if(p.dist<best.dist) best=p; });
+    const v=meshUmToVoxel(best.point[0],best.point[1],best.point[2]);
+    return { contactNucleusId:String(HSB[r.i]), contactRootId:String(c3Id(r.i)),
+             contactCellType:hjumpCellTypeFor(r.i),
+             minDistanceNm:Math.round(best.dist*1000*10)/10,
+             contactVoxelX:v[0], contactVoxelY:v[1], contactVoxelZ:v[2],
+             touchPointCount:r.points.length };
+  });
+  postReport({ type:"cell_contacts_batch",
+               nucleusId:String(HSB[i]), rootId:String(c3Id(i)),
+               cellType:hjumpCellTypeFor(i),
+               usedDefaultSettings:usedDefault, pairs:pairs,
+               reporterName:REPORTER_NAME||"",
+               timestamp:new Date().toISOString() },"Contacts saved.")
+    .catch(function(){});
+  return "";
+}
+
 async function runContacts(i,cands,threshUm,clusterUm,onProgress){
   const own=await UJ.mesh.fetchCombinedMesh(c3Id(i));
   const ownGrid=UJ.mesh.buildContactGrid(own.positions,threshUm);

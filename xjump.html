@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-04 10:14</span></p>
+ctrl-shift-R.">build 2026-09-04 18:29</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -6613,6 +6613,8 @@ UJ.app = (function(){
   var CC_DEFAULTS = { radiusUm: 50, gapNm: 40, spacingNm: 1000, maxCells: 6 };
   var CC_GEO = {};                  // cellKey -> {positions, indices, have, total}, this session
   var CC_RESULT = {};               // cellKey -> the last computed rows, for the two exports
+  /* Why the last run for this cell was not written, if it was not. Cleared when one is. */
+  var CC_GATE = {};
 
   function ccSectionHtml(cellKey){
     return "<details class='cc' data-cell='" + esc(cellKey) + "'"
@@ -7033,6 +7035,16 @@ UJ.app = (function(){
                              /* Whether a coordinate derived from this geometry can be believed.
                                 The contacts can be believed either way. */
                              frameOk: shift !== null };
+      /* ── AND IT IS KEPT ────────────────────────────────────────────────────────  2026-09-03
+         Until today this whole run -- every neighbour's mesh fetched, decoded and measured --
+         lived in CC_RESULT and died with the tab. `cell_contacts_batch` has been in the backend
+         since August and four other tools send it.
+
+         EVERY EVALUATED PAIR, not only the touching ones: this page measures how close the others
+         came (nearestApproach), so "137 nm apart" is a real row rather than a missing one. The
+         pairs that could not be fetched at all are left out -- there is nothing to report about a
+         cell whose mesh never arrived. */
+      CC_GATE[cellKey] = ccSave(cellKey, CC_RESULT[cellKey]);
       ccShowRows(d, cellKey);
     }).catch(function(e){
       d.querySelector(".cc-results").innerHTML =
@@ -7133,6 +7145,12 @@ UJ.app = (function(){
             + "'>Open in Neuroglancer</button>"
             + "</div>";
         }).join("");
+    /* Set by the run that produced these rows; blank on a redraw, which is right -- the
+       sentence belongs to the moment of the write, not to every later look at the answer. */
+    if (CC_GATE[cellKey]){
+      host.innerHTML += "<p class='hint' style='margin:8px 0 0;color:var(--warn)'>"
+        + esc(CC_GATE[cellKey]) + "</p>";
+    }
     d.querySelector(".cc-ngl").disabled = !R.rows.length;
     d.querySelector(".cc-xlsx").disabled = !R.rows.length;
     Array.prototype.forEach.call(host.querySelectorAll(".cc-jump"), function(a){
@@ -7223,6 +7241,46 @@ UJ.app = (function(){
     var o = originUm || [0,0,0];
     return X.toVox([(pointUm[0] + o[0]) * 1000, (pointUm[1] + o[1]) * 1000,
                     (pointUm[2] + o[2]) * 1000]).map(Math.round);
+  }
+  /* What the run found, in µJump's own payload shape, so one "Mesh contacts" sheet holds every
+     tool's rows. Returns "" when it was sent or when there was nothing to send, and the sentence
+     to print otherwise -- the caller shows it under the rows, because a run that reached nothing
+     must not look like one that reached the sheet. */
+  function ccSave(cellKey, R){
+    if (!R || !R.rows || !R.rows.length) return "";
+    var pairs = [];
+    R.rows.forEach(function(r){
+      if (r.failed) return;                       /* no mesh arrived; nothing was measured */
+      var nm = r.points.length ? r.distNm : r.nearNm;
+      if (nm == null) return;                     /* neither a contact nor an approach */
+      /* THE COORDINATE ONLY WHEN THE FRAME IS KNOWN. The distances are differences and survive any
+         offset; a POSITION does not, and this page already refuses to draw markers when the mesh
+         store and the viewer disagree (frameOk). The sheet gets the same treatment. */
+      var pt = null;
+      if (R.frameOk){
+        if (r.points.length) pt = touchVox(r.points[0], R);
+        else if (r.nearPoint) pt = touchVox({ point: r.nearPoint }, R);
+      }
+      pairs.push({ contactNucleusId: r.u.key,
+                   contactRootId: (segsForCell(r.u.key)[0] || ""),
+                   contactCellType: labelOf(r.u),
+                   minDistanceNm: Math.round(nm * 10) / 10,
+                   contactVoxelX: pt ? pt[0] : "", contactVoxelY: pt ? pt[1] : "",
+                   contactVoxelZ: pt ? pt[2] : "",
+                   touchPointCount: r.points.length });
+    });
+    if (!pairs.length) return "";
+    if (!STORE.canWrite()) return signInMsg();
+    var usedDefault = R.gapNm === CC_DEFAULTS.gapNm && R.spacingNm === CC_DEFAULTS.spacingNm;
+    pairs.rootId = segsForCell(cellKey)[0] || "";
+    STORE.contacts(cellKey, labelOfCell(cellKey), pairs, usedDefault).catch(function(){});
+    return "";
+  }
+  /* The name this page calls a cell, for a key rather than a universe row -- the same precedence
+     labelOf uses, so a volume, an organelle and a contact all file it under one word. */
+  function labelOfCell(cellKey){
+    var u = universe().filter(function(x){ return x.key === cellKey; })[0];
+    return u ? labelOf(u) : "";
   }
   function touchVox(p, R){
     return ccVox(p.point, R && R.originUm);
@@ -8376,6 +8434,7 @@ UJ.app = (function(){
       return Promise.resolve({ ok:true, added:added, merged:merged, total:points.length,
                                results:results });
     },
+    contacts: function(){ return Promise.resolve({ ok:true }); },
     visit:  function(){ return Promise.resolve({ ok:true }); },
     join:   function(){ return Promise.resolve({ ok:true, joined:true }); },
     loadExplore: function(){ return Promise.resolve(STATE.explore || { visited:{}, nuclei:[] }); },
@@ -8648,6 +8707,15 @@ UJ.app = (function(){
           });
           return by;
         });
+    },
+    /* µJump's own type, unchanged, and no new backend code: doPost routes on `ds`, so the rows
+       land in χJump's spreadsheet in a "Mesh contacts" tab with µJump's exact columns, upserted on
+       the unordered pair. `nucleusId` carries a CELL key here, the same way the organelle reports
+       do -- see organSectionHtml's note on why no separate type exists for that. */
+    contacts: function(cellKey, cellType, pairs, usedDefault){
+      return this._post({ type:"cell_contacts_batch", nucleusId: cellKey,
+                          rootId: (pairs.rootId || ""), cellType: cellType || "",
+                          usedDefaultSettings: !!usedDefault, pairs: pairs });
     },
     visit:  function(boxKey, outcome, n){
       return this._post({ type:"xjump_box_visit", boxKey:boxKey, outcome:outcome, foundCount:n||0 });

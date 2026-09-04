@@ -119,7 +119,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-03 09:46</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-04 18:19</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -1639,10 +1639,63 @@ UJ.organelles = (function(){
   /* "is this kind the two-point shape", asked of the DATA rather than by name. µJump learned this
      the hard way: a hardcoded ===\"cilium\" check meant nucleoplasmic reticulum type II silently
      got one coordinate field when it was added as the second vector kind. */
-  function isVector(v){ var k = BY_VALUE[v]; return !!(k && k.vector); }
+  function isVector(v){
+    var k = BY_VALUE[v];
+    if (k) return !!k.vector;
+    /* No UJ.organelleData on this page: the µJump family carries the same ontology as
+       core/ontology.js's ORGANELLE_KIND_BY_VALUE. Read rather than assumed false -- answering
+       "not a vector" for a cilium would pair nothing and make half-filled rows. */
+    var o = (typeof ORGANELLE_KIND_BY_VALUE !== "undefined") ? ORGANELLE_KIND_BY_VALUE[v] : null;
+    return !!(o && o.vector);
+  }
   function pointLabels(v){ var k = BY_VALUE[v]; return (k && k.pointLabels) || ["Point 1", "Point 2"]; }
   function labelOf(v){ var k = BY_VALUE[v]; return (k && k.label) || v; }
   function shortOf(v){ var k = BY_VALUE[v]; return (k && k.short) || v; }
+
+  /* THE MARKERS IN A PASTED VIEWER LINK.                                          2026-09-03
+
+     Søren: "I also wanted the option to paste url, like in xJump where you can log a lot of
+     organelles of the same type quickly."
+
+     Decoding a Neuroglancer state and pulling the point annotations out of it is not page
+     knowledge -- it is the same six lines wherever it happens -- and the µJump family had no copy
+     of it at all, so the alternative to putting it here was writing one into core/panel.js and a
+     second into hjump.html. χJump keeps its own X.parsePoints, which does more (it reads the
+     position too, and its callers need to tell "no markers" from "markers in the wrong layer"
+     apart); this is the smaller shared thing the other forms need.
+
+     THE LAYER NAME IS OPTIONAL and the µJump family passes nothing. χJump filters to its
+     `organelles` layer because its own button arms exactly that layer, so a marker dropped
+     elsewhere means something else. No other tool has that convention, and being fussy about a
+     layer name nobody was told to use would reject the links people actually paste.
+
+     A point is kept only if it is three finite numbers. Neuroglancer's annotation list also holds
+     lines, boxes and ellipsoids, and a half-written point annotation can carry nulls. */
+  function markersFromLink(text, layerName){
+    if (!text || !String(text).trim()) return { ok:false, error:"nothing pasted", points:[] };
+    var t = String(text).trim();
+    var hash = t.indexOf("#!");
+    if (hash >= 0) t = t.slice(hash + 2);
+    if (/%7B|%22/i.test(t)){ try { t = decodeURIComponent(t); } catch (e){} }
+    t = t.trim();
+    if (t.charAt(0) !== "{")
+      return { ok:false, error:"that does not look like a Neuroglancer link", points:[] };
+    var st;
+    try { st = JSON.parse(t); }
+    catch (e){ return { ok:false, points:[],
+      error:"that link's state is not valid JSON \u2014 copy the whole address bar, not part of it" }; }
+    var pts = [];
+    (st.layers || []).forEach(function(l){
+      if (!l || l.type !== "annotation") return;
+      if (layerName && l.name !== layerName) return;
+      (l.annotations || []).forEach(function(a){
+        if (a && a.point && a.point.length === 3
+            && a.point.every(function(v){ return isFinite(Number(v)); }))
+          pts.push(a.point.map(Number));
+      });
+    });
+    return { ok:true, points: pts };
+  }
 
   /* ONE PASTE OF MARKERS, ONE KIND -- how many markers does a row of this kind take?
 
@@ -1728,7 +1781,7 @@ UJ.organelles = (function(){
   return { GROUPS:GROUPS, KINDS:KINDS, BY_VALUE:BY_VALUE, optionsHtml:optionsHtml,
            isVector:isVector, pointLabels:pointLabels, labelOf:labelOf, shortOf:shortOf,
            countParts:countParts, buildSubs:buildSubs, splitPaste:splitPaste, groupId:groupId,
-           rowsFromPoints:rowsFromPoints };
+           rowsFromPoints:rowsFromPoints, markersFromLink:markersFromLink };
 })();
 </script>
 <script>/* core/points.js -- how a points total is turned into something a person reads.
@@ -4562,8 +4615,16 @@ UJ.app = (function(){
   }
 
   var ApiStore = {
-    live: true, credential: null, who: "",
-    canWrite: function(){ return !!this.credential; },
+    live: true, credential: null, who: "", expires: 0,
+    /* GOOGLE'S TOKEN LASTS ABOUT AN HOUR (2026-09-03). ωJump took the credential once at sign-in
+       and used it for as long as the tab stayed open, so an hour into a session every write came
+       back "unauthenticated" -- while the page still showed who you were signed in as.
+
+       A minute of margin, so a request that leaves while the token is alive does not arrive after
+       it is dead. `expires` is 0 on a page nobody has signed in to, which is the ordinary
+       signed-out case and behaves exactly as it did before. */
+    expired: function(){ return !!this.expires && Date.now() > this.expires - 60000; },
+    canWrite: function(){ return !!this.credential && !this.expired(); },
     _post: function(payload){
       /* No Content-Type header, deliberately: that keeps the request "simple" so the browser
          does not send a CORS preflight, which Apps Script would answer with a redirect and fail.
@@ -4573,7 +4634,19 @@ UJ.app = (function(){
       payload.timestamp = new Date().toISOString();
       var what = payload.type;
       return fetch(UJ.cfg.backend.endpoint, { method:"POST", body: JSON.stringify(payload) })
-        .then(function(r){ return readJson(r, what); });
+        .then(function(r){ return readJson(r, what); })
+        .then(function(d){
+          /* THE SERVER'S OWN WORD, TRANSLATED, for a token that lapsed between requireWrite() and
+             this request landing. Rethrown rather than returned: every caller here treats a
+             rejected promise as the failure path and prints the message. */
+          if (d && d.ok === false
+              && /unauthenticat|invalid[ _-]?token|token[ _-]?expired/i.test(String(d.error || ""))){
+            ApiStore.expires = 1;
+            askSignInAgain();
+            throw new Error(expiredMsg());
+          }
+          return d;
+        });
     },
     load: function(){
       var u = UJ.cfg.backend.endpoint + "?wjumpState=1&ds=" + encodeURIComponent(UJ.cfg.backend.ds)
@@ -5979,8 +6052,29 @@ UJ.app = (function(){
   }
 
   /* ── actions ─────────────────────────────────────────────────────────────────────────────── */
+  /* Google re-issues a token silently when the browser is still signed in to it, so asking is
+     usually invisible and repairs the tab. Wrapped: prompt() throws where the library never
+     loaded, which is every harness and every page opened from a file. */
+  var EXPIRY_TIMER = null;
+  function askSignInAgain(){
+    try {
+      if (window.google && google.accounts && google.accounts.id) google.accounts.id.prompt();
+    } catch (e){}
+  }
+  function expiredMsg(){
+    return "Your Google sign-in has expired \u2014 Google's tokens last about an hour. Sign in "
+         + "again with the account chip at the top of the page, then try again. Nothing on this "
+         + "page is lost.";
+  }
+  /* WHICH OF THE TWO SITUATIONS. Telling somebody who signed in forty minutes ago to "sign in
+     first" reads as the page having forgotten them, and invites a reload. */
   function requireWrite(where){
     if (STORE.canWrite()) return true;
+    if (STORE.expired && STORE.expired() && STORE.credential){
+      askSignInAgain();
+      say(where || "msg", expiredMsg(), false);
+      return false;
+    }
     say(where || "msg",
       "Sign in with Google first &mdash; contributions are attributed, so the map can be trusted.", false);
     return false;
@@ -6206,8 +6300,20 @@ UJ.app = (function(){
               same way the page does and cannot do that without knowing whose voxels they are. */
            dataset: function(){ return DS; },
            curNucleus: function(){ return CURID; }, revealed: function(){ return REVEALED; },
-           store: function(){ return STORE; }, setCredential: function(c, who){
-             ApiStore.credential = c; ApiStore.who = who || ""; render();
+           store: function(){ return STORE; }, setCredential: function(c, who, expMs){
+             /* `expMs` is the JWT's own `exp`, in milliseconds, read by the page's Google callback.
+                A caller that does not send it leaves expires at 0 -- "no known expiry" -- which is
+                exactly how this behaved before. */
+             ApiStore.credential = c; ApiStore.who = who || "";
+             ApiStore.expires = Number(expMs) || 0;
+             if (EXPIRY_TIMER){ clearTimeout(EXPIRY_TIMER); EXPIRY_TIMER = null; }
+             if (ApiStore.expires){
+               var ms = Math.max(0, ApiStore.expires - Date.now() - 60000);
+               /* No render() on the timer: a redraw wipes whatever message is on screen, including
+                  the one explaining why the last write failed. */
+               if (ms < 86400000) EXPIRY_TIMER = setTimeout(askSignInAgain, ms);
+             }
+             render();
              /* ONE PLACE WHERE ωJUMP LEARNS IT HAS A CREDENTIAL, and gamify.js is told here
                 rather than in the GSI callback -- the callback is only one of the two ways this
                 is reached, the page checks being the other, and a chip that only loads for a real
@@ -6248,11 +6354,17 @@ function postReport(payload){ return UJ.app.store()._post(payload); }
    is injected directly, and the chip is rendered when ωJump's own callback fires. */
 function handleGoogleCred(resp){ wjumpOnCredential(resp); }
 function wjumpOnCredential(resp){
-  var who = "";
-  try { who = JSON.parse(atob(resp.credential.split(".")[1])).email || ""; } catch(e){}
+  var who = "", exp = 0;
+  try {
+    var p = JSON.parse(atob(resp.credential.split(".")[1]));
+    who = p.email || "";
+    /* WHEN THIS CREDENTIAL DIES (2026-09-03). Google's ID tokens last about an hour; the page used
+       to keep using one until the backend refused it. */
+    exp = (Number(p.exp) || 0) * 1000;
+  } catch(e){}
   /* setCredential is where gamify is told, not here: this callback is only ONE of the two ways
      ωJump learns it is signed in, and the page checks are the other. */
-  UJ.app.setCredential(resp.credential, who);
+  UJ.app.setCredential(resp.credential, who, exp);
   document.getElementById("whoami").innerHTML = "signed in as <b>" + who.replace(/</g,"&lt;") + "</b>";
   var b = document.getElementById("gsiButton"); if (b) b.style.display = "none";
 }

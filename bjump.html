@@ -383,7 +383,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-03 12:02</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 18:54</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1756,12 +1756,16 @@ function wireMeshButtons(i){
     run(vb,function(){
       return UJ.mesh.computeVolume(String(BSEG[i]),prog).then(function(info){
         const cell=info.volumeUm3||0, nuc=BVOL[i]||0;
+        /* ASKED BEFORE THE POST, so the line printed below states what is about to happen
+           rather than what somebody hopes happened. */
+        const volGate=bjumpSaveGate();
         msg.innerHTML='<b>Cell volume '+cell.toFixed(1)+' &micro;m&sup3;</b> from '
           +fmt(info.vertices)+' vertices'
           +(nuc>0?' &middot; nucleus '+nuc.toFixed(1)+' &micro;m&sup3; ('
                   +(100*nuc/cell).toFixed(1)+'% of the cell)':'')
-          +(BTR[i]?' &middot; <b>nucleus truncated, so that ratio is an underestimate</b>':'');
-        if(GOOGLE_VERIFIED) postReport({
+          +(BTR[i]?' &middot; <b>nucleus truncated, so that ratio is an underestimate</b>':'')
+          +(volGate?' &middot; <span class="hint">'+escHtml(volGate)+'</span>':'');
+        if(!volGate) postReport({
           type:"save_computed_volume",
           rootId:String(BSEG[i]), nucleusId:BID[i], cellType:cellLabel(i),
           volumeUm3:Math.round(cell*100)/100,
@@ -2001,14 +2005,33 @@ async function computeBjumpCellContacts(rootIdStr,candidates,clusterUm,threshold
   onProgress&&onProgress(1,"done");
   return results;
 }
+/* ── WHY A SILENT SAVE WOULD NOT HAPPEN ─────────────────────────────────────────  2026-09-03
+   The volume button and the contacts run save "best-effort": they compute first and post
+   afterwards, and signed out they simply did not post. Right behaviour -- every row in these
+   sheets names who measured it -- and the wrong silence, since what is on screen looks identical
+   either way.
+
+   "" when the write will go out; otherwise the sentence to print beside the number. signInMsg()
+   is the page's own, and already distinguishes "never signed in" from "your token lapsed", which
+   is a distinction somebody forty minutes into a session very much needs. */
+function bjumpSaveGate(){
+  if(!REPORT_ENDPOINT) return "Not saved: this page has no backend configured.";
+  if(googleExpired() || !GOOGLE_VERIFIED || !GOOGLE_CREDENTIAL) return signInMsg();
+  return "";
+}
+
 /* Silent, best-effort save -- same convention as the volume button's save_computed_volume post
    above (only saves when already signed in). Uses postReport() rather than a raw fetch() (unlike
    µJump's own maybeSaveCellContacts, which predates postReport()'s ds-stamping) -- ds:"bjump" is
    therefore added automatically, avoiding the exact silent-cross-dataset-write bug µJump's own
    code would reproduce if copied verbatim (µJump's version relies on "ujump" being the backend's
    DEFAULT_DS, which is not true here). */
+/* Returns "" when it saved, or the sentence saying why it did not -- the caller prints it under
+   the rows, because a scan that reached nothing must not look like one that reached the sheet. */
 function maybeSaveBjumpCellContacts(nucleusId,rootId,cellType,pairs,clusterUm,thresholdUm){
-  if(!GOOGLE_VERIFIED||!pairs.length)return;
+  if(!pairs.length)return "";        /* nothing to save is not a refusal */
+  const gate=bjumpSaveGate();
+  if(gate)return gate;
   const usedDefault=Math.abs((Number(clusterUm)||0)-BCC_POINT_CLUSTER_UM)<1e-9
     &&Math.abs((Number(thresholdUm)||0)-BCC_THRESHOLD_UM)<1e-9;
   postReport({
@@ -2189,6 +2212,12 @@ async function loadCellContactsPanel(containerId,i){
   if(!el)return;
   el.innerHTML='<div class="hint">Loading known cell contacts…</div>';
   const known=await fetchBjumpCellContacts(BID[i]);
+  /* THE CELL MAY HAVE CHANGED WHILE WE WAITED.                                       2026-09-04
+     showCell rebuilds this container, so a click during the read leaves this callback holding a
+     detached element -- and every id the render looks up belongs to the container that was
+     replaced, so they all come back null and the first write throws. Nothing to draw into and
+     nobody looking at it: stop. */
+  if(!el.isConnected)return;
   renderCellContactsPanel(el,known,i);
 }
 function renderCellContactsPanel(el,known,i){
@@ -2258,8 +2287,9 @@ function renderCellContactsPanel(el,known,i){
         checkBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";
       });
       curRows=results;curThresholdNm=thresholdNm;
-      maybeSaveBjumpCellContacts(BID[i],rootId0,cellType,results,clusterNm/1000,thresholdNm/1000);
-      resultsEl.innerHTML=results.length?results.map(bjumpCellContactRowHtml).join(""):'<div class="hint">No meshed neighbours nearby to check.</div>';
+      const ccGate=maybeSaveBjumpCellContacts(BID[i],rootId0,cellType,results,clusterNm/1000,thresholdNm/1000);
+      resultsEl.innerHTML=(results.length?results.map(bjumpCellContactRowHtml).join(""):'<div class="hint">No meshed neighbours nearby to check.</div>')
+        +(ccGate?'<div class="hint" style="margin-top:6px">'+escHtml(ccGate)+'</div>':'');
       nglBtn.disabled=!results.length;xlsxBtn.disabled=!results.length;
     }catch(err){
       console.warn("[bJump cell contacts]",err);
@@ -2516,6 +2546,45 @@ function downloadBjumpSynapseContactsExcel(nucleusId,rootId,cellType,synapseIds,
   XLSX.utils.book_append_sheet(wb,ws,"Synapses");
   XLSX.writeFile(wb,"bjump_synapse_contacts_"+nucleusId+".xlsx");
 }
+/* ── THE SYNAPSE SEARCH, KEPT ────────────────────────────────────────────────────  2026-09-04
+   Item 4 of the write audit. This search is the only way to find synapses in this dataset -- there
+   is no CAVE table -- and its result existed as an .xlsx download and nothing else.
+
+   `status` is the row's most important column: "touching" means the synapse's own mesh was fetched
+   and verified to overlap this cell within the threshold; "unverified" means that fetch failed and
+   the ID is offered on weaker evidence; "" means this cell had no mesh at all and the fallback box
+   search ran, where no overlap check is possible. Three different strengths of claim, kept apart
+   here exactly as the panel keeps them apart on screen.
+
+   NO minDistanceNm. This search tests overlap against a threshold; it does not measure a gap.
+   Writing the threshold into a distance column would be recording a number nobody measured. */
+function bjumpSaveSynapseContacts(i,rootId,cellType,ids,statuses,meta,overlapUm){
+  if(!ids || !ids.length) return "";
+  const gate=bjumpSaveGate();
+  if(gate) return gate;
+  const items=ids.map(function(id,idx){
+    return { partnerRootId:String(id), partnerType:"synapse",
+             status:statuses&&statuses[idx]?statuses[idx]:"",
+             minDistanceNm:"", count:"",
+             detail:{ index: idx+1 } };
+  });
+  postReport({ type:"mesh_proximity_batch", kind:"synapse_contacts",
+               nucleusId:String(BID[i]), rootId:String(rootId||""), cellType:cellType||"",
+               settings:{ method:meta&&meta.method||"", radiusVox:meta&&meta.radiusVox,
+                          verticesSampled:meta&&meta.verticesSampled,
+                          totalVerts:meta&&meta.totalVerts,
+                          vertexStride:meta&&meta.vertexStride,
+                          overlapNm:Math.round((overlapUm||0)*1000) },
+               usedDefaultSettings:
+                 (meta&&meta.method==="mesh-surface")
+                 && Number(meta.radiusVox)===BSYN_RADIUS_DEFAULT_VOX
+                 && Math.abs((overlapUm||0)-BSYN_OVERLAP_THRESHOLD_UM_DEFAULT)<1e-9,
+               items:items,
+               timestamp:new Date().toISOString() },"Synapse contacts saved.")
+    .catch(function(){});
+  return "";
+}
+
 function loadSynapseContactsPanel(containerId,i){
   const el=document.getElementById(containerId);
   if(!el)return;
@@ -2638,6 +2707,10 @@ function loadSynapseContactsPanel(containerId,i){
         summary=(res.ids.length?'':'No synapse segments found. ')+'<b>No mesh available for this cell (main or community-proposed)</b> — fell back to a '+(half*2+1)+'-voxel box around the nucleus centre instead of the mesh surface (no overlap check was possible). Propose a root ID above for a more accurate, membrane-verified search.'+(res.ids.length?' '+res.chunksFetched+' chunk(s) with data, '+res.chunksEmpty+' empty, '+res.voxelsSampled+' voxels sampled.':'');
       }
       curIds=ids;curMeta=meta;curStatuses=statuses;
+      /* AND INTO THE SHEET. The .xlsx download stays -- it is how somebody works with the result
+         today -- but it is no longer the only copy that survives the tab. */
+      const synGate=bjumpSaveSynapseContacts(i,bjumpEffectiveRootId(i),cellType,ids,statuses,meta,overlapUm);
+      if(synGate) summary=summary+' <span class="hint">'+escHtml(synGate)+'</span>';
       resultsEl.innerHTML=curIds.length
         ?curIds.map(function(id,idx){return bjumpSynapseRowHtml(id,idx,curStatuses[idx]);}).join("")+'<div class="hint" style="margin-top:4px">'+summary+'</div>'
         :'<div class="hint">'+summary+'</div>';
@@ -2997,19 +3070,67 @@ const REPORT_ENDPOINT = UJ.cfg.backend.endpoint;
 const GOOGLE_CLIENT_ID = UJ.cfg.backend.clientId;
 const OWNER_EMAIL = UJ.cfg.backend.ownerEmail;
 let GOOGLE_VERIFIED=false, GOOGLE_CREDENTIAL=null, REPORTER_NAME="";
+/* ── THE TOKEN'S OWN EXPIRY ──────────────────────────────────────────────────────  2026-09-03
+   Google's ID token lasts about an hour. Until today this page took it once and used it until the
+   tab closed, so every write after that hour came back "unauthenticated" -- which reads as "you
+   are not signed in" to somebody looking at their own name in the corner of the page.
+
+   Milliseconds, 0 until somebody signs in. A MINUTE OF MARGIN in googleExpired(), so a request
+   that leaves while the token is alive does not arrive after it is dead. */
+let GOOGLE_EXP=0, GOOGLE_EXP_TIMER=null;
+function googleExpired(){ return GOOGLE_EXP>0 && Date.now()>GOOGLE_EXP-60000; }
+/* Google re-issues silently when the browser is still signed in to it, so in the common case this
+   repairs the tab without anybody being asked anything. Wrapped: prompt() throws on a page where
+   the library never loaded. */
+function askSignInAgain(){
+  try{ if(window.google&&google.accounts&&google.accounts.id) google.accounts.id.prompt(); }
+  catch(e){}
+}
+/* Which of the two situations this is. The wrong sentence here is worse than none: told to "sign
+   in first", somebody who signed in forty minutes ago reads it as the page having lost their work
+   and reloads, which is the one action that throws away whatever is on screen. */
+function signInMsg(){
+  return googleExpired()
+    ? "Your Google sign-in has expired \u2014 Google's tokens last about an hour. Sign in again "
+      + "with the account chip at the top of the page, then try again. Nothing on this page is lost."
+    : "Sign in with Google first \u2014 reading is public, adding to the record is not.";
+}
 function handleGoogleCred(resp){
   try{
     const p=JSON.parse(atob(String(resp.credential).split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
     REPORTER_NAME=p.name||""; GOOGLE_CREDENTIAL=resp.credential; GOOGLE_VERIFIED=true;
+    GOOGLE_EXP=(Number(p.exp)||0)*1000;
+    /* A minute before it lapses, ask for a new one. No re-render: a redraw would wipe whatever
+       message is on screen, including the one explaining why the last write failed. */
+    if(GOOGLE_EXP_TIMER){ clearTimeout(GOOGLE_EXP_TIMER); GOOGLE_EXP_TIMER=null; }
+    if(GOOGLE_EXP>0){
+      const ms=Math.max(0, GOOGLE_EXP-Date.now()-60000);
+      if(ms<86400000) GOOGLE_EXP_TIMER=setTimeout(askSignInAgain, ms);
+    }
     if(typeof gamifyOnSignIn==="function") gamifyOnSignIn();
   }catch(e){ GOOGLE_VERIFIED=false; }
 }
 /* Every write carries ds so the backend routes it to the βJump spreadsheet. */
 function postReport(payload,okMsg){
+  /* REFUSED HERE, BEFORE THE ROUND TRIP, when the token is already dead -- and answered in the
+     shape every call site in this page already handles ({ok:false, error}), so the sentence
+     reaches every message line and every toast without one of them being edited. */
+  if(googleExpired()){
+    askSignInAgain();
+    if(typeof showSubmitToast==="function") showSubmitToast(false, "");
+    return Promise.resolve({ok:false, error:signInMsg()});
+  }
   payload.credential=GOOGLE_CREDENTIAL; payload.ds=UJ.cfg.backend.ds;
   return fetch(REPORT_ENDPOINT,{method:"POST",body:JSON.stringify(payload)})
     .then(r=>r.json())
     .then(function(d){
+      /* AND THE SERVER'S OWN WORD, TRANSLATED, for a token that lapsed between the check above and
+         this request landing -- the one case no check on this side can catch. */
+      if(d && d.ok===false && /unauthenticat|invalid[ _-]?token|token[ _-]?expired/i.test(String(d.error||""))){
+        GOOGLE_EXP=1;              /* googleExpired() is true from here until a fresh sign-in */
+        askSignInAgain();
+        d.error=signInMsg();
+      }
       /* NORMALISE THE TWO RESPONSE SHAPES (2026-08-28). Handlers with their own gJson() return
          {ok:true,...}; doPost's shared success return said only {status:"ok"} until this was
          found, so every identification filed through it came back looking like a failure -- the

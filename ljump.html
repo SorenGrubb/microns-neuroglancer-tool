@@ -383,7 +383,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-03 12:02</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 18:30</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1555,20 +1555,68 @@ const REPORT_ENDPOINT = UJ.cfg.backend.endpoint;
 const GOOGLE_CLIENT_ID = UJ.cfg.backend.clientId;
 const OWNER_EMAIL = UJ.cfg.backend.ownerEmail;
 let GOOGLE_VERIFIED=false, GOOGLE_CREDENTIAL=null, REPORTER_NAME="";
+/* ── THE TOKEN'S OWN EXPIRY ──────────────────────────────────────────────────────  2026-09-03
+   Google's ID token lasts about an hour. Until today this page took it once and used it until the
+   tab closed, so every write after that hour came back "unauthenticated" -- which reads as "you
+   are not signed in" to somebody looking at their own name in the corner of the page.
+
+   Milliseconds, 0 until somebody signs in. A MINUTE OF MARGIN in googleExpired(), so a request
+   that leaves while the token is alive does not arrive after it is dead. */
+let GOOGLE_EXP=0, GOOGLE_EXP_TIMER=null;
+function googleExpired(){ return GOOGLE_EXP>0 && Date.now()>GOOGLE_EXP-60000; }
+/* Google re-issues silently when the browser is still signed in to it, so in the common case this
+   repairs the tab without anybody being asked anything. Wrapped: prompt() throws on a page where
+   the library never loaded. */
+function askSignInAgain(){
+  try{ if(window.google&&google.accounts&&google.accounts.id) google.accounts.id.prompt(); }
+  catch(e){}
+}
+/* Which of the two situations this is. The wrong sentence here is worse than none: told to "sign
+   in first", somebody who signed in forty minutes ago reads it as the page having lost their work
+   and reloads, which is the one action that throws away whatever is on screen. */
+function signInMsg(){
+  return googleExpired()
+    ? "Your Google sign-in has expired \u2014 Google's tokens last about an hour. Sign in again "
+      + "with the account chip at the top of the page, then try again. Nothing on this page is lost."
+    : "Sign in with Google first \u2014 reading is public, adding to the record is not.";
+}
 function handleGoogleCred(resp){
   try{
     const p=JSON.parse(atob(String(resp.credential).split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
     REPORTER_NAME=p.name||""; GOOGLE_CREDENTIAL=resp.credential; GOOGLE_VERIFIED=true;
+    GOOGLE_EXP=(Number(p.exp)||0)*1000;
+    /* A minute before it lapses, ask for a new one. No re-render: a redraw would wipe whatever
+       message is on screen, including the one explaining why the last write failed. */
+    if(GOOGLE_EXP_TIMER){ clearTimeout(GOOGLE_EXP_TIMER); GOOGLE_EXP_TIMER=null; }
+    if(GOOGLE_EXP>0){
+      const ms=Math.max(0, GOOGLE_EXP-Date.now()-60000);
+      if(ms<86400000) GOOGLE_EXP_TIMER=setTimeout(askSignInAgain, ms);
+    }
     if(typeof gamifyOnSignIn==="function") gamifyOnSignIn();
   }catch(e){ GOOGLE_VERIFIED=false; }
 }
 function netErr(e){ return (e&&e.message)?e.message:"network error"; }
 /* Every write carries ds so the backend routes it to the λJump spreadsheet. */
 function postReport(payload,okMsg){
+  /* REFUSED HERE, BEFORE THE ROUND TRIP, when the token is already dead -- and answered in the
+     shape every call site in this page already handles ({ok:false, error}), so the sentence
+     reaches every message line and every toast without one of them being edited. */
+  if(googleExpired()){
+    askSignInAgain();
+    if(typeof showSubmitToast==="function") showSubmitToast(false, "");
+    return Promise.resolve({ok:false, error:signInMsg()});
+  }
   payload.credential=GOOGLE_CREDENTIAL; payload.ds=UJ.cfg.backend.ds;
   return fetch(REPORT_ENDPOINT,{method:"POST",body:JSON.stringify(payload)})
     .then(r=>r.json())
     .then(function(d){
+      /* AND THE SERVER'S OWN WORD, TRANSLATED, for a token that lapsed between the check above and
+         this request landing -- the one case no check on this side can catch. */
+      if(d && d.ok===false && /unauthenticat|invalid[ _-]?token|token[ _-]?expired/i.test(String(d.error||""))){
+        GOOGLE_EXP=1;              /* googleExpired() is true from here until a fresh sign-in */
+        askSignInAgain();
+        d.error=signInMsg();
+      }
       /* NORMALISE THE TWO RESPONSE SHAPES (2026-08-28). Handlers with their own gJson() return
          {ok:true,...}; doPost's shared success return said only {status:"ok"} until this was
          found, so every identification filed through it came back looking like a failure -- the
