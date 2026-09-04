@@ -538,7 +538,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 19:15</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 20:32</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -4802,6 +4802,37 @@ function fetchComputedVolumesMap(){
   })();
   return _computedVolumesFetchPromise;
 }
+/* ── THE VOLUME ROW IS NOT ALWAYS THE NEXT ONE ──────────────────────────────────  2026-09-04
+   Søren: "when I press compute volume, it does not show the volume although the button
+   disappears after it is done calculating."
+
+   Both callers used to take rowEl.nextElementSibling and test it for .volrow. That was true when
+   it was written -- the markup emits '</div>' + meshVolRowHtml(), adjacent -- and stopped being
+   true when core/mesh3d.js started inserting its canvas host after the row the "Show in 3D"
+   button sits in (deliberately after the ROW, because a 300 px canvas inside a flex row lays out
+   as a very tall column). Measured on the live page:
+
+       idrow  ->  m3d-host  ->  idrow volrow
+
+   So volEl was null, the handler hid the button one line earlier regardless, and the number was
+   computed, saved, and written nowhere. Invisible in jsdom, where mesh3d bails without WebGL and
+   the adjacency still holds.
+
+   Walk forward instead, and stop rather than guess: another compute button, or the next ordinary
+   .idrow, means this row's volume row is missing and anything beyond belongs to a different root
+   id -- these panels carry several (additional root IDs, merged sub-cells), each with its own. A
+   number written into somebody else's row is worse than a number not written at all. */
+function volRowFor(rowEl){
+  if(!rowEl)return null;
+  var n=rowEl.nextElementSibling;
+  while(n){
+    if(n.classList&&n.classList.contains("volrow"))return n;
+    if(n.querySelector&&n.querySelector(".meshvol"))return null;
+    if(n.classList&&n.classList.contains("idrow"))return null;
+    n=n.nextElementSibling;
+  }
+  return null;
+}
 /* Fills in the hidden "volume" idrow (see meshVolRowHtml() above) for any already-rendered
    ".meshvol" button whose root ID already has a known volume, and decides whether the button
    itself should even be offered.
@@ -4816,8 +4847,10 @@ function fetchComputedVolumesMap(){
       recalculate would just redo the exact same fetch+decode for the same answer, so the button
       is hidden entirely and only the volume idrow shows.
 
-   volEl is found purely by DOM adjacency (the .idrow immediately after the button's own root-ID
-   .idrow), not an id/attribute match -- see meshVolRowHtml()'s own comment for why.
+   volEl is found by WALKING FORWARD to the first .volrow (volRowFor, below), not by taking the
+   next sibling: core/mesh3d.js inserts its canvas host between the two, which is what made a
+   computed volume invisible until 2026-09-04. Not an id/attribute match either -- see
+   meshVolRowHtml()'s own comment for why.
 
    Safe to call repeatedly, including from the MutationObserver below watching #cellPanelCard: a
    button mid-computation (disabled) or already holding a FRESH result from THIS session
@@ -4840,7 +4873,7 @@ function decorateMeshVolButtons(){
     const lookupKey=rootId||(nucId?("nuc:"+nucId):"");
     const known=lookupKey&&map[lookupKey];
     const rowEl=btn.closest(".idrow");
-    const volEl=(rowEl&&rowEl.nextElementSibling&&rowEl.nextElementSibling.classList&&rowEl.nextElementSibling.classList.contains("volrow"))?rowEl.nextElementSibling:null;
+    const volEl=volRowFor(rowEl);
     const curFragCount=(typeof MeshDL!=="undefined"&&MeshDL.currentFragmentCount)?MeshDL.currentFragmentCount(rootId):(known?known.fragmentCount||1:1);
     /* Community-only case (rootId==="", see meshDlButtonHtml()'s rootId==="" branch): the 3D
        model/PowerPoint buttons render hidden because at render time we don't yet know whether
@@ -5920,7 +5953,7 @@ document.addEventListener("click",(e)=>{
           computedVolCacheKeys(effectiveRootId,volNucleusId).forEach(function(key){window._computedVolumesMap[key]=freshEntry;});
         }
         const rowEl=volBtn.closest(".idrow");
-        const volEl=(rowEl&&rowEl.nextElementSibling&&rowEl.nextElementSibling.classList&&rowEl.nextElementSibling.classList.contains("volrow"))?rowEl.nextElementSibling:null;
+        const volEl=volRowFor(rowEl);
         if(volEl){
           const valSpan=volEl.querySelector(".idval");
           const combinedStr=info.fragmentCount>1?" ("+info.fragmentCount+" fragments combined)":"";
