@@ -387,6 +387,12 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
    UJ_RX/UJ_RY/UJ_RZ are nm per voxel; they replaced 64 hardcoded 4/4/40 literals. */
 window.UJ = window.UJ || {};
 UJ.cfg = {
+  /* WHO MADE THE PREDICTIONS the dashboard's first identity-source bar counts. A fact about the
+     dataset, so it lives here beside id/label/res rather than being sliced out of `label` at
+     render time. minnie65 and pinky100 are both MICrONS volumes; V1DD is the Allen Institute's
+     V1 Deep Dive, and calling its predictions "MICrONS-predicted" credited the wrong laboratory
+     on all 207,455 of them. */
+  predictedBy: "MICrONS",
   id: "microns",
   label: "MICrONS minnie65",
   res: [4, 4, 40]           // nm per voxel, x/y/z
@@ -479,7 +485,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-05 19:07</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-05 20:03</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1470,7 +1476,26 @@ function renderLiveCoreCharts(live){
 
   // Cells per type per layer -- grouped bar, one trace per layer, x = cell type (Unclassified
   // already excluded server-side; see the dedicated plotUnclassifiedPerLayer chart for those).
-  const layerOrder=live.cells_per_type_per_layer.layer_order;
+  /* DOES THIS DATASET KNOW WHERE ITS CELLS ARE? 2026-09-05, Søren: "For pJump, the cortical layer
+     graph does not make sense." Both layer charts need a layer per cell, interpolated from
+     hand-traced pia and white-matter surfaces; pinky100 has none traced, so every cell comes back
+     "Unknown" and the chart's whole x-axis is a variable that does not vary -- three bars that
+     just repeat the cell-type counts under a grey "Unknown" legend chip.
+
+     Decided from the data, never from which page this is: µJump and δJump keep both cards, πJump
+     loses both, and if pinky100's surfaces are ever traced they return with no further edit. The
+     display is SET on every render, not only cleared, so a dataset that gains layers un-hides.
+
+     Deliberately not the "say why it is empty" placeholder the cilia and neighbour panels got
+     earlier today: those fill in as people use the tool and are worth a promise, this one never
+     will for pinky100. */
+  const layerOrder=live.cells_per_type_per_layer.layer_order||[];
+  const realLayers=layerOrder.filter(function(l){return l&&l!=="Unknown";});
+  ["plotCellsPerLayer","plotUnclassifiedPerLayer"].forEach(function(id){
+    const el=document.getElementById(id);
+    const c=el&&el.closest?el.closest(".card"):null;
+    if(c)c.style.display=realLayers.length?"":"none";
+  });
   const perLayer=live.cells_per_type_per_layer.data;
   const types=sortByCategory(Object.keys(perLayer),
     t=>Object.values(perLayer[t]).reduce((s,v)=>s+v,0)).slice(0,20);
@@ -1484,7 +1509,7 @@ function renderLiveCoreCharts(live){
       text:types,hovertemplate:"%{text}<br>"+layer+": %{y}<extra></extra>",
       marker:{color:LAYER_COLORS[layer]||"#999"}};
   });
-  Plotly.newPlot("plotCellsPerLayer",layerTraces,categorizedLayout(shortTypes,{
+  if(realLayers.length)Plotly.newPlot("plotCellsPerLayer",layerTraces,categorizedLayout(shortTypes,{
     barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}},
     yaxis:Object.assign({},baseLayout().yaxis,{title:"# of cells"})
   }),PLOTLY_CFG);
@@ -1492,7 +1517,7 @@ function renderLiveCoreCharts(live){
   // Unclassified cells per layer -- its own simple chart, x = cortical layer (not cell type,
   // so no category grouping here), in the same layer_order used everywhere else.
   const ul=live.unclassified_per_layer;
-  if(ul&&ul.counts){
+  if(realLayers.length&&ul&&ul.counts){
     /* layer_order is always sent by dashboardLive(); the fallback is here because when it was
        briefly absent, the throw on this line skipped the FOUR charts drawn after it -- cilia
        percentage, cilium length, nucleus-to-centriole and neighbour composition -- and produced
@@ -1630,14 +1655,46 @@ function renderLiveCoreCharts(live){
    consensus identity, same precedence used everywhere else in this project). null (not yet
    loaded / not ready) shows a "(loading…)" label instead of a zero bar. */
 function renderPredictedVerified(live){
+  /* 2026-09-05, Søren: "We should remove the verified by Grubb from the dJump and pJump graphs,
+     because they don't exist."
+
+     The four bars and their labels used to be a constant. dashboardLive() already reports whether
+     anything in this dataset is own-verified (has_verified) and under whose name (verified_label:
+     "verified by Grubb et al." in µJump, the dataset's own source_name elsewhere, "" when nothing
+     is verified), so the series is built from that instead. "Grubb et al." no longer appears
+     anywhere in this function -- including the loading state, which used to print four
+     "(loading…)" labels and so briefly claimed a Grubb bar on δJump before the reply landed.
+     Loading now shows the three bars every dataset has; a fourth appears if there is one. */
   const s=live&&live.ready?live.predicted_vs_verified_live:null;
-  const labels=["MICrONS-predicted only","Verified by Grubb et al.","Community-identified (majority vote)","Unclassified"];
-  const values=s?[s.microns_predicted_no_override,s.own_verified,s.community_majority,s.unclassified]:[0,0,0,0];
-  const colors=["#8a6b3a","#3a6b5a","#5a4a7a","#c9c2b4"];
+  const src=(typeof UJ!=="undefined"&&UJ.cfg&&UJ.cfg.predictedBy)||"Source";
+  const showVerified=!!(s&&s.has_verified);
+  /* The backend's phrase is mid-sentence ("verified by Grubb et al."); a bar label starts a line. */
+  const vLab=(s&&s.verified_label)?(s.verified_label.charAt(0).toUpperCase()+s.verified_label.slice(1))
+                                  :"Verified";
+  const labels=[src+"-predicted only"],values=[],colors=[];
+  values.push(s?s.microns_predicted_no_override:0);colors.push("#8a6b3a");
+  if(showVerified){labels.push(vLab);values.push(s.own_verified);colors.push("#3a6b5a");}
+  labels.push("Community-identified (majority vote)");
+  values.push(s?s.community_majority:0);colors.push("#5a4a7a");
+  labels.push("Unclassified");values.push(s?s.unclassified:0);colors.push("#c9c2b4");
   Plotly.newPlot("plotIdentitySource",[{
     type:"bar",x:labels,y:values,marker:{color:colors},
-    text:s?["","","",""]:["(loading…)","(loading…)","(loading…)","(loading…)"],textposition:"outside"
+    text:labels.map(function(){return s?"":"(loading…)";}),textposition:"outside"
   }],Object.assign({},baseLayout(),{yaxis:Object.assign({},baseLayout().yaxis,{title:"# of nuclei"})}),PLOTLY_CFG);
+  /* THE HEADING IS THE SAME CLAIM ONE LINE HIGHER UP. Leaving "vs. verified by Grubb et al." above
+     a chart with no such bar would answer half of what Søren asked; "All 4 bars" is wrong the
+     moment there are three. Reached through closest(".card") rather than by giving three pages
+     matching ids for two elements. */
+  const card=document.getElementById("plotIdentitySource");
+  const box=card&&card.closest?card.closest(".card"):null;
+  if(box){
+    const h=box.querySelector("h2");
+    if(h)h.textContent=src+"-predicted"+(showVerified?" vs. "+vLab.charAt(0).toLowerCase()+vLab.slice(1):"")
+                      +" vs. community-identified";
+    const sub=box.querySelector(".sub");
+    if(sub&&s)sub.textContent="All "+labels.length+" bars LIVE from \u201cMaster cell list\u201d\u2019s "
+                             +"current identity source, main nuclei only.";
+  }
 }
 
 /* renderVolumes(): always a dot plot, never a bar -- three tiers depending on what data is
