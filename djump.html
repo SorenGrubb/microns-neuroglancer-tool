@@ -538,7 +538,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 20:32</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-05 18:57</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1278,7 +1278,20 @@ function shortAxisLabel(t){
   return s.indexOf(" × ")>=0?s.split(" × ").map(shortSingleTypeLabel).join(" × "):shortSingleTypeLabel(s);
 }
 
-function barChart(divId,dataObj,yTitle,byCategory){
+function barChart(divId,dataObj,yTitle,byCategory,emptyNote){
+  /* "% of cells with a cilium, by cell type has no data" -- an empty object drew an empty axis
+     with no explanation, which reads as a broken chart rather than an unstarted one. */
+  if(!Object.keys(dataObj||{}).length){
+    const el=document.getElementById(divId);
+    if(el){
+      try{if(window.Plotly&&Plotly.purge)Plotly.purge(divId);}catch(e){}
+      const box=document.createElement("div");
+      box.className="placeholder";
+      box.textContent=emptyNote||"Nothing recorded yet.";
+      el.innerHTML="";el.appendChild(box);
+    }
+    return;
+  }
   let types=Object.keys(dataObj);
   types=byCategory?sortByCategory(types,t=>dataObj[t]):types.sort((a,b)=>dataObj[b]-dataObj[a]);
   const y=types.map(t=>dataObj[t]);
@@ -1294,12 +1307,92 @@ function barChart(divId,dataObj,yTitle,byCategory){
   }],layout,PLOTLY_CFG);
 }
 
+/* ── A CHART THAT DRAWS NOTHING MUST SAY WHY ──────────────────────────────────── 2026-09-05
+   Søren, of "Input vs. output synapses per cell type": "I know that there are 2 layer 2 neurons in
+   the google sheet, but it doesn't show on the graph. It is ok if it needs at least 3 datapoints
+   to show, I just want to know that it is working."
+
+   It was working -- checked on the live page, not assumed: ?connectivitySamples=1 returns both
+   cells (nucleus 200322 and 351091, both "Layer 2 pyramidal neuron (L2P)", 5967/139 and 7890/324
+   synapses). They do not appear because dotMedianChart and groupedDotChart drop any category with
+   fewer than three values, which is correct -- two points are not a distribution -- and then drew
+   an empty pair of axes without a word, which is not: an empty chart and a broken chart look
+   exactly alike.
+
+   So the rule is named once here, and the two functions that enforce it now explain it. Nothing
+   reaching the threshold replaces the plot with a count of what IS there; a mix draws the ones
+   that qualify and footnotes the ones still waiting. Every chart built on either function
+   inherits this -- cilium length and nucleus-to-centriole distance included. */
+const MIN_DOTS_TO_PLOT=3;
+
+/* {plotted:[type], waiting:[{t,n}]} for a {type:[values]} object, biggest waiting first. */
+function dotsWaiting_(dataObj,countOf){
+  const plotted=[],waiting=[];
+  Object.keys(dataObj||{}).forEach(function(t){
+    const n=countOf?countOf(t):((dataObj[t]||[]).length);
+    if(!n)return;
+    if(n>=MIN_DOTS_TO_PLOT)plotted.push(t); else waiting.push({t:t,n:n});
+  });
+  waiting.sort(function(a,b){return b.n-a.n;});
+  return {plotted:plotted,waiting:waiting};
+}
+
+/* "Layer 2 pyramidal neuron (L2P) (2), Astrocyte (1)" -- full names, not shortAxisLabel()'d:
+   this is prose, and the whole point of it is to be recognisable. */
+function waitingList_(waiting){
+  return waiting.map(function(w){return w.t+" ("+w.n+")";}).join(", ");
+}
+
+/* Nothing qualified. Replace the plot -- Plotly.purge first, or a stale chart stays behind the
+   text. `noun` is what one value IS, so each chart can say "cells measured" or "checks". */
+function sayWhyNothingPlots_(divId,waiting,noun){
+  const el=document.getElementById(divId);
+  if(!el)return;
+  try{if(window.Plotly&&Plotly.purge)Plotly.purge(divId);}catch(e){}
+  const box=document.createElement("div");
+  box.className="placeholder";
+  const total=waiting.reduce(function(a,w){return a+w.n;},0);
+  box.textContent=total
+    ?("Not enough yet to draw a distribution — a cell type needs at least "+MIN_DOTS_TO_PLOT+" "
+      +(noun||"measurements")+" before it gets a box. "+total+" so far, none of one type reaching "
+      +MIN_DOTS_TO_PLOT+": "+waitingList_(waiting)+".")
+    : ("No "+(noun||"measurements")+" recorded yet.");
+  el.innerHTML="";
+  el.appendChild(box);
+}
+
+/* Some qualified, some did not. One footnote under the chart, replaced rather than stacked --
+   these charts re-render on every picker change and every live refresh. */
+function noteDotsWaiting_(divId,waiting,noun){
+  const el=document.getElementById(divId);
+  if(!el||!el.parentNode)return;
+  const id=divId+"__waiting";
+  const old=document.getElementById(id);
+  if(old&&old.parentNode)old.parentNode.removeChild(old);
+  if(!waiting.length)return;
+  const total=waiting.reduce(function(a,w){return a+w.n;},0);
+  const note=document.createElement("p");
+  note.className="footnote";
+  note.id=id;
+  note.title="A box needs at least "+MIN_DOTS_TO_PLOT+" values of the same cell type to describe a "
+            +"distribution. These types have fewer, so their data is stored but not drawn yet.";
+  note.textContent=waiting.length+" cell type"+(waiting.length===1?"":"s")+" with fewer than "
+                  +MIN_DOTS_TO_PLOT+" "+(noun||"measurements")+" not drawn yet ("+total+" value"
+                  +(total===1?"":"s")+"): "+waitingList_(waiting)+".";
+  el.parentNode.insertBefore(note,el.nextSibling);
+}
+
 /* "SuperPlot"-style dot plot: jittered individual points (grey) + a coloured horizontal
    median bar per category, approximating the style in Søren's reference images. Built from
    a box trace with the box/whiskers hidden (width:0, transparent fill) so only points +
    median line remain, rather than a full box-and-whisker chart. */
-function dotMedianChart(divId,dataObj,yTitle,tight,useRank){
-  let types=Object.keys(dataObj).filter(t=>dataObj[t]&&dataObj[t].length>=3);
+function dotMedianChart(divId,dataObj,yTitle,tight,useRank,noun){
+  /* The >=3 filter used to live inline here and say nothing. Same rule, now reported -- see
+     MIN_DOTS_TO_PLOT above. Charts calling this and then adding a footnote of their own
+     (renderVolumeShare) still work: noteDotsWaiting_ inserts its own, keyed by id. */
+  const w=dotsWaiting_(dataObj);
+  if(!w.plotted.length){sayWhyNothingPlots_(divId,w.waiting,noun);return;}
+  let types=w.plotted;
   types=(useRank?sortByCategoryAndRank:sortByCategory)(types,t=>dataObj[t].length);
   const traces=types.map(function(t){
     return {
@@ -1318,6 +1411,7 @@ function dotMedianChart(divId,dataObj,yTitle,tight,useRank){
     yaxis:Object.assign({},baseLayout().yaxis,{title:yTitle}),
     showlegend:false
   },tight?TIGHT_BOX_LAYOUT:{})),PLOTLY_CFG);
+  noteDotsWaiting_(divId,w.waiting,noun);
 }
 
 /* ujump.html shows an unresolved merged-nucleus-blob detection (MICrONS's automatic detector
@@ -1354,15 +1448,21 @@ function isUnclassifiedType(name){
    volume, NOT necessarily the same cells) shown side by side per category via Plotly's standard
    boxmode:"group" behavior -- ordinary, well-documented grouping of box traces sharing an x
    category, unlike the earlier multicategory-axis experiment. seriesList: [{name,color,dataObj}]. */
-function groupedDotChart(divId,seriesList,yTitle,tight,useRank){
-  const allTypes=new Set();
+function groupedDotChart(divId,seriesList,yTitle,tight,useRank,noun){
+  /* A type counts by its FULLEST series -- the same "does any series have 3?" test the set-builder
+     did, written once so the same number can be reported when the answer is no. Input and Output
+     are two views of ONE queried cell, so summing them would claim twice the sample there is. */
+  const union={};
   seriesList.forEach(function(s){
-    Object.keys(s.dataObj).forEach(function(t){
-      if(s.dataObj[t]&&s.dataObj[t].length>=3)allTypes.add(t);
+    Object.keys(s.dataObj||{}).forEach(function(t){
+      const n=(s.dataObj[t]||[]).length;
+      if(n>(union[t]||0))union[t]=n;
     });
   });
-  const types=(useRank?sortByCategoryAndRank:sortByCategory)(Array.from(allTypes),function(t){
-    return Math.max.apply(null,seriesList.map(function(s){return (s.dataObj[t]||[]).length;}));
+  const w=dotsWaiting_(union,function(t){return union[t];});
+  if(!w.plotted.length){sayWhyNothingPlots_(divId,w.waiting,noun);return;}
+  const types=(useRank?sortByCategoryAndRank:sortByCategory)(w.plotted,function(t){
+    return union[t];
   });
   const traces=[];
   seriesList.forEach(function(s){
@@ -1392,6 +1492,7 @@ function groupedDotChart(divId,seriesList,yTitle,tight,useRank){
     boxmode:"group",
     showlegend:true,legend:{orientation:"h",y:1.15,font:{size:10}}
   },tight?TIGHT_BOX_LAYOUT:{})),PLOTLY_CFG);
+  noteDotsWaiting_(divId,w.waiting,noun);
 }
 
 const LAYER_COLORS={"Leptomeninges":"#c9c2b4","Layer 1":"#e8d9b5","Layer 2":"#e0c68d","Layer 3":"#cfa451","Layer 5":"#8a6b3a","Layer 6":"#4a5a3a","Layer 2/3":"#d9b56a","Layer 4":"#b5883a",
@@ -1465,7 +1566,12 @@ function renderLiveCoreCharts(live){
   // so no category grouping here), in the same layer_order used everywhere else.
   const ul=live.unclassified_per_layer;
   if(ul&&ul.counts){
-    const ulLayers=ul.layer_order.filter(l=>ul.counts[l]!=null);
+    /* layer_order is always sent by dashboardLive(); the fallback is here because when it was
+       briefly absent, the throw on this line skipped the FOUR charts drawn after it -- cilia
+       percentage, cilium length, nucleus-to-centriole and neighbour composition -- and produced
+       exactly the "has no data" symptom Søren reported for each of them. The layers are already
+       in `counts`; there is no need to give up. */
+    const ulLayers=(ul.layer_order||Object.keys(ul.counts)).filter(l=>ul.counts[l]!=null);
     Plotly.newPlot("plotUnclassifiedPerLayer",[{
       type:"bar",x:ulLayers,y:ulLayers.map(l=>ul.counts[l]||0),
       marker:{color:ulLayers.map(l=>LAYER_COLORS[l]||"#999")}
@@ -1486,29 +1592,86 @@ function renderLiveCoreCharts(live){
      hover (which would otherwise just repeat the now-short x label) is overridden with an explicit
      hovertemplate carrying the FULL type name + percent + n/total together. */
   const pcShort=pcTypes.map(shortAxisLabel);
+  /* 2026-09-05, Søren: "% of cells with a cilium, by cell type has no data ... make sure that it
+     works." Two separate things were wrong, and only the first is what he saw.
+
+     (1) Nothing at all drew an empty axis in silence, which reads as broken rather than unstarted.
+
+     (2) A PERCENTAGE IS NOT AVAILABLE IN EVERY DATASET. µJump's list has a `cilium_checked`
+     column, so the denominator is "cells somebody opened and looked at". The shared schema
+     (δJump and the rest) has no such column, so dashboardLive() returns percent:null with a real
+     with_cilium count and a `denominator` sentence -- dividing by every seeded nucleus instead
+     would be a rate that only falls as the dataset grows. Plotting that null gave bars of zero
+     height labelled "3/0": correct data, drawn as if it were broken. So when no type has a
+     percentage, this draws the COUNT and says which it is. */
+  const pcHasPercent=pcTypes.some(function(t){return typeof pc[t].percent==="number";});
+  const pcArea=document.getElementById("plotCiliaPercent");
+  const pcNoteId="plotCiliaPercent__basis";
+  const pcOldNote=document.getElementById(pcNoteId);
+  if(pcOldNote&&pcOldNote.parentNode)pcOldNote.parentNode.removeChild(pcOldNote);
+  if(!pcTypes.length){
+    if(pcArea){
+      try{if(window.Plotly&&Plotly.purge)Plotly.purge("plotCiliaPercent");}catch(e){}
+      const box=document.createElement("div");box.className="placeholder";
+      box.textContent="No primary cilium has been recorded in this dataset yet — every time "
+        +"somebody logs a cilium on a cell, its type appears here.";
+      pcArea.innerHTML="";pcArea.appendChild(box);
+    }
+  }else{
   Plotly.newPlot("plotCiliaPercent",[{
     type:"bar",
-    x:pcShort, y:pcTypes.map(t=>pc[t].percent),
-    text:pcTypes.map(t=>pc[t].with_cilium+"/"+pc[t].checked),
+    x:pcShort, y:pcTypes.map(t=>pcHasPercent?pc[t].percent:pc[t].with_cilium),
+    text:pcTypes.map(t=>pcHasPercent?(pc[t].with_cilium+"/"+pc[t].checked)
+                                    :String(pc[t].with_cilium)),
     textposition:"outside",
     customdata:pcTypes,
-    hovertemplate:"%{customdata}<br>%{y:.1f}% (%{text})<extra></extra>",
+    hovertemplate:pcHasPercent?"%{customdata}<br>%{y:.1f}% (%{text})<extra></extra>"
+                              :"%{customdata}<br>%{y} with a cilium<extra></extra>",
     marker:{color:pcTypes.map(colorFor)}
-  }],categorizedLayout(pcShort,{
-    margin:Object.assign({},baseLayout().margin,{t:32}),
-    yaxis:Object.assign({},baseLayout().yaxis,{title:"% with primary cilium",range:[0,118]})
-  }),PLOTLY_CFG);
+  }],categorizedLayout(pcShort,Object.assign({
+    margin:Object.assign({},baseLayout().margin,{t:32})
+  },pcHasPercent
+    ?{yaxis:Object.assign({},baseLayout().yaxis,{title:"% with primary cilium",range:[0,118]})}
+    :{yaxis:Object.assign({},baseLayout().yaxis,{title:"cells with a primary cilium"})})),PLOTLY_CFG);
+  /* The backend's own sentence about what the number is counted out of, under the chart it
+     describes -- keyed by id and replaced, not stacked, since this redraws on every refresh. */
+  const pcDen=live.primary_cilia.denominator;
+  if(pcDen&&pcArea&&pcArea.parentNode){
+    const n=document.createElement("p");n.className="footnote";n.id=pcNoteId;
+    n.textContent=pcHasPercent?pcDen:("Counts, not percentages — "+pcDen);
+    pcArea.parentNode.insertBefore(n,pcArea.nextSibling);
+  }
+  }
 
   // Cilium length / nucleus-to-centriole distance -- already live-merged server-side (any
   // Organelle-locations report not yet folded into the sheet is included by dashboardLive()
   // itself), so this is a direct render, no client-side merge step needed any more.
-  dotMedianChart("plotCiliaLength",live.primary_cilia.length_um_by_type,"Cilium length (µm)");
-  dotMedianChart("plotNucCentriole",live.nucleus_to_centriole_um,"Nucleus-to-centriole distance (µm)");
+  dotMedianChart("plotCiliaLength",live.primary_cilia.length_um_by_type,"Cilium length (µm)",
+                 false,false,"measured cilia");
+  dotMedianChart("plotNucCentriole",live.nucleus_to_centriole_um,
+                 "Nucleus-to-centriole distance (µm)",false,false,"logged centrioles");
 
   // Neighbor composition picker -- top 8 by occurrence, then re-ordered by category. Options are
   // rebuilt fresh every call (cheap, ~30 types) rather than assumed stable across refreshes.
-  const nc=live.neighbor_composition;
+  /* neighbor_composition is computed from `neighbor_10_keys`, a µJump-only column, so
+     dashboardLive() reports neighbor_composition_available:false for every dataset on the shared
+     schema. That used to be an empty picker over an empty chart with nothing to say it is not
+     coming. The ||{} is for the same reason as the layer_order fallback above: this is the last
+     chart drawn, and a throw here is a console error nobody has open. */
+  const nc=live.neighbor_composition||{};
   const ncTypes=Object.keys(nc).sort();
+  if(!ncTypes.length){
+    const ncArea=document.getElementById("plotNeighborComposition");
+    if(ncArea){
+      try{if(window.Plotly&&Plotly.purge)Plotly.purge("plotNeighborComposition");}catch(e){}
+      const box=document.createElement("div");box.className="placeholder";
+      box.textContent=(live.neighbor_composition_available===false)
+        ?"Not measured for this dataset — which cells sit next to which is read from a precomputed "
+         +"ten-nearest-neighbour column that only µJump's cell list carries."
+        :"No neighbour data yet.";
+      ncArea.innerHTML="";ncArea.appendChild(box);
+    }
+  }
   const picker=document.getElementById("neighborTypePicker");
   const prevValue=picker.value;
   picker.innerHTML="";
@@ -1872,10 +2035,12 @@ function renderSynapseIO(connSamples){
     // groupedDotChart() already filters out any type with fewer than 3 samples (see its own
     // comment) -- exactly right here too: a type with 1-2 queries so far just doesn't have
     // enough of a distribution to plot yet, and will appear once more people look at it.
+    /* "queried cells", not "measurements": one dot here is one cell somebody opened the
+       Connectivity panel on, and the note should say the thing a reader can go and do. */
     groupedDotChart("plotSynapseIo",[
       {name:"Input (received)",color:"#00b7ff",dataObj:inputByType},
       {name:"Output (made)",color:"#ff4fa3",dataObj:outputByType}
-    ],yTitle,true);
+    ],yTitle,true,false,"queried cells");
   }
   if(picker)picker.onchange=renderOne;
   renderOne();
@@ -3150,8 +3315,78 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
       for(var mk in __msPos){if(!RP[mk])RP[mk]={label:__msPos[mk].label,cat:__msPos[mk].cat,picks:[],k:mk};RP[mk].picks.push({src:"ms",positions:__msPos[mk].positions});}
     }
   }catch(_ce){}
+  /* ── EVERY TYPE THIS TOOL CAN IDENTIFY, EVEN AT ZERO ────────────────────────── 2026-09-05
+     Søren: "all the same cell types that are in µJump are also represented here, if there are
+     none of those types identified, they should just have (0) and be greyed out."
+
+     The shared list is core/ontology.js's LEAF_NAMES -- the leaves of the guided identification
+     tree, i.e. the types a person can actually assign here -- NOT the other dataset's classes.
+     MICrONS's 23P/BC/MC and V1DD's L2P/PTC/6P-SP are different vocabularies; greying out "23P" in
+     δJump would be a permanent wrong entry, not a zero waiting to be filled. A leaf at (0) is a
+     promise the tool can keep: somebody identifies one and it lights up.
+
+     A leaf is skipped when the dataset already has a pool that IS that cell. Three ways the two
+     strings differ -- case ("Pia mater fibroblast" vs "Pia mater Fibroblast"), wording
+     ("Perivascular macrophage" vs the canonical "Macrophage" bucket) and code ("L2/3 pyramidal
+     neuron (23P)" vs the bare type "23P") -- so the match is on the leaf's display name AND on
+     canonSubmitName() of it AND through longName(), all lowercased. Same LABEL2POOL idea as the
+     community-identity merge above. */
+  const LEAF_CATEGORY={
+    erythrocyte:"Blood cells",platelet:"Blood cells",
+    /* Neutrophil/lymphocyte/monocyte stay where CATEGORY_OF already puts a real Lymphocyte pool,
+       so a type never changes group depending on whether anyone has found one yet. */
+    neutrophil:"Immune & perivascular cells",lymphocyte:"Immune & perivascular cells",
+    monocyte:"Immune & perivascular cells",perivascular_macrophage:"Immune & perivascular cells",
+    perivascular_fibroblast:"Immune & perivascular cells",dendritic_cell:"Immune & perivascular cells",
+    endothelial_cell:"Vascular cells",pericyte:"Vascular cells",smooth_muscle_cell:"Vascular cells",
+    venular_smooth_muscle_pericyte:"Vascular cells",pericyte_ensheathing:"Vascular cells",
+    pericyte_mesh:"Vascular cells",pericyte_thin_strand:"Vascular cells",
+    exc_l23_it:"Excitatory neurons",exc_l4:"Excitatory neurons",exc_l5_it:"Excitatory neurons",
+    exc_l5_et:"Excitatory neurons",exc_l5_np:"Excitatory neurons",exc_l6_it:"Excitatory neurons",
+    exc_l6_ct:"Excitatory neurons",
+    inh_basket:"Inhibitory neurons",inh_martinotti:"Inhibitory neurons",
+    inh_bipolar:"Inhibitory neurons",inh_neurogliaform:"Inhibitory neurons",
+    astrocyte:"Glia",microglia:"Glia",oligodendrocyte:"Glia",opc:"Glia",
+    pia_mater_fibroblast:"Leptomeninges",pial_sheath_fibroblast:"Leptomeninges",
+    arachnoid_barrier_cell:"Leptomeninges",fibroblast_reticular_cell:"Leptomeninges",
+    inner_arachnoid_fibroblast:"Leptomeninges",dural_border_cell:"Leptomeninges"
+  };
+  try{
+    if(typeof LEAF_NAMES!=="undefined"){
+      var __have={};
+      for(var __pk in RP){
+        var __l=String(RP[__pk].label||"").toLowerCase();
+        __have[__l]=1;
+        try{__have[String(longName(RP[__pk].label)||"").toLowerCase()]=1;}catch(_ln){}
+      }
+      /* The dataset's own say in what does not apply to it -- already the one place a tool
+         declares that (bJump uses it), so an excluded leaf must not reappear as a greyed promise. */
+      var __excl=(typeof UJ!=="undefined"&&UJ.cfg&&UJ.cfg.tree&&UJ.cfg.tree.excludeLeaves)||[];
+      Object.keys(LEAF_NAMES).forEach(function(slug){
+        /* Skipped BY SLUG, not through isGenericExcInh(): πJump overrides that to always return
+           false, because in pinky100 these two ARE published classes (396 of 456 cells), and it
+           would otherwise grow two greyed entries Søren asked to be rid of on 2026-08-07. */
+        if(slug==="excitatory_neuron"||slug==="inhibitory_neuron")return;
+        if(__excl.indexOf(slug)>=0)return;
+        var disp=LEAF_NAMES[slug];
+        if(!disp)return;
+        var canon=(typeof canonSubmitName==="function")?canonSubmitName(disp):disp;
+        var names=[disp,canon];
+        try{names.push(longName(disp));names.push(longName(canon));}catch(_l2){}
+        for(var ni=0;ni<names.length;ni++){
+          var nn=String(names[ni]||"").toLowerCase();
+          if(nn&&__have[nn])return;
+        }
+        var zk="leaf0|"+slug;
+        if(RP[zk])return;
+        RP[zk]={label:disp,cat:LEAF_CATEGORY[slug]||"Other",picks:[],k:zk,zero:true};
+      });
+    }
+  }catch(_lz){}
   for(const k in RP){const p=RP[k];(groups[p.cat]=groups[p.cat]||[]).push(p);}
-  const CAT_SEQ=["Excitatory neurons","Inhibitory neurons","Neurons","Glia","Vascular cells","Immune & perivascular cells","Leptomeninges","Other"];
+  /* "Blood cells" sits after the vessel wall and before the perivascular space, following the
+     tree's own route: lumen (q2 -> l1/l2) -> wall (w1/w2) -> perivascular space (p1). */
+  const CAT_SEQ=["Excitatory neurons","Inhibitory neurons","Neurons","Glia","Vascular cells","Blood cells","Immune & perivascular cells","Leptomeninges","Other"];
   /* Per-pick example count, shared by the optgroup label counter just below and the weighted
      random draw in randomOfTypeBtn's click handler further down -- kept as one function so the
      two never silently drift out of sync when a new pick source (like "ms") is added. */
@@ -3166,7 +3401,14 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
   for(const cat of CAT_SEQ){
     if(!groups[cat]||!groups[cat].length)continue;
     const items=groups[cat].slice().sort((a,b)=>a.label.localeCompare(b.label));
-    opts+='<optgroup label="'+cat+'">'+items.map(p=>{let c=0;p.picks.forEach(pk=>c+=pickCount(pk));c-=(RECLASS_OUT[p.k]||0);if(c<0)c=0;return '<option value="'+p.k+'">'+p.label+' ('+c+')</option>';}).join("")+'</optgroup>';
+    /* c===0 covers both a never-seen leaf and a real pool emptied by RECLASS_OUT -- either way
+       there is nothing to jump to, so the option is disabled rather than selectable-and-alerting.
+       The label goes through escHtml because a community-reported identity string (typed by a
+       stranger into the report form, arriving via getCommunityConsensus above) can become a pool
+       label; every other field around it is dataset-generated. */
+    opts+='<optgroup label="'+cat+'">'+items.map(p=>{let c=0;p.picks.forEach(pk=>c+=pickCount(pk));c-=(RECLASS_OUT[p.k]||0);if(c<0)c=0;
+      const lab=(typeof escHtml==="function")?escHtml(p.label):p.label;
+      return '<option value="'+p.k+'"'+(c?"":' disabled title="No cell of this type has been identified in this dataset yet — identify one and it appears here."')+'>'+lab+' ('+c+')</option>';}).join("")+'</optgroup>';
   }
   randomTypeSelect.innerHTML=opts;
   window.RAND_POOLS=RP;
