@@ -544,7 +544,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-05 20:03</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-05 20:32</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3546,10 +3546,21 @@ const NAV_HISTORY_KEY="djump_nav_history",NAV_HISTORY_MAX=200;
     const raw=localStorage.getItem(NAV_HISTORY_KEY);
     if(!raw)return;
     const d=JSON.parse(raw);
-    if(d&&Array.isArray(d.h)){NAV_HISTORY=d.h;NAV_INDEX=typeof d.i==="number"?Math.min(d.i,d.h.length-1):d.h.length-1;}
+    /* THE LIST SAYS WHICH VOLUME IT IS OF, 2026-09-05. Until today pjump.html shared µJump's
+       NAV_HISTORY_KEY, so an existing µJump history can contain pinky100 cells -- and because
+       pinky100's nucleus ids (4809-7570) are also valid minnie65 ids, clicking one jumps to a
+       different real cell with nothing to suggest it. There is no way to tell the foreign entries
+       apart after the fact, so a blob with no stamp, or the wrong one, is dropped rather than
+       trusted: a list that quietly sends you to the wrong cell is worse than an empty one. The
+       stamp also means a future key collision could not mix them again. */
+    if(!d||d.ds!==((typeof UJ!=="undefined"&&UJ.cfg&&UJ.cfg.id)||"")){
+      try{localStorage.removeItem(NAV_HISTORY_KEY);}catch(e2){}
+      return;
+    }
+    if(Array.isArray(d.h)){NAV_HISTORY=d.h;NAV_INDEX=typeof d.i==="number"?Math.min(d.i,d.h.length-1):d.h.length-1;}
   }catch(e){}
 })();
-function saveNavHistory(){try{localStorage.setItem(NAV_HISTORY_KEY,JSON.stringify({h:NAV_HISTORY,i:NAV_INDEX}));}catch(e){}}
+function saveNavHistory(){try{localStorage.setItem(NAV_HISTORY_KEY,JSON.stringify({ds:(typeof UJ!=="undefined"&&UJ.cfg&&UJ.cfg.id)||"",h:NAV_HISTORY,i:NAV_INDEX}));}catch(e){}}
 function renderNavControls(){
   const b=document.getElementById("navBackBtn"),f=document.getElementById("navFwdBtn");
   if(b)b.disabled=NAV_INDEX<=0;
