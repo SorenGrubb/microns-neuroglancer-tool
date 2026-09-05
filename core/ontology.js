@@ -149,7 +149,16 @@ const LEAF_NAMES={erythrocyte:"Erythrocyte",platelet:"Platelet",neutrophil:"Neut
    ONLY when constructing the `identified`/`type` field of a report payload (postReport) -- never
    for on-screen text, where the leaf's own wording (with its extra context, e.g. "Perivascular")
    is clearer to a reader than the bare canonical type name. */
-const LEAF_SUBMIT_CANON={"Perivascular fibroblast":"Perivascular Fibroblast","Pia mater fibroblast":"Pia mater Fibroblast","Pial sheath fibroblast":"Pial sheath Fibroblast","Perivascular macrophage":"Macrophage"};
+const LEAF_SUBMIT_CANON={"Perivascular fibroblast":"Perivascular Fibroblast","Pia mater fibroblast":"Pia mater Fibroblast","Pial sheath fibroblast":"Pial sheath Fibroblast","Perivascular macrophage":"Macrophage",
+  /* 2026-09-05, Søren: "Just collapse them in Pericyte." The w2p question still ASKS which subtype
+     (and still shows the answer back, since this table is submission-only by design -- see the
+     comment above), but every one of the three lands in the single "Pericyte" bucket the shared
+     master cell lists already have, rather than opening three new per-type columns on every
+     dashboard chart. populateRandomTypeSelect matches leaves through canonSubmitName(), so the
+     three also stop appearing as separate greyed-out (0) rows in the random-example picker without
+     any change there. NOTE this is a discard, not a rename: the subtype a person worked out is
+     recorded nowhere afterwards. */
+  "Ensheathing pericyte":"Pericyte","Mesh pericyte":"Pericyte","Thin-strand pericyte":"Pericyte"};
 function canonSubmitName(nm){return nm?(LEAF_SUBMIT_CANON[nm]||nm):nm;}
 /* Coarse cell-type "family" buckets -- 2026-08-09, undo/restore feature (Søren's example: "a
    neuron was accidentally reclassified as an endothelial cell instead of a nearby pericyte" --

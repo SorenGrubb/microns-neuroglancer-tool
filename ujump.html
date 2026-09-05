@@ -479,7 +479,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-05 18:57</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-05 19:07</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3275,9 +3275,20 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
           var nn=String(names[ni]||"").toLowerCase();
           if(nn&&__have[nn])return;
         }
-        var zk="leaf0|"+slug;
+        /* KEYED AND LABELLED BY THE CANONICAL NAME, not the leaf's own display name, because
+           several leaves can canonicalise to ONE bucket: after 2026-09-05 all three pericyte
+           subtypes submit as "Pericyte" (Søren: "Just collapse them in Pericyte"), and
+           "Perivascular macrophage" has always submitted as "Macrophage". Keying by slug gave
+           four pericyte rows where the data has one type to jump to. The canonical name is also
+           the honest label here: this picker offers a random example OF A BUCKET, and the bucket
+           is what the report writes. */
+        var zk="leaf0|"+String(canon).toLowerCase();
         if(RP[zk])return;
-        RP[zk]={label:disp,cat:LEAF_CATEGORY[slug]||"Other",picks:[],k:zk,zero:true};
+        RP[zk]={label:canon,cat:LEAF_CATEGORY[slug]||"Other",picks:[],k:zk,zero:true};
+        /* Registered as we go, so the NEXT leaf that canonicalises to the same bucket meets it in
+           the loop above instead of depending on the order of Object.keys(LEAF_NAMES). */
+        __have[String(canon).toLowerCase()]=1;
+        __have[String(disp).toLowerCase()]=1;
       });
     }
   }catch(_lz){}
