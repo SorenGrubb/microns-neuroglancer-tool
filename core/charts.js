@@ -182,6 +182,10 @@ function waitingList_(waiting){
   return waiting.map(function(w){return w.t+" ("+w.n+")";}).join(", ");
 }
 
+function chartCategoryNoun(){
+  return (typeof UJ!=="undefined"&&UJ.charts&&UJ.charts.categoryNoun)||"cell type";
+}
+
 function sayWhyNothingPlots_(divId,waiting,noun){
   const el=document.getElementById(divId);
   if(!el)return;
@@ -190,9 +194,9 @@ function sayWhyNothingPlots_(divId,waiting,noun){
   box.className="placeholder";
   const total=waiting.reduce(function(a,w){return a+w.n;},0);
   box.textContent=total
-    ?("Not enough yet to draw a distribution — a cell type needs at least "+MIN_DOTS_TO_PLOT+" "
-      +(noun||"measurements")+" before it gets a box. "+total+" so far, none of one type reaching "
-      +MIN_DOTS_TO_PLOT+": "+waitingList_(waiting)+".")
+    ?("Not enough yet to draw a distribution — a "+chartCategoryNoun()+" needs at least "
+      +MIN_DOTS_TO_PLOT+" "+(noun||"measurements")+" before it gets a box. "+total
+      +" so far, none of one reaching "+MIN_DOTS_TO_PLOT+": "+waitingList_(waiting)+".")
     : ("No "+(noun||"measurements")+" recorded yet.");
   el.innerHTML="";
   el.appendChild(box);
@@ -209,11 +213,13 @@ function noteDotsWaiting_(divId,waiting,noun){
   const note=document.createElement("p");
   note.className="footnote";
   note.id=id;
-  note.title="A box needs at least "+MIN_DOTS_TO_PLOT+" values of the same cell type to describe a "
-            +"distribution. These types have fewer, so their data is stored but not drawn yet.";
-  note.textContent=waiting.length+" cell type"+(waiting.length===1?"":"s")+" with fewer than "
-                  +MIN_DOTS_TO_PLOT+" "+(noun||"measurements")+" not drawn yet ("+total+" value"
-                  +(total===1?"":"s")+"): "+waitingList_(waiting)+".";
+  note.title="A box needs at least "+MIN_DOTS_TO_PLOT+" values of the same "+chartCategoryNoun()
+            +" to describe a distribution. These have fewer, so their data is stored but not "
+            +"drawn yet.";
+  note.textContent=waiting.length+" "+chartCategoryNoun()+(waiting.length===1?"":"s")
+                  +" with fewer than "+MIN_DOTS_TO_PLOT+" "+(noun||"measurements")
+                  +" not drawn yet ("+total+" value"+(total===1?"":"s")+"): "
+                  +waitingList_(waiting)+".";
   el.parentNode.insertBefore(note,el.nextSibling);
 }
 

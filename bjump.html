@@ -383,7 +383,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 18:54</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-06 14:51</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -658,6 +658,10 @@ a plain spatial cutout and do not.</p>
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Statistics dashboard</div>
 <p class="hint" style="margin-top:6px">Charts built from the <span id="dashTotal"></span> nuclei embedded in this page, plus one bulk read of the community&rsquo;s current identifications (the same read the Filter tab&rsquo;s identity dropdown uses). The charting library only loads once this tab is opened.</p>
 <p class="hint" style="margin-top:6px">This dataset has no published cell types, so unlike &micro;Jump&rsquo;s dashboard every chart here is keyed on <b>current community identity</b> &mdash; a live consensus that can still change as more people classify. The six most-identified names get their own bucket; anything else named folds into &ldquo;Other&rdquo;, and every nucleus nobody has classified yet is &ldquo;Unclassified&rdquo;.</p>
+<div class="row" style="gap:10px;margin-top:8px">
+  <button class="idbtn" id="bdashRefresh" style="flex:0 0 auto">&#8635; Refresh live data</button>
+  <span class="hint" id="bdashAge" style="align-self:center"></span>
+</div>
 </div>
 
 <div class="card"><label>Nuclei per community identity</label><div id="dIdentity" style="height:340px"></div></div>
@@ -679,6 +683,19 @@ a plain spatial cutout and do not.</p>
 <div class="card"><label>Distance-from-pyramidale profile, by community identity</label>
 <p class="hint" style="margin-top:0">Each panel is one identity&rsquo;s own distribution as a percentage of that identity, so a rarely-used identity is still readable next to a common one &mdash; same form as &eta;Jump&rsquo;s cortical depth profile, with distance from the fitted stratum pyramidale standing in for cortical depth.</p>
 <div id="dIdentityPyProfile"></div></div>
+
+<div class="card"><label>Community reports over time</label>
+<p class="hint" style="margin-top:0" id="dBReportsNote"></p>
+<div id="dBReports" style="height:280px"></div></div>
+
+<!-- LAST, on purpose (Søren, 2026-09-06) -- a reader arrives here having seen what the numbers
+     are, and the same card sits in the same place on all five dashboards. -->
+<div class="card"><label>Take the numbers away</label>
+<p class="hint" style="margin-top:0">Every chart above as a spreadsheet: nuclei per identity, each marker&rsquo;s shell readings, distance from pyramidale, the nearest-neighbour matrix and the report timeline. The first sheet says when it was exported &mdash; a spreadsheet outlives the tab it came from.</p>
+<div class="row" style="gap:10px;margin-top:8px">
+  <button class="idbtn" id="bdashXlsx" style="flex:0 0 auto">&#8681; Download the numbers as Excel</button>
+  <span class="hint" id="bdashXlsxNote" style="align-self:center"></span>
+</div></div>
 
 </div><!-- /dashboard tabpanel -->
 
@@ -942,6 +959,9 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/gamify.js"></script>
 <script src="core/organelles.js"></script>
 <script src="core/ontology.js"></script>
+<!-- The family's chart look, generated from ujump.html by src/core_charts.py. The UJ.charts hooks
+     it reads are set below and read at DRAW time, so tag order does not matter. -->
+<script src="core/charts.js"></script>
 <script src="core/panel.js"></script>
 <script src="core/tree.js"></script>
 <script src="core/report.js"></script>
@@ -980,6 +1000,21 @@ const BTR = b64(D.TB);                                    // truncated by a z fa
 /* The marker channels. `nuc` is inside the nucleus (mostly a background control); `shell` is the
    ring from the nucleus surface out to SETTINGS.SHELL_UM, which is the informative one -- these
    markers label structures OUTSIDE the nucleus. -1 means the read failed. */
+/* ── HOW core/charts.js SHOULD TREAT βJUMP'S LABELS ─────────────────────────────── 2026-09-06
+   βJump's chart categories are FREE-TEXT community identities, plus the synthetic buckets "Other"
+   and "Unclassified" -- not a fixed taxonomy with codes. The default shortLabel strips a trailing
+   "(CODE)", which is µJump's convention and would quietly eat the parenthesis off something a
+   person typed, like "Microglia (activated)". So it is the identity, unchanged.
+
+   categoryOf/categoryOrder are deliberately NOT set: there are no families to group free text
+   into, and βJump passes its own count-sorted order (with Other and Unclassified last) to every
+   chart anyway, so core's sorting never decides anything here. */
+UJ.charts.shortLabel = function(t){ return String(t == null ? "" : t); };
+/* βJump groups by community identity, not by cell type -- it has no published cell types at all.
+   Without this the dot plots' held-back note reads "1 cell type with fewer than 3 measured nuclei
+   not drawn yet", naming something this dataset does not have. */
+UJ.charts.categoryNoun = "identity";
+
 const MARKERS = [
   {key:"mg",  label:"CD11b (microglia)", nuc:"MGN", shell:"MGS", colour:"#3fb950"},
   {key:"tau", label:"pTau",              nuc:"TAN", shell:"TAS", colour:"#f0883e"},
@@ -3700,22 +3735,27 @@ function ensureConnPlotly(){
   });
   return _bjumpPlotlyLoadPromise;
 }
-/* Same page accent used everywhere else on βJump (build_bjump.py's ACCENT_OVERRIDE) -- a lone
-   series wears the page's own identity colour rather than a generic categorical hue, same
-   convention hJump's dashboard uses for its own single-series charts. */
-function bjumpDashOneColor(){ return currentTheme()==="light" ? "#a4133c" : "#ff6b81"; }
+/* ── 2026-09-06: THE FAMILY'S LOOK, NOT THIS PAGE'S ─────────────────────────────────────────
+   Søren: "Now we should do the similar changes to bJump." This used to return βJump's page accent
+   (#a4133c / #ff6b81), so every single-series chart wore the tool's own identity colour -- the
+   same thing he objected to on ηJump ("all of the hJump graphs orange, like the theme"), in
+   crimson. It now returns a slot from the shared PALETTE, so a βJump bar is the same colour as
+   the equivalent bar in every other tool. Charts whose x-axis is an IDENTITY take colorFor()
+   per bucket instead. */
+function bjumpDashOneColor(){ return currentTheme()==="light" ? "#3a6b5a" : "#5d8c77"; }
 /* Sequential blue ramp for the two heatmaps (magnitude: cell counts, % of row) -- one hue,
    monotonic lightness, light->dark on the light surface and dark->light on the dark one (same
    inversion hJump's own ramp() uses, for the same reason: "near zero" has to recede toward
    whichever surface colour is actually behind it). Steps are the dataviz skill's own validated
    sequential-blue family (references/palette.md); the two darkest dark-mode anchors extend that
    same hue down toward this page's near-black panel background. */
-function bjumpDashSeqRamp(){
-  return currentTheme()==="light"
-    ? [[0,"#eef4fc"],[0.17,"#cde2fb"],[0.33,"#9ec5f4"],[0.5,"#6da7ec"],[0.67,"#3987e5"],[0.83,"#1c5cab"],[1,"#0d366b"]]
-    : [[0,"#0d2440"],[0.17,"#123258"],[0.33,"#184f95"],[0.5,"#1c5cab"],[0.67,"#2a78d6"],[0.83,"#5598e7"],[1,"#9ec5f4"]];
-}
-const BJUMP_DASH_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d","autoScale2d"]};
+/* Replaced by the shared ramp, 2026-09-06. The blue below was NOT careless -- the comment above
+   cites the dataviz skill's own validated sequential-blue family, and it is a good ramp. It goes
+   because Søren asked for consistency BETWEEN datasets: a reader moving from ηJump's heatmap to
+   βJump's should not have to re-learn what a dark cell means. Magnitude through lightness survives
+   every colour-vision check in either hue, so this is a consistency choice, not a correction. */
+function bjumpDashSeqRamp(){ return chartRamp(); }
+const BJUMP_DASH_CFG=PLOTLY_CFG;
 /* Object.assign is shallow -- merge one level into xaxis/yaxis so a caller overriding just a
    title doesn't silently drop gridcolor (same fix hJump's own layout() applies, for the same
    reason). Colours are read fresh (liveThemeColors()) at every draw call, not baked once, so a
@@ -3723,16 +3763,14 @@ const BJUMP_DASH_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:[
    toggling theme WITHOUT a redraw only re-tints font/grid/hoverlabel via retintPlotlyCharts();
    marker/colorscale colours stay whatever they were at last draw, matching existing precedent. */
 function bjumpDashLayout(extra){
-  const c=liveThemeColors();
-  const base={
-    margin:{l:64,r:14,t:10,b:80},
-    font:{family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:c.ink},
-    paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
-    showlegend:false,
-    hoverlabel:{bgcolor:c.panel,bordercolor:c.line,font:{color:c.ink}},
-    xaxis:{automargin:true,gridcolor:c.line,zeroline:false,tickangle:-30},
-    yaxis:{automargin:true,gridcolor:c.line,zeroline:false}
-  };
+  /* THE BASE IS NOW µJUMP'S OWN baseLayout(), from core/charts.js -- same fonts, margins, grid,
+     hover chrome and theme handling, because it is the same function. The one-level xaxis/yaxis
+     merge below stays, for the real bug it was written against (a shallow Object.assign replaced
+     the whole axis object and silently dropped gridcolor). tickangle:-30 is βJump's own, kept:
+     its identity labels are free text and shorter than a cell-type name. */
+  const base=Object.assign({},baseLayout());
+  base.xaxis=Object.assign({},base.xaxis,{automargin:true,zeroline:false,tickangle:-30});
+  base.yaxis=Object.assign({},base.yaxis,{automargin:true});
   const out=Object.assign({},base,extra||{});
   ["xaxis","yaxis"].forEach(function(k){ if(extra&&extra[k]) out[k]=Object.assign({},base[k],extra[k]); });
   return out;
@@ -3819,17 +3857,35 @@ function bjumpDashDraw(){
   const one=bjumpDashOneColor(), order=BDASH.order;
 
   // 1. nuclei per community identity -- magnitude, one series, no legend needed
+  /* x IS an identity here, so each bar takes that identity's own slot from the shared palette
+     rather than one flat accent. The name is on the axis and in the hover, so the hue stays
+     redundant -- see core/charts.js's note on why that is the rule that matters. */
   bjumpDashPlot("dIdentity",[{type:"bar",x:order,y:order.map(function(b){return BDASH.perBucket[b];}),
-    marker:{color:one},hovertemplate:"%{x}<br>%{y} nuclei<extra></extra>"}],
+    marker:{color:order.map(function(b){return colorFor(b);})},
+    hovertemplate:"%{x}<br>%{y} nuclei<extra></extra>"}],
     {yaxis:{title:{text:"nuclei"}}});
 
-  // 2/3/4. marker shell-percentile distributions, one box plot per marker, boxed by identity
+  /* 2/3/4. THE MARKER DISTRIBUTIONS, AS DOT PLOTS. These were type:"box" with boxpoints:false --
+     a box describing a distribution while hiding every observation that makes it, which is the
+     third page in this family to have that line and the thing Søren singled out on ηJump. They now
+     go through dotMedianChart() from core/charts.js: jittered grey points, one per nucleus, with a
+     coloured median bar.
+
+     NO SAMPLING HERE, unlike ηJump. That page thins its dot plots because one type has 19,352
+     cells; βJump has 220 nuclei in total, so every single point is drawn. Worth stating, so the
+     difference between the two files reads as a decision rather than an inconsistency.
+
+     dotMedianChart also brings MIN_DOTS_TO_PLOT with it, which matters more here than anywhere:
+     with six identity buckets over 220 nuclei, a rarely-used identity really can have one or two
+     readings, and those are now counted in a note instead of drawn as a box through two points. */
   MARKERS.forEach(function(m){
-    const rows=order.filter(function(b){return BDASH.byMarker[m.key][b].length;});
-    bjumpDashPlot("dMarker_"+m.key,rows.map(function(b){return{type:"box",name:b,y:BDASH.byMarker[m.key][b],
-      marker:{color:one},line:{width:1.5},boxpoints:false,
-      hovertemplate:"%{x}<br>median %{median}th pct<extra></extra>"};}),
-      {yaxis:{title:{text:m.label+" shell percentile"},range:[0,100]}});
+    const byBucket={};
+    order.forEach(function(b){
+      const v=BDASH.byMarker[m.key][b];
+      if(v&&v.length)byBucket[b]=v;
+    });
+    dotMedianChart("dMarker_"+m.key,byBucket,m.label+" shell percentile",true,false,
+                   "measured nuclei");
   });
 
   // 5. identity x distance-from-pyramidale -- magnitude across two categories: a heatmap
@@ -3857,9 +3913,13 @@ function bjumpDashDraw(){
     BDASH.byPy[b].forEach(function(d){ const bi=Math.floor((d-lo)/w2); if(bi>=0&&bi<bins2)h[bi]++; });
     const tot=BDASH.byPy[b].length||1;
     const ax=k?String(k+1):"";
+    /* One panel per identity, so the fill carries that identity's colour: redundant with the
+       panel title above it, and it ties each facet to the same identity's bar in every other
+       chart on the page. */
+    const bc=colorFor(b);
     traces.push({type:"scatter",mode:"lines",x:h.map(function(_,bi){return lo+(bi+0.5)*w2;}),
       y:h.map(function(v){return 100*v/tot;}),
-      line:{color:one,width:2},fill:"tozeroy",fillcolor:one+"33",xaxis:"x"+ax,yaxis:"y"+ax,
+      line:{color:bc,width:2},fill:"tozeroy",fillcolor:bc+"33",xaxis:"x"+ax,yaxis:"y"+ax,
       hovertemplate:b+"<br>%{x:.0f} µm<br>%{y:.1f}%<extra></extra>"});
     ann.push({text:b+" ("+BDASH.perBucket[b]+")",xref:"x"+ax+" domain",yref:"y"+ax+" domain",
       x:0.5,y:1.08,showarrow:false,font:{size:10}});
@@ -3873,13 +3933,126 @@ function bjumpDashDraw(){
   }
   bjumpDashPlot("dIdentityPyProfile",traces,gl);
 }
+/* ── COMMUNITY REPORTS OVER TIME ──────────────────────────────────────────────── 2026-09-06
+   ?reportsOverTime=1 answers for every dataset and nobody had drawn it on βJump. Daily counts per
+   report KIND, stacked, so the chart says what people did rather than only how much. Same chart
+   ηJump gained today, and it is the endpoint that actually works -- ηJump's old community panel
+   read a `d.allIds` key that has never existed in any reply. */
+function bjumpDashReports(){
+  const note=function(t){ const e=document.getElementById("dBReportsNote"); if(e)e.textContent=t; };
+  if(!REPORT_ENDPOINT){ note("No backend configured."); return Promise.resolve(); }
+  return fetch(REPORT_ENDPOINT+"?reportsOverTime=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(rt){
+      const daily=(rt&&rt.daily)||[];
+      if(!daily.length){
+        note("No community reports on this dataset yet — every identification, organelle location "
+            +"and volume computation lands here.");
+        const e=document.getElementById("dBReports");
+        if(e)e.innerHTML="<div class='hint'>Nothing reported yet.</div>";
+        return;
+      }
+      const kinds={};
+      daily.forEach(function(r){ Object.keys(r.counts||{}).forEach(function(k){ kinds[k]=1; }); });
+      const kk=Object.keys(kinds).sort();
+      const days=daily.map(function(r){ return r.date; });
+      bjumpDashPlot("dBReports",kk.map(function(k){
+        return {type:"bar",name:k,x:days,
+          y:daily.map(function(r){ return (r.counts&&r.counts[k])||0; }),
+          marker:{color:colorFor(k)},
+          hovertemplate:"%{x}<br>"+k+": %{y}<extra></extra>"};
+      }),{barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.14,font:{size:10}},
+          xaxis:{tickangle:-45},yaxis:{title:{text:"reports that day"}}});
+      let total=0;
+      daily.forEach(function(r){ Object.keys(r.counts||{}).forEach(function(k){ total+=r.counts[k]; }); });
+      note(fmt(total)+" report"+(total===1?"":"s")+" across "+daily.length
+          +" day"+(daily.length===1?"":"s")+", by kind.");
+    })
+    .catch(function(){ note("Could not reach the backend."); });
+}
+
+/* ── THE NUMBERS, AS A SPREADSHEET ────────────────────────────────────────────────────────────
+   Built from BDASH -- the aggregate the charts themselves were drawn from -- so the workbook and
+   the screen cannot disagree. A sheet only when its data exists: an empty sheet claims "measured
+   zero", a different statement from "not measured". */
+function bjumpDashWorkbook(){
+  if(typeof XLSX==="undefined"||!BDASH)return null;
+  const wb=XLSX.utils.book_new();
+  const add=function(rows,name){ if(rows&&rows.length>1)XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),name); };
+
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([
+    ["Dataset",(UJ.cfg&&UJ.cfg.label)||""],
+    ["Nuclei in this volume",N],
+    ["Exported",new Date().toISOString()],
+    ["Identity buckets",BDASH.order.join(", ")]]),"About");
+
+  const a1=[["Community identity","Nuclei"]];
+  BDASH.order.forEach(function(b){ a1.push([b,BDASH.perBucket[b]]); });
+  add(a1,"Per identity");
+
+  /* EVERY READING, not a median: these charts are distributions and a spreadsheet that flattens
+     each to one number is less than the picture it came from. */
+  MARKERS.forEach(function(m){
+    const a=[["Community identity",m.label+" shell percentile"]];
+    BDASH.order.forEach(function(b){
+      (BDASH.byMarker[m.key][b]||[]).forEach(function(v){ a.push([b,v]); });
+    });
+    add(a,m.label.replace(/[^A-Za-z0-9 ]/g,"").slice(0,28));
+  });
+
+  const a3=[["Community identity","µm from pyramidale"]];
+  BDASH.order.forEach(function(b){ (BDASH.byPy[b]||[]).forEach(function(v){ a3.push([b,v]); }); });
+  add(a3,"Distance from pyramidale");
+
+  try{
+    const nb=bjumpDashNeighborMatrix();
+    const a4=[["Identity"].concat(BDASH.order)];
+    BDASH.order.forEach(function(b,i){ a4.push([b].concat(nb[i])); });
+    add(a4,"Nearest neighbour pct");
+  }catch(e){ /* the matrix needs the same aggregate the charts do; absent rather than blank */ }
+
+  return wb;
+}
+function bjumpDownloadDashExcel(){
+  const note=document.getElementById("bdashXlsxNote");
+  const say=function(t){ if(note)note.textContent=t; };
+  if(typeof XLSX==="undefined"){ say("The spreadsheet library has not loaded yet — try again in a moment."); return; }
+  const wb=bjumpDashWorkbook();
+  if(!wb){ say("The charts have not been built yet."); return; }
+  XLSX.writeFile(wb,"bjump_dashboard_"+new Date().toISOString().slice(0,10)+".xlsx");
+  say("Downloaded — "+wb.SheetNames.length+" sheets.");
+}
+
 let __bjumpDashInited=false;
+function bjumpDashAge(){
+  const e=document.getElementById("bdashAge");
+  if(e)e.textContent="identities read just now";
+}
 function initDashboardTab(){
   if(__bjumpDashInited)return; __bjumpDashInited=true;
   const totalEl=document.getElementById("dashTotal"); if(totalEl)totalEl.textContent=fmt(N);
   fetchBjumpIdentities().then(function(){
     bjumpDashAggregate();
     bjumpDashDraw();
+    bjumpDashAge();
+    bjumpDashReports();
+  });
+  const x=document.getElementById("bdashXlsx");
+  if(x)x.addEventListener("click",bjumpDownloadDashExcel);
+  /* NOTHING EVER REFRESHED. fetchBjumpIdentities() returns the cached IDENTITY_BY_NID forever
+     after the first call, so a dashboard left open showed the identities as they were at page
+     load and never moved -- "live" that happens once. Clearing both the map and any in-flight
+     promise is what makes a refetch possible; everything else here already redraws from it. */
+  const rb=document.getElementById("bdashRefresh");
+  if(rb)rb.addEventListener("click",function(){
+    rb.disabled=true; const was=rb.textContent; rb.textContent="Refreshing…";
+    IDENTITY_BY_NID=null; IDENTITY_FETCH=null;
+    fetchBjumpIdentities().then(function(){
+      bjumpDashAggregate();
+      bjumpDashDraw();
+      bjumpDashAge();
+      return bjumpDashReports();
+    }).then(function(){ rb.disabled=false; rb.textContent=was; });
   });
 }
 
