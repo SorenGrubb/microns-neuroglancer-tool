@@ -383,7 +383,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 18:30</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-06 16:27</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -690,6 +690,10 @@ reviewed those rows. That review is what &lambda;Jump is for.</p>
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Statistics dashboard</div>
 <p class="hint" style="margin-top:6px">Charts built from the <span id="dashTotal"></span> nuclei embedded in this page, plus one bulk read of the community&rsquo;s current identifications (the same read the Filter tab&rsquo;s identity dropdown uses). The charting library only loads once this tab is opened.</p>
 <p class="hint" style="margin-top:6px">This dataset has no published cell types, so every chart is keyed on <b>current community identity</b> &mdash; a live consensus that can still change. The six most-identified names get their own bucket; anything else named folds into &ldquo;Other&rdquo;, and every nucleus nobody has classified yet is &ldquo;Unclassified&rdquo;.</p>
+<div class="row" style="gap:10px;margin-top:8px">
+  <button class="idbtn" id="ldashRefresh" style="flex:0 0 auto">&#8635; Refresh live data</button>
+  <span class="hint" id="ldashAge" style="align-self:center"></span>
+</div>
 </div>
 
 <div class="card"><label>Nuclei per community identity</label><div id="dIdentity" style="height:340px"></div></div>
@@ -699,7 +703,7 @@ reviewed those rows. That review is what &lambda;Jump is for.</p>
 <div id="dPass" style="height:340px"></div></div>
 
 <div class="card"><label>Nucleus diameter, by community identity</label>
-<p class="hint" style="margin-top:0">Detection is size-tuned near 7.5&nbsp;&micro;m, so the small end of every distribution here is thinner than the tissue really is &mdash; see the References tab.</p>
+<p class="hint" style="margin-top:0">One grey dot per nucleus, with the median marked &mdash; all 488 are drawn, no thinning. Detection is size-tuned near 7.5&nbsp;&micro;m, so the small end of every distribution here is thinner than the tissue really is &mdash; see the References tab.</p>
 <div id="dDiameter" style="height:340px"></div></div>
 
 <div class="card"><label>Community identity, by cortical layer</label><div id="dIdentityLayer" style="height:400px"></div></div>
@@ -711,6 +715,19 @@ reviewed those rows. That review is what &lambda;Jump is for.</p>
 <div class="card"><label>Depth profile, by community identity</label>
 <p class="hint" style="margin-top:0">Each panel is one identity&rsquo;s own distribution as a percentage of that identity, so a rarely-used identity is still readable next to a common one. Depth is measured from the traced pial surface; negative is above it.</p>
 <div id="dIdentityDepthProfile"></div></div>
+
+<div class="card"><label>Community reports over time</label>
+<p class="hint" style="margin-top:0" id="dLReportsNote"></p>
+<div id="dLReports" style="height:280px"></div></div>
+
+<!-- LAST, on purpose (Søren, 2026-09-06) -- a reader arrives here having seen what the numbers
+     are, and the same card sits in the same place on all six dashboards. -->
+<div class="card"><label>Take the numbers away</label>
+<p class="hint" style="margin-top:0">Every chart above as a spreadsheet: nuclei per identity, which detector pass found them, every diameter and every depth reading rather than a median, the identity&times;layer and nearest-neighbour matrices. The first sheet says when it was exported &mdash; a spreadsheet outlives the tab it came from.</p>
+<div class="row" style="gap:10px;margin-top:8px">
+  <button class="idbtn" id="ldashXlsx" style="flex:0 0 auto">&#8681; Download the numbers as Excel</button>
+  <span class="hint" id="ldashXlsxNote" style="align-self:center"></span>
+</div></div>
 
 </div><!-- /dashboard tabpanel -->
 
@@ -906,6 +923,10 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/gamify.js"></script>
 <script src="core/organelles.js"></script>
 <script src="core/ontology.js"></script>
+<!-- The family's chart look, generated from ujump.html by src/core_charts.py. The UJ.charts
+     hooks it reads are set in the dashboard section below and read at DRAW time, so tag
+     order does not matter. -->
+<script src="core/charts.js"></script>
 <script src="core/panel.js"></script>
 <script src="core/tree.js"></script>
 <script src="core/report.js"></script>
@@ -1980,29 +2001,55 @@ function ensureConnPlotly(){
   });
   return _ljumpPlotlyLoadPromise;
 }
-function ljumpDashOneColor(){ return currentTheme()==="light" ? "#1d4ed8" : "#7aa2ff"; }
-/* Sequential blue ramp for the heatmaps: one hue, monotonic lightness, light->dark on the
-   light surface and dark->light on the dark one -- "near zero" has to recede toward whichever
-   surface colour is actually behind it. Same validated family the other tools use. */
-function ljumpDashSeqRamp(){
-  return currentTheme()==="light"
-    ? [[0,"#eef4fc"],[0.17,"#cde2fb"],[0.33,"#9ec5f4"],[0.5,"#6da7ec"],[0.67,"#3987e5"],[0.83,"#1c5cab"],[1,"#0d366b"]]
-    : [[0,"#0d2440"],[0.17,"#123258"],[0.33,"#184f95"],[0.5,"#1c5cab"],[0.67,"#2a78d6"],[0.83,"#5598e7"],[1,"#9ec5f4"]];
+/* ── HOW core/charts.js SHOULD TREAT λJUMP'S LABELS ─────────────────────────────── 2026-09-06
+   Word for word βJump's situation, because it is word for word the same dataset problem: Lee16
+   publishes no cell types, so every chart here is keyed on FREE-TEXT community identities plus the
+   synthetic buckets "Other" and "Unclassified". The default shortLabel strips a trailing "(CODE)",
+   which is µJump's convention and would quietly eat the parenthesis off something a person typed,
+   like "Microglia (activated)". So it is the identity, unchanged.
+
+   categoryOf/categoryOrder are deliberately NOT set: there are no families to group free text into,
+   and λJump passes its own count-sorted order (Other and Unclassified last) to every chart anyway,
+   so core's sorting never decides anything here. */
+UJ.charts.shortLabel = function(t){ return String(t == null ? "" : t); };
+/* Without this the dot plot's held-back note reads "1 cell type with fewer than 3 measured nuclei
+   not drawn yet", naming something Lee16 does not have. */
+UJ.charts.categoryNoun = "identity";
+
+/* ljumpDashOneColor() USED TO BE HERE, returning #1d4ed8 / #7aa2ff. That is not merely a blue: it
+   is this page's --accent, injected by build_ljump.py's ACCENT_OVERRIDE, so every single-series
+   chart on the dashboard wore the theme colour -- Søren's ηJump complaint ("all of the hJump
+   graphs orange, like the theme") in blue. It is deleted rather than re-pointed, because after the
+   changes below nothing calls it: the identity bars and the depth facets take colorFor(), diameter
+   goes through dotMedianChart(), and the detector-pass chart reads the shared ramp. A function
+   returning the page accent that nothing calls is a trap for whoever adds the next chart. */
+
+/* The heatmap ramp is now the shared one. The blue below it was NOT careless -- one hue, monotonic
+   lightness, inverted for the dark surface so "near zero" recedes toward whichever background is
+   actually behind it, from the same validated family. It goes because Søren asked for consistency
+   BETWEEN datasets: a reader moving from ηJump's heatmap to λJump's should not have to re-learn
+   what a dark cell means. */
+function ljumpDashSeqRamp(){ return chartRamp(); }
+/* "Which detector pass found them" is the one chart whose two series are not two categories -- they
+   are two grades of the same measurement, the pale pass and the dark pass. A light/dark pair of ONE
+   hue says that; two palette slots would claim they are unrelated things. Both tones are taken from
+   the shared ramp, so the chart is on the family palette without pretending to be categorical. */
+function ljumpDashPassColors(){
+  const r=chartRamp();
+  return {pale:r[Math.floor(r.length*0.4)][1], dense:r[r.length-2][1]};
 }
-const LJUMP_DASH_CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d","autoScale2d"]};
+const LJUMP_DASH_CFG=PLOTLY_CFG;
 /* Object.assign is shallow -- merge one level into xaxis/yaxis so a caller overriding just a
    title does not silently drop gridcolor. */
 function ljumpDashLayout(extra){
-  const c=liveThemeColors();
-  const base={
-    margin:{l:64,r:14,t:10,b:80},
-    font:{family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:c.ink},
-    paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
-    showlegend:false,
-    hoverlabel:{bgcolor:c.panel,bordercolor:c.line,font:{color:c.ink}},
-    xaxis:{automargin:true,gridcolor:c.line,zeroline:false,tickangle:-30},
-    yaxis:{automargin:true,gridcolor:c.line,zeroline:false}
-  };
+  /* THE BASE IS NOW µJUMP'S OWN baseLayout(), from core/charts.js -- same fonts, margins, grid,
+     hover chrome and theme handling, because it is the same function. The one-level xaxis/yaxis
+     merge below stays, for the real bug it was written against (a shallow Object.assign replaced
+     the whole axis object and silently dropped gridcolor). tickangle:-30 is λJump's own, kept:
+     its identity labels are free text and shorter than a cell-type name. */
+  const base=Object.assign({},baseLayout());
+  base.xaxis=Object.assign({},base.xaxis,{automargin:true,zeroline:false,tickangle:-30});
+  base.yaxis=Object.assign({},base.yaxis,{automargin:true,zeroline:false});
   const out=Object.assign({},base,extra||{});
   ["xaxis","yaxis"].forEach(function(k){ if(extra&&extra[k]) out[k]=Object.assign({},base[k],extra[k]); });
   return out;
@@ -2066,31 +2113,45 @@ function ljumpDashNeighborMatrix(){
   });
 }
 function ljumpDashDraw(){
-  const one=ljumpDashOneColor(), order=LDASH.order;
+  const order=LDASH.order;
 
   // 1. nuclei per community identity
+  /* x IS an identity here, so each bar takes that identity's own slot from the shared palette
+     rather than one flat accent. The name is on the axis and in the hover, so the hue stays
+     redundant -- see core/charts.js's note on why that is the rule that matters. */
   ljumpDashPlot("dIdentity",[{type:"bar",x:order,y:order.map(function(b){return LDASH.perBucket[b];}),
-    marker:{color:one},hovertemplate:"%{x}<br>%{y} nuclei<extra></extra>"}],
+    marker:{color:order.map(function(b){return colorFor(b);})},
+    hovertemplate:"%{x}<br>%{y} nuclei<extra></extra>"}],
     {yaxis:{title:{text:"nuclei"}}});
 
   // 2. how much of the table each detector pass supplies, per identity. Two series, so this is
   //    the one chart with a legend -- and it is the chart that shows reviewers where the
   //    unreliable rows are.
+  const pass=ljumpDashPassColors();
   ljumpDashPlot("dPass",[
     {type:"bar",name:"pale",x:order,y:order.map(function(b){return LDASH.byPass[b].pale;}),
-     marker:{color:one},hovertemplate:"%{x}<br>%{y} pale<extra></extra>"},
+     marker:{color:pass.pale},hovertemplate:"%{x}<br>%{y} pale<extra></extra>"},
     {type:"bar",name:"dense",x:order,y:order.map(function(b){return LDASH.byPass[b].dense;}),
-     marker:{color:currentTheme()==="light"?"#93b5f0":"#37548c"},
+     marker:{color:pass.dense},
      hovertemplate:"%{x}<br>%{y} dense<extra></extra>"}],
     {barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.12},yaxis:{title:{text:"nuclei"}}});
 
-  // 3. nucleus diameter by identity -- a box plot, because the interesting claim is about the
-  //    distribution, not a mean
-  const diaRows=order.filter(function(b){return LDASH.byDia[b].length;});
-  ljumpDashPlot("dDiameter",diaRows.map(function(b){return {type:"box",name:b,y:LDASH.byDia[b],
-    marker:{color:one},line:{width:1.5},boxpoints:false,
-    hovertemplate:"%{x}<br>median %{median:.1f} µm<extra></extra>"};}),
-    {yaxis:{title:{text:"equivalent diameter (µm)"}}});
+  /* 3. NUCLEUS DIAMETER, AS A DOT PLOT. This was type:"box" with boxpoints:false -- a box
+     describing a distribution while hiding every observation that makes it, the fourth page in
+     this family to carry that line and the thing Søren singled out on ηJump. It now goes through
+     dotMedianChart() from core/charts.js: jittered grey points, one per nucleus, with a coloured
+     median bar.
+
+     NO SAMPLING, unlike ηJump. That page thins its dot plots because one type has 19,352 cells;
+     λJump has 488 nuclei in total, so every single point is drawn -- the same call βJump makes at
+     220, for the same reason.
+
+     dotMedianChart also brings MIN_DOTS_TO_PLOT with it, which matters here: with six identity
+     buckets over 488 nuclei a rarely-used identity really can have one or two readings, and those
+     are now counted in a note rather than drawn as a box through two points. */
+  const byDia={};
+  order.forEach(function(b){ if(LDASH.byDia[b]&&LDASH.byDia[b].length)byDia[b]=LDASH.byDia[b]; });
+  dotMedianChart("dDiameter",byDia,"equivalent diameter (µm)",true,false,"measured nuclei");
 
   // 4. identity x layer -- magnitude across two categories, so a heatmap
   ljumpDashPlot("dIdentityLayer",[{type:"heatmap",x:LAYERS,y:order,z:ljumpDashLayerMatrix(),
@@ -2114,9 +2175,12 @@ function ljumpDashDraw(){
     LDASH.byDepth[b].forEach(function(d){ const bi=Math.floor((d-lo)/w2); if(bi>=0&&bi<bins2)hcount[bi]++; });
     const tot=LDASH.byDepth[b].length||1;
     const ax=k?String(k+1):"";
+    /* One panel per identity, so the fill carries that identity's colour: redundant with the panel
+       title above it, and it ties each facet to the same identity's bar in every other chart. */
+    const bc=colorFor(b);
     traces.push({type:"scatter",mode:"lines",x:hcount.map(function(_,bi){return lo+(bi+0.5)*w2;}),
       y:hcount.map(function(v){return 100*v/tot;}),
-      line:{color:one,width:2},fill:"tozeroy",fillcolor:one+"33",xaxis:"x"+ax,yaxis:"y"+ax,
+      line:{color:bc,width:2},fill:"tozeroy",fillcolor:bc+"33",xaxis:"x"+ax,yaxis:"y"+ax,
       hovertemplate:b+"<br>%{x:.0f} µm below pia<br>%{y:.1f}%<extra></extra>"});
     ann.push({text:b+" ("+LDASH.perBucket[b]+")",xref:"x"+ax+" domain",yref:"y"+ax+" domain",
       x:0.5,y:1.08,showarrow:false,font:{size:10}});
@@ -2130,13 +2194,131 @@ function ljumpDashDraw(){
   }
   ljumpDashPlot("dIdentityDepthProfile",traces,gl);
 }
+/* ── COMMUNITY REPORTS OVER TIME ──────────────────────────────────────────────── 2026-09-06
+   ?reportsOverTime=1 answers for every dataset and nobody had drawn it on λJump. Daily counts per
+   report KIND, stacked, so the chart says what people did rather than only how much. The same
+   chart ηJump and βJump gained this week. */
+function ljumpDashReports(){
+  const note=function(t){ const e=document.getElementById("dLReportsNote"); if(e)e.textContent=t; };
+  if(!REPORT_ENDPOINT){ note("No backend configured."); return Promise.resolve(); }
+  return fetch(REPORT_ENDPOINT+"?reportsOverTime=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+    .then(function(r){ return r.json(); })
+    .then(function(rt){
+      const daily=(rt&&rt.daily)||[];
+      if(!daily.length){
+        note("No community reports on this dataset yet — every identification and organelle "
+            +"location lands here.");
+        const e=document.getElementById("dLReports");
+        if(e)e.innerHTML="<div class='hint'>Nothing reported yet.</div>";
+        return;
+      }
+      const kinds={};
+      daily.forEach(function(r){ Object.keys(r.counts||{}).forEach(function(k){ kinds[k]=1; }); });
+      const kk=Object.keys(kinds).sort();
+      const days=daily.map(function(r){ return r.date; });
+      ljumpDashPlot("dLReports",kk.map(function(k){
+        return {type:"bar",name:k,x:days,
+                y:daily.map(function(r){ return (r.counts&&r.counts[k])||0; }),
+                marker:{color:colorFor(k)},
+                hovertemplate:"%{x}<br>%{y} "+k+"<extra></extra>"};
+      }),{barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.14},
+          xaxis:{tickangle:-45,type:"category"},yaxis:{title:{text:"reports"}}});
+      const total=daily.reduce(function(s,r){
+        return s+Object.keys(r.counts||{}).reduce(function(t,k){ return t+r.counts[k]; },0); },0);
+      note(total+" report"+(total===1?"":"s")+" over "+daily.length+" day"
+          +(daily.length===1?"":"s")+", by kind.");
+    })
+    .catch(function(){ note("Could not read the report history just now."); });
+}
+/* ── TAKE THE NUMBERS AWAY ─────────────────────────────────────────────────────── 2026-09-06
+   Søren: "I like that there is a download the numbers as Excel, but that should be in the bottom
+   of the page. We can do that for all the dashboards of the other tools as well." λJump is the
+   last of them. */
+function ljumpDashWorkbook(){
+  if(typeof XLSX==="undefined"||!LDASH)return null;
+  const wb=XLSX.utils.book_new();
+  const add=function(rows,name){ if(rows&&rows.length>1)XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),name); };
+
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([
+    ["Dataset",(UJ.cfg&&UJ.cfg.label)||""],
+    ["Nuclei in this volume",N],
+    ["Exported",new Date().toISOString()],
+    ["Identity buckets",LDASH.order.join(", ")]]),"About");
+
+  const a1=[["Community identity","Nuclei"]];
+  LDASH.order.forEach(function(b){ a1.push([b,LDASH.perBucket[b]]); });
+  add(a1,"Per identity");
+
+  const a2=[["Community identity","Pale pass","Dark pass"]];
+  LDASH.order.forEach(function(b){ a2.push([b,LDASH.byPass[b].pale,LDASH.byPass[b].dense]); });
+  add(a2,"Detector pass");
+
+  /* EVERY READING, not a median: these charts are distributions and a spreadsheet that flattens
+     each to one number is less than the picture it came from. */
+  const a3=[["Community identity","Equivalent diameter (um)"]];
+  LDASH.order.forEach(function(b){ (LDASH.byDia[b]||[]).forEach(function(v){ a3.push([b,v]); }); });
+  add(a3,"Diameter");
+
+  const a4=[["Community identity","Depth below pia (um)"]];
+  LDASH.order.forEach(function(b){ (LDASH.byDepth[b]||[]).forEach(function(v){ a4.push([b,v]); }); });
+  add(a4,"Depth");
+
+  try{
+    const lm=ljumpDashLayerMatrix();
+    const a5=[["Identity"].concat(LAYERS)];
+    LDASH.order.forEach(function(b,i){ a5.push([b].concat(lm[i])); });
+    add(a5,"By layer");
+  }catch(e){ /* needs the same aggregate the charts do; absent rather than blank */ }
+
+  try{
+    const nb=ljumpDashNeighborMatrix();
+    const a6=[["Identity"].concat(LDASH.order)];
+    LDASH.order.forEach(function(b,i){ a6.push([b].concat(nb[i])); });
+    add(a6,"Nearest neighbour pct");
+  }catch(e){ /* same */ }
+
+  return wb;
+}
+function ljumpDownloadDashExcel(){
+  const note=document.getElementById("ldashXlsxNote");
+  const say=function(t){ if(note)note.textContent=t; };
+  if(typeof XLSX==="undefined"){ say("The spreadsheet library has not loaded yet — try again in a moment."); return; }
+  const wb=ljumpDashWorkbook();
+  if(!wb){ say("The charts have not been built yet."); return; }
+  XLSX.writeFile(wb,"ljump_dashboard_"+new Date().toISOString().slice(0,10)+".xlsx");
+  say("Downloaded — "+wb.SheetNames.length+" sheets.");
+}
+
 let __ljumpDashInited=false;
+function ljumpDashAge(){
+  const e=document.getElementById("ldashAge");
+  if(e)e.textContent="identities read just now";
+}
 function initDashboardTab(){
   if(__ljumpDashInited)return; __ljumpDashInited=true;
   const totalEl=document.getElementById("dashTotal"); if(totalEl)totalEl.textContent=fmt(N);
   fetchLjumpIdentities().then(function(){
     ljumpDashAggregate();
     ljumpDashDraw();
+    ljumpDashAge();
+    ljumpDashReports();
+  });
+  const x=document.getElementById("ldashXlsx");
+  if(x)x.addEventListener("click",ljumpDownloadDashExcel);
+  /* NOTHING EVER REFRESHED. fetchLjumpIdentities() returns the cached IDENTITY_BY_NID for ever
+     after the first call, so a dashboard left open showed the identities as they were at page load
+     and never moved -- "live" that happens once. Clearing both the map AND any in-flight promise is
+     what makes a refetch possible; everything else here already redraws from it. */
+  const rb=document.getElementById("ldashRefresh");
+  if(rb)rb.addEventListener("click",function(){
+    rb.disabled=true; const was=rb.textContent; rb.textContent="Refreshing…";
+    IDENTITY_BY_NID=null; IDENTITY_FETCH=null;
+    fetchLjumpIdentities().then(function(){
+      ljumpDashAggregate();
+      ljumpDashDraw();
+      ljumpDashAge();
+      return ljumpDashReports();
+    }).then(function(){ rb.disabled=false; rb.textContent=was; });
   });
 }
 
