@@ -433,7 +433,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-06 12:14</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-06 14:03</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -725,7 +725,10 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 <div class="card">
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Statistics dashboard</div>
 <p class="hint" style="margin-top:6px">Fifteen charts computed from the <span id="dashTotal"></span> cells embedded in this page &mdash; no network. Three more come from the community backend. <span id="dashStatus" style="color:var(--accent)"></span></p>
-<div class="row" style="gap:10px;margin-top:8px"><button class="idbtn" id="dashXlsx" style="flex:0 0 auto">Download the numbers as Excel</button></div>
+<div class="row" style="gap:10px;margin-top:8px">
+  <button class="idbtn" id="dashRefresh" style="flex:0 0 auto">&#8635; Refresh live data</button>
+  <span class="hint" id="dashLiveAge" style="align-self:center"></span>
+</div>
 <p class="hint" style="margin-top:6px">Colour is never the only channel. Where a chart is grouped by cell type, the type is on the labelled axis and in the hover text and the hue only repeats it &mdash; using the same palette as &micro;Jump, &delta;Jump and &pi;Jump, so a cell type is the same colour in every tool. Where colour carries something on its own it is broad class (three slots) or magnitude through lightness, both of which survive colour-vision checks.</p>
 </div>
 
@@ -763,10 +766,33 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 <p class="hint" style="margin-top:0">H01's layer volume against the classification's own <code>#L1&hellip;#WM</code> tags. If the disagreements really are boundary cells, they should pile up at the dotted lines and be near zero between them.</p>
 <div id="dDisagree" style="height:320px"></div></div>
 
-<div class="card"><label>Community contributions &mdash; live</label>
-<div id="dIdentified" style="height:200px"></div>
-<p class="hint" id="dSourceNote"></p><div id="dSource" style="height:230px"></div>
-<p class="hint" id="dReportsNote"></p><div id="dReports" style="height:280px"></div></div>
+<div class="card"><label>Cells per cell type &mdash; live</label>
+<p class="hint" style="margin-top:0">From the shared &ldquo;Master cell list&rdquo;, not from H01's frozen call: this one moves when somebody re-identifies a cell. The chart above it is the published classification.</p>
+<div id="dLiveType" style="height:340px"></div></div>
+
+<div class="card"><label>Identified vs. unclassified &mdash; live</label>
+<p class="hint" style="margin-top:0" id="dIdentifiedNote"></p>
+<div id="dIdentified" style="height:220px"></div></div>
+
+<div class="card"><label>Cells per cell type, per cortical layer &mdash; live</label>
+<p class="hint" style="margin-top:0">The same cells as the heat map above, but under their CURRENT identity rather than H01's published one &mdash; so the two disagree exactly where somebody has corrected a call. Layer is fixed geometry (H01's layers volume where it covers the soma, otherwise the published tag); which type counts in each layer is live.</p>
+<div id="dLiveTypeLayer" style="height:400px"></div></div>
+
+<div class="card"><label>Unclassified cells per cortical layer &mdash; live</label>
+<p class="hint" style="margin-top:0">Split out so the identified types are not crowded by the unclassified population. Same layer estimate.</p>
+<div id="dLiveUnclassLayer" style="height:300px"></div></div>
+
+<div class="card"><label>Where each identity comes from &mdash; live</label>
+<p class="hint" style="margin-top:0" id="dSourceNote"></p><div id="dSource" style="height:260px"></div></div>
+
+<div class="card"><label>Community reports over time</label>
+<p class="hint" style="margin-top:0" id="dReportsNote"></p><div id="dReports" style="height:280px"></div></div>
+
+<!-- LAST, on purpose (Søren, 2026-09-06: "that should be in the bottom of the page") -- a reader
+     arrives here having seen what the numbers are. -->
+<div class="card"><label>Take the numbers away</label>
+<p class="hint" style="margin-top:0">Every chart above as a spreadsheet: one sheet per cell type, one for type &times; layer, one for the E/I balance, and one for whatever the live backend last returned.</p>
+<div class="row" style="gap:10px;margin-top:8px"><button class="idbtn" id="dashXlsx" style="flex:0 0 auto">Download the numbers as Excel</button></div></div>
 </div><!-- /tabpanel dash -->
 
 <script>
@@ -3942,51 +3968,199 @@ const DASH = (function(){
        yaxis:{title:{text:"% where the two layer sources differ"}}});
   }
 
-  /* ── the live charts ───────────────────────────────────────────────────────────────────── */
-  function drawLive(){
-    const one=oneSeries(), C=classColors();
-    const withCall=TYPES.filter(t=>!H01_NO_CALL[t]).reduce((a,t)=>a+A.perType[t],0);
-    const noCall=N-withCall;
-    draw("dIdentified",[{type:"bar",orientation:"h",y:["H01 published","no confident call"],
-      x:[withCall,noCall],marker:{color:one},
-      hovertemplate:"%{y}<br>%{x:,} cells<extra></extra>"}],
-      {margin:{l:150,r:14,t:10,b:44},xaxis:{title:{text:"cells"},tickangle:0},
-       yaxis:{gridcolor:"rgba(0,0,0,0)"}});
+  /* ── the live charts ─────────────────────────────────────────────────────────── 2026-09-06
+     Søren: "Is there still no live updating graphs? Where are the community report graphs?"
 
-    if(!REPORT_ENDPOINT){ ["dSource","dReports"].forEach(id=>note(id+"Note","No backend configured.")); return; }
-    fetch(REPORT_ENDPOINT+"?allIds=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
-      .then(r=>r.json())
-      .then(function(d){
-        const rows=(d&&d.allIds)||[];
-        if(!rows.length){
-          note("dSourceNote","No community identifications on file yet — this fills in as people submit.");
-          note("dReportsNote","No community reports yet.");
+     THE OLD ONES COULD NOT DRAW. This function used to read `d.allIds` from ?allIds=1, and that
+     reply has no such key -- it is {byNucleus, nucleusIds}. So `rows` was empty on every call, the
+     function wrote "No community identifications on file yet" and returned before drawing either
+     chart, while ηJump in fact had community identifications from 2026-08-19 onwards. The
+     categorisation underneath was wrong too: it sorted on `r.type`, and a byNucleus entry carries
+     {identified, comment, reporterName, certainty, timestamp} with no type, so every row would
+     have landed in "first call on record" even had the key been right.
+
+     Rebuilt on ?dashboardLive=1, which is what µJump's dashboard is built on: the shared Master
+     cell list, aggregated server-side, so these move when somebody re-identifies a cell. Drawn
+     through core/charts.js, so they look like µJump's because they ARE µJump's chart functions. */
+  let LIVE=null;
+
+  function drawLive(){
+    if(!REPORT_ENDPOINT){
+      ["dLiveType","dIdentified","dSource","dReports"].forEach(function(id){
+        const e=document.getElementById(id);
+        if(e)e.innerHTML="<div class='hint'>No backend configured, so nothing here is live.</div>";
+      });
+      return;
+    }
+    const d=LIVE;
+    if(!d||!d.ready){
+      const why=(d&&d.note)||"Fetching the live figures…";
+      ["dLiveType","dIdentified","dSource","dReports"].forEach(function(id){
+        const e=document.getElementById(id);
+        if(e)e.innerHTML="<div class='hint'>"+why+"</div>";
+      });
+      return;
+    }
+
+    /* 1. Cells per type, from the community-corrected identities rather than H01's frozen call.
+          barChart is core/charts.js's, so it carries the same palette as the static chart above
+          and says so itself when there is nothing to draw. */
+    barChart("dLiveType",d.cells_per_type.combined_best_identity,"cells",true,
+             "No identities in the Master cell list yet.");
+
+    /* 2. Identified vs unclassified. H01 publishes a call for ALL 47,447 cells -- including 604
+          whose call is literally "unknown-type" -- so this comes back one-sided, and a single
+          wedge with no explanation reads as "ηJump is finished". Say what the denominator is. */
+    const iu=d.identified_vs_unclassified;
+    draw("dIdentified",[{type:"pie",labels:["Identified","Unclassified"],
+      values:[iu.identified,iu.unclassified],
+      marker:{colors:[colorFor("Identified"),"#c9c2b4"]},
+      textinfo:"label+percent",hole:0.45}],
+      {margin:{l:10,r:10,t:10,b:10},showlegend:false});
+    note("dIdentifiedNote","H01 publishes a classification for every cell in the volume, so this "
+      +"starts at "+fmt(iu.identified)+" identified and "+fmt(iu.unclassified)+" unclassified — "
+      +"including the "+fmt((A.perType["unknown-type"]||0))+" whose published call is itself "
+      +"\u201cunknown type\u201d. It moves when somebody records an identity the list did not have.");
+
+    /* 2b. Cells per type per layer, and the unclassified ones, both live. THE CARDS HIDE
+       THEMSELVES if the dataset has no layers -- which is what ηJump looks like until the
+       estimated_layer column is pasted into its master cell list, and is the same rule πJump got
+       on 2026-09-05: a chart whose entire x-axis is a variable that does not vary is worse than
+       no chart. Decided from layer_order, never from which page this is, so they appear on their
+       own the moment the column lands. */
+    const lo=(d.cells_per_type_per_layer&&d.cells_per_type_per_layer.layer_order)||[];
+    const realLayers=lo.filter(function(l){return l&&l!=="Unknown";});
+    ["dLiveTypeLayer","dLiveUnclassLayer"].forEach(function(id){
+      const e=document.getElementById(id);
+      const c=e&&e.closest?e.closest(".card"):null;
+      if(c)c.style.display=realLayers.length?"":"none";
+    });
+    if(realLayers.length){
+      const perLayer=(d.cells_per_type_per_layer&&d.cells_per_type_per_layer.data)||{};
+      const lTypes=sortByCategory(Object.keys(perLayer),function(t){
+        return Object.keys(perLayer[t]).reduce(function(a,l){return a+perLayer[t][l];},0);
+      });
+      const lShort=lTypes.map(shortAxisLabel);
+      draw("dLiveTypeLayer",realLayers.map(function(layer){
+        return {type:"bar",name:layer,x:lShort,
+          y:lTypes.map(function(t){return (perLayer[t]&&perLayer[t][layer])||0;}),
+          text:lTypes,hovertemplate:"%{text}<br>"+layer+": %{y}<extra></extra>",
+          marker:{color:LAYER_COLORS[layer]||"#999"}};
+      }),{barmode:"stack",showlegend:true,legend:{orientation:"h",y:1.14,font:{size:10}},
+          yaxis:{title:{text:"cells"}}});
+
+      const ul=d.unclassified_per_layer;
+      if(ul&&ul.counts){
+        const uL=(ul.layer_order||Object.keys(ul.counts)).filter(function(l){
+          return l&&l!=="Unknown"&&ul.counts[l]!=null;
+        });
+        draw("dLiveUnclassLayer",[{type:"bar",x:uL,y:uL.map(function(l){return ul.counts[l]||0;}),
+          marker:{color:uL.map(function(l){return LAYER_COLORS[l]||"#999";})},
+          hovertemplate:"%{x}<br>%{y:,} unclassified<extra></extra>"}],
+          {xaxis:{tickangle:0},yaxis:{title:{text:"cells with no identity"}}});
+      }
+    }
+
+    /* 3. Where each identity comes from. Same four-bar chart the other three tools draw, and the
+          same rule as of 2026-09-05: the verified bar exists only where something IS verified, and
+          wears whatever name the backend gives it. H01 has no Grubb et al. table, so it gets three
+          bars rather than an empty one under somebody else's name. */
+    const s=d.predicted_vs_verified_live;
+    const src=(UJ.cfg&&UJ.cfg.predictedBy)||"H01";
+    const showVerified=!!(s&&s.has_verified);
+    const vLab=(s&&s.verified_label)
+      ?(s.verified_label.charAt(0).toUpperCase()+s.verified_label.slice(1)):"Verified";
+    const labels=[src+"-published only"],values=[s?s.microns_predicted_no_override:0],
+          colors=["#8a6b3a"];
+    if(showVerified){labels.push(vLab);values.push(s.own_verified);colors.push("#3a6b5a");}
+    labels.push("Community-identified (majority vote)");
+    values.push(s?s.community_majority:0);colors.push("#5a4a7a");
+    labels.push("Unclassified");values.push(s?s.unclassified:0);colors.push("#c9c2b4");
+    draw("dSource",[{type:"bar",x:labels,y:values,marker:{color:colors},
+      hovertemplate:"%{x}<br>%{y:,} cells<extra></extra>"}],
+      {yaxis:{title:{text:"cells"}}});
+    note("dSourceNote","All "+labels.length+" bars live from the Master cell list's current identity "
+      +"source. A cell counts as community-identified once the majority vote lands on a type.");
+
+    /* 4. Reports over time. ?reportsOverTime=1 is the endpoint that actually works for this -- it
+          returns one row per day with a count per report KIND, which is more than the old chart's
+          single cumulative line had. Kinds are stacked, and the running total is on the hover. */
+    fetch(REPORT_ENDPOINT+"?reportsOverTime=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+      .then(function(r){return r.json();})
+      .then(function(rt){
+        const daily=(rt&&rt.daily)||[];
+        if(!daily.length){
+          note("dReportsNote","No community reports on this dataset yet — every identification, "
+            +"organelle location and volume computation lands here.");
+          const e=document.getElementById("dReports");
+          if(e)e.innerHTML="<div class='hint'>Nothing reported yet.</div>";
           return;
         }
-        let agree=0,disagree=0,firstCall=0;
-        const byDay={};
-        rows.forEach(function(r){
-          const i=BY_BODY.get(String(r.nucleusId||""));
-          const t=r.type||"";
-          if(t==="confirmation")agree++; else if(t==="discrepancy")disagree++; else firstCall++;
-          const day=String(r.timestamp||"").slice(0,10);
-          if(day) byDay[day]=(byDay[day]||0)+1;
+        const kinds={};
+        daily.forEach(function(row){Object.keys(row.counts||{}).forEach(function(k){kinds[k]=1;});});
+        const kk=Object.keys(kinds).sort();
+        const days=daily.map(function(r){return r.date;});
+        const running={}; kk.forEach(function(k){running[k]=0;});
+        const series=kk.map(function(k){
+          return {type:"bar",name:k,x:days,
+            y:daily.map(function(r){return (r.counts&&r.counts[k])||0;}),
+            marker:{color:colorFor(k)},
+            hovertemplate:"%{x}<br>"+k+": %{y}<extra></extra>"};
         });
-        draw("dSource",[{type:"bar",orientation:"h",
-          y:["confirmed H01's call","disagreed with H01","first call on record"],
-          x:[agree,disagree,firstCall],marker:{color:[C.inh,C.exc,C.non]},
-          hovertemplate:"%{y}<br>%{x:,} reports<extra></extra>"}],
-          {margin:{l:170,r:14,t:10,b:44},xaxis:{title:{text:"community reports"},tickangle:0},
-           yaxis:{gridcolor:"rgba(0,0,0,0)"}});
-        const days=Object.keys(byDay).sort();
-        let run=0; const cum=days.map(d=>(run+=byDay[d]));
-        draw("dReports",[{type:"scatter",mode:"lines",x:days,y:cum,line:{color:one,width:2},
-          fill:"tozeroy",fillcolor:one+"33",hovertemplate:"%{x}<br>%{y:,} reports in total<extra></extra>"}],
-          {xaxis:{tickangle:0},yaxis:{title:{text:"cumulative reports"}}});
+        draw("dReports",series,{barmode:"stack",showlegend:true,
+          legend:{orientation:"h",y:1.14,font:{size:10}},
+          xaxis:{tickangle:-45},yaxis:{title:{text:"reports that day"}}});
+        let total=0;
+        daily.forEach(function(r){Object.keys(r.counts||{}).forEach(function(k){total+=r.counts[k];});});
+        note("dReportsNote",fmt(total)+" report"+(total===1?"":"s")+" across "+daily.length
+          +" day"+(daily.length===1?"":"s")+", by kind.");
+      })
+      .catch(function(){ note("dReportsNote","Could not reach the backend."); });
+  }
+
+  /* ── fetching, and not re-fetching ───────────────────────────────────────────────── 2026-09-06
+     µJump's arrangement, for µJump's reason (Søren, 2026-08-02: "the graphs should live update
+     with user reports, but we can apply the live update more rarely and the user can request a
+     live update"). A fresh-enough cache renders with NO network call; the button always forces a
+     real fetch. THE KEY IS NAMESPACED FROM THE FIRST LINE -- πJump spent a week writing into
+     µJump's, and storagekeycheck.js now refuses a repeat. */
+  const HJ_LIVE_KEY="hjump_dashboard_live_cache_v1";
+  const HJ_LIVE_MAX_AGE_MS=24*60*60*1000;
+
+  function readLiveCache(){
+    try{
+      const raw=localStorage.getItem(HJ_LIVE_KEY);
+      if(!raw)return null;
+      const p=JSON.parse(raw);
+      return (p&&typeof p.ts==="number"&&p.data)?p:null;
+    }catch(e){return null;}
+  }
+  function ageNote(ts){
+    const el=document.getElementById("dashLiveAge");
+    if(!el)return;
+    if(!ts){el.textContent="";return;}
+    const mins=Math.round((Date.now()-ts)/60000);
+    el.textContent=mins<1?"live figures just fetched"
+      :mins<60?("live figures from "+mins+" min ago")
+      :("live figures from "+Math.round(mins/60)+" h ago");
+  }
+  function fetchLive(force){
+    if(!REPORT_ENDPOINT)return Promise.resolve(null);
+    const cached=readLiveCache();
+    if(!force&&cached&&(Date.now()-cached.ts)<HJ_LIVE_MAX_AGE_MS){
+      LIVE=cached.data; ageNote(cached.ts); return Promise.resolve(LIVE);
+    }
+    return fetch(REPORT_ENDPOINT+"?dashboardLive=1&ds="+encodeURIComponent(UJ.cfg.backend.ds))
+      .then(function(r){return r.json();})
+      .then(function(d){
+        LIVE=d;
+        try{localStorage.setItem(HJ_LIVE_KEY,JSON.stringify({ts:Date.now(),data:d}));}catch(e){}
+        ageNote(Date.now());
+        return d;
       })
       .catch(function(){
-        note("dSourceNote","Could not reach the backend.");
-        note("dReportsNote","Could not reach the backend.");
+        LIVE={ready:false,note:"Could not reach the backend."};
+        return LIVE;
       });
   }
 
@@ -4008,6 +4182,27 @@ const DASH = (function(){
     LAYERS.forEach(l=>{const b=A.eiByLayer[l];
       ei.push([l,b.e+b.i?Math.round(1000*b.e/(b.e+b.i))/10:0,b.n]);});
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(ei),"E-I by layer");
+    /* The live figures, so a download taken after a refresh holds what is on screen rather than
+       only the embedded half. Absent rather than blank when the backend was never reached: an
+       empty sheet in a workbook reads as "measured zero", which is a different claim. */
+    if(LIVE&&LIVE.ready){
+      const lv=[["Cell type","Cells (live, community-corrected)"]];
+      const cpt=LIVE.cells_per_type.combined_best_identity||{};
+      Object.keys(cpt).sort(function(a,b){return cpt[b]-cpt[a];})
+                      .forEach(function(t){lv.push([t,cpt[t]]);});
+      lv.push([]);
+      const iu=LIVE.identified_vs_unclassified||{};
+      lv.push(["Identified",iu.identified]);
+      lv.push(["Unclassified",iu.unclassified]);
+      const s=LIVE.predicted_vs_verified_live||{};
+      lv.push([]);
+      lv.push(["Published only",s.microns_predicted_no_override]);
+      if(s.has_verified)lv.push([s.verified_label||"Verified",s.own_verified]);
+      lv.push(["Community-identified",s.community_majority]);
+      lv.push([]);
+      lv.push(["Fetched",new Date().toISOString()]);
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(lv),"Live");
+    }
     XLSX.writeFile(wb,"h01_dashboard_summary.xlsx");
   }
 
@@ -4019,11 +4214,19 @@ const DASH = (function(){
     return ensureDashPlotly().then(function(){
       if(status) status.textContent="computing…";
       aggregate();
-      drawStatic(); drawLive();
+      drawStatic();
       inited=true;
       if(status) status.textContent="";
       const x=document.getElementById("dashXlsx");
       if(x) x.addEventListener("click",downloadDashExcel);
+      /* The live half is a network round-trip, so the static charts are on screen before it is
+         asked for; a cache younger than a day answers with no request at all. */
+      const rb=document.getElementById("dashRefresh");
+      if(rb) rb.addEventListener("click",function(){
+        rb.disabled=true; const was=rb.textContent; rb.textContent="Refreshing…";
+        fetchLive(true).then(function(){ drawLive(); rb.disabled=false; rb.textContent=was; });
+      });
+      return fetchLive(false).then(drawLive);
     }).catch(function(e){
       if(status) status.textContent="Could not load the charting library — "+((e&&e.message)||e);
     });

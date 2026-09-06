@@ -544,7 +544,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-05 20:32</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-06 13:37</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1041,6 +1041,18 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
     <h2>Cumulative community reports over time</h2>
     <p class="sub">Every report type (identifications, discrepancies, merged-nucleus splits, organelle reports, root-ID proposals/votes, computed volumes), cumulative by day. LIVE.</p>
     <div class="plot tall" id="plotReportsOverTime"></div>
+  </div>
+
+  <!-- LAST, on purpose (Søren, 2026-09-06: "that should be in the bottom of the page") — a reader
+       arrives here having already seen what the numbers are. ηJump has had this; these three had
+       no export at all, so the only way to get a number off the dashboard was to hover a bar. -->
+  <div class="card wide">
+    <h2>Take the numbers away</h2>
+    <p class="sub">Everything the live charts above were drawn from, as a spreadsheet: cells per type, type&nbsp;&times;&nbsp;layer, where each identity came from, cilia, every nucleus-to-centriole distance, the computed volumes, the connectivity samples and the report timeline. The first sheet says when the figures were fetched — a dashboard can be showing a cache up to a day old, and a spreadsheet outlives the tab it came from.</p>
+    <div class="row" style="gap:10px;margin-top:8px">
+      <button class="refresh" id="dashXlsxBtn">&#8681; Download the numbers as Excel</button>
+      <span class="sub" id="dashXlsxNote" style="align-self:center"></span>
+    </div>
   </div>
 
 </div>
@@ -2142,6 +2154,109 @@ function renderMeshContactStats(pairs){
 
 function setStatus(msg){document.getElementById("statusLine").textContent=msg;}
 
+/* ── THE NUMBERS, AS A SPREADSHEET ──────────────────────────────────────────────── 2026-09-06
+   Søren: "I like that there is a download the numbers as Excel ... We can do that for all the
+   dashboards of the other tools as well." ηJump had one; these three had none.
+
+   Built from _lastLiveBundle -- the same object applyLiveData() drew the charts from -- so the
+   workbook and the screen cannot disagree. A sheet is written only when its data is really there:
+   an empty sheet reads as "measured zero", a different claim from "not measured", and this
+   dashboard has spent two days learning to keep those apart. */
+function dashboardWorkbook(){
+  if(typeof XLSX==="undefined")return null;
+  const d=_lastLiveBundle;
+  if(!d)return null;
+  const live=d.live||{};
+  const wb=XLSX.utils.book_new();
+  const add=(rows,name)=>{ if(rows&&rows.length>1)XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),name); };
+
+  /* WHEN, first, because a spreadsheet outlives the tab. generated_at is the backend's own stamp;
+     the export time is this browser's, and the two differ by however long the cache has been held. */
+  const about=[["Dataset",(UJ.cfg&&UJ.cfg.label)||""],
+               ["Backend generated",live.generated_at||"(not reported)"],
+               ["Exported",new Date().toISOString()],
+               ["Rows in the master cell list",live.n_rows||""],
+               ["Schema",live.schema||""]];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(about),"About");
+
+  const cpt=(live.cells_per_type&&live.cells_per_type.combined_best_identity)||{};
+  const a1=[["Cell type","Cells"]];
+  Object.keys(cpt).sort((a,b)=>cpt[b]-cpt[a]).forEach(t=>a1.push([t,cpt[t]]));
+  add(a1,"Cells per type");
+
+  const ptl=(live.cells_per_type_per_layer&&live.cells_per_type_per_layer.data)||{};
+  const lo=(live.cells_per_type_per_layer&&live.cells_per_type_per_layer.layer_order)||[];
+  if(lo.length){
+    const a2=[["Cell type"].concat(lo)];
+    Object.keys(ptl).sort().forEach(t=>a2.push([t].concat(lo.map(l=>(ptl[t]&&ptl[t][l])||0))));
+    add(a2,"Type x layer");
+  }
+
+  const s=live.predicted_vs_verified_live||{};
+  const iu=live.identified_vs_unclassified||{};
+  const a3=[["Bar","Cells"],
+            [((UJ.cfg&&UJ.cfg.predictedBy)||"Source")+"-predicted only",s.microns_predicted_no_override]];
+  if(s.has_verified)a3.push([s.verified_label||"Verified",s.own_verified]);
+  a3.push(["Community-identified (majority vote)",s.community_majority]);
+  a3.push(["Unclassified",s.unclassified]);
+  a3.push([]);
+  a3.push(["Identified",iu.identified]);
+  a3.push(["Unclassified",iu.unclassified]);
+  add(a3,"Identity source");
+
+  const pc=(live.primary_cilia&&live.primary_cilia.percent_with_cilium_by_type)||{};
+  const a4=[["Cell type","With a cilium","Checked","% with a cilium"]];
+  Object.keys(pc).sort().forEach(function(t){
+    a4.push([t,pc[t].with_cilium,pc[t].checked===null?"(not counted)":pc[t].checked,
+             pc[t].percent===null?"(no denominator)":pc[t].percent]);
+  });
+  add(a4,"Primary cilia");
+
+  /* EVERY VALUE, not a median. The chart is a distribution; a spreadsheet that flattens it to one
+     number per type would be less than the picture it came from. */
+  const cl=(live.primary_cilia&&live.primary_cilia.length_um_by_type)||{};
+  const a5=[["Cell type","Cilium length (um)"]];
+  Object.keys(cl).sort().forEach(t=>(cl[t]||[]).forEach(v=>a5.push([t,v])));
+  add(a5,"Cilium lengths");
+
+  const nc=live.nucleus_to_centriole_um||{};
+  const a6=[["Cell type","Nucleus-to-centriole (um)"]];
+  Object.keys(nc).sort().forEach(t=>(nc[t]||[]).forEach(v=>a6.push([t,v])));
+  add(a6,"Nucleus-to-centriole");
+
+  const cv=d.computedVolumes||[];
+  const a7=[["Cell type","Whole-cell volume (um3)","Nucleus volume (um3)","Root ID","Nucleus ID"]];
+  cv.forEach(r=>a7.push([r.cellType||"",r.volumeUm3||"",r.nucVolumeUm3||"",r.rootId||"",r.nucleusId||""]));
+  add(a7,"Computed volumes");
+
+  const cs=d.connSamples||[];
+  const a8=[["Nucleus ID","Cell type","Layer","Input synapses","Output synapses"]];
+  cs.forEach(r=>a8.push([r.nucleusId||"",r.cellType||"",r.layer||"",r.inputCount,r.outputCount]));
+  add(a8,"Connectivity samples");
+
+  const rd=d.reportsDaily||[];
+  if(rd.length){
+    const kinds={};
+    rd.forEach(r=>Object.keys(r.counts||{}).forEach(k=>{kinds[k]=1;}));
+    const kk=Object.keys(kinds).sort();
+    const a9=[["Date"].concat(kk)];
+    rd.forEach(r=>a9.push([r.date].concat(kk.map(k=>(r.counts&&r.counts[k])||0))));
+    add(a9,"Reports per day");
+  }
+  return wb;
+}
+function downloadDashboardExcel(){
+  const note=document.getElementById("dashXlsxNote");
+  const say=t=>{ if(note)note.textContent=t; };
+  if(typeof XLSX==="undefined"){ say("The spreadsheet library has not loaded yet — try again in a moment."); return; }
+  const wb=dashboardWorkbook();
+  if(!wb){ say("The live figures have not arrived yet — press “Refresh live data” first."); return; }
+  const id=(UJ.cfg&&UJ.cfg.id)||"dashboard";
+  XLSX.writeFile(wb,id+"_dashboard_"+new Date().toISOString().slice(0,10)+".xlsx");
+  say("Downloaded — " + wb.SheetNames.length + " sheets.");
+}
+
+
 /* On-demand live refresh (2026-08-02) -- Soren: "All of the graphs should live update with user
    reports, but we can apply the live update more rarely and the user can request a live update
    but it does not have to be live updated every time a user looks." Previously loadLiveData() ran
@@ -2152,6 +2267,10 @@ function setStatus(msg){document.getElementById("statusLine").textContent=msg;}
    of cache age. LIVE_CACHE_MAX_AGE_MS controls how "rare" automatic refreshing is -- currently a
    day, which was chosen as a reasonable default for a low-traffic community tool, not a specific
    number Soren asked for; safe to change to whatever cadence feels right. */
+(function(){
+  const b=document.getElementById("dashXlsxBtn");
+  if(b)b.addEventListener("click",downloadDashboardExcel);
+})();
 const LIVE_CACHE_KEY="djump_dashboard_live_cache_v1";
 const LIVE_CACHE_MAX_AGE_MS=24*60*60*1000; // 1 day -- tune freely, see comment above
 
@@ -2228,7 +2347,11 @@ async function fetchLiveData(){
 
 /* Renders every live-fed chart from an already-fetched (or cached) data bundle -- no network
    calls in here, so this is safe/instant to call from the cache path. */
+let _lastLiveBundle=null;
 function applyLiveData(d){
+  /* KEPT, so the Excel export below hands out exactly what the charts were drawn from rather than
+     taking a second fetch that could disagree with what is on screen. */
+  _lastLiveBundle=d;
   const live=d.live||{ready:false};
   _liveNucleusVolumeByType=live.ready?(live.nucleus_volume_um3||{}):{};
   renderLiveCoreCharts(live);
