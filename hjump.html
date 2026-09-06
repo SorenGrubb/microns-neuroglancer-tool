@@ -433,7 +433,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-04 18:30</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-06 12:14</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -726,7 +726,7 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin-bottom:2px">Statistics dashboard</div>
 <p class="hint" style="margin-top:6px">Fifteen charts computed from the <span id="dashTotal"></span> cells embedded in this page &mdash; no network. Three more come from the community backend. <span id="dashStatus" style="color:var(--accent)"></span></p>
 <div class="row" style="gap:10px;margin-top:8px"><button class="idbtn" id="dashXlsx" style="flex:0 0 auto">Download the numbers as Excel</button></div>
-<p class="hint" style="margin-top:6px">Cell types are never encoded by colour: no ten-hue set survives colour-vision checks, so type is carried by position and label. Colour is only used for broad class (excitatory / inhibitory / non-neuronal) and for magnitude.</p>
+<p class="hint" style="margin-top:6px">Colour is never the only channel. Where a chart is grouped by cell type, the type is on the labelled axis and in the hover text and the hue only repeats it &mdash; using the same palette as &micro;Jump, &delta;Jump and &pi;Jump, so a cell type is the same colour in every tool. Where colour carries something on its own it is broad class (three slots) or magnitude through lightness, both of which survive colour-vision checks.</p>
 </div>
 
 <div class="card"><label>Cells per cell type</label><div id="dCellsPerType" style="height:340px"></div></div>
@@ -869,6 +869,11 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/gamify.js"></script>
 <script src="core/organelles.js"></script>
 <script src="core/ontology.js"></script>
+<!-- The family's chart look: palette, layout, and the dot-plot functions, generated from
+     ujump.html by src/core_charts.py so the two cannot differ. Loaded after ontology.js and
+     before this page's own scripts; the UJ.charts hooks it reads are set below, and read at
+     DRAW time, so their order relative to this tag does not matter. -->
+<script src="core/charts.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 
@@ -980,6 +985,29 @@ const H01_LONG_NAME={
   "unknown-type":"Unknown type"
 };
 function longName(t){ return H01_LONG_NAME[t] || (String(t).charAt(0).toUpperCase()+String(t).slice(1)); }
+/* ── HOW core/charts.js SHOULD TREAT H01's NAMES ────────────────────────────────── 2026-09-06
+   Two of its four optional hooks. Without shortLabel, the default strips a trailing "(CODE)" --
+   µJump's convention, which H01's names do not use, so every tick would be the full string and
+   "Excitatory neuron — atypical dendritic tree" would push the plot area off the card. Without
+   categoryOf/categoryOrder the charts would run in raw count order, which puts oligodendrocyte
+   (19,352) first and scatters the neuron types through the glia; µJump groups by family first and
+   ηJump now does the same. Set on UJ.charts, read at draw time. */
+UJ.charts.shortLabel = function(t){
+  return longName(t).replace("Excitatory neuron — atypical dendritic tree", "Atypical spiny")
+                    .replace("Microglia / OPC (merged in H01)", "Microglia / OPC")
+                    .replace(" (community-resolved)", "");
+};
+const H01_CATEGORY = {
+  "pyramidal":"Neurons", "spiny-stellate":"Neurons",
+  "excitatory/spiny-with-atypical-tree":"Neurons", "interneuron":"Neurons",
+  "unclassified-neuron":"Neurons",
+  "astrocyte":"Glia", "oligodendrocyte":"Glia", "microglia/opc":"Glia",
+  "microglia":"Glia", "opc":"Glia",
+  "blood-vessel-cell":"Vascular cells",
+  "unknown-type":"Unresolved"
+};
+UJ.charts.categoryOf = function(t){ return H01_CATEGORY[t] || "Unresolved"; };
+UJ.charts.categoryOrder = ["Neurons", "Glia", "Vascular cells", "Unresolved"];
 
 /* ── lookup ─────────────────────────────────────────────────────────────────────────── */
 function nearest(vx,vy,vz){
@@ -3608,38 +3636,47 @@ const DASH = (function(){
   const VOX_NM3 = UJ_RX * UJ_RY * UJ_RZ;          // 8·8·33 nm = 2112 nm³ per voxel
 
   function isLight(){ return document.documentElement.getAttribute("data-theme")==="light"; }
+  /* ── 2026-09-06: THE FAMILY'S LOOK, NOT THIS PAGE'S ─────────────────────────────────────────
+     Søren: "I want the graphs to be consistent in the look between the datasets." Everything
+     below now comes from core/charts.js, which is generated from ujump.html, so "the same" is
+     the same code rather than two colour lists somebody keeps in step by hand. */
+
+  /* Three BROAD classes, for the scatter and the community-source bars -- never the ten types.
+     Re-hued out of PALETTE's own family (its brick, slate-blue and violet slots) so they sit with
+     the rest instead of announcing the orange tool. */
   function classColors(){
     return isLight()
-      ? {exc:"#bc4c00", inh:"#0969da", non:"#6b21a8", none:"#57606a"}
-      : {exc:"#d9752c", inh:"#4a90d9", non:"#8957e5", none:"#8b949e"};
+      ? {exc:"#8a3b2a", inh:"#4a6b8a", non:"#5a4a7a", none:"#8a8a8a"}
+      : {exc:"#b8543d", inh:"#6d92b5", non:"#7d6ba0", none:"#9a9a9a"};
   }
-  function ramp(){
-    return isLight()
-      ? [[0,"#fff3e6"],[0.17,"#ffdcb8"],[0.33,"#f7b97c"],[0.5,"#e8944a"],[0.67,"#cf6f22"],[0.83,"#a8500f"],[1,"#7a3708"]]
-      : [[0,"#2a1a08"],[0.17,"#5c3410"],[0.33,"#8f4f18"],[0.5,"#c26a20"],[0.67,"#e08b3a"],[0.83,"#f5b169"],[1,"#ffd9a8"]];
-  }
-  /* One neutral for every single-series chart. A lone series needs no identity colour -- the
-     title names it -- so it wears the page accent rather than a categorical slot. */
-  function oneSeries(){ return isLight() ? "#bc4c00" : "#d9752c"; }
+  function ramp(){ return chartRamp(); }
+  /* For the charts whose x-axis is NOT a cell type -- cortical depth, layer, somata per segment.
+     A lone series still needs no identity colour, but it now wears a palette slot rather than the
+     page accent, so ηJump's bars are the same colour as µJump's. Charts whose x-axis IS a cell
+     type take colorFor(type) instead, the same per-type assignment µJump uses. */
+  function oneSeries(){ return isLight() ? "#3a6b5a" : "#5d8c77"; }
 
-  const CFG={displaylogo:false,responsive:true,modeBarButtonsToRemove:["lasso2d","select2d","autoScale2d"]};
+  const CFG=PLOTLY_CFG;
+
+  /* How many points one category may draw before it is thinned. 400 is enough for the eye to read
+     a distribution's shape and cheap enough that ten of them stay interactive; 19,352 (this
+     dataset's oligodendrocyte count) is neither. See dots() for the stride, and for why the count
+     under the chart states the true n. */
+  const DOT_SAMPLE_MAX=400;
   function themeC(){ return liveThemeColors(); }
   /* Object.assign is SHALLOW: passing {yaxis:{title:...}} used to replace the whole default
      yaxis, silently dropping gridcolor -- so those charts fell back to Plotly's default white
      grid, which then competed with the marks instead of receding behind them. Merge one level
      into the axis objects so a caller can override a title without losing the theming. */
   function layout(extra){
-    const c=themeC();
-    const base=({
-      margin:{l:64,r:14,t:10,b:96},
-      font:{family:"-apple-system,Segoe UI,Helvetica,Arial,sans-serif",size:11,color:c.ink},
-      paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
-      showlegend:false,
-      hoverlabel:{bgcolor:c.panel,bordercolor:c.line,font:{color:c.ink}},
-      /* Recessive grid: present enough to read a value off, never competing with the marks. */
-      xaxis:{automargin:true,gridcolor:c.line,zeroline:false,tickangle:-45},
-      yaxis:{automargin:true,gridcolor:c.line,zeroline:false}
-    });
+    /* THE BASE IS NOW µJUMP'S OWN baseLayout(), from core/charts.js -- same fonts, margins, grid,
+       hover chrome and theme handling, because it is the same function. The one-level xaxis/yaxis
+       merge below stays: it is here for a real bug (a shallow Object.assign replaced the whole
+       axis object and silently dropped gridcolor, so those charts fell back to Plotly's white
+       grid and it competed with the marks). zeroline:false on the x-axis is ηJump's own, kept. */
+    const base=Object.assign({},baseLayout());
+    base.xaxis=Object.assign({},base.xaxis,{automargin:true,zeroline:false});
+    base.yaxis=Object.assign({},base.yaxis,{automargin:true});
     const out=Object.assign({},base,extra||{});
     ["xaxis","yaxis"].forEach(function(k){
       if(extra&&extra[k]) out[k]=Object.assign({},base[k],extra[k]);
@@ -3720,8 +3757,16 @@ const DASH = (function(){
     const C=classColors(), one=oneSeries(), order=typesByCount();
 
     // 1. cells per type -- magnitude, one series, so no legend and no categorical hue
+    /* x IS a cell type here, so each bar takes a colour from the shared PALETTE through the same
+       colorFor() every other tool uses, instead of one flat accent. NOTE what that does and does
+       not promise: colorFor assigns slots in FIRST-SEEN order, so ηJump and µJump draw from one
+       palette but a given type does not necessarily land on the same slot in both. Making
+       "Astrocyte" literally one colour everywhere needs a deterministic name -> slot map, which
+       would reshuffle µJump's current colours -- worth doing, not worth doing silently. The name
+       is on the axis and in the hover either way, so the hue stays redundant. */
     draw("dCellsPerType",[{type:"bar",x:order.map(shortName),y:order.map(t=>A.perType[t]),
-      marker:{color:one},hovertemplate:"%{x}<br>%{y:,} cells<extra></extra>"}],
+      marker:{color:order.map(t=>colorFor(longName(t)))},
+      hovertemplate:"%{x}<br>%{y:,} cells<extra></extra>"}],
       {yaxis:{title:{text:"cells"}}});
 
     // 2. type × layer -- magnitude across two categories: a heatmap, not 10 stacked hues
@@ -3732,21 +3777,64 @@ const DASH = (function(){
       {margin:{l:150,r:14,t:10,b:60},xaxis:{tickangle:0,gridcolor:"rgba(0,0,0,0)"},yaxis:{gridcolor:"rgba(0,0,0,0)"}});
 
     // 3. cells with no confident call, per layer
+    /* x is a LAYER, so it takes ηJump's own LAYER_COLORS -- exactly what µJump's equivalent
+       chart does with its own layer vocabulary. */
     draw("dUnclassPerLayer",[{type:"bar",x:LAYERS,y:LAYERS.map(l=>A.unclassPerLayer[l]),
-      marker:{color:one},hovertemplate:"%{x}<br>%{y:,} cells<extra></extra>"}],
+      marker:{color:LAYERS.map(l=>LAYER_COLORS[l]||one)},
+      hovertemplate:"%{x}<br>%{y:,} cells<extra></extra>"}],
       {xaxis:{tickangle:0},yaxis:{title:{text:"cells with no H01 call"}}});
 
-    // 4/5/6. distributions -> box plots, which show spread rather than hiding it in a mean
-    function boxes(id,src,title,fmt){
-      draw(id,order.filter(t=>src[t]&&src[t].length).map(t=>({type:"box",name:shortName(t),y:src[t],
-        marker:{color:one},line:{width:1.5},boxpoints:false,
-        hovertemplate:"%{x}<br>median "+(fmt||"%{median}")+"<extra></extra>"})),
-        {yaxis:{title:{text:title}}});
+    /* 4/5/6/7. THE DISTRIBUTIONS, AS DOT PLOTS. Søren, 2026-09-06: "where relevant it should be
+       dot plots to show the spread in points, like in uJump." These four were type:"box" with
+       boxpoints:false -- a box describing a distribution while hiding every observation that makes
+       it. They now go through dotMedianChart() from core/charts.js: jittered grey points, one per
+       cell, with a coloured median bar. Same function µJump uses, so they inherit its palette and
+       its MIN_DOTS_TO_PLOT accounting for free.
+
+       SAMPLED FOR DISPLAY, AND SAYING SO. ηJump has 47,447 cells and oligodendrocyte alone has
+       19,352; nineteen thousand markers in one category is a filled rectangle, not a plot, and it
+       would make the tab crawl. So each type's points are thinned by an even stride through the
+       SORTED values -- which preserves the shape of the distribution exactly, unlike a random
+       sample -- and the note under the chart says so. µJump never needed this: its dot charts are
+       fed by "Compute volume" clicks, of which there are tens. */
+    function dotsFor(src){
+      const out={},kept={};
+      order.forEach(function(t){
+        const v=src[t];
+        if(!v||!v.length)return;
+        if(v.length<=DOT_SAMPLE_MAX){ out[longName(t)]=v.slice(); kept[t]=v.length; return; }
+        const a=v.slice().sort(function(x,y){return x-y;});
+        const step=a.length/DOT_SAMPLE_MAX, s=[];
+        for(let k=0;k<DOT_SAMPLE_MAX;k++)s.push(a[Math.min(a.length-1,Math.floor(k*step))]);
+        out[longName(t)]=s; kept[t]=v.length;
+      });
+      return {data:out,counts:kept};
     }
-    boxes("dSomaVol",A.soma,"soma volume (µm³)");
-    boxes("dSegVol",A.seg,"whole-cell volume (µm³)");
-    boxes("dShare",A.share,"soma ÷ whole-cell volume");
-    boxes("dSpin",A.spin,"spininess");
+    function dots(id,src,title,noun){
+      const d=dotsFor(src);
+      dotMedianChart(id,d.data,title,true,false,noun||"cells");
+      /* THE MEDIAN LINE THE CHART DRAWS IS THE SAMPLE'S. State the true n, and where a type was
+         thinned, say it -- a plot that looks like every cell when it is one in twenty is a lie
+         about sample size, however good the shape. */
+      const thinned=Object.keys(d.counts).filter(function(t){return d.counts[t]>DOT_SAMPLE_MAX;});
+      const el=document.getElementById(id);
+      const nid=id+"__sample";
+      const old=document.getElementById(nid);
+      if(old&&old.parentNode)old.parentNode.removeChild(old);
+      if(el&&el.parentNode&&thinned.length){
+        const p=document.createElement("p");
+        p.className="hint"; p.id=nid;
+        p.textContent="Points thinned for drawing: "+thinned.map(function(t){
+          return shortName(t)+" shows "+DOT_SAMPLE_MAX+" of "+fmt(d.counts[t]);
+        }).join(", ")+". An even stride through the sorted values, so the shape is exact; "
+          +"the median bar is drawn from those same points.";
+        el.parentNode.insertBefore(p,el.nextSibling);
+      }
+    }
+    dots("dSomaVol",A.soma,"soma volume (µm³)","measured somata");
+    dots("dSegVol",A.seg,"whole-cell volume (µm³)","measured cells");
+    dots("dShare",A.share,"soma ÷ whole-cell volume","paired cells");
+    dots("dSpin",A.spin,"spininess","scored cells");
 
     // 7. synaptic input, two series -> legend required
     draw("dSynIo",[
@@ -3768,7 +3856,8 @@ const DASH = (function(){
 
     // 9. cilia
     draw("dCilia",[{type:"bar",x:order.map(shortName),
-      y:order.map(t=>A.ciliaN[t]?100*A.cilia[t]/A.ciliaN[t]:0),marker:{color:one},
+      y:order.map(t=>A.ciliaN[t]?100*A.cilia[t]/A.ciliaN[t]:0),
+      marker:{color:order.map(t=>colorFor(longName(t)))},
       hovertemplate:"%{x}<br>%{y:.1f}% have a cilium<extra></extra>"}],
       {yaxis:{title:{text:"% of cells with a cilium"},range:[0,100]}});
 
@@ -3784,9 +3873,12 @@ const DASH = (function(){
       A.depth[t].forEach(function(d){ const b=Math.floor((d-lo)/w); if(b>=0&&b<bins) h[b]++; });
       const tot=A.depth[t].length||1;
       const ax=k?String(k+1):"";
+      /* One panel per type, so the fill can carry that type's colour: redundant with the panel
+         title above it, and it ties each facet to the same type's bar in every other chart. */
+      const tc=colorFor(longName(t));
       traces.push({type:"scatter",mode:"lines",orientation:"h",
         x:h.map(v=>100*v/tot), y:h.map((_,b)=>lo+(b+0.5)*w),
-        line:{color:one,width:2},fill:"tozerox",fillcolor:one+"33",
+        line:{color:tc,width:2},fill:"tozerox",fillcolor:tc+"33",
         xaxis:"x"+ax,yaxis:"y"+ax,
         hovertemplate:shortName(t)+"<br>%{y:.0f} µm deep<br>%{x:.1f}% of them<extra></extra>"});
       ann.push({text:shortName(t)+" ("+fmt(A.perType[t])+")",xref:"x"+ax+" domain",yref:"y"+ax+" domain",
@@ -3808,7 +3900,8 @@ const DASH = (function(){
 
     // 11. E/I balance by layer -- one derived series, no legend
     const ei=LAYERS.map(l=>{ const b=A.eiByLayer[l]; return b.e+b.i?100*b.e/(b.e+b.i):0; });
-    draw("dEI",[{type:"bar",x:LAYERS,y:ei,marker:{color:one},
+    draw("dEI",[{type:"bar",x:LAYERS,y:ei,
+      marker:{color:LAYERS.map(l=>LAYER_COLORS[l]||one)},
       hovertemplate:"%{x}<br>%{y:.1f}% of synaptic input is excitatory<extra></extra>"}],
       {xaxis:{tickangle:0},
        yaxis:{title:{text:"% of input that is excitatory"},range:[0,60]}});
