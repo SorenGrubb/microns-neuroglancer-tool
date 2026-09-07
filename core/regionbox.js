@@ -136,7 +136,7 @@ UJ.regionbox = (function(){
        onChange    : optional, called whenever a box changes -- the host uses it to mark a
                      previously previewed filter result stale.
        rootIdsInBox: optional fn(boxNM) -> string[]. Called when a notebook is generated with
-                     Meshes ticked; returns the matched cells whose nucleus is inside THAT box.
+                     Cell 3D model ticked; returns the matched cells whose nucleus is inside THAT box.
                      Return null (not []) to mean "no filter has been run yet", which is refused
                      with a message rather than shipping an empty mesh list silently.
        download    : optional fn({boxNM, boxLabel, include}) -> true if it handled the download.
@@ -285,7 +285,7 @@ UJ.regionbox = (function(){
         + '<div class="row" style="margin-top:6px;gap:10px;align-items:center;flex-wrap:wrap">'
         + tick("colab-em", "EM", can.em, why.em)
         + tick("colab-seg", "Segmentation", can.seg, why.seg)
-        + tick("colab-meshes", "Meshes", can.meshes, why.meshes)
+        + tick("colab-meshes", "Cell 3D model", can.meshes, why.meshes)
         + '</div>'
         + '<div class="row" style="margin-top:6px">'
         + '<button type="button" class="rbox-colab" style="font-size:11px;padding:3px 8px" '
@@ -330,13 +330,13 @@ UJ.regionbox = (function(){
       var ck = function(c){ var el = row.querySelector("." + c); return !!(el && el.checked && !el.disabled); };
       var wantEM = ck("colab-em"), wantSeg = ck("colab-seg"), wantMeshes = ck("colab-meshes");
       if (!wantEM && !wantSeg && !wantMeshes){
-        alert("Tick at least one of EM, Segmentation, or Meshes."); return;
+        alert("Tick at least one of EM, Segmentation, or Cell 3D model."); return;
       }
       var nx1=x1*RX, nx2=x2*RX, ny1=y1*RY, ny2=y2*RY, nz1=z1*RZ, nz2=z2*RZ;
       var boxNM = { xmin:Math.min(nx1,nx2), xmax:Math.max(nx1,nx2),
                     ymin:Math.min(ny1,ny2), ymax:Math.max(ny1,ny2),
                     zmin:Math.min(nz1,nz2), zmax:Math.max(nz1,nz2) };
-      /* Meshes are the one piece that depends on the FILTER rather than on the box: they are the
+      /* Cell 3D models are the one piece that depends on the FILTER rather than on the box: they are the
          cells Filter-and-show matched whose nucleus fell inside this box. rootIdsInBox returns
          null when no filter has been run, and that is refused loudly -- a notebook with an empty
          MESH_ROOT_IDS looks like it worked and downloads nothing, which is the worst outcome of
@@ -345,7 +345,7 @@ UJ.regionbox = (function(){
       if (wantMeshes){
         rootIds = opts.rootIdsInBox ? opts.rootIdsInBox(boxNM) : [];
         if (rootIds === null){
-          alert('Meshes need a current "Filter and show" result, so the notebook matches what you are previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again — or untick Meshes to download EM/segmentation only.');
+          alert('Cell 3D models need a current "Filter and show" result, so the notebook matches what you are previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again — or untick Cell 3D model to download EM/segmentation only.');
           return;
         }
       }
