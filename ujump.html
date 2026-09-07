@@ -502,7 +502,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-07 19:36</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-07 19:43</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11165,6 +11165,11 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     return[L(Sv,Ev),L(Ev,p1),L(Ev,p2),L(p1,p2),L(Ev,p3),L(Ev,p4),L(p3,p4)];
   }
   let ALL_ROOTID_PROPOSALS=null;
+  /* ON WINDOW, because the bounding-box panel needs it and lives outside this IIFE. Calling it by
+     bare name from there throws "fetchAllRootIdProposals is not defined", which inside a click
+     listener is swallowed by the browser and leaves the button looking dead -- the same failure
+     colorFor() produced on this very button (see src/ujump_blender_colours.py). One line here
+     beats one more silent handler. */
   async function fetchAllRootIdProposals(){
     if(ALL_ROOTID_PROPOSALS)return ALL_ROOTID_PROPOSALS;
     try{
@@ -11173,6 +11178,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     }catch(_e){ALL_ROOTID_PROPOSALS={};}
     return ALL_ROOTID_PROPOSALS;
   }
+  window.fetchAllRootIdProposals=fetchAllRootIdProposals;
   async function fetchAllOrganelles(){
     if(!REPORT_ENDPOINT)return{};
     try{var r=await fetch(REPORT_ENDPOINT+"?allOrganelles=1");var d=await r.json();var map={};
@@ -11870,11 +11876,16 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     /* WRAPPED, because the failure this replaces was invisible. A ReferenceError inside a click
        listener goes to the console and nowhere else: the button looks dead, and there is nothing
        to tell the user whether they mis-ticked something or the page is broken. Now it says. */
-    row.querySelector(".rbox-colab").addEventListener("click",()=>{ try{ regionColabClick(row); }
-      catch(err){ console.error("region download failed:",err);
-        alert("Couldn't build the notebook: "+(err&&err.message?err.message:err)
-              +"\n\nThis is a bug -- please report it. Nothing was downloaded."); } });
-    function regionColabClick(row){
+    /* Promise.resolve().then(...), not try/catch: regionColabClick awaits the proposed root IDs
+       now, so a plain try/catch would return before anything could fail and the handler would be
+       silent again -- which is the exact failure this wrapper exists to prevent. .catch() takes
+       both a synchronous throw and a rejected promise. */
+    row.querySelector(".rbox-colab").addEventListener("click",()=>{
+      Promise.resolve().then(()=>regionColabClick(row))
+        .catch(err=>{ console.error("region download failed:",err);
+          alert("Couldn't build the notebook: "+(err&&err.message?err.message:err)
+                +"\n\nThis is a bug -- please report it. Nothing was downloaded."); }); });
+    async function regionColabClick(row){
       const gv=cls=>{const el=row.querySelector("."+cls);return el?parseFloat(el.value):NaN;};
       const x1=gv("rx1"),y1=gv("ry1"),z1=gv("rz1"),x2=gv("rx2"),y2=gv("ry2"),z2=gv("rz2");
       if([x1,y1,z1,x2,y2,z2].some(v=>isNaN(v))){alert("Fill in both corners of this box first.");return;}
@@ -11898,14 +11909,48 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          TYPE and NUCLEUS ID as well as its root ID -- the type to colour it and to file it in its
          own collection, the nucleus id to fetch the nucleus mesh -- so the loop collects all
          three and rootIds is derived from it. One pass, one definition of "inside this box". */
-      const boxCells=[];
+      const boxCells=[],seenIds=new Set();
+      /* Fetched here rather than read off window: window.ALL_ROOTID_PROPOSALS is only populated by
+         the "Open all matches in Neuroglancer" button, so a user who goes straight to the Colab
+         button would get nothing. Cached inside the fetcher after the first call, and {} if the
+         endpoint is unreachable -- a missing proposal list must not stop an export. */
+      const PROPOSALS=anyGeometry&&window.fetchAllRootIdProposals
+        ?await window.fetchAllRootIdProposals().catch(()=>({}))
+        :(window.ALL_ROOTID_PROPOSALS||{});
       if(anyGeometry&&lastResult&&lastResult.matches){
         for(const m of lastResult.matches){
           const p=rowPos(m.row); // voxel
           const nx=p[0]*UJ_RX,ny=p[1]*UJ_RY,nz=p[2]*UJ_RZ;
           if(nx>=boxNM.xmin&&nx<=boxNM.xmax&&ny>=boxNM.ymin&&ny<=boxNM.ymax&&nz>=boxNM.zmin&&nz<=boxNM.zmax){
+            /* THE NATIVE ID *AND* EVERY PROPOSED ONE. Søren: "I just made a colab script for a
+               cell where I had reported a new rootID, it did not include the root ID I had
+               proposed in the Blender file." The Neuroglancer button has folded these in for a
+               while (see the "Fold in every non-removed proposal" comment in
+               buildFilterViewerState); this one only ever read rowRootId, so a corrected
+               segmentation exported the old id and a cell whose ONLY id was a proposal exported
+               nothing at all.
+
+               img65 and blank only. img35 and the nucleus flavours are other volumes, and an id
+               from one of those fetched against minnie65 is either missing or a different cell.
+
+               The nucleus rides on the FIRST entry only: one nucleus mesh per cell, however many
+               segment ids it has, or the same nucleus is drawn twice in the same place. */
+            const ids=[];
             const rid=rowRootId(m.row);
-            if(rid)boxCells.push({type:String(m.row.type||"Unclassified"),root_id:String(rid),nucleus_id:rowNucId(m.row)||null});
+            if(rid)ids.push(String(rid));
+            const nidKey=rowNucId(m.row);
+            const props=nidKey&&m.row.space==="N"?(PROPOSALS[nidKey]||PROPOSALS[String(nidKey)]):null;
+            if(props)for(const pr of props){
+              const st=(pr&&pr.segType)||"img65";
+              if(pr&&pr.rootId&&(st==="img65"||st===""))ids.push(String(pr.rootId));
+            }
+            for(const id of ids){
+              if(seenIds.has(id))continue;
+              seenIds.add(id);
+              boxCells.push({type:String(m.row.type||"Unclassified"),root_id:id,
+                             nucleus_id:boxCells.some(c=>c.nucleus_id&&String(c.nucleus_id)===String(nidKey))
+                                        ?null:(nidKey||null)});
+            }
           }
         }
       }
