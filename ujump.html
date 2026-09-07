@@ -496,7 +496,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-07 09:32</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-07 09:47</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11692,6 +11692,28 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(anyIncomplete)html+='<p class="hint">One or more boxes have incomplete coordinates and won\'t be used until all 6 fields are filled in.</p>';
     c.innerHTML=html;
   }
+  /* ── the Blender export's colours ───────────────────────────────────────────── 2026-09-07
+     The same 30 hex values as the dashboard's PALETTE (line ~1094). Repeated, deliberately, and
+     the two must be changed together: that PALETTE and its colorFor() live INSIDE
+     initDashboardTab(), so nothing out here can see them -- calling colorFor() from the region
+     box threw "ReferenceError: colorFor is not defined", and a throw inside a click listener is
+     swallowed by the browser, so the button simply did nothing.
+
+     The rule is also deliberately NOT colorFor()'s. That one hands out entries in first-seen
+     order as charts are drawn, so a type's colour depends on which panels have been rendered this
+     session; two exports of the same box could disagree. Here the types in the box are sorted and
+     indexed, so the same box always produces the same colours. */
+  const BLENDER_PALETTE=["#8a3b2a","#5a4a7a","#3a6b5a","#a37a3a","#4a6b8a","#7a3a5a","#6b7a3a","#3a5a6b",
+                         "#8a5a3a","#5a3a6b","#3a7a6b","#7a5a3a","#4a3a6b","#6b3a4a","#3a4a6b","#7a6b3a",
+                         "#4a7a3a","#8a4a5a","#3a6b8a","#6b4a3a","#5a6b3a","#3a4a5a","#8a6b4a","#4a5a3a",
+                         "#6b3a6b","#3a8a6b","#8a3a3a","#3a3a6b","#6b8a3a","#8a6b3a"];
+  function blenderColorsFor(cells){
+    const types=Array.from(new Set((cells||[]).map(c=>String(c.type||"Unclassified")))).sort();
+    const out={};
+    types.forEach((t,i)=>{out[t]=BLENDER_PALETTE[i%BLENDER_PALETTE.length];});
+    return out;
+  }
+
   /* Builds one region-box row (6 coordinate inputs + a remove button), wires its own
      input/paste-split/remove listeners, and returns the DOM node ready to append to
      #regionBoxes. Uses classes (not per-row unique ids) for the 6 fields so add/remove never
@@ -11769,7 +11791,14 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
        run at least once since the page loaded or the box was last edited) rather than silently
        shipping an empty MESH_ROOT_IDS; EM/segmentation don't depend on the filter at all (they're
        a pure spatial cutout of the box) so they're never gated on it. */
-    row.querySelector(".rbox-colab").addEventListener("click",()=>{
+    /* WRAPPED, because the failure this replaces was invisible. A ReferenceError inside a click
+       listener goes to the console and nowhere else: the button looks dead, and there is nothing
+       to tell the user whether they mis-ticked something or the page is broken. Now it says. */
+    row.querySelector(".rbox-colab").addEventListener("click",()=>{ try{ regionColabClick(row); }
+      catch(err){ console.error("region download failed:",err);
+        alert("Couldn't build the notebook: "+(err&&err.message?err.message:err)
+              +"\n\nThis is a bug -- please report it. Nothing was downloaded."); } });
+    function regionColabClick(row){
       const gv=cls=>{const el=row.querySelector("."+cls);return el?parseFloat(el.value):NaN;};
       const x1=gv("rx1"),y1=gv("ry1"),z1=gv("rz1"),x2=gv("rx2"),y2=gv("ry2"),z2=gv("rz2");
       if([x1,y1,z1,x2,y2,z2].some(v=>isNaN(v))){alert("Fill in both corners of this box first.");return;}
@@ -11804,10 +11833,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const boxLabel="Box "+(boxIdx>=0?boxIdx+1:1);
       if(wantBlender){
         if(!UJ.blender){alert("The Blender notebook module didn't load. Reload the page (ctrl-shift-R) and try again.");return;}
-        /* colorFor is the page's own palette function -- the same one the charts use -- so a cell
-           is the same colour in a render as it is in a bar chart. */
-        const colors={};
-        for(const c of boxCells){ if(!(c.type in colors)) colors[c.type]=colorFor(c.type); }
+        const colors=blenderColorsFor(boxCells);
         UJ.blender.downloadNotebook({
           datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
           emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,nucSource:UJ.cfg.em.nucSource,
@@ -11822,7 +11848,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         boxNM:boxNM,boxLabel:boxLabel,rootIds:rootIds,
         include:{em:wantEM,seg:wantSeg,meshes:wantMeshes}
       });
-    });
+    }
     /* Paste-split for each corner's x field, matching the main coordinate field's behaviour:
        paste "x, y, z" into either corner's first field and it auto-splits into that corner's
        three inputs. */
