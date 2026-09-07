@@ -496,7 +496,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-07 09:47</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-07 19:08</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -778,7 +778,8 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <details class="rv-panel filter-section" id="filterSecViewer" style="margin-top:22px">
 <summary title="These only add extra 3D layers to the Neuroglancer view opened below — they never change which cells match, and none of them show up in the Excel export.">Add extra layers to the 3D view (optional — doesn't change which cells match)</summary>
 <div style="margin-top:10px">
-<label style="text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterVasc" style="width:auto"> Include vasculature outline</label>
+<label style="text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer" title="Shows root ID 864691134966128927 -- the single giant blob the vessels merged into inside MICrONS's own CELL segmentation. A by-product of proofreading cells, not a vessel segmentation. Useful as a landmark; use the TriSAM layer below for actual vessel geometry."><input type="checkbox" id="filterVasc" style="width:auto"> Include vasculature outline (MICrONS merged blob)</label>
+<label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer" title="Wan &amp; Wei's TriSAM segmentation of the blood vessels across the whole minnie65 volume, published on BossDB (IEEE J. Biomed. Health Inform. 2025, open access). A dedicated, automatic vessel segmentation -- different data from the checkbox above, which is the merged blob left inside MICrONS's own cell segmentation. Added as its own toggleable layer in the viewer opened below, with segment 1 selected."><input type="checkbox" id="filterVascSeg" style="width:auto"> Include vasculature segmentation (Wan &amp; Wei 2024, TriSAM)</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer"><input type="checkbox" id="filterEMOn" style="width:auto"> Include EM imagery (ultrastructure)</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer" title="Draws a wireframe outline around the Allen Institute's manually identified V1 column. This is not an official published shape — it's a derived envelope (slanted to match the real tilt of the manually annotated member cells) computed from the member coordinates, since MICrONS only publishes the membership list, not a column geometry."><input type="checkbox" id="filterV1ColOn" style="width:auto"> Include V1 column boundary (Allen manually-annotated column, derived+slanted envelope)</label>
 <div style="margin-top:10px">
@@ -10735,6 +10736,20 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      way individual cells are found. Img65 (minnie65) and Img35 (minnie35) are separate
      segmentation volumes with separate IDs, so both are offered as separate layers. */
   const VASC_ID_IMG65="864691134966128927",VASC_ID_IMG35="864691138069012732";
+  /* Wan & Wei's TriSAM vasculature segmentation of the full minnie65 volume, on BossDB --
+     https://doi.org/10.1109/JBHI.2025.3576643, open access, data at bossdb.org/project/wei2024.
+     A DEDICATED vessel segmentation, unlike VASC_ID_IMG65 above, which is the single merged blob
+     the vessels became inside MICrONS's own cell segmentation.
+
+     The https form, not the `precomputed://s3://bossdb-open-data/...` one his Neuroglancer state
+     carried: it is the same form SRC.nuc already uses against this same bucket family and is
+     proven to work here, and an S3 bucket can serve its info file happily and then fail CORS on
+     the data chunks depending on which access path Neuroglancer picks.
+
+     Segment "1" only -- exactly what his own state had. Nothing else is guessed; Neuroglancer's
+     Segments tab on the layer is where to add more if the vessels turn out to be split. */
+  const VASC_SEG_SRC="precomputed://https://bossdb-open-data.s3.amazonaws.com/wei2024/minnie/bv";
+  const VASC_SEG_IDS=["1"];
   function categoryForRowType(type){return ROWTYPE_CATEGORY[type]||"Other";}
   /* Blends a "#rrggbb" color toward white by `amt` (0 = unchanged, 1 = pure white) -- used by
      buildFilterViewerState() to render cross-cell-type-proximity "reference/landmark" cells
@@ -11158,7 +11173,10 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       else ORG_POINT_COLORS[k.value]=hslToHex((idx*137.508)%360,70,60);
     });
   })();
-  function buildFilterViewerState(matches,includeVasc,includeEM,includeV1Col,includeVascTrace,includeCentVec,includeCilVec,includeOrgPoints){
+  function buildFilterViewerState(matches,includeVasc,includeEM,includeV1Col,includeVascTrace,includeCentVec,includeCilVec,includeOrgPoints,includeVascSeg){
+    /* includeVascSeg is LAST on purpose. Every existing caller passes eight arguments and gets
+       `undefined` here, which is falsy, so adding the parameter cannot change what any of them
+       already produce. */
     includeOrgPoints=includeOrgPoints||[];
     /* "position" in a Neuroglancer state is in VOXEL units of the declared per-axis scale
        (matching how buildState/buildExampleState use it elsewhere in this file) -- NOT
@@ -11286,6 +11304,13 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         const ptAnns=bucket.points.map((pp,idx)=>({type:"point",id:catKey.replace(/[^A-Za-z0-9]/g,"_")+"_pt_"+idx,point:[pp[0],pp[1],pp[2]]}));
         layers.push({type:"annotation",source:"local://annotations",annotations:ptAnns,annotationColor:color,name:cat+nameSuffix+" (all cells)"});
       }
+    }
+    if(includeVascSeg){
+      /* selectedAlpha 0.3 and segments ["1"], matching his own NeuroGlass state. tab:"segments"
+         so the layer opens on the list of IDs -- this is the one layer a user is likely to want
+         to add to, since nobody has confirmed the vessels are a single instance. */
+      layers.push({type:"segmentation",source:VASC_SEG_SRC,tab:"segments",name:"Vasculature (TriSAM, Wan & Wei 2024)",
+                   segments:VASC_SEG_IDS,selectedAlpha:0.3,objectAlpha:0.5});
     }
     if(includeVasc){
       layers.push({type:"segmentation",source:SRC.seg,tab:"source",name:"Vasculature (Img65)",segments:[VASC_ID_IMG65],segmentColors:{[VASC_ID_IMG65]:VASC_COLOR},objectAlpha:0.3});
@@ -11436,7 +11461,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     UJ.stepthrough.initStepThrough(null);
   }
   const filterCard=document.getElementById("filterCard");
-  const STALE_IGNORE_IDS=new Set(["filterVasc","filterEMOn","filterV1ColOn","filterRun","filterDownload","filterViewerAll","regionAddBox",
+  const STALE_IGNORE_IDS=new Set(["filterVasc","filterVascSeg","filterEMOn","filterV1ColOn","filterRun","filterDownload","filterViewerAll","regionAddBox",
     "fvt_pial_arterioles","fvt_penetrating_arterioles","fvt_arterial_cap_order1","fvt_arterial_cap_order2","fvt_arterial_cap_order3",
     "fvt_venous_cap_order3","fvt_venous_cap_order2","fvt_venous_cap_order1","fvt_ascending_venules","fvt_pial_venules"]);
   if(filterCard){
@@ -11501,6 +11526,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     const orig=viewAllBtn.textContent;
     viewAllBtn.disabled=true;viewAllBtn.textContent="Building view…";
     const vascChk=document.getElementById("filterVasc");
+    const vascSegChk=document.getElementById("filterVascSeg");
     const emChk=document.getElementById("filterEMOn");
     const v1ColChk=document.getElementById("filterV1ColOn");
     const vascTraceSlugs=Array.from(document.querySelectorAll(".fvasctrace:checked")).map(el=>el.value);
@@ -11519,7 +11545,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     viewAllBtn.textContent="Fetching proposed segmentation IDs…";
     window.ALL_ROOTID_PROPOSALS=await fetchAllRootIdProposals();
     viewAllBtn.textContent="Building view…";
-    const state=buildFilterViewerState(lastResult.matches,vascChk&&vascChk.checked,emChk&&emChk.checked,v1ColChk&&v1ColChk.checked,vascTraceSlugs.length>0,centVecOn,cilVecOn,orgPointKinds);
+    const state=buildFilterViewerState(lastResult.matches,vascChk&&vascChk.checked,emChk&&emChk.checked,v1ColChk&&v1ColChk.checked,vascTraceSlugs.length>0,centVecOn,cilVecOn,orgPointKinds,vascSegChk&&vascSegChk.checked);
     viewAllBtn.disabled=false;viewAllBtn.textContent=orig;
     if(!state)return;
     if(vascTraceLayers.length)state.layers.push(...vascTraceLayers);
@@ -11748,6 +11774,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          a separate setting: blend_scene.py reads it off whether the manifest carries any nucleus,
          so this one tick decides both. */
       +'<label class="colab-nuc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Fetch each matched cell\'s nucleus mesh. With nuclei in, the cells are drawn translucent so a nucleus stays visible through its own cell, the way it does in Neuroglancer; without them the cells are solid. Blender file only -- the EM/segmentation notebook has no nucleus step."><input type="checkbox" class="colab-nuclei" checked>Nuclei</label>'
+      +'<label class="colab-vasc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Add the blood vessels inside this box as a 3D model, from Wan &amp; Wei\'s TriSAM segmentation of minnie65 (BossDB, open access) -- the same data as the &quot;Include vasculature segmentation&quot; checkbox in the 3D-view options above. Cut to this box and surfaced, not downloaded whole: the vasculature is one segment spanning the entire volume. Drawn translucent so it does not hide the cells. Blender file only."><input type="checkbox" class="colab-vasc" checked>Vasculature</label>'
       +'<span style="flex:1"></span>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells and nuclei as 3D models, the EM sections sweeping through them and the matched cells painted on those sections. The four ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
       +'</div>'
@@ -11763,6 +11790,10 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     (function(){
       const bl=row.querySelector(".colab-blender"), nu=row.querySelector(".colab-nuclei"),
             lab=row.querySelector(".colab-nuc-lab");
+      /* Vasculature joins the SAME closure rather than getting one of its own: both ticks are
+         Blender-only for the same reason (the EM/segmentation notebook writes PNG sections and
+         has nowhere to put a 3D model), and two closures doing one job is how they drift. */
+      const va=row.querySelector(".colab-vasc"), valab=row.querySelector(".colab-vasc-lab");
       if(!bl||!nu||!lab)return;
       const sync=()=>{
         nu.disabled=!bl.checked;
@@ -11770,6 +11801,13 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         lab.title=bl.checked
           ? "Fetch each matched cell's nucleus mesh. With nuclei in, the cells are drawn translucent so a nucleus stays visible through its own cell, the way it does in Neuroglancer; without them the cells are solid."
           : "Nuclei are part of the Blender scene only \u2014 the EM/segmentation notebook has no nucleus step. Tick \u201cBlender file\u201d to enable this.";
+        if(va&&valab){
+          va.disabled=!bl.checked;
+          valab.style.opacity=bl.checked?"":"0.45";
+          valab.title=bl.checked
+            ? "Add the blood vessels inside this box as a 3D model, from Wan & Wei's TriSAM segmentation of minnie65 (BossDB, open access). Cut to this box and surfaced, not downloaded whole. Drawn translucent so it does not hide the cells."
+            : "The vessel model is part of the Blender scene only \u2014 the EM/segmentation notebook has nowhere to put a 3D model. Tick \u201cBlender file\u201d to enable this.";
+        }
       };
       bl.addEventListener("change",sync); sync();
     })();
@@ -11808,6 +11846,11 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          EM/segmentation one has no nucleus step), and wantBlender chooses WHICH notebook the
          button writes rather than what goes in it. */
       const wantNuclei=row.querySelector(".colab-nuclei").checked, wantBlender=row.querySelector(".colab-blender").checked;
+      /* Vasculature is an ADDITION to a scene, not a scene: it is deliberately absent from
+         anyGeometry below, so "vessels only, no cells" still trips the "tick something" guard
+         rather than rendering an empty box with a tube in it. It also needs no Filter-and-show
+         result -- the vessels are whatever is in the box, not whatever matched. */
+      const wantVasc=row.querySelector(".colab-vasc").checked;
       const anyGeometry=wantMeshes||(wantBlender&&wantNuclei);
       if(!wantEM&&!wantSeg&&!anyGeometry){alert(wantBlender?"Tick at least one of EM, Segmentation, Cell 3D model, or Nuclei.":"Tick at least one of EM, Segmentation, or Cell 3D model.");return;}
       if(anyGeometry&&!(lastResult&&lastResult.matches)){alert('Cell 3D models need a current "Filter and show" result so the notebook matches what you\'re previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again -- or untick Cell 3D model to download EM/segmentation only.');return;}
@@ -11838,7 +11881,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
           datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
           emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,nucSource:UJ.cfg.em.nucSource,
           boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,colors:colors,
-          include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,nuclei:wantNuclei}
+          include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,nuclei:wantNuclei,vasc:wantVasc}
         });
         return;
       }
