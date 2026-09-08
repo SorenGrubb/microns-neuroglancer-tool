@@ -502,7 +502,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-07 19:43</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 06:11</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11819,6 +11819,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          so this one tick decides both. */
       +'<label class="colab-nuc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Fetch each matched cell\'s nucleus mesh. With nuclei in, the cells are drawn translucent so a nucleus stays visible through its own cell, the way it does in Neuroglancer; without them the cells are solid. Blender file only -- the EM/segmentation notebook has no nucleus step."><input type="checkbox" class="colab-nuclei" checked>Nuclei</label>'
       +'<label class="colab-vasc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Add the blood vessels inside this box as a 3D model, from Wan &amp; Wei\'s TriSAM segmentation of minnie65 (BossDB, open access) -- the same data as the &quot;Include vasculature segmentation&quot; checkbox in the 3D-view options above. Cut to this box and surfaced, not downloaded whole: the vasculature is one segment spanning the entire volume. Drawn translucent so it does not hide the cells. Blender file only."><input type="checkbox" class="colab-vasc" checked>Vasculature</label>'
+      +'<select class="colab-vasc-extent" style="font-size:11px;padding:1px 2px;background:var(--inset);color:var(--ink);border:1px solid var(--line);border-radius:4px" title="IN THIS BOX cuts the vessel labels to the bounding box and builds the surface locally -- fast, and it keeps the scene framed on the cells. WHOLE DATASET downloads the published mesh for the whole vessel segment: one download and no surfacing, but it is the vessel tree of a cubic millimetre of cortex, so the file is large and the scene ends up framed on the entire volume. If that source publishes no mesh the notebook falls back to the box and says so."><option value="box">in this box</option><option value="whole">whole dataset</option></select>'
       +'<span style="flex:1"></span>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells and nuclei as 3D models, the EM sections sweeping through them and the matched cells painted on those sections. The four ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
       +'</div>'
@@ -11826,7 +11827,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       +'<button type="button" class="rbox-colab" style="font-size:11px;padding:3px 8px" '
       +'title="Generates a Colab notebook (.ipynb) that downloads whichever of EM imagery, segmentation, cell 3D models and nuclei are ticked above -- as TIFFs and OBJs, or, with &quot;Blender file&quot; ticked, as a Blender scene and a .glb -- for cells matched inside THIS box -- nothing is downloaded here, the notebook does the actual fetching when you run it in Colab.">'
       +'&#11015; Colab notebook for this box</button>'
-      +'</div>';
+      +'</div>'
+      +'<div class="rbox-blender-help" style="display:none;margin:6px 0 2px 0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--inset);font-size:11px;color:var(--mut);line-height:1.55"><b style="color:var(--ink)">What to do with the Blender notebook</b><ol style="margin:5px 0 0 0;padding-left:18px"><li>Download the Colab script (the button above).</li><li>Go to <a href="https://colab.research.google.com/" target="_blank" rel="noopener">colab.research.google.com</a> and log in.</li><li>File &rarr; Upload notebook, and pick the file you just downloaded.</li><li>Runtime &rarr; Run all.</li><li>Make sure you accept the download when it appears.</li><li>Unzip the folder and open the .blend file. (<a href="https://www.blender.org/" target="_blank" rel="noopener">Blender</a> required &mdash; free and open source, version 4.5 or newer.)</li><li>Press Ctrl+F12 in Blender to render the movie.</li></ol><div style="margin-top:6px">The notebook fetches the data, builds the scene and hands back a zip: the .blend, its EM sections, and a .glb for any other 3D tool. Rendering the ten-second movie takes a few minutes on a normal laptop.</div></div>';
     row.querySelectorAll('input[type="text"]').forEach(el=>el.addEventListener("input",drawRegionViz));
     /* Nuclei only mean anything to the Blender notebook, so the tick follows the Blender one:
        dimmed and explained when it cannot do anything, rather than present and inert. Run once at
@@ -11845,8 +11847,15 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         lab.title=bl.checked
           ? "Fetch each matched cell's nucleus mesh. With nuclei in, the cells are drawn translucent so a nucleus stays visible through its own cell, the way it does in Neuroglancer; without them the cells are solid."
           : "Nuclei are part of the Blender scene only \u2014 the EM/segmentation notebook has no nucleus step. Tick \u201cBlender file\u201d to enable this.";
+        /* The explainer is the third thing the Blender tick decides, and it is decided here
+           with the other two rather than in a listener of its own -- one place to look when the
+           answer to "what does this tick change" is wanted. */
+        const help=row.querySelector(".rbox-blender-help");
+        if(help)help.style.display=bl.checked?"":"none";
         if(va&&valab){
           va.disabled=!bl.checked;
+          const vx=row.querySelector(".colab-vasc-extent");
+          if(vx){vx.disabled=!bl.checked;vx.style.opacity=bl.checked?"":"0.45";}
           valab.style.opacity=bl.checked?"":"0.45";
           valab.title=bl.checked
             ? "Add the blood vessels inside this box as a 3D model, from Wan & Wei's TriSAM segmentation of minnie65 (BossDB, open access). Cut to this box and surfaced, not downloaded whole. Drawn translucent so it does not hide the cells."
@@ -11900,6 +11909,13 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          rather than rendering an empty box with a tube in it. It also needs no Filter-and-show
          result -- the vessels are whatever is in the box, not whatever matched. */
       const wantVasc=row.querySelector(".colab-vasc").checked;
+      const vascExtentEl=row.querySelector(".colab-vasc-extent");
+      const vascExtent=vascExtentEl?vascExtentEl.value:"box";
+      /* The wordmark drawn bottom-right in the video. The colours are the DARK theme's, read from
+         :root rather than from whatever theme the user has on right now -- the render's background
+         is #0d1117 whatever the page looks like, and a light-theme accent on it is invisible. */
+      const brand={name:(UJ.cfg&&UJ.cfg.label)||"µJump",url:"www.grubblab.com",
+                   accent:"#27e0b3",ink:"#e6edf3",mut:"#8b949e"};
       const anyGeometry=wantMeshes||(wantBlender&&wantNuclei);
       if(!wantEM&&!wantSeg&&!anyGeometry){alert(wantBlender?"Tick at least one of EM, Segmentation, Cell 3D model, or Nuclei.":"Tick at least one of EM, Segmentation, or Cell 3D model.");return;}
       if(anyGeometry&&!(lastResult&&lastResult.matches)){alert('Cell 3D models need a current "Filter and show" result so the notebook matches what you\'re previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again -- or untick Cell 3D model to download EM/segmentation only.');return;}
@@ -11964,7 +11980,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
           datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
           emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,nucSource:UJ.cfg.em.nucSource,
           boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,colors:colors,
-          include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,nuclei:wantNuclei,vasc:wantVasc}
+          include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,nuclei:wantNuclei,vasc:wantVasc},
+          vascExtent:vascExtent, brand:brand
         });
         return;
       }
