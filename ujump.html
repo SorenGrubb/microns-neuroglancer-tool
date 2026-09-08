@@ -395,6 +395,11 @@ UJ.cfg = {
   predictedBy: "MICrONS",
   id: "microns",
   label: "MICrONS minnie65",
+  /* The dataset reference drawn small at the bottom of a Blender video (2026-09-08, Søren: "I
+     think we need to have a reference to the original dataset also, but don't let it fill too much
+     in the video"). Separate from `label` because label is a UI string that has to stay short in
+     headings, and a credit wants to name where the data came from. */
+  datasetCredit: "MICrONS minnie65 \u00b7 microns-explorer.org",
   res: [4, 4, 40]           // nm per voxel, x/y/z
 };
 var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
@@ -502,7 +507,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 06:11</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 07:23</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -8549,7 +8554,14 @@ async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,on
   const meshCache=new Map(); // rootIdStr -> {mesh,grid}|null|"skipped_limit"|"skipped_toolarge"
   let totalVertsFetched=0; // cumulative vertex count across successfully-cached astrocyte meshes this run
   let limitHit=false; // once true, no NEW distinct astrocyte is fetched for the rest of this run
-  async function getAstroMeshGrid(candRootStr,candNucleusId){
+  /* `note` and `base` added 2026-09-08. Søren: "In uJump, this one gets stuck at 1/10 every time",
+     then, having waited: "it looks like it is working, it is just very slow." Both were true, and
+     the second is the fault worth fixing: this function was called with fetchCombinedMesh's
+     onProgress left undefined, so fifteen astrocyte mesh downloads reported NOTHING and the label
+     sat on "checking synapse 1/10… 0%" for minutes. A slow run and a hung one were indistinguishable
+     from the outside. `note` is which astrocyte of how many; `base`/`span` place its progress inside
+     the current synapse's share of the bar rather than leaving it at zero until the synapse ends. */
+  async function getAstroMeshGrid(candRootStr,candNucleusId,onProgress,note,base,span){
     if(meshCache.has(candRootStr))return meshCache.get(candRootStr);
     // Circuit breaker (2026-08-15/16, Soren reported repeated crashes at 100/200nm gap; exact
     // mechanism unconfirmed from code alone -- so this budgets CUMULATIVE mesh geometry size
@@ -8567,7 +8579,10 @@ async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,on
       // "all astrocyte meshes are too large": at the normal finest-under-8MB LOD, astrocytes
       // routinely decode to millions of vertices; the coarsest LOD is far smaller and is plenty
       // precise for a proximity check at the hundreds-of-nm scale this feature operates at.
-      const mesh=await MeshDL.fetchCombinedMesh(candRootStr,undefined,undefined,extras,true);
+      const mesh=await MeshDL.fetchCombinedMesh(candRootStr,
+        (f,m)=>onProgress&&onProgress((base||0)+(span||0)*(f||0),
+                                      (note||"")+(m?" \u2014 "+m:"")),
+        undefined,extras,true);
       const vertCount=mesh.positions.length/3;
       if(vertCount>TRIPARTITE_MAX_MESH_VERTICES){
         console.warn("[uJump tripartite] astrocyte mesh too large, skipping",candRootStr,vertCount,"vertices");
@@ -8593,10 +8608,18 @@ async function computeTripartiteSynapses(points,thresholdUm,candidateRadiusUm,on
     const candidates=findWithinRadiusOfTypeAtPoint(vx,vy,vz,"Astrocyte",candidateRadiusUm).slice(0,TRIPARTITE_MAX_CANDIDATES_PER_SYNAPSE);
     const[sx,sy,sz]=voxelToMeshUm(vx,vy,vz);
     let best=null,anySkippedLimit=false,anySkippedTooLarge=false;
-    for(const c of candidates){
+    /* One synapse owns 1/capped.length of the bar; each of its candidates owns an equal slice of
+       that. A cached astrocyte returns immediately and simply skips its slice, which is the
+       honest picture -- the bar moves fast through the ones already fetched. */
+    const synShare=1/capped.length,candShare=synShare/Math.max(candidates.length,1);
+    for(let ci=0;ci<candidates.length;ci++){
+      const c=candidates[ci];
       const candRoot=rootId(c.i);
       if(!candRoot)continue;
-      const entry=await getAstroMeshGrid(candRoot,NID[c.i]);
+      const note="synapse "+(si+1)+"/"+capped.length+" \u00b7 astrocyte "+(ci+1)+"/"+candidates.length;
+      onProgress&&onProgress(si*synShare+ci*candShare,note+"…");
+      const entry=await getAstroMeshGrid(candRoot,NID[c.i],onProgress,note,
+                                         si*synShare+ci*candShare,candShare);
       if(entry==="skipped_limit"){anySkippedLimit=true;continue;}
       if(entry==="skipped_toolarge"){anySkippedTooLarge=true;continue;}
       if(!entry)continue;
@@ -11819,7 +11842,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          so this one tick decides both. */
       +'<label class="colab-nuc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Fetch each matched cell\'s nucleus mesh. With nuclei in, the cells are drawn translucent so a nucleus stays visible through its own cell, the way it does in Neuroglancer; without them the cells are solid. Blender file only -- the EM/segmentation notebook has no nucleus step."><input type="checkbox" class="colab-nuclei" checked>Nuclei</label>'
       +'<label class="colab-vasc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Add the blood vessels inside this box as a 3D model, from Wan &amp; Wei\'s TriSAM segmentation of minnie65 (BossDB, open access) -- the same data as the &quot;Include vasculature segmentation&quot; checkbox in the 3D-view options above. Cut to this box and surfaced, not downloaded whole: the vasculature is one segment spanning the entire volume. Drawn translucent so it does not hide the cells. Blender file only."><input type="checkbox" class="colab-vasc" checked>Vasculature</label>'
-      +'<select class="colab-vasc-extent" style="font-size:11px;padding:1px 2px;background:var(--inset);color:var(--ink);border:1px solid var(--line);border-radius:4px" title="IN THIS BOX cuts the vessel labels to the bounding box and builds the surface locally -- fast, and it keeps the scene framed on the cells. WHOLE DATASET downloads the published mesh for the whole vessel segment: one download and no surfacing, but it is the vessel tree of a cubic millimetre of cortex, so the file is large and the scene ends up framed on the entire volume. If that source publishes no mesh the notebook falls back to the box and says so."><option value="box">in this box</option><option value="whole">whole dataset</option></select>'
+      +'<label class="colab-vasc-extent-lab" style="font-size:11px;color:var(--mut);display:inline-flex;align-items:center;gap:4px;margin-left:2px">Vasculature:'
+      +'<select class="colab-vasc-extent" style="font-size:11px;padding:1px 2px;width:auto;background:var(--inset);color:var(--ink);border:1px solid var(--line);border-radius:4px" title="IN THIS BOX cuts the vessel labels to the bounding box and builds the surface locally -- fast, and it keeps the scene framed on the cells. WHOLE DATASET downloads the published mesh for the whole vessel segment: one download and no surfacing, but it is the vessel tree of a cubic millimetre of cortex, so the file is large and the scene ends up framed on the entire volume. If that source publishes no mesh the notebook falls back to the box and says so."><option value="box">in this box</option><option value="whole">whole dataset</option></select></label>'
       +'<span style="flex:1"></span>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells and nuclei as 3D models, the EM sections sweeping through them and the matched cells painted on those sections. The four ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
       +'</div>'
@@ -11855,7 +11879,9 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         if(va&&valab){
           va.disabled=!bl.checked;
           const vx=row.querySelector(".colab-vasc-extent");
-          if(vx){vx.disabled=!bl.checked;vx.style.opacity=bl.checked?"":"0.45";}
+          const vxlab=row.querySelector(".colab-vasc-extent-lab");
+          if(vx)vx.disabled=!bl.checked;
+          if(vxlab)vxlab.style.opacity=bl.checked?"":"0.45";
           valab.style.opacity=bl.checked?"":"0.45";
           valab.title=bl.checked
             ? "Add the blood vessels inside this box as a 3D model, from Wan & Wei's TriSAM segmentation of minnie65 (BossDB, open access). Cut to this box and surfaced, not downloaded whole. Drawn translucent so it does not hide the cells."
@@ -11911,10 +11937,20 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const wantVasc=row.querySelector(".colab-vasc").checked;
       const vascExtentEl=row.querySelector(".colab-vasc-extent");
       const vascExtent=vascExtentEl?vascExtentEl.value:"box";
-      /* The wordmark drawn bottom-right in the video. The colours are the DARK theme's, read from
-         :root rather than from whatever theme the user has on right now -- the render's background
-         is #0d1117 whatever the page looks like, and a light-theme accent on it is invisible. */
-      const brand={name:(UJ.cfg&&UJ.cfg.label)||"µJump",url:"www.grubblab.com",
+      /* The wordmark drawn bottom-right in the video.
+
+         THE NAME COMES FROM THE LOGO ELEMENT, not from UJ.cfg.label. label is "MICrONS minnie65"
+         here -- the dataset -- so the first version of this would have printed the dataset name
+         where the logo goes and credited nothing. <h1 class="logo"> IS the logo, so reading it is
+         both correct and automatically right for every other tool in the family.
+
+         The colours are the DARK theme's, read from :root rather than from whatever theme the user
+         has on right now -- the render's background is #0d1117 whatever the page looks like, and a
+         light-theme accent on it is invisible. */
+      const logoEl=document.querySelector("h1.logo");
+      const brand={name:(logoEl?logoEl.textContent:"").trim()||"µJump",
+                   url:"www.grubblab.com",
+                   dataset:(UJ.cfg&&(UJ.cfg.datasetCredit||UJ.cfg.label))||"",
                    accent:"#27e0b3",ink:"#e6edf3",mut:"#8b949e"};
       const anyGeometry=wantMeshes||(wantBlender&&wantNuclei);
       if(!wantEM&&!wantSeg&&!anyGeometry){alert(wantBlender?"Tick at least one of EM, Segmentation, Cell 3D model, or Nuclei.":"Tick at least one of EM, Segmentation, or Cell 3D model.");return;}
