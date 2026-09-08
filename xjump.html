@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-08 11:04</span></p>
+ctrl-shift-R.">build 2026-09-08 16:07</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -7425,6 +7425,31 @@ UJ.app = (function(){
     return universe().filter(function(u){ return !!u.pos; });
   }
 
+  /* Every fragment inside a box, carrying the CELL it belongs to. See the two callers in the
+     region-box mount below: rootIdsInBox flattens this to ids for the EM/segmentation notebook,
+     cellsInBox hands it over whole for the Blender one. The box test is on the unit's own
+     position -- a cell is in the box when its soma is, not when one of its fragments strays in --
+     which is the rule the flat version always used. 2026-09-08. */
+  function fragmentsInBox(boxNM){
+    var out = [];
+    filterable().forEach(function(u){
+      if (out.length >= 2000) return;
+      var nm = X.toNm(u.pos);
+      if (nm[0] < boxNM.xmin || nm[0] > boxNM.xmax
+          || nm[1] < boxNM.ymin || nm[1] > boxNM.ymax
+          || nm[2] < boxNM.zmin || nm[2] > boxNM.zmax) return;
+      var segs = u.cell ? allSegs(u.cell) : (u.row ? X.seedSegments(u.row) : []);
+      segs.forEach(function(sg){
+        if (out.length >= 2000) return;
+        out.push({ type: String(u.label || u.type || "Unclassified"),
+                   root_id: String(sg), nucleus_id: null,
+                   group: String(u.key), cell_name: String(u.name || u.key) });
+      });
+    });
+    return out;
+  }
+
+
   /* ── section 1: select the cell(s) of interest ────────────────────────────────────────────
      µJump's widget exactly: a scrolling box of grouped checkboxes with live counts, one class for
      the primary list and another for the proximity list so the two ":checked" sets cannot
@@ -7948,20 +7973,24 @@ UJ.app = (function(){
           onEl: el("filterRegionOn"), vizEl: el("regionViz"),
           res: X.resXYZ(), onChange: invalidatePreview,
           /* Which fragments a per-box Colab notebook should fetch meshes for: the ones belonging
-             to cells whose soma is in that box, which is the only set the notebook could mean. */
+             to cells whose soma is in that box, which is the only set the notebook could mean.
+
+             ONE WALK, TWO SHAPES. cellsInBox below is the same loop with the unit kept, because
+             the two notebooks want different things from it: the EM/segmentation one wants a flat
+             set of ids to paint, and the Blender one wants CELLS. Written as one function that
+             both call, so they cannot disagree about which fragments are in the box -- and they
+             share the 2000 cap for the same reason, since a section painted for a cell the scene
+             does not contain is worse than either list being short. */
           rootIdsInBox: function(boxNM){
-            var out = [];
-            filterable().forEach(function(u){
-              if (out.length >= 2000) return;
-              var nm = X.toNm(u.pos);
-              if (nm[0] < boxNM.xmin || nm[0] > boxNM.xmax
-                  || nm[1] < boxNM.ymin || nm[1] > boxNM.ymax
-                  || nm[2] < boxNM.zmin || nm[2] > boxNM.zmax) return;
-              var segs = u.cell ? allSegs(u.cell) : (u.row ? X.seedSegments(u.row) : []);
-              segs.forEach(function(sg){ if (out.length < 2000) out.push(sg); });
-            });
-            return out;
-          }
+            return fragmentsInBox(boxNM).map(function(f){ return f.root_id; });
+          },
+          /* WHAT A CELL IS HERE, and it is not a root id. On µJump a cell is one segment; on cb2
+             a cell is ASSEMBLED, and a Purkinje cell is thirty-odd fragments that are all one
+             cell. Søren, 2026-09-08: "This is one cell with many fragments, will it produce one
+             cell of the same color or one cell of many colors?" -- one, and `group` is what says
+             so. colour_policy.py falls back to the root id when there is no group, so this
+             changes nothing anywhere else. */
+          cellsInBox: function(boxNM){ return fragmentsInBox(boxNM); }
         });
       } catch (err){
         el("regionBoxes").innerHTML = "<p class='hint' style='margin:0;color:var(--bad)'>"

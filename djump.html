@@ -548,7 +548,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 11:51</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 17:03</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11830,6 +11830,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
          separate nucleus segmentation, and Wan & Wei's vessels are minnie65's. Absent rather than
          disabled -- a capability this dataset was never going to have is a fact about the
          dataset, not a gap in the tool. */
+      +'<label class="colab-cave-lab" style="font-size:11px;color:var(--mut);display:none;align-items:center;gap:3px;cursor:pointer" title="Writes your saved CAVE token into the downloaded notebook, so Colab does not stop to ask for it. The file then CONTAINS a live credential: keep it to yourself and delete it when the run is done. Left unticked, the token never leaves your browser and Colab asks for it instead."><input type="checkbox" class="colab-cave">Include my CAVE token</label>'
       +'<span style="flex:1"></span>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The three ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
       +'</div>'
@@ -11838,7 +11839,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       +'title="Generates a Colab notebook (.ipynb) that downloads whichever of EM imagery, segmentation, and cell 3D models are ticked above, for cells matched inside THIS box -- nothing is downloaded here, the notebook does the actual fetching when you run it in Colab. This dataset\'s segmentation needs your own CAVE token, entered inside the notebook.">'
       +'&#11015; Colab notebook for this box</button>'
       +'</div>'
-      +'<div class="rbox-blender-help" style="display:none;margin:6px 0 2px 0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--inset);font-size:11px;color:var(--mut);line-height:1.55"><b style="color:var(--ink)">What to do with the Blender notebook</b><ol style="margin:5px 0 0 0;padding-left:18px"><li>Download the Colab script (the button above).</li><li>Go to <a href="https://colab.research.google.com/" target="_blank" rel="noopener">colab.research.google.com</a> and log in.</li><li>File &rarr; Upload notebook, and pick the file you just downloaded.</li><li>Runtime &rarr; Run all.</li><li>Make sure you accept the download when it appears.</li><li>Unzip the folder and open the .blend file. (<a href="https://www.blender.org/" target="_blank" rel="noopener">Blender</a> required &mdash; free and open source, version 4.5 or newer.)</li><li>Press Ctrl+F12 in Blender to render the movie.</li></ol><div style="margin-top:6px">The notebook fetches the data, builds the scene and hands back a zip: the .blend, its EM sections, and a .glb for any other 3D tool. Rendering the ten-second movie takes a few minutes on a normal laptop. <b style="color:var(--ink)">This dataset needs your own CAVE token</b> for the segmentation and the 3D models &mdash; the notebook stops and tells you how. The imagery downloads without one.</div></div>';
+      +'<div class="rbox-blender-help" style="display:none;margin:6px 0 2px 0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--inset);font-size:11px;color:var(--mut);line-height:1.55"><b style="color:var(--ink)">What to do with the Blender notebook</b><ol style="margin:5px 0 0 0;padding-left:18px"><li>Download the Colab script (the button above).</li><li>Go to <a href="https://colab.research.google.com/" target="_blank" rel="noopener">colab.research.google.com</a> and log in.</li><li>File &rarr; Upload notebook, and pick the file you just downloaded.</li><li>Runtime &rarr; Run all.</li><li>Make sure you accept the download when it appears.</li><li>Unzip the folder and open the .blend file. (<a href="https://www.blender.org/" target="_blank" rel="noopener">Blender</a> required &mdash; free and open source, version 4.5 or newer.)</li><li>Press Ctrl+F12 in Blender to render the movie.</li></ol><div style="margin-top:6px">The notebook fetches the data, builds the scene and hands back a zip: the .blend, its EM sections, and a .glb for any other 3D tool. Rendering the ten-second movie takes a few minutes on a normal laptop. <b style="color:var(--ink)">This dataset needs your own CAVE token</b> for the segmentation and the 3D models &mdash; the notebook stops and tells you how. The imagery downloads without one. Tick <b style=\"color:var(--ink)\">Include my CAVE token</b> to write it into the file instead, and Colab will not ask &mdash; but the downloaded notebook then contains a live credential, so keep it to yourself and delete it when the run is done.</div></div>';
     row.querySelectorAll('input[type="text"]').forEach(el=>el.addEventListener("input",drawRegionViz));
     /* The explainer is the only thing the Blender tick changes on this page -- there is no Nuclei
        or Vasculature tick to dim -- so the closure is short. Run once at build time as well as on
@@ -11846,7 +11847,19 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     (function(){
       const bl=row.querySelector(".colab-blender"), help=row.querySelector(".rbox-blender-help");
       if(!bl||!help)return;
-      const sync=()=>{help.style.display=bl.checked?"":"none";};
+      /* The CAVE tick is only an option when it can do something: this dataset's segmentation is
+         behind CAVE, and a token is already saved (the Connectivity panel puts it there). With no
+         saved token it is not rendered at all rather than rendered dead -- the same rule the
+         Nuclei and Vasculature ticks follow on the other tools. */
+      const cavLab=row.querySelector(".colab-cave-lab"), cav=row.querySelector(".colab-cave");
+      const haveToken=()=>{try{return !!localStorage.getItem(UJ.cfg.mesh&&UJ.cfg.mesh.caveTokenKey||"djump_cave_token");}catch(_e){return false;}};
+      const sync=()=>{
+        help.style.display=bl.checked?"":"none";
+        if(cavLab)cavLab.style.display=(UJ.cfg.em&&UJ.cfg.em.segCaveAuth&&haveToken())?"flex":"none";
+        /* Never carried over from a previous state: a credential going into a file is a decision
+           taken each time, not one the page remembers for you. */
+        if(cav&&cavLab&&cavLab.style.display==="none")cav.checked=false;
+      };
       bl.addEventListener("change",sync); sync();
     })();
     /* 2026-08-29, ported verbatim from µJump (see core/colabexport.js's own header for the full
@@ -11864,6 +11877,12 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       if(!UJ.cfg.em||!UJ.colab){alert("This tool doesn't have a region-download notebook configured yet.");return;}
       const wantEM=row.querySelector(".colab-em").checked, wantSeg=row.querySelector(".colab-seg").checked, wantMeshes=row.querySelector(".colab-meshes").checked;
       const blEl=row.querySelector(".colab-blender"), wantBlender=!!(blEl&&blEl.checked);
+      const cavEl=row.querySelector(".colab-cave");
+      let caveToken="";
+      if(cavEl&&cavEl.checked){
+        try{caveToken=localStorage.getItem((UJ.cfg.mesh&&UJ.cfg.mesh.caveTokenKey)||"djump_cave_token")||"";}catch(_e){caveToken="";}
+        if(!caveToken)alert("No CAVE token is saved in this browser, so none can be included. Enter one in the Connectivity panel first, or untick the box and let Colab ask for it.");
+      }
       if(!wantEM&&!wantSeg&&!wantMeshes){alert("Tick at least one of EM, Segmentation, or Cell 3D model.");return;}
       if(wantBlender&&!UJ.blender){alert("The Blender notebook module (core/blenderexport.js) did not load. Reload the page, or untick Blender file to write the EM/segmentation notebook instead.");return;}
       if(wantMeshes&&!(lastResult&&lastResult.matches)){alert('Cell 3D models need a current "Filter and show" result so the notebook matches what you\'re previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again -- or untick Cell 3D model to download EM/segmentation only.');return;}
@@ -11896,6 +11915,10 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
              service; the notebook writes a token cell and passes the token to every
              CloudVolume(SEG...) call. The imagery is public and never sees it. */
           segCaveAuth:UJ.cfg.em.segCaveAuth,
+          /* ONLY IF TICKED, and read at click time rather than held anywhere. Unticked, this is
+             "" and the notebook asks Colab for the token, which is the default and the one that
+             writes no credential to disk. */
+          caveToken:caveToken,
           nucSource:"",          /* V1DD publishes no nucleus segmentation */
           vascSource:"",         /* and the TriSAM vessels are minnie65's volume */
           boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,
