@@ -517,7 +517,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 11:03</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 13:19</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11795,27 +11795,19 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(anyIncomplete)html+='<p class="hint">One or more boxes have incomplete coordinates and won\'t be used until all 6 fields are filled in.</p>';
     c.innerHTML=html;
   }
-  /* ── the Blender export's colours ───────────────────────────────────────────── 2026-09-07
-     The same 30 hex values as the dashboard's PALETTE (line ~1094). Repeated, deliberately, and
-     the two must be changed together: that PALETTE and its colorFor() live INSIDE
-     initDashboardTab(), so nothing out here can see them -- calling colorFor() from the region
-     box threw "ReferenceError: colorFor is not defined", and a throw inside a click listener is
-     swallowed by the browser, so the button simply did nothing.
+  /* ── THE BLENDER EXPORT'S COLOURS ARE NOT DECIDED HERE ANY MORE ─────────────── 2026-09-08
+     This was a 30-hex palette indexed by sorted cell type, matching the dashboard's. It was
+     removed after Søren rendered a box round an arteriole: seven matches, every one of them a
+     "Smooth muscle cell", so the type rule painted all seven #8a3b2a -- and the vessel they wrap
+     is #b03a48. Two dark reds, both translucent, one inside the other. He had ticked Vasculature,
+     the notebook fetched it, the scene contained 82,701 vertices of it, and what he reported was
+     "it was never shown": there was nothing to tell apart.
 
-     The rule is also deliberately NOT colorFor()'s. That one hands out entries in first-seen
-     order as charts are drawn, so a type's colour depends on which panels have been rendered this
-     session; two exports of the same box could disagree. Here the types in the box are sorted and
-     indexed, so the same box always produces the same colours. */
-  const BLENDER_PALETTE=["#8a3b2a","#5a4a7a","#3a6b5a","#a37a3a","#4a6b8a","#7a3a5a","#6b7a3a","#3a5a6b",
-                         "#8a5a3a","#5a3a6b","#3a7a6b","#7a5a3a","#4a3a6b","#6b3a4a","#3a4a6b","#7a6b3a",
-                         "#4a7a3a","#8a4a5a","#3a6b8a","#6b4a3a","#5a6b3a","#3a4a5a","#8a6b4a","#4a5a3a",
-                         "#6b3a6b","#3a8a6b","#8a3a3a","#3a3a6b","#6b8a3a","#8a6b3a"];
-  function blenderColorsFor(cells){
-    const types=Array.from(new Set((cells||[]).map(c=>String(c.type||"Unclassified")))).sort();
-    const out={};
-    types.forEach((t,i)=>{out[t]=BLENDER_PALETTE[i%BLENDER_PALETTE.length];});
-    return out;
-  }
+     "When there is only one cell ... the same color as the tool ... When there is more than one
+     cell they should have different colors ... The vasculature, however, should always be red and
+     the nucleus always blue." That is a statement about the whole scene -- how many cells it
+     holds, and which two colours are reserved -- so blend_scene.py's cell_colours() owns it, and
+     this page sends none. See src/scene_colour_policy.py. */
 
   /* Builds one region-box row (6 coordinate inputs + a remove button), wires its own
      input/paste-split/remove listeners, and returns the DOM node ready to append to
@@ -12032,7 +12024,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const boxLabel="Box "+(boxIdx>=0?boxIdx+1:1);
       if(wantBlender){
         if(!UJ.blender){alert("The Blender notebook module didn't load. Reload the page (ctrl-shift-R) and try again.");return;}
-        const colors=blenderColorsFor(boxCells);
+        /* No colours: blend_scene.py decides them (cell_colours). 2026-09-08. */
         UJ.blender.downloadNotebook({
           datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
           emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,nucSource:UJ.cfg.em.nucSource,
@@ -12040,7 +12032,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
              overrule the tick, so an absent address means "no vessels in this dataset" rather
              than "fetch them anyway". */
           vascSource:UJ.cfg.em.vascSource||"",
-          boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,colors:colors,
+          boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,   /* and no colors: see above */
           include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,nuclei:wantNuclei,vasc:wantVasc},
           vascExtent:vascExtent, brand:brand
         });
