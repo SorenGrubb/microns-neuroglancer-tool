@@ -507,7 +507,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 07:23</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 08:09</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11841,8 +11841,8 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          a separate setting: blend_scene.py reads it off whether the manifest carries any nucleus,
          so this one tick decides both. */
       +'<label class="colab-nuc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Fetch each matched cell\'s nucleus mesh. With nuclei in, the cells are drawn translucent so a nucleus stays visible through its own cell, the way it does in Neuroglancer; without them the cells are solid. Blender file only -- the EM/segmentation notebook has no nucleus step."><input type="checkbox" class="colab-nuclei" checked>Nuclei</label>'
-      +'<label class="colab-vasc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Add the blood vessels inside this box as a 3D model, from Wan &amp; Wei\'s TriSAM segmentation of minnie65 (BossDB, open access) -- the same data as the &quot;Include vasculature segmentation&quot; checkbox in the 3D-view options above. Cut to this box and surfaced, not downloaded whole: the vasculature is one segment spanning the entire volume. Drawn translucent so it does not hide the cells. Blender file only."><input type="checkbox" class="colab-vasc" checked>Vasculature</label>'
-      +'<label class="colab-vasc-extent-lab" style="font-size:11px;color:var(--mut);display:inline-flex;align-items:center;gap:4px;margin-left:2px">Vasculature:'
+      +'<label class="colab-vasc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Add the blood vessels inside this box as a 3D model, from Wan &amp; Wei\'s TriSAM segmentation of minnie65 (BossDB, open access) -- the same data as the &quot;Include vasculature segmentation&quot; checkbox in the 3D-view options above. Cut to this box and surfaced, not downloaded whole: the vasculature is one segment spanning the entire volume. Drawn translucent so it does not hide the cells. Blender file only."><input type="checkbox" class="colab-vasc">Vasculature</label>'
+      +'<label class="colab-vasc-extent-lab" style="display:none;font-size:11px;color:var(--mut);align-items:center;gap:4px;margin-left:2px">'
       +'<select class="colab-vasc-extent" style="font-size:11px;padding:1px 2px;width:auto;background:var(--inset);color:var(--ink);border:1px solid var(--line);border-radius:4px" title="IN THIS BOX cuts the vessel labels to the bounding box and builds the surface locally -- fast, and it keeps the scene framed on the cells. WHOLE DATASET downloads the published mesh for the whole vessel segment: one download and no surfacing, but it is the vessel tree of a cubic millimetre of cortex, so the file is large and the scene ends up framed on the entire volume. If that source publishes no mesh the notebook falls back to the box and says so."><option value="box">in this box</option><option value="whole">whole dataset</option></select></label>'
       +'<span style="flex:1"></span>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells and nuclei as 3D models, the EM sections sweeping through them and the matched cells painted on those sections. The four ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
@@ -11878,17 +11878,28 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         if(help)help.style.display=bl.checked?"":"none";
         if(va&&valab){
           va.disabled=!bl.checked;
+          /* The extent choice is not dimmed when it does not apply -- it is ABSENT. It only
+             means anything for a vasculature that is actually being fetched, and a disabled
+             control sitting under five ticks was what made Søren ask what it referred to.
+             Shown inline-flex rather than "" so it lands beside the word Vasculature rather than
+             on a line of its own. */
           const vx=row.querySelector(".colab-vasc-extent");
           const vxlab=row.querySelector(".colab-vasc-extent-lab");
-          if(vx)vx.disabled=!bl.checked;
-          if(vxlab)vxlab.style.opacity=bl.checked?"":"0.45";
+          const showExtent=bl.checked&&va.checked;
+          if(vx)vx.disabled=!showExtent;
+          if(vxlab)vxlab.style.display=showExtent?"inline-flex":"none";
           valab.style.opacity=bl.checked?"":"0.45";
           valab.title=bl.checked
             ? "Add the blood vessels inside this box as a 3D model, from Wan & Wei's TriSAM segmentation of minnie65 (BossDB, open access). Cut to this box and surfaced, not downloaded whole. Drawn translucent so it does not hide the cells."
             : "The vessel model is part of the Blender scene only \u2014 the EM/segmentation notebook has nowhere to put a 3D model. Tick \u201cBlender file\u201d to enable this.";
         }
       };
-      bl.addEventListener("change",sync); sync();
+      /* TWO listeners, because sync() now answers two questions: what the Blender tick changes,
+         and whether the extent choice applies. Without the second one the select would appear
+         only after the Blender tick was next touched. */
+      bl.addEventListener("change",sync);
+      if(va)va.addEventListener("change",sync);
+      sync();
     })();
     /* 2026-08-29, Søren: "give the user a colab code they can upload to colab and make it download
        the cutout... available when ticking Limit to region(s)... If more than one bounding box,
