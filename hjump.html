@@ -433,7 +433,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 11:51</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 21:04</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3263,9 +3263,10 @@ function addRegionBox(){
         boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,
         /* Dark-theme colours whatever the page's theme: the render's background is the dark one
            either way, and a light accent vanishes on it. */
-        brand:{name:(logoEl?logoEl.textContent:"").trim()||"\u03b7Jump",url:"www.grubblab.com",
-               dataset:UJ.cfg.datasetCredit||UJ.cfg.label||"",
-               accent:"#27e0b3",ink:"#e6edf3",mut:"#8b949e"},
+        /* The tool's OWN colours, read from its :root block -- see brandFromPage(). This
+           was a hand-built block with µJump's #27e0b3 in it, on four pages that are not
+           µJump. 2026-09-08. */
+        brand:UJ.blender.brandFromPage(),
         include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,nuclei:false,vasc:false}
       });
       return;

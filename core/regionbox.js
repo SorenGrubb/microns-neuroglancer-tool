@@ -435,7 +435,7 @@ UJ.regionbox = (function(){
         if (!cells) cells = rootIds.map(function(r){
           return { type: "Unclassified", root_id: String(r), nucleus_id: null };
         });
-        var logoEl = document.querySelector("h1.logo");
+        /* the logo lookup moved into brandFromPage() -- 2026-09-08 */
         var vxEl = row.querySelector(".colab-vasc-extent");
         UJ.blender.downloadNotebook({
           datasetId: UJ.cfg.id, datasetLabel: UJ.cfg.label,
@@ -454,6 +454,19 @@ UJ.regionbox = (function(){
              page states it as segTranslateZ -- output z voxels, the amount the SOURCE is moved UP
              to meet the EM -- so the notebook's offset is its negation, times the z resolution.
              Zero everywhere but cb2. */
+          /* WHERE THE MESHES ARE. Empty unless the page declares a mesh source of its own --
+             only χJump does, and its note explains why: cb2's meshes are NOT beside its
+             segmentation but in a separate store. Both that path and its PARENT are offered,
+             because cloud-volume reads meshes through the volume whose info names a mesh
+             directory and which of the two that is cannot be checked from here; the notebook
+             probes them and prints which one answered. */
+          meshSources: (function(){
+            var m = (UJ.cfg.volume && UJ.cfg.volume.mesh) || "";
+            if (!m) return [];
+            var bare = String(m).replace(/^precomputed:\/\//, "");
+            var parent = bare.replace(/\/[^\/]+\/?$/, "");
+            return parent && parent !== bare ? [bare, parent] : [bare];
+          })(),
           segOffsetNm: (function(){
             var t = (UJ.cfg.volume && UJ.cfg.volume.segTranslateZ) || 0;
             /* opts.res FIRST, because it is what this module was mounted with and the only
@@ -466,12 +479,11 @@ UJ.regionbox = (function(){
           })(),
           boxNM: boxNM, boxLabel: boxLabel, cells: cells,
           vascExtent: vxEl ? vxEl.value : "box",
-          /* Dark-theme colours whatever the page's theme: the render's background is the dark one
-             either way, and a light accent vanishes on it. */
-          brand: { name: (logoEl ? logoEl.textContent : "").trim() || UJ.cfg.id,
-                   url: "www.grubblab.com",
-                   dataset: UJ.cfg.datasetCredit || UJ.cfg.label || "",
-                   accent: "#27e0b3", ink: "#e6edf3", mut: "#8b949e" },
+          /* The TOOL'S OWN colours, read from its :root block, in the dark values whatever
+             theme the page is showing -- the render's background is the dark one either way.
+             This was "#27e0b3" written out, which is µJump's, on a module three other tools
+             use. See brandFromPage() in core/blenderexport.js. 2026-09-08. */
+          brand: UJ.blender.brandFromPage(),
           include: { em: wantEM, seg: wantSeg, meshes: wantMeshes,
                      nuclei: wantNuclei, vasc: wantVasc }
         });

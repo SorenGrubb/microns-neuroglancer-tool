@@ -517,7 +517,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 13:19</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 21:04</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11961,10 +11961,10 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          has on right now -- the render's background is #0d1117 whatever the page looks like, and a
          light-theme accent on it is invisible. */
       const logoEl=document.querySelector("h1.logo");
-      const brand={name:(logoEl?logoEl.textContent:"").trim()||"µJump",
-                   url:"www.grubblab.com",
-                   dataset:(UJ.cfg&&(UJ.cfg.datasetCredit||UJ.cfg.label))||"",
-                   accent:"#27e0b3",ink:"#e6edf3",mut:"#8b949e"};
+      /* The tool's OWN colours, read from its :root block -- see brandFromPage() in
+         core/blenderexport.js. This was written out with #27e0b3 here first and then copied
+         into four pages that are not µJump. 2026-09-08. */
+      const brand=UJ.blender.brandFromPage();
       const anyGeometry=wantMeshes||(wantBlender&&wantNuclei);
       if(!wantEM&&!wantSeg&&!anyGeometry){alert(wantBlender?"Tick at least one of EM, Segmentation, Cell 3D model, or Nuclei.":"Tick at least one of EM, Segmentation, or Cell 3D model.");return;}
       if(anyGeometry&&!(lastResult&&lastResult.matches)){alert('Cell 3D models need a current "Filter and show" result so the notebook matches what you\'re previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again -- or untick Cell 3D model to download EM/segmentation only.');return;}
