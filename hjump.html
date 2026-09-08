@@ -433,7 +433,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-07 06:30</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 11:51</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -816,6 +816,11 @@ window.UJ = window.UJ || {};
 UJ.cfg = {
   id: "hjump",
   label: "H01 human cortex",
+  /* The dataset reference drawn small at the bottom of a Blender video. Shapson-Coe, Januszewski,
+     Berger et al., Science 384, eadk4858 (2024), https://doi.org/10.1126/science.adk4858,
+     released CC BY -- the same citation the About panel carries, shortened to fit one line of a
+     video corner. */
+  datasetCredit: "H01 \u00b7 Shapson-Coe et al., Science 2024",
   res: [8, 8, 33]                       // nm per voxel, the H01 viewer's native frame
 };
 var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
@@ -890,6 +895,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <!-- Show in 3D, installed onto the .meshdl[data-root] button above. -->
 <script src="core/mesh3d.js"></script>
 <script src="core/colabexport.js"></script>
+<script src="core/blenderexport.js"></script>
 <script src="core/organellefilter.js"></script>
 <script src="core/points.js"></script>
 <script src="core/gamify.js"></script>
@@ -3156,12 +3162,17 @@ function regionRowHtml(k){
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" class="colab-em" checked>EM</label>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" class="colab-seg" checked>Segmentation</label>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" class="colab-meshes" checked>Cell 3D model</label>'
+      /* No Nuclei tick and no Vasculature tick: minnie65 is the only volume in this family with a
+         separate nucleus segmentation, and Wan & Wei's vessels are minnie65's. */
+      +'<span style="flex:1"></span>'
+      +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The three ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
     +'</div>'
     +'<div class="row" style="margin-top:6px">'
       +'<button type="button" class="idbtn rb-colab" style="font-size:11px;padding:3px 8px" '
       +'title="Generates a Colab notebook (.ipynb) that downloads whichever of EM imagery, segmentation, and cell 3D models are ticked above, for cells matched inside THIS box -- nothing is downloaded here, the notebook does the actual fetching when you run it in Colab.">'
       +'&#11015; Colab notebook for this box</button>'
     +'</div>'
+    +'<div class="rbox-blender-help" style="display:none;margin:6px 0 2px 0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--inset);font-size:11px;color:var(--mut);line-height:1.55"><b style="color:var(--ink)">What to do with the Blender notebook</b><ol style="margin:5px 0 0 0;padding-left:18px"><li>Download the Colab script (the button above).</li><li>Go to <a href="https://colab.research.google.com/" target="_blank" rel="noopener">colab.research.google.com</a> and log in.</li><li>File &rarr; Upload notebook, and pick the file you just downloaded.</li><li>Runtime &rarr; Run all.</li><li>Make sure you accept the download when it appears.</li><li>Unzip the folder and open the .blend file. (<a href="https://www.blender.org/" target="_blank" rel="noopener">Blender</a> required &mdash; free and open source, version 4.5 or newer.)</li><li>Press Ctrl+F12 in Blender to render the movie.</li></ol><div style="margin-top:6px">The notebook fetches the data, builds the scene and hands back a zip: the .blend, its EM sections, and a .glb for any other 3D tool. Rendering the ten-second movie takes a few minutes on a normal laptop.</div></div>'
     +'</div>';
 }
 function renumberRegionRows(){
@@ -3193,13 +3204,24 @@ function addRegionBox(){
      per-box scoping as µJump; if Filter-and-show hasn't been run yet FILTER.rows is simply [],
      so MESH_ROOT_IDS in the generated notebook comes out empty -- same graceful-empty behaviour
      µJump's own comment documents for its "no filter run yet" case. */
+  /* The explainer is the only thing the Blender tick changes on this page. Run once at build
+     time as well as on change, so a fresh row is right before anything is clicked. */
+  (function(){
+    const bl=row.querySelector(".colab-blender"), help=row.querySelector(".rbox-blender-help");
+    if(bl&&help){
+      const sync=function(){ help.style.display=bl.checked?"":"none"; };
+      bl.addEventListener("change",sync); sync();
+    }
+  })();
   row.querySelector(".rb-colab").addEventListener("click",function(){
     const gv=function(cls){ const el=row.querySelector("."+cls); return el?parseFloat(el.value):NaN; };
     const x1=gv("rb-x1"),y1=gv("rb-y1"),z1=gv("rb-z1"),x2=gv("rb-x2"),y2=gv("rb-y2"),z2=gv("rb-z2");
     if([x1,y1,z1,x2,y2,z2].some(function(v){ return isNaN(v); })){ alert("Fill in both corners of this box first."); return; }
     if(!UJ.cfg.em||!UJ.colab){ alert("This tool doesn't have a region-download notebook configured yet."); return; }
     const wantEM=row.querySelector(".colab-em").checked, wantSeg=row.querySelector(".colab-seg").checked, wantMeshes=row.querySelector(".colab-meshes").checked;
+    const blEl=row.querySelector(".colab-blender"), wantBlender=!!(blEl&&blEl.checked);
     if(!wantEM&&!wantSeg&&!wantMeshes){ alert("Tick at least one of EM, Segmentation, or Cell 3D model."); return; }
+    if(wantBlender&&!UJ.blender){ alert("The Blender notebook module (core/blenderexport.js) did not load. Reload the page, or untick Blender file to write the EM/segmentation notebook instead."); return; }
     /* 2026-08-29 (2nd round), Søren: "we should make sure it downloads the filtered cells, so the
        download from colab should be after the preview matches" -- Meshes now requires FILTER.ran
        (runFilter() has actually executed at least once since the page loaded), same gate as
@@ -3208,18 +3230,46 @@ function addRegionBox(){
     if(wantMeshes&&!FILTER.ran){ alert('Cell 3D models need a current "Filter and show" result so the notebook matches what you\'re previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again -- or untick Cell 3D model to download EM/segmentation only.'); return; }
     const bx=[Math.min(x1,x2),Math.max(x1,x2)],by=[Math.min(y1,y2),Math.max(y1,y2)],bz=[Math.min(z1,z2),Math.max(z1,z2)];
     const boxNM={xmin:bx[0]*UJ_RX,xmax:bx[1]*UJ_RX,ymin:by[0]*UJ_RY,ymax:by[1]*UJ_RY,zmin:bz[0]*UJ_RZ,zmax:bz[1]*UJ_RZ};
-    const rootIds=[];
+    const rootIds=[],boxCells=[];
     if(wantMeshes){
       const matched=(FILTER&&FILTER.rows)||[];
       for(const i of matched){
         if(HX[i]>=bx[0]&&HX[i]<=bx[1]&&HY[i]>=by[0]&&HY[i]<=by[1]&&HZ[i]>=bz[0]&&HZ[i]<=bz[1]){
           const rid=c3Id(i);
           if(rid)rootIds.push(String(rid));
+          /* For the Blender notebook, which colours by type. Same loop and same box test as
+             rootIds. H01 publishes no nucleus volume, so nucleus_id is always null; the type
+             comes from typeName(i), which is how every other panel on this page names a cell. */
+          if(rid)boxCells.push({type:String(typeName(i)||"unclassified"),
+                                root_id:String(rid),nucleus_id:null});
         }
       }
     }
     const boxIdx=Array.from(document.querySelectorAll("#regionBoxes .rbox-row")).indexOf(row);
     const boxLabel="Box "+(boxIdx>=0?boxIdx+1:1);
+    if(wantBlender){
+      const logoEl=document.querySelector("h1.logo");
+      UJ.blender.downloadNotebook({
+        datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
+        emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,
+        nucSource:"",          /* H01 publishes no nucleus segmentation */
+        vascSource:"",         /* and the TriSAM vessels are minnie65's volume */
+        /* MESH_VERTEX_TO_NM stays the identity, deliberately. This page carries
+           UJ.cfg.mesh.transform = [16,0,0,0, 0,16,0,0, 0,0,33,0] because it decodes H01's shards
+           in the browser and applies the source's own transform by hand; cloud-volume applies
+           that same transform when it reads a multi-res mesh, so its vertices arrive already in
+           nanometres and passing the matrix again would inflate every cell 16x. If that is ever
+           wrong it is loud: the notebook prints each cell's extent and warns outside 5-2000 um. */
+        boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,
+        /* Dark-theme colours whatever the page's theme: the render's background is the dark one
+           either way, and a light accent vanishes on it. */
+        brand:{name:(logoEl?logoEl.textContent:"").trim()||"\u03b7Jump",url:"www.grubblab.com",
+               dataset:UJ.cfg.datasetCredit||UJ.cfg.label||"",
+               accent:"#27e0b3",ink:"#e6edf3",mut:"#8b949e"},
+        include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,nuclei:false,vasc:false}
+      });
+      return;
+    }
     UJ.colab.downloadNotebook({
       datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
       emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,
