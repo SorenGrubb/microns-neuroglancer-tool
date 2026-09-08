@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-08 16:07</span></p>
+ctrl-shift-R.">build 2026-09-08 18:08</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -7431,8 +7431,22 @@ UJ.app = (function(){
      position -- a cell is in the box when its soma is, not when one of its fragments strays in --
      which is the rule the flat version always used. 2026-09-08. */
   function fragmentsInBox(boxNM){
+    /* THE CURRENT PREVIEW, not the whole universe -- and null when there is none.
+
+       Søren, 2026-09-08: "The preview matches only found 1 cell called pc_1 with the applied
+       filter, but the code shows several cells." This walked filterable(), so a box round a
+       Purkinje cell also swept in every granule cell that happened to sit in the same 60 um.
+       Every other tool in the family intersects the box with what the filter selected -- uJump
+       and piJump walk lastResult.matches, etaJump walks FILTER.rows, betaJump returns null with
+       no preview -- and this page was the one that did not.
+
+       Returning NULL with no preview is the other half of that contract: core/regionbox.js turns
+       it into "run the filter first" rather than generating a notebook with an empty or stale
+       mesh list. That message could never appear here before, because the walk did not depend on
+       the preview at all. */
+    if (!RESULT || !RESULT.matches) return null;
     var out = [];
-    filterable().forEach(function(u){
+    RESULT.matches.forEach(function(u){
       if (out.length >= 2000) return;
       var nm = X.toNm(u.pos);
       if (nm[0] < boxNM.xmin || nm[0] > boxNM.xmax
@@ -7982,7 +7996,8 @@ UJ.app = (function(){
              share the 2000 cap for the same reason, since a section painted for a cell the scene
              does not contain is worse than either list being short. */
           rootIdsInBox: function(boxNM){
-            return fragmentsInBox(boxNM).map(function(f){ return f.root_id; });
+            var f = fragmentsInBox(boxNM);
+            return f && f.map(function(x){ return x.root_id; });   // null propagates: no preview
           },
           /* WHAT A CELL IS HERE, and it is not a root id. On µJump a cell is one segment; on cb2
              a cell is ASSEMBLED, and a Purkinje cell is thirty-odd fragments that are all one
