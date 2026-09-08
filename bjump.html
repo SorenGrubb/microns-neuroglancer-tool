@@ -383,7 +383,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-07 06:30</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 11:03</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -936,7 +936,7 @@ UJ.cfg.regionbox = {
   /* All three available: this volume has a real segmentation and about half its segments are
      meshed (see UJ.cfg.mesh's notFoundKey comment for why the not-found set is large). A cell
      whose mesh is missing is skipped by the notebook with a printed note, not a failure. */
-  colab: { em: true, seg: true, meshes: true }
+  colab: { em: true, seg: true, meshes: true, blender: true }
 };
 
 document.addEventListener("DOMContentLoaded", function(){
@@ -948,6 +948,7 @@ document.addEventListener("DOMContentLoaded", function(){
 
 <script src="core/colabexport.js"></script>
 <script src="core/organellefilter.js"></script>
+<script src="core/blenderexport.js"></script>
 <script src="core/regionbox.js"></script>
 <script src="core/mesh.js"></script>
 <!-- Show in 3D. Installs itself onto the .meshdl[data-root] button above; needs core/mesh.js,

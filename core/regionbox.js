@@ -165,7 +165,13 @@ UJ.regionbox = (function(){
       if (colab[k] === false && !why[k])
         throw new Error("UJ.cfg.regionbox.colab." + k + " is false but colabWhy." + k + " is missing -- a disabled tickbox with no stated reason is worse than no tickbox");
     });
-    var can = { em: colab.em !== false, seg: colab.seg !== false, meshes: colab.meshes !== false };
+    /* em/seg/meshes default TRUE and explain themselves when false (see colabWhy above). The
+       three below default FALSE and are simply not rendered when false: they exist in one dataset
+       of the family each, and a row of disabled ticks on every other tool is noise rather than
+       information. See src/regionbox_blender.py for the full reasoning. */
+    var can = { em: colab.em !== false, seg: colab.seg !== false, meshes: colab.meshes !== false,
+                nuclei: colab.nuclei === true, vasc: colab.vasc === true,
+                blender: colab.blender === true };
     var res = opts.res || (UJ.cfg && UJ.cfg.res) || [1,1,1];
     var RX = res[0], RY = res[1], RZ = res[2];
     var depthCaption = cfg.depthCaption || "Y – depth";
@@ -251,6 +257,17 @@ UJ.regionbox = (function(){
       });
     }
 
+    /* The optional ticks are never disabled -- they are only rendered when the dataset has the
+       thing at all -- so they carry a plain explanatory title rather than tick()'s "not in this
+       dataset" wording, and their own starting state. */
+    function optTick(cls, label, checked, title){
+      return '<label class="' + cls + '-lab" style="font-size:11px;color:var(--mut);display:flex;'
+           + 'align-items:center;gap:3px;cursor:pointer" title="'
+           + String(title).replace(/"/g, "&quot;") + '">'
+           + '<input type="checkbox" class="' + cls + '"' + (checked ? " checked" : "") + '>'
+           + label + '</label>';
+    }
+
     function tick(cls, label, allowed, reason){
       var dis = allowed ? "" : " disabled";
       var style = "font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;"
@@ -286,12 +303,23 @@ UJ.regionbox = (function(){
         + tick("colab-em", "EM", can.em, why.em)
         + tick("colab-seg", "Segmentation", can.seg, why.seg)
         + tick("colab-meshes", "Cell 3D model", can.meshes, why.meshes)
+        + (can.nuclei ? optTick("colab-nuclei", "Nuclei", true,
+             "Fetch each matched cell's nucleus mesh. With nuclei in, the cells are drawn translucent so a nucleus stays visible through its own cell; without them the cells are solid. Blender file only.") : "")
+        + (can.vasc ? optTick("colab-vasc", "Vasculature", false,
+             "Add the blood vessels inside this box as a 3D model, cut to the box and surfaced. Drawn translucent so it does not hide the cells. Blender file only.")
+             + '<label class="colab-vasc-extent-lab" style="display:none;font-size:11px;color:var(--mut);align-items:center;gap:4px;margin-left:2px">'
+             + '<select class="colab-vasc-extent" style="font-size:11px;padding:1px 2px;width:auto;background:var(--inset);color:var(--ink);border:1px solid var(--line);border-radius:4px" title="IN THIS BOX cuts the vessel labels to the bounding box and builds the surface locally. WHOLE DATASET downloads the published mesh for the whole vessel segment instead: one download, but it is the vessel tree of the entire volume and the scene ends up framed on all of it.">'
+             + '<option value="box">in this box</option><option value="whole">whole dataset</option></select></label>' : "")
+        + (can.blender ? '<span style="flex:1"></span>'
+             + optTick("colab-blender", "Blender file", false,
+                 "Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The ticks to the left still say what goes in.") : "")
         + '</div>'
         + '<div class="row" style="margin-top:6px">'
         + '<button type="button" class="rbox-colab" style="font-size:11px;padding:3px 8px" '
         + 'title="Generates a Colab notebook (.ipynb) that downloads whichever of the boxes above are ticked, for this box only — nothing is downloaded here, the notebook does the fetching when you run it in Colab.">'
         + '&#11015; Colab notebook for this box</button>'
-        + '</div>';
+        + '</div>'
+        + (can.blender ? '<div class="rbox-blender-help" style="display:none;margin:6px 0 2px 0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--inset);font-size:11px;color:var(--mut);line-height:1.55"><b style="color:var(--ink)">What to do with the Blender notebook</b><ol style="margin:5px 0 0 0;padding-left:18px"><li>Download the Colab script (the button above).</li><li>Go to <a href="https://colab.research.google.com/" target="_blank" rel="noopener">colab.research.google.com</a> and log in.</li><li>File &rarr; Upload notebook, and pick the file you just downloaded.</li><li>Runtime &rarr; Run all.</li><li>Make sure you accept the download when it appears.</li><li>Unzip the folder and open the .blend file. (<a href="https://www.blender.org/" target="_blank" rel="noopener">Blender</a> required &mdash; free and open source, version 4.5 or newer.)</li><li>Press Ctrl+F12 in Blender to render the movie.</li></ol><div style="margin-top:6px">The notebook fetches the data, builds the scene and hands back a zip: the .blend, its EM sections, and a .glb for any other 3D tool. Rendering the ten-second movie takes a few minutes on a normal laptop.</div></div>' : '');
 
       row.querySelectorAll('input[type="text"]').forEach(function(el){
         el.addEventListener("input", function(){ redraw(); fire(); });
@@ -315,6 +343,34 @@ UJ.regionbox = (function(){
         row.remove(); renumber(); redraw(); fire();
       });
       row.querySelector(".rbox-colab").addEventListener("click", function(){ generate(row); });
+      /* Nuclei, the vessel extent and the explainer all mean something only for the Blender
+         notebook -- the EM/segmentation one writes PNG sections and has nowhere to put a 3D model
+         -- so one closure decides all of it, run once at build time as well as on change so a
+         fresh row is right before anything is clicked. */
+      (function(){
+        var bl = row.querySelector(".colab-blender"), nu = row.querySelector(".colab-nuclei"),
+            va = row.querySelector(".colab-vasc"),
+            help = row.querySelector(".rbox-blender-help"),
+            vxl = row.querySelector(".colab-vasc-extent-lab"),
+            vx = row.querySelector(".colab-vasc-extent");
+        if (!bl) return;
+        function sync(){
+          var on = bl.checked;
+          if (help) help.style.display = on ? "" : "none";
+          [["colab-nuclei", nu], ["colab-vasc", va]].forEach(function(pair){
+            var el = pair[1]; if (!el) return;
+            el.disabled = !on;
+            var lab = row.querySelector("." + pair[0] + "-lab");
+            if (lab) lab.style.opacity = on ? "" : "0.45";
+          });
+          var showExtent = on && !!(va && va.checked);
+          if (vx) vx.disabled = !showExtent;
+          if (vxl) vxl.style.display = showExtent ? "inline-flex" : "none";
+        }
+        bl.addEventListener("change", sync);
+        if (va) va.addEventListener("change", sync);
+        sync();
+      })();
       return row;
     }
 
@@ -329,8 +385,18 @@ UJ.regionbox = (function(){
       }
       var ck = function(c){ var el = row.querySelector("." + c); return !!(el && el.checked && !el.disabled); };
       var wantEM = ck("colab-em"), wantSeg = ck("colab-seg"), wantMeshes = ck("colab-meshes");
-      if (!wantEM && !wantSeg && !wantMeshes){
-        alert("Tick at least one of EM, Segmentation, or Cell 3D model."); return;
+      var wantNuclei = ck("colab-nuclei"), wantVasc = ck("colab-vasc"),
+          wantBlender = ck("colab-blender");
+      /* Nuclei count as geometry for the Blender notebook -- a scene of nuclei alone is a scene --
+         and the vasculature does NOT: it is an addition to one, and "vessels only, no cells" is
+         not what this panel is for. Same rule as µJump's own row. */
+      var anyGeometry = wantMeshes || (wantBlender && wantNuclei);
+      if (!wantEM && !wantSeg && !anyGeometry){
+        alert(wantBlender ? "Tick at least one of EM, Segmentation, Cell 3D model, or Nuclei."
+                          : "Tick at least one of EM, Segmentation, or Cell 3D model."); return;
+      }
+      if (wantBlender && !UJ.blender){
+        alert("This page has the Blender tick but core/blenderexport.js is not loaded."); return;
       }
       var nx1=x1*RX, nx2=x2*RX, ny1=y1*RY, ny2=y2*RY, nz1=z1*RZ, nz2=z2*RZ;
       var boxNM = { xmin:Math.min(nx1,nx2), xmax:Math.max(nx1,nx2),
@@ -342,7 +408,7 @@ UJ.regionbox = (function(){
          MESH_ROOT_IDS looks like it worked and downloads nothing, which is the worst outcome of
          the three. EM and segmentation are a pure spatial cutout and never gated on the filter. */
       var rootIds = [];
-      if (wantMeshes){
+      if (anyGeometry){
         rootIds = opts.rootIdsInBox ? opts.rootIdsInBox(boxNM) : [];
         if (rootIds === null){
           alert('Cell 3D models need a current "Filter and show" result, so the notebook matches what you are previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again — or untick Cell 3D model to download EM/segmentation only.');
@@ -358,6 +424,43 @@ UJ.regionbox = (function(){
         opts.download({ boxNM: boxNM, boxLabel: boxLabel,
                         include: { em: wantEM, seg: wantSeg, meshes: wantMeshes },
                         rootIds: rootIds });
+        return;
+      }
+      if (wantBlender){
+        /* The Blender notebook wants CELLS, not bare ids -- a type to colour by and a nucleus id
+           where there is one. A page can supply them through opts.cellsInBox; most cannot, and
+           then every cell is "Unclassified" and core/blenderexport.js colours them individually
+           rather than painting the whole scene one grey. */
+        var cells = opts.cellsInBox ? (opts.cellsInBox(boxNM) || []) : null;
+        if (!cells) cells = rootIds.map(function(r){
+          return { type: "Unclassified", root_id: String(r), nucleus_id: null };
+        });
+        var logoEl = document.querySelector("h1.logo");
+        var vxEl = row.querySelector(".colab-vasc-extent");
+        UJ.blender.downloadNotebook({
+          datasetId: UJ.cfg.id, datasetLabel: UJ.cfg.label,
+          emSource: UJ.cfg.em.emSource, segSource: UJ.cfg.em.segSource,
+          nucSource: UJ.cfg.em.nucSource || "",
+          vascSource: (UJ.cfg.em && UJ.cfg.em.vascSource) || "",
+          /* CB2's mesh vertices are METRES on permuted axes; every other dataset's are
+             nanometres. READ from wherever the page's own renderer already keeps the constant --
+             UJ.cfg.mesh for the tools that use core/mesh.js's fetch half, UJ.cfg.volume for
+             χJump, whose renderer is its own. Not copied into a third place: the first attempt
+             did copy it, into a UJ.cfg.mesh that χJump then reassigns to {} forty lines later,
+             and the exporter got undefined -- a cb2 cell would have arrived 60,000x too small. */
+          meshVertexToNm: (UJ.cfg.mesh && UJ.cfg.mesh.meshVertexToNm)
+                          || (UJ.cfg.volume && UJ.cfg.volume.meshVertexToNm) || null,
+          boxNM: boxNM, boxLabel: boxLabel, cells: cells,
+          vascExtent: vxEl ? vxEl.value : "box",
+          /* Dark-theme colours whatever the page's theme: the render's background is the dark one
+             either way, and a light accent vanishes on it. */
+          brand: { name: (logoEl ? logoEl.textContent : "").trim() || UJ.cfg.id,
+                   url: "www.grubblab.com",
+                   dataset: UJ.cfg.datasetCredit || UJ.cfg.label || "",
+                   accent: "#27e0b3", ink: "#e6edf3", mut: "#8b949e" },
+          include: { em: wantEM, seg: wantSeg, meshes: wantMeshes,
+                     nuclei: wantNuclei, vasc: wantVasc }
+        });
         return;
       }
       UJ.colab.downloadNotebook({

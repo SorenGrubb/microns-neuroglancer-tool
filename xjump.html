@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-04 18:29</span></p>
+ctrl-shift-R.">build 2026-09-08 11:04</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -1218,7 +1218,7 @@ UJ.cfg.regionbox = {
      white matter runs down the middle. Saying "pia at top" here would be copying µJump's caption
      onto tissue it is false of. */
   depthCaption: "Y — molecular layer at top and bottom, white matter down the middle",
-  colab: { em: true, seg: true, meshes: true }
+  colab: { em: true, seg: true, meshes: true, blender: true }
 };
 
 /* core/colabexport.js, for the per-box notebook. cb2 is served as ordinary precomputed volumes on
@@ -1240,7 +1240,12 @@ UJ.cfg.backend = {
    EMPTY ON PURPOSE: χJump uses only that file's EXPORT half -- saveGlb, savePptx, volumeOf -- and
    decodes cb2's own unsharded legacy meshes in xjump_mesh.js. None of the fetch half's settings
    (bucket, sharding, LOD, CORS host preference) apply to this volume, and inventing plausible
-   values for them would be an invitation to call the wrong half. */
+   values for them would be an invitation to call the wrong half.
+
+   AND IT IS WHY THE BLENDER EXPORTER DOES NOT LOOK HERE. core/regionbox.js reads
+   meshVertexToNm from UJ.cfg.mesh first and UJ.cfg.volume second, precisely because this line
+   exists: a copy written above it is erased here, silently, and cb2 cells would then reach the
+   scene 60,000x too small. The one true copy is UJ.cfg.volume.meshVertexToNm. 2026-09-08. */
 UJ.cfg.mesh = {};
 </script>
 <!-- core/mesh.js, for its EXPORT half only: the .glb container, the PowerPoint skeleton and the
@@ -1279,6 +1284,7 @@ UJ.organelleData = { source: "core/ontology.js", groups: [{"label": "Not sure wh
      fix to any of them reaches every tool rather than the one it was found in. core/tree.js,
      core/ontology.js and core/panel.js are NOT loaded: they are µJump's guided-identification
      and organelle-report machinery, and cb2 has neither. -->
+<script src="core/blenderexport.js"></script>
 <script src="core/regionbox.js"></script>
 <script src="core/colabexport.js"></script>
 <script src="core/stepthrough.js"></script>

@@ -458,7 +458,17 @@ UJ.cfg.em = {
      and a module that reaches into this page's own constants only ever works in this page. A tool
      whose dataset publishes no nucleus segmentation simply omits it, and the panel dims the
      Nuclei tick. */
-  nucSource:"precomputed://https://bossdb-open-data.s3.amazonaws.com/iarpa_microns/minnie/minnie65/nuclei"
+  nucSource:"precomputed://https://bossdb-open-data.s3.amazonaws.com/iarpa_microns/minnie/minnie65/nuclei",
+  /* Wan & Wei's TriSAM vasculature segmentation of the full minnie65 volume, added 2026-09-08.
+     https://doi.org/10.1109/JBHI.2025.3576643 (open access), data at bossdb.org/project/wei2024.
+
+     The same address VASC_SEG_SRC carries for the Neuroglancer layer, repeated here for the same
+     reason nucSource is: UJ.cfg.em is the block core/blenderexport.js and core/regionbox.js read,
+     and VASC_SEG_SRC is a const inside the filter IIFE. Without this line the Vasculature tick
+     was inert -- the exporter treats an absent source as "this dataset has no vessels" and turns
+     INCLUDE['vasculature'] off however the tick is set, so the notebook ran and quietly fetched
+     nothing. Only minnie65 gets this; the vessels are this volume's. */
+  vascSource:"precomputed://https://bossdb-open-data.s3.amazonaws.com/wei2024/minnie/bv"
 };
 /* core/stepthrough.js config (2026-08-18) -- exact same key names µJump's own inline tab/step
    code always used, so this extraction changes nothing observable here. βJump sets its own
@@ -507,7 +517,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 08:09</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 11:03</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -12026,6 +12036,10 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         UJ.blender.downloadNotebook({
           datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
           emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,nucSource:UJ.cfg.em.nucSource,
+          /* Without this the Vasculature tick is inert: core/blenderexport.js lets the SOURCE
+             overrule the tick, so an absent address means "no vessels in this dataset" rather
+             than "fetch them anyway". */
+          vascSource:UJ.cfg.em.vascSource||"",
           boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,colors:colors,
           include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,nuclei:wantNuclei,vasc:wantVasc},
           vascExtent:vascExtent, brand:brand
