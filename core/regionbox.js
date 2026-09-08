@@ -450,6 +450,20 @@ UJ.regionbox = (function(){
              and the exporter got undefined -- a cb2 cell would have arrived 60,000x too small. */
           meshVertexToNm: (UJ.cfg.mesh && UJ.cfg.mesh.meshVertexToNm)
                           || (UJ.cfg.volume && UJ.cfg.volume.meshVertexToNm) || null,
+          /* Nanometres from a point on the tissue to the same tissue in the segmentation. The
+             page states it as segTranslateZ -- output z voxels, the amount the SOURCE is moved UP
+             to meet the EM -- so the notebook's offset is its negation, times the z resolution.
+             Zero everywhere but cb2. */
+          segOffsetNm: (function(){
+            var t = (UJ.cfg.volume && UJ.cfg.volume.segTranslateZ) || 0;
+            /* opts.res FIRST, because it is what this module was mounted with and the only
+               resolution it is sure of. UJ.cfg.res does not exist on every page -- χJump keeps
+               its own as UJ.cfg.volume.res_nm in Z,Y,X order and hands x,y,z in at mount time --
+               and reading the missing one gave rz = 0, so the offset came out [0,0,0] and this
+               fix silently did nothing. */
+            var r = opts.res || (UJ.cfg && UJ.cfg.res) || [0, 0, 0];
+            return [0, 0, -t * (r[2] || 0)];
+          })(),
           boxNM: boxNM, boxLabel: boxLabel, cells: cells,
           vascExtent: vxEl ? vxEl.value : "box",
           /* Dark-theme colours whatever the page's theme: the render's background is the dark one
