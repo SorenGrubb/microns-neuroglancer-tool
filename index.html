@@ -981,39 +981,147 @@ function toggleTheme(){ setTheme(currentTheme() === "dark" ? "light" : "dark"); 
       +'style="font-weight:400;color:var(--muted)">'+lbEsc(msg)+'</span><span class="lbnum"></span></div>';
     if(note)note.textContent="";
   }
+  /* ONE RENDERER, TWO SOURCES. The board can be built from the combined endpoint or pooled from
+     the eight per-tool boards (see below), and the two must not be able to draw different-looking
+     boards -- so the drawing lives here and each loader only supplies rows. */
+  function lbDraw(rows,note){
+    var el=document.getElementById("lbAll");
+    if(!el)return;
+    el.innerHTML=rows.map(function(u,i){
+      var letters=(u.datasets||[]).map(function(ds){
+        var t=TOOLS[ds];
+        if(!t)return "";
+        var pts=(u.perDataset&&u.perDataset[ds])?" \u2014 "+lbNum(u.perDataset[ds])+" points here":"";
+        return '<a class="tl-'+lbEsc(ds)+'" href="'+t.href+'" title="'+lbEsc(t.name+pts)+'">'
+              +t.ch+'</a>';
+      }).join("");
+      return '<div class="lbrow">'
+        +'<span class="lbrank">'+(i+1)+'.</span>'
+        +'<span class="lbname">'+lbEsc(u.handle||"anonymous")+'</span>'
+        +'<span class="lbnum">'+lbNum(u.points)+' points \u00b7 '+lbNum(u.reports)+' reports</span>'
+        +(letters?'<span class="lbtools">'+letters+'</span>':'')
+        +'</div>';
+    }).join("");
+    var n=document.getElementById("lbAllNote");
+    if(n)n.textContent=note||"";
+  }
+  /* ── the fallback: pool the eight boards this deployment already serves ───────────────────
+     Søren, 2026-09-09, on seeing "not available from the server yet": every number this section
+     wants is ALREADY public, eight times over, one board per dataset. Making a leaderboard he
+     asked for today wait on a redeploy was the wrong trade, so the page does the pooling itself
+     until the combined endpoint answers, and then stops.
+
+     THREE HONEST LIMITS, all of them on screen rather than only in the generator:
+       - each per-tool board is a TOP TEN, so somebody eleventh everywhere is invisible here;
+       - it pools by HANDLE, because that is all the per-dataset board returns (email never leaves
+         the server, which is right) -- so two people who chose the same display name merge;
+       - eight Apps Script calls. Measured against the live deployment: four in parallel took
+         10.3 s. So they go out together and the board is REDRAWN as each lands -- names appear
+         after a second or two and settle, rather than twenty seconds of a spinner. */
+  /* ── the pooled board, remembered ─────────────────────────────────────────────────────────
+     Measured against the live deployment: four of these boards in parallel take 10.3 s and eight
+     take over 45. Apps Script serialises one user's requests, so parallelism buys less than it
+     looks like it should, and the last name can land half a minute after the page does.
+
+     So the pooled rows are kept and redrawn instantly on the next visit while the fetches run
+     again behind them. Six hours, because the endpoint this stands in for recomputes every four
+     -- past that these numbers are stale by the feature's own standard and are dropped rather
+     than shown. Every access is wrapped: a private window, blocked site data or a full quota all
+     throw, and none of them should cost the board. The cache never wins over the network. */
+  var LB_CACHE_KEY="grubblab_lb_pooled_v1",LB_CACHE_MAX_MS=6*60*60*1000;
+  function lbCacheRead(){
+    try{
+      var raw=localStorage.getItem(LB_CACHE_KEY);
+      if(!raw)return null;
+      var d=JSON.parse(raw);
+      if(!d||!d.t||!d.rows||!d.rows.length)return null;
+      if(Date.now()-d.t>LB_CACHE_MAX_MS)return null;
+      return d;
+    }catch(_e){return null;}
+  }
+  function lbCacheWrite(rows){
+    try{localStorage.setItem(LB_CACHE_KEY,JSON.stringify({t:Date.now(),rows:rows}));}catch(_e){}
+  }
+  function lbAgo(ms){
+    var m=Math.round((Date.now()-ms)/60000);
+    if(m<2)return "just now";
+    if(m<60)return m+" minutes ago";
+    var h=Math.round(m/60);
+    return h===1?"an hour ago":(h+" hours ago");
+  }
+  function lbPoolPerTool(){
+    var keys=[];for(var k in TOOLS)keys.push(k);
+    var by={},done=0,got=0;
+    /* Drawn before a single request goes out, so a returning visitor sees the board rather than
+       "Adding up the tools…" for half a minute. Overwritten the moment real rows arrive. */
+    var cached=lbCacheRead();
+    if(cached)lbDraw(cached.rows,"Pooled from each tool\u2019s own top-ten board, as of "
+      +lbAgo(cached.t)+". Refreshing\u2026");
+    function paint(final){
+      var rows=[];
+      for(var h in by)rows.push(by[h]);
+      rows.sort(function(a,b){return b.points-a.points||b.reports-a.reports;});
+      rows.forEach(function(r){
+        r.datasets.sort(function(a,b){return (r.perDataset[b]||0)-(r.perDataset[a]||0);});
+      });
+      if(!rows.length){
+        /* Nothing of our own yet. A cached board is still on screen and still true-as-of; wiping
+           it for a spinner, or for "could not reach the server" while eight requests are still in
+           flight, would be a strictly worse thing to look at. */
+        if(cached&&!final)return;
+        if(final&&!got&&cached)return;
+        if(final)lbSay(got?"No contributions yet \u2014 open any tool and identify a cell."
+                          :"Could not reach the server, so the leaderboard could not be loaded.");
+        return;
+      }
+      if(final)lbCacheWrite(rows);
+      lbDraw(rows,final
+        ? "Pooled from each tool\u2019s own top-ten board, so somebody outside the top ten "
+          +"everywhere is not listed, and two people sharing a display name would be added "
+          +"together. Both go away once the combined board is deployed."
+        : "Adding up the tools\u2026 ("+done+" of "+keys.length+")");
+    }
+    keys.forEach(function(ds){
+      fetch(LB_ENDPOINT+"?leaderboard=1&ds="+encodeURIComponent(ds))
+        .then(function(r){return r.json();})
+        .then(function(j){
+          got++;
+          ((j&&j.leaderboard)||[]).forEach(function(u){
+            var h=String(u.handle||"anonymous");
+            var e=by[h]||(by[h]={handle:h,points:0,reports:0,perDataset:{},datasets:[]});
+            var p=Number(u.points)||0,rep=Number(u.reports)||0;
+            e.points+=p;e.reports+=rep;
+            /* A tool where somebody has points but no reports (a computed volume, say) is not one
+               they have "reported in", and drawing its letter would claim they had. */
+            if(rep>0){
+              if(!e.perDataset.hasOwnProperty(ds))e.datasets.push(ds);
+              e.perDataset[ds]=(e.perDataset[ds]||0)+p;
+            }
+          });
+        })
+        .catch(function(){})   /* one tool down is not the board down */
+        .then(function(){ done++; paint(done===keys.length); });
+    });
+  }
   (function loadCombinedLeaderboard(){
     var el=document.getElementById("lbAll");
     if(!el)return;
     fetch(LB_ENDPOINT+"?combinedLeaderboard=1").then(function(r){return r.json();}).then(function(d){
       var rows=(d&&d.leaderboard)||null;
-      /* THREE OUTCOMES, THREE SENTENCES. An old deployment answers without a leaderboard array at
-         all -- that is not the same as an empty board, and saying "no entries yet" for it would
-         send somebody looking for contributors instead of for a redeploy. */
-      if(!rows){lbSay("The combined leaderboard is not available from the server yet.");return;}
+      /* An old deployment answers doGet's fallback -- {"reports":[],"mergedGroups":[],...}, no
+         leaderboard key at all. Measured, 2026-09-09. That is not an empty board and must not be
+         treated as one: it means the pooling path below, not "nobody has contributed". */
+      if(!rows){lbPoolPerTool();return;}
       if(!rows.length){lbSay("No contributions yet \u2014 open any tool and identify a cell.");return;}
-      el.innerHTML=rows.map(function(u,i){
-        var letters=(u.datasets||[]).map(function(ds){
-          var t=TOOLS[ds];
-          if(!t)return "";
-          var pts=(u.perDataset&&u.perDataset[ds])?" \u2014 "+lbNum(u.perDataset[ds])+" points here":"";
-          return '<a class="tl-'+lbEsc(ds)+'" href="'+t.href+'" title="'+lbEsc(t.name+pts)+'">'
-                +t.ch+'</a>';
-        }).join("");
-        return '<div class="lbrow">'
-          +'<span class="lbrank">'+(i+1)+'.</span>'
-          +'<span class="lbname">'+lbEsc(u.handle||"anonymous")+'</span>'
-          +'<span class="lbnum">'+lbNum(u.points)+' points \u00b7 '+lbNum(u.reports)+' reports</span>'
-          +(letters?'<span class="lbtools">'+letters+'</span>':'')
-          +'</div>';
-      }).join("");
-      var note=document.getElementById("lbAllNote");
       /* The totals are a four-hourly snapshot, not live, and a board that looks live while being
          four hours old is the kind of thing somebody argues with. */
-      if(note)note.textContent=d.updated
+      lbDraw(rows,d.updated
         ? ("Totals recomputed every four hours \u2014 last on "+String(d.updated).slice(0,16).replace("T"," ")+" UTC.")
-        : "Totals are recomputed every four hours.";
+        : "Totals are recomputed every four hours.");
     }).catch(function(){
-      lbSay("Could not reach the server, so the leaderboard could not be loaded.");
+      /* Not necessarily dead: the combined call can fail on its own. Try the eight; if they are
+         unreachable too, paint() says so. */
+      lbPoolPerTool();
     });
   })();
 

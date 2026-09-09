@@ -33,23 +33,32 @@ const BOARD = {
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 
+  /* stub: null aborts every call. Otherwise a function of the URL, so the two endpoints the page
+     now knows about can answer differently — which is the whole point of the fallback. */
   async function open(stub){
     const p = await b.newPage({ viewport: { width: 1100, height: 900 } });
-    const errs = [];
+    const errs = [], seen = [];
     p.on("pageerror", e => errs.push(String((e && e.stack) || e).split("\n")[0]));
     await p.route("**script.google.com/**", route => {
+      const url = route.request().url();
+      seen.push(url);
       if (stub === null) return route.abort();
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(stub) });
+      const body = (typeof stub === "function") ? stub(url) : stub;
+      if (body === null) return route.abort();
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     });
     await p.goto("file://" + page_("index.html"));
     await p.waitForTimeout(900);
-    return { p, errs };
+    return { p, errs, seen };
   }
 
   /* ── the happy path ─────────────────────────────────────────────────────────────────────── */
   console.log("\n--- a board with entries ---");
-  let { p, errs } = await open(BOARD);
+  let { p, errs, seen } = await open(BOARD);
   ok(errs.length === 0, "page loads with no JS error", errs[0] || "clean");
+  ok(seen.filter(u => /leaderboard=1&/.test(u)).length === 0,
+     "when the combined endpoint answers, the eight per-tool boards are not asked",
+     seen.length + " request(s)");
 
   const nav = await p.evaluate(() => {
     const links = Array.from(document.querySelectorAll(".sitenav a"));
@@ -135,22 +144,112 @@ const BOARD = {
 
   /* ── the two ways to have nothing, which must not say the same thing ─────────────────────── */
   console.log("\n--- an old deployment, and an empty board ---");
-  ({ p } = await open({ ok: true }));
-  const oldMsg = (await p.textContent("#lbAll")).trim();
-  ok(/not available from the server yet/i.test(oldMsg),
-     "a backend without the endpoint says so", oldMsg);
+  /* WHAT THE LIVE DEPLOYMENT ACTUALLY RETURNS, measured 2026-09-09: doGet's fallback, with no
+     leaderboard key at all. The page must pool the eight per-tool boards rather than give up. */
+  const OLD_DOGET = { reports: [], mergedGroups: [], notNucleusReports: [], organelleGroups: [] };
+  const PER = {
+    ujump: [{ handle: "Søren Grubb", points: 1471.1, reports: 250 },
+            { handle: "Hesham", points: 369.3, reports: 125 }],
+    pjump: [{ handle: "Søren Grubb", points: 70.7, reports: 15 }],
+    /* points but no reports — a computed volume. It must add to the total and NOT earn a letter. */
+    djump: [{ handle: "Søren Grubb", points: 0.3, reports: 0 }],
+    xjump: null                                   /* one tool down must not take the board down */
+  };
+  ({ p, seen } = await open(url => {
+    if (/combinedLeaderboard/.test(url)) return OLD_DOGET;
+    const m = /ds=([a-z]+)/.exec(url);
+    const ds = m && m[1];
+    if (PER[ds] === null) return null;
+    return { leaderboard: PER[ds] || [] };
+  }));
+  await p.waitForTimeout(1200);
+  ok(seen.filter(u => /leaderboard=1&/.test(u)).length === 8,
+     "an old deployment makes the page pool all eight per-tool boards",
+     seen.filter(u => /leaderboard=1&/.test(u)).length + " asked");
+  const pooled = await p.evaluate(() => Array.from(document.querySelectorAll("#lbAll .lbrow")).map(r => ({
+    name: (r.querySelector(".lbname") || {}).textContent,
+    num: (r.querySelector(".lbnum") || {}).textContent,
+    letters: Array.from(r.querySelectorAll(".lbtools a")).map(a => a.textContent)
+  })));
+  ok(pooled.length === 2, "the pooled board has one row per person, not per tool",
+     pooled.length + " rows");
+  ok(/1,542 points/.test(pooled[0].num) && /265 reports/.test(pooled[0].num),
+     "points and reports are summed across tools", pooled[0].num);
+  ok(pooled[0].letters.join("") === "µπ",
+     "...with a letter per tool REPORTED in, points-only ones excluded",
+     pooled[0].letters.join("") || "(none)");
+  ok(pooled[1].name.indexOf("Hesham") >= 0, "everybody on any board is included", pooled[1].name);
+  const pnote = (await p.textContent("#lbAllNote")).trim();
+  ok(/top-ten/.test(pnote) && /display name/.test(pnote),
+     "...and the note admits both limits of pooling", pnote.slice(0, 70) + "…");
   await p.close();
 
   ({ p } = await open({ ok: true, leaderboard: [] }));
   const emptyMsg = (await p.textContent("#lbAll")).trim();
   ok(/No contributions yet/i.test(emptyMsg), "an empty board says something different", emptyMsg);
-  ok(oldMsg !== emptyMsg, "...and the two are not the same sentence");
   await p.close();
 
   ({ p } = await open(null));
   const deadMsg = (await p.textContent("#lbAll")).trim();
   ok(/Could not reach/i.test(deadMsg), "an unreachable server says that instead", deadMsg);
   await p.close();
+
+  /* ── the pooled board is remembered ───────────────────────────────────────────────────────
+     Eight Apps Script calls take 20-40 s against the live deployment (measured), so a returning
+     visitor must not wait for them again. Same browser CONTEXT for both loads, since that is what
+     shares localStorage — browser.newPage() would not. */
+  console.log("\n--- the pooled board is remembered ---");
+  const ctx = await b.newContext({ viewport: { width: 1100, height: 900 } });
+  const p1 = await ctx.newPage();
+  await p1.route("**script.google.com/**", route => {
+    const url = route.request().url();
+    if (/combinedLeaderboard/.test(url))
+      return route.fulfill({ status: 200, contentType: "application/json",
+                             body: JSON.stringify({ reports: [] }) });
+    const ds = (/ds=([a-z]+)/.exec(url) || [])[1];
+    return route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify({ leaderboard: ds === "ujump"
+        ? [{ handle: "Søren Grubb", points: 1471.1, reports: 250 }] : [] }) });
+  });
+  await p1.goto("file://" + page_("index.html"));
+  await p1.waitForTimeout(1600);
+  const stored = await p1.evaluate(() => { try { return !!localStorage.getItem("grubblab_lb_pooled_v1"); }
+                                           catch (e) { return "threw"; } });
+  ok(stored === true, "the pooled board is written to localStorage once every tool has answered");
+  await p1.close();
+
+  /* Second visit, with the network dead: the board must still be there. */
+  const p2 = await ctx.newPage();
+  await p2.route("**script.google.com/**", route => route.abort());
+  await p2.goto("file://" + page_("index.html"));
+  await p2.waitForTimeout(500);
+  const fast = await p2.evaluate(() => ({
+    rows: document.querySelectorAll("#lbAll .lbrow").length,
+    name: (document.querySelector("#lbAll .lbname") || {}).textContent || "",
+    note: (document.getElementById("lbAllNote") || {}).textContent || "" }));
+  ok(fast.rows === 1 && /Søren/.test(fast.name),
+     "a returning visitor sees the board immediately, without waiting for eight calls",
+     fast.rows + " row(s), " + fast.name);
+  ok(/as of/.test(fast.note), "...and is told how old the numbers are", fast.note.trim());
+  await p2.close();
+
+  /* Stale past six hours — the endpoint it stands in for recomputes every four. */
+  const p3 = await ctx.newPage();
+  await p3.route("**script.google.com/**", route => route.abort());
+  await p3.addInitScript(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem("grubblab_lb_pooled_v1"));
+      d.t = Date.now() - 7 * 60 * 60 * 1000;
+      localStorage.setItem("grubblab_lb_pooled_v1", JSON.stringify(d));
+    } catch (e) {}
+  });
+  await p3.goto("file://" + page_("index.html"));
+  await p3.waitForTimeout(700);
+  const staleRows = await p3.evaluate(() => document.querySelectorAll("#lbAll .lbname").length &&
+    /Søren/.test(document.querySelector("#lbAll .lbname").textContent));
+  ok(staleRows === false, "a board older than six hours is dropped rather than shown");
+  await p3.close();
+  await ctx.close();
 
   await b.close();
   console.log(fails ? "\nRESULT: " + fails + " FAILED" : "\nRESULT: ALL CHECKS PASSED");
