@@ -410,6 +410,24 @@ UJ.regionbox = (function(){
       var rootIds = [];
       if (anyGeometry){
         rootIds = opts.rootIdsInBox ? opts.rootIdsInBox(boxNM) : [];
+        /* ONE SEGMENT, ONE CELL -- 2026-09-09, from a βJump manifest that carried root_id 55064
+           twice. A page's callback walks its MATCHES, and where the matches are nuclei two of them
+           can share one segmented cell, so the id arrives once per nucleus. Fetched twice, written
+           twice, built twice: two identical meshes in the same place, z-fighting with each other.
+           Here rather than in that page's callback, because any tool whose matches are nuclei has
+           the same shape. Order is preserved -- the first occurrence keeps its place. */
+        if (Array.isArray(rootIds)){
+          var seen = {}, uniq = [];
+          rootIds.forEach(function(r){
+            var k = String(r);
+            if (!seen[k]){ seen[k] = 1; uniq.push(r); }
+          });
+          if (uniq.length !== rootIds.length)
+            console.log("region box: " + (rootIds.length - uniq.length)
+                        + " duplicate segment id(s) dropped -- "
+                        + uniq.length + " cell(s) go into the notebook");
+          rootIds = uniq;
+        }
         if (rootIds === null){
           alert('Cell 3D models need a current "Filter and show" result, so the notebook matches what you are previewing. Run the filter (tick "Limit to region(s)" with this box if you want it applied), then click this again — or untick Cell 3D model to download EM/segmentation only.');
           return;
