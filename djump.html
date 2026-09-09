@@ -503,6 +503,12 @@ UJ.cfg.mesh = {
 UJ.cfg.em = {
   emSource:"gs://v1dd_imagery/image/aligned_image",
   segSource:"graphene://middleauth+https://api.em.brain.allentech.org/segmentation/table/v1dd_public",
+  /* THE NUCLEUS VOLUME, which this page has had since 2026-08-20 and the Blender panel spent two
+     weeks claiming did not exist ("V1DD publishes no nucleus segmentation" -- it does; SRC.nuc
+     below is the same string, verified against the bucket). PUBLIC, unlike the segmentation: no
+     CAVE token, no middleauth. Søren, 2026-09-09: "the nucleus has a separate segmentation, it
+     should also be included." Checked against SRC.nuc at load, a few thousand lines down. */
+  nucSource:"precomputed://gs://v1dd_imagery/v1dd_nuclei/segmentation",
   segCaveAuth:true
 };
 /* core/stepthrough.js config (2026-08-18) -- exact same key names µJump's own inline tab/step
@@ -553,7 +559,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 16:57</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 17:59</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -2458,6 +2464,12 @@ const SRC={em:"precomputed://gs://v1dd_imagery/image/aligned_image",em35:"precom
    placeholder standing in for "contrast not yet characterised", and it read as washed out. */
 const EM_SHADER_CONTROLS={normalized:{range:[115,144]}};
 const NUC_INFO="https://storage.googleapis.com/v1dd_imagery/v1dd_nuclei/segmentation/info";
+/* ONE NUCLEUS VOLUME, NOT TWO. UJ.cfg.em.nucSource (top of the file, where the Blender panel
+   reads it) and SRC.nuc (here, where the viewer reads it) are the same bucket, and a page that
+   painted one volume and exported another would be almost impossible to notice. 2026-09-09. */
+if(UJ.cfg.em.nucSource!==SRC.nuc)
+  console.warn("nucleus source mismatch: viewer uses "+SRC.nuc
+              +", the Blender panel would export "+UJ.cfg.em.nucSource);
 const DIM={x:[UJ_RX*1e-9,"m"],y:[UJ_RY*1e-9,"m"],z:[UJ_RZ*1e-9,"m"]};
 /* Distance (nm) past which the nearest MICrONS-detected nucleus is no longer treated as a
    credible stand-in for what's actually at a query coordinate. Tighter than the 5000nm/5um
@@ -11839,8 +11851,13 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
          disabled -- a capability this dataset was never going to have is a fact about the
          dataset, not a gap in the tool. */
       +'<label class="colab-cave-lab" style="font-size:11px;color:var(--mut);display:none;align-items:center;gap:3px;cursor:pointer" title="Writes your saved CAVE token into the downloaded notebook, so Colab does not stop to ask for it. ON by default (Søren, 2026-09-09) because this dataset cannot fetch a mesh without it. The file then CONTAINS a live credential: keep it to yourself and delete it when the run is done. Untick it and the token never leaves your browser — Colab will ask for one instead."><input type="checkbox" class="colab-cave" checked>Include my CAVE token</label>'
+      /* V1DD's nucleus volume is public and separate from its segmentation, so this tick can
+         do two things at once: fetch each matched cell's nucleus MESH, and paint the nucleus on
+         the EM sections. The second works even if that volume publishes no meshes -- painting
+         needs voxels -- and the run reports which it got. 2026-09-09. */
+      +'<label class="colab-nuc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Include the nucleus: its 3D mesh inside the cell, and the nucleus painted on the EM sections in blue. V1DD publishes its nuclei as a separate, public volume — no CAVE token needed for this part. Blender file only."><input type="checkbox" class="colab-nuclei" checked>Nuclei</label>'
       +'<span style="flex:1"></span>'
-      +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The three ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
+      +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
       +'</div>'
       +'<div class="row" style="margin-top:6px">'
       +'<button type="button" class="rbox-colab" style="font-size:11px;padding:3px 8px" '
@@ -11905,6 +11922,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       if([x1,y1,z1,x2,y2,z2].some(v=>isNaN(v))){alert("Fill in both corners of this box first.");return;}
       if(!UJ.cfg.em||!UJ.colab){alert("This tool doesn't have a region-download notebook configured yet.");return;}
       const wantEM=row.querySelector(".colab-em").checked, wantSeg=row.querySelector(".colab-seg").checked, wantMeshes=row.querySelector(".colab-meshes").checked;
+      const nuEl=row.querySelector(".colab-nuclei");
       const blEl=row.querySelector(".colab-blender"), wantBlender=!!(blEl&&blEl.checked);
       const cavEl=row.querySelector(".colab-cave");
       let caveToken="";
@@ -11927,9 +11945,11 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
             if(rid)rootIds.push(String(rid));
             /* For the Blender notebook, which colours by type. Same loop and same box test as
                rootIds -- two lists built from one pass cannot disagree about which cells are in
-               the box. V1DD publishes no nucleus volume, so nucleus_id is always null. */
+               the box. The nucleus id rides along since 2026-09-09: V1DD DOES publish a nucleus
+               volume (see UJ.cfg.em.nucSource), and both the nucleus mesh and the nucleus painted
+               on the sections are looked up by that id, not by the root id. */
             if(rid)boxCells.push({type:String(m.row.type||"Unclassified"),root_id:String(rid),
-                                  nucleus_id:null});
+                                  nucleus_id:String(rowNucId(m.row)||"")||null});
           }
         }
       }
@@ -11948,7 +11968,10 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
              "" and the notebook asks Colab for the token, which is the default and the one that
              writes no credential to disk. */
           caveToken:caveToken,
-          nucSource:"",          /* V1DD publishes no nucleus segmentation */
+          /* IT DOES PUBLISH ONE -- see UJ.cfg.em.nucSource. This line read `nucSource:""` with
+             the comment "V1DD publishes no nucleus segmentation" until 2026-09-09, which was
+             written from memory and contradicted by this page's own SRC.nuc. */
+          nucSource:UJ.cfg.em.nucSource||"",
           vascSource:"",         /* and the TriSAM vessels are minnie65's volume */
           boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,
           /* Dark-theme colours whatever the page's theme: the render's background is the dark one
@@ -11957,7 +11980,8 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
              was a hand-built block with µJump's #27e0b3 in it, on four pages that are not
              µJump. 2026-09-08. */
           brand:UJ.blender.brandFromPage(),
-          include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,nuclei:false,vasc:false}
+          include:{em:wantEM,seg:wantSeg,meshes:wantMeshes,
+                   nuclei:!!(nuEl&&nuEl.checked),vasc:false}
         });
         return;
       }
