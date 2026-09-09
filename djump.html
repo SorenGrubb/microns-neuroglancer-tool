@@ -553,7 +553,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 16:01</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 16:57</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11838,7 +11838,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
          separate nucleus segmentation, and Wan & Wei's vessels are minnie65's. Absent rather than
          disabled -- a capability this dataset was never going to have is a fact about the
          dataset, not a gap in the tool. */
-      +'<label class="colab-cave-lab" style="font-size:11px;color:var(--mut);display:none;align-items:center;gap:3px;cursor:pointer" title="Writes your saved CAVE token into the downloaded notebook, so Colab does not stop to ask for it. The file then CONTAINS a live credential: keep it to yourself and delete it when the run is done. Left unticked, the token never leaves your browser and Colab asks for it instead."><input type="checkbox" class="colab-cave">Include my CAVE token</label>'
+      +'<label class="colab-cave-lab" style="font-size:11px;color:var(--mut);display:none;align-items:center;gap:3px;cursor:pointer" title="Writes your saved CAVE token into the downloaded notebook, so Colab does not stop to ask for it. ON by default (Søren, 2026-09-09) because this dataset cannot fetch a mesh without it. The file then CONTAINS a live credential: keep it to yourself and delete it when the run is done. Untick it and the token never leaves your browser — Colab will ask for one instead."><input type="checkbox" class="colab-cave" checked>Include my CAVE token</label>'
       +'<span style="flex:1"></span>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The three ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
       +'</div>'
@@ -11871,13 +11871,24 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
          Nuclei and Vasculature ticks follow on the other tools. */
       const cavLab=row.querySelector(".colab-cave-lab"), cav=row.querySelector(".colab-cave");
       const haveToken=()=>{try{return !!localStorage.getItem(DJUMP_CAVE_TOKEN_KEY);}catch(_e){return false;}};
+      /* ON BY DEFAULT, 2026-09-09, per Søren -- and only ever where the tick is SHOWN, which
+         is this one dataset with a token already saved in this browser. Hidden means no token to
+         include, so the box is cleared rather than left ticked over nothing: what is sent must
+         match what is on screen.
+
+         `touched` is what stops this from overruling him. sync() runs on every toggle of the
+         Blender tick, and re-arming the box each time would undo an untick a second later. Once
+         he has moved it himself, this leaves it alone for the life of the row. */
       const sync=()=>{
         help.style.display=bl.checked?"":"none";
-        if(cavLab)cavLab.style.display=(UJ.cfg.em&&UJ.cfg.em.segCaveAuth&&haveToken())?"flex":"none";
-        /* Never carried over from a previous state: a credential going into a file is a decision
-           taken each time, not one the page remembers for you. */
-        if(cav&&cavLab&&cavLab.style.display==="none")cav.checked=false;
+        const show=!!(UJ.cfg.em&&UJ.cfg.em.segCaveAuth&&haveToken());
+        if(cavLab)cavLab.style.display=show?"flex":"none";
+        if(cav){
+          if(!show)cav.checked=false;
+          else if(cav.dataset.touched!=="1")cav.checked=true;
+        }
       };
+      if(cav)cav.addEventListener("change",()=>{cav.dataset.touched="1";});
       bl.addEventListener("change",sync); sync();
     })();
     /* 2026-08-29, ported verbatim from µJump (see core/colabexport.js's own header for the full
