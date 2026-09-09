@@ -136,6 +136,88 @@ const NEW_CELLS = [
   ok(!/added by the community/i.test(detection),
      "a coordinate nearer a real detection still shows the detection", detection.slice(0, 70) + "…");
 
+  /* ── the same info and rights ──────────────────────────────────────────────────────────────
+     Søren: "The cells that are named should have the same info and rights as the nuclei that have
+     been detected." Concretely: they are IN the arrays every reader of this file walks. */
+  const arr = await p.evaluate(() => {
+    const i = N - 1;                       // the last added one
+    return { N, N_DET, added: BADDED[i], id: BID[i],
+             dia: BDIA[i], vol: BVOL[i], pol: BPOL[i], dep: BDEP[i], lay: BLAY[i],
+             detStillWhole: BADDED[0] === 0 && BID[0] > 0 && isFinite(BDIA[0]) };
+  });
+  ok(arr.N === arr.N_DET + 3, "the added cells are appended to the arrays",
+     arr.N_DET + " detected + 3 = " + arr.N);
+  ok(arr.detStillWhole, "...without disturbing the detections");
+  ok(arr.added === 1 && arr.id === 0,
+     "...marked as added, with no detection id to collide with one", "BID=" + arr.id);
+  ok(!isFinite(arr.dia) && !isFinite(arr.vol),
+     "...with NaN where nothing was measured, so a range filter excludes them",
+     "dia=" + arr.dia + " vol=" + arr.vol);
+  ok(arr.pol === -1, "...and no detector pass, rather than a claim that one found it", arr.pol);
+  ok(isFinite(arr.dep) && arr.lay >= 0, "...but a real estimated depth and layer",
+     arr.dep.toFixed(1) + " µm, layer index " + arr.lay);
+
+  /* The estimate has to be right, not merely present: a point one voxel from a detection must
+     come out at that detection's own depth. */
+  const est = await p.evaluate(() => {
+    const d = estimateDepthUm(BX[5] + 1, BY[5] + 1, BZ[5]);
+    return { est: d, truth: BDEP[5] };
+  });
+  ok(Math.abs(est.est - est.truth) < 1.0,
+     "the depth fit lands on a detection's own depth beside it",
+     est.est.toFixed(2) + " vs " + est.truth.toFixed(2) + " µm");
+
+  /* Found by searching rather than by index arithmetic: how many cells have been added by this
+     point in the run is exactly the thing under test two assertions up. */
+  ok(await p.evaluate(() => {
+       const i = BADDED.findIndex((f, k) => f && ADDED_REC[k] && ADDED_REC[k].identified === "Microglia");
+       return i >= 0 && ljumpIdentityOf(i) === "Microglia";
+     }),
+     "an added cell's identity is read from its own row, not from nucleus id 0");
+
+  /* ── naming one ────────────────────────────────────────────────────────────────────────── */
+  const before = posts.length;
+  const prefill = await p.evaluate(() => {
+    /* His row: identified empty, comment "Astrocyte". */
+    const i = BADDED.findIndex((f, k) => f && ADDED_REC[k] && ADDED_REC[k].comment === "Astrocyte");
+    showCell(i, 0);
+    const sel = document.getElementById("addnucid");
+    return sel ? sel.value : null;
+  });
+  ok(prefill === "Astrocyte",
+     "a comment that names a cell type is offered as the identity, not silently promoted", prefill);
+  await p.evaluate(() => { document.getElementById("addnucsave").click(); });
+  await p.waitForTimeout(600);
+  const nameIt = posts.slice(before).map(s => { try { return JSON.parse(s); } catch (e) { return {}; } })[0];
+  ok(nameIt && nameIt.append === true,
+     "naming it appends to the existing row instead of making a second one",
+     nameIt && JSON.stringify(nameIt.append));
+  ok(nameIt && nameIt.coord === "102833,23184,348",
+     "...matched on that row's own exact coord", nameIt && nameIt.coord);
+  ok(nameIt && nameIt.identified === "Astrocyte", "...with the name", nameIt && nameIt.identified);
+  const after = await p.evaluate(() =>
+    document.querySelector("#panel .celltype").textContent.replace(/\s+/g, " ").trim());
+  ok(/Astrocyte/.test(after), "...and the panel says so at once", after.slice(0, 40));
+
+  ok(await p.evaluate(() => !!document.getElementById("idfOrganelleToggle")),
+     "an added cell can carry organelles");
+
+  /* ── every cell name is filterable ─────────────────────────────────────────────────────── */
+  const idOpts = await p.evaluate(() => {
+    const s = document.getElementById("fIdentity");
+    if (!s) return null;
+    return { n: s.options.length,
+             groups: Array.from(s.querySelectorAll("optgroup")).map(g => g.label),
+             hasUnreported: Array.from(s.options).some(o => /\(0\)$/.test(o.textContent)) };
+  });
+  ok(!!idOpts, "the filter has a community-identity picker");
+  ok(idOpts && idOpts.n > 20, "...listing every cell name, not only the ones seen here",
+     idOpts && idOpts.n + " options");
+  ok(idOpts && idOpts.groups.indexOf("Not reported here yet") >= 0,
+     "...with the never-reported ones grouped and honest about it",
+     idOpts && idOpts.groups.join(" | "));
+  ok(idOpts && idOpts.hasUnreported, "...and their count shown as 0 rather than hidden");
+
   await b.close();
   console.log(fails ? "\nRESULT: " + fails + " FAILED" : "\nRESULT: ALL CHECKS PASSED");
   process.exit(fails ? 1 : 0);

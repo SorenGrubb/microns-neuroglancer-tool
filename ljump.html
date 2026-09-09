@@ -980,19 +980,28 @@ const D = JSON.parse(document.getElementById("ljumpdata").textContent);
 function b64(s){const b=atob(s);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
 function i32(k){ return new Int32Array(b64(D[k]).buffer); }
 
-const N    = D.N;
-const BID  = i32("ID");                       // nucleus_id, 1..N in sort order
-const BX   = i32("X"), BY = i32("Y"), BZ = i32("Z");   // mip-0 voxels, 4/4/40 nm
-const BVOL = Float32Array.from(i32("V"),  function(v){ return v/100; });   // µm³
-const BDIA = Float32Array.from(i32("DIA"),function(v){ return v/100; });   // µm
+/* `let`, not `const`, and N_DET beside N -- because community-added nuclei are appended to every
+   one of these arrays once they arrive (see absorbAddedNuclei()). Søren, 2026-09-09: "The cells
+   that are named should have the same info and rights as the nuclei that have been detected."
+   Every reader in this file walks 0..N-1, so appending is what gives them those rights; N_DET
+   keeps the DETECTOR's own count, which is what the page's prose and the recall arithmetic mean. */
+let N      = D.N;
+const N_DET = D.N;
+let BID    = i32("ID");                       // nucleus_id, 1..N_DET in sort order; 0 = added
+let BX     = i32("X"), BY = i32("Y"), BZ = i32("Z");   // mip-0 voxels, 4/4/40 nm
+let BVOL   = Float32Array.from(i32("V"),  function(v){ return v/100; });   // µm³
+let BDIA   = Float32Array.from(i32("DIA"),function(v){ return v/100; });   // µm
 /* Depth below the TRACED pia, signed: negative means above it, i.e. in the leptomeninges.
    Not a fitted plane and not a tilt correction -- the pial surface is IN this volume and was
    traced directly, which is the one thing this dataset makes easy that minnie65 does not. */
-const BDEP = Float32Array.from(i32("DEP"),function(v){ return v/10; });    // µm
-const BLAY = i32("L");                        // index into D.layers, -1 = unknown
-const BPOL = i32("P");                        // 1 = found by the DARK pass
-const BTR  = i32("TR");                       // cut by a z face of the ~33 µm slab
-const BDM  = i32("DM");                       // in or beside a damaged section
+let BDEP   = Float32Array.from(i32("DEP"),function(v){ return v/10; });    // µm
+let BLAY   = i32("L");                        // index into D.layers, -1 = unknown
+let BPOL   = i32("P");                        // 1 = found by the DARK pass, -1 = no pass (added)
+let BTR    = i32("TR");                       // cut by a z face of the ~33 µm slab
+let BDM    = i32("DM");                       // in or beside a damaged section
+/* Provenance, parallel to the arrays above: 1 where the community added the nucleus, and the row
+   it came from. Both are empty until absorbAddedNuclei() runs. */
+let BADDED = [], ADDED_REC = [];
 
 const LAYERS = D.layers || ["leptomeninges","layer 1","layer 2/3","layer 4"];
 function layerName(i){ return (BLAY[i]>=0 && LAYERS[BLAY[i]]) || "unknown"; }
@@ -1194,9 +1203,59 @@ async function fetchNewNuclei(){
   }catch(_e){return null;}
   finally{NEW_NUC_FETCHED=true;}
 }
-function kickNewNuclei(){ fetchNewNuclei().then(function(){ try{wireNewNucleusList();}catch(_e){} }); }
+function kickNewNuclei(){ fetchNewNuclei().then(function(){
+  try{absorbAddedNuclei();}catch(_e0){}
+  try{wireNewNucleusList();}catch(_e){}
+}); }
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",kickNewNuclei);
 else setTimeout(kickNewNuclei,0);
+/* ── THE SAME RIGHTS: added nuclei join the arrays ────────────────────────────────────────
+   Every reader in this file -- nearest(), kNearest(), Filter and show, the Excel export, the
+   charts, the random picker -- walks 0..N-1 over the parallel arrays. Teaching each of them about
+   a second kind of cell is how the second kind keeps being forgotten; appending is one change that
+   reaches all of them at once.
+
+   IDEMPOTENT: always rebuilt from the first N_DET entries, so running again after somebody adds or
+   names a cell replaces the tail rather than compounding it.
+
+   Depth is estimated BEFORE N grows, so the plane fit is over detections only -- an added cell must
+   never be used to place another added cell. */
+function absorbAddedNuclei(){
+  const list=(NEW_NUC_CACHE||[]).filter(function(r){return !!newNucCoord(r);});
+  const cut=function(a){return Array.prototype.slice.call(a,0,N_DET);};
+  const bx=cut(BX),by=cut(BY),bz=cut(BZ),bid=cut(BID),bvol=cut(BVOL),bdia=cut(BDIA),
+        bdep=cut(BDEP),blay=cut(BLAY),bpol=cut(BPOL),btr=cut(BTR),bdm=cut(BDM);
+  const flags=[],recs=[];
+  /* N is pinned to the detector's count for the whole loop: estimateDepthUm() reads it. */
+  N=N_DET;
+  list.forEach(function(rec){
+    const p=newNucCoord(rec);
+    bx.push(p[0]);by.push(p[1]);bz.push(p[2]);
+    /* 0, because detection ids run 1..N_DET and 0 therefore cannot collide with one. */
+    bid.push(0);
+    /* NaN, not 0: every numeric range filter here compares with < and >, and NaN fails both -- so
+       an added cell is EXCLUDED from "diameter 5 to 8 µm" rather than arriving as a spurious zero.
+       Nothing measured this nucleus, and a filter about measurements should not match it. */
+    bvol.push(NaN);bdia.push(NaN);
+    const dep=estimateDepthUm(p[0],p[1],p[2]);
+    bdep.push((dep===null||!isFinite(dep))?NaN:dep);
+    const lay=layerFromDepth(dep);
+    const li=lay?LAYERS.indexOf(lay):-1;
+    blay.push(li);
+    /* -1 rather than 0: 0 is the BRIGHT pass, and claiming a pass found it would be a fact about
+       the detector that is not true. Neither pass found this nucleus; that is the point of it. */
+    bpol.push(-1);
+    btr.push(0);bdm.push(0);
+    flags.push(1);recs.push(rec);
+  });
+  BX=bx;BY=by;BZ=bz;BID=bid;BVOL=bvol;BDIA=bdia;BDEP=bdep;BLAY=blay;BPOL=bpol;BTR=btr;BDM=bdm;
+  BADDED=[];ADDED_REC=[];
+  for(let i=0;i<N_DET;i++){BADDED.push(0);ADDED_REC.push(null);}
+  BADDED=BADDED.concat(flags);ADDED_REC=ADDED_REC.concat(recs);
+  N=N_DET+list.length;
+  /* The identity dropdown counts by walking 0..N-1, so it has to be told the range moved. */
+  try{ if(typeof window.__ljumpBuildIdentityDropdown==="function")window.__ljumpBuildIdentityDropdown(); }catch(_e){}
+}
 /* Same anisotropic scaling as nearest() -- these coordinates are voxels in the same frame. */
 function nearestNewNucleus(vx,vy,vz){
   if(!NEW_NUC_CACHE||!NEW_NUC_CACHE.length)return null;
@@ -1252,6 +1311,95 @@ function wireNewNucleusList(){
     });
   });
 }
+/* ── DEPTH AND LAYER FOR A POINT WITH NO DETECTION ────────────────────────────────────────
+   Søren, 2026-09-09: "I should ... see the layer it is in."
+
+   BDEP (depth below the traced pia) and BLAY (layer) are precomputed per detection, and the pial
+   trace itself does not ship on the page -- so neither exists for a nucleus somebody added. What
+   does ship is 488 points that each carry both, all around it.
+
+   Depth below a traced surface is locally close to LINEAR in position, so: take the k nearest
+   detections in real micrometres, fit depth = a·x + b·y + c·z + d by least squares over just
+   those, and evaluate at the new point. That is meaningfully better than borrowing the nearest
+   neighbour's depth, which ignores which way the surface tilts. Falls back to the nearest
+   neighbour when the neighbourhood is too small or degenerate (coplanar points make the normal
+   equations singular, and a wrong number is worse than an approximate one). */
+const DEPTH_FIT_K=14;
+function solve4_(A,b){
+  /* Gaussian elimination with partial pivoting on a 4x4. Small enough to write out, and writing
+     it out beats a dependency for one plane fit. Returns null when singular, which is the
+     coplanar-neighbourhood case the caller falls back on. */
+  const M=[[A[0][0],A[0][1],A[0][2],A[0][3],b[0]],
+           [A[1][0],A[1][1],A[1][2],A[1][3],b[1]],
+           [A[2][0],A[2][1],A[2][2],A[2][3],b[2]],
+           [A[3][0],A[3][1],A[3][2],A[3][3],b[3]]];
+  for(let c=0;c<4;c++){
+    let piv=c;
+    for(let r=c+1;r<4;r++)if(Math.abs(M[r][c])>Math.abs(M[piv][c]))piv=r;
+    if(Math.abs(M[piv][c])<1e-9)return null;
+    const t=M[c];M[c]=M[piv];M[piv]=t;
+    for(let r=0;r<4;r++){
+      if(r===c)continue;
+      const f=M[r][c]/M[c][c];
+      for(let k=c;k<5;k++)M[r][k]-=f*M[c][k];
+    }
+  }
+  return [M[0][4]/M[0][0],M[1][4]/M[1][1],M[2][4]/M[2][2],M[3][4]/M[3][3]];
+}
+function nearestDetections_(vx,vy,vz,k){
+  const best=[];
+  for(let i=0;i<N;i++){
+    const dx=(vx-BX[i])*UJ_RX/1000,dy=(vy-BY[i])*UJ_RY/1000,dz=(vz-BZ[i])*UJ_RZ/1000;
+    const d2=dx*dx+dy*dy+dz*dz;
+    if(best.length<k){best.push({i:i,d2:d2});best.sort(function(a,b){return a.d2-b.d2;});}
+    else if(d2<best[k-1].d2){best[k-1]={i:i,d2:d2};best.sort(function(a,b){return a.d2-b.d2;});}
+  }
+  return best;
+}
+function estimateDepthUm(vx,vy,vz){
+  const near=nearestDetections_(vx,vy,vz,DEPTH_FIT_K);
+  if(!near.length)return null;
+  if(near.length<6)return BDEP[near[0].i];
+  const A=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]],b=[0,0,0,0];
+  near.forEach(function(o){
+    const r=[BX[o.i]*UJ_RX/1000,BY[o.i]*UJ_RY/1000,BZ[o.i]*UJ_RZ/1000,1],y=BDEP[o.i];
+    for(let p=0;p<4;p++){ for(let q=0;q<4;q++)A[p][q]+=r[p]*r[q]; b[p]+=r[p]*y; }
+  });
+  const c=solve4_(A,b);
+  if(!c)return BDEP[near[0].i];
+  const plane=function(x,y,z){return c[0]*(x*UJ_RX/1000)+c[1]*(y*UJ_RY/1000)+c[2]*(z*UJ_RZ/1000)+c[3];};
+  /* ── ANCHORED, and the check is why ──────────────────────────────────────────────────────
+     A least-squares plane minimises error over the fourteen neighbours and is not required to
+     pass through any of them. Measured: one voxel from detection 5, the raw plane said 6.63 µm
+     where that detection's own measured depth is 8.30. Right beside a real measurement, the real
+     measurement is the answer.
+
+     So the plane contributes only the GRADIENT -- how depth changes as you move -- and the
+     nearest real measurement contributes the OFFSET. Exact at a neighbour's own position, still
+     tilt-aware away from it. Neither half is right alone: the bare plane drifts near a known
+     point, and the bare nearest-neighbour depth ignores which way the pia tilts. */
+  const a0=near[0].i;
+  const d=BDEP[a0]+(plane(vx,vy,vz)-plane(BX[a0],BY[a0],BZ[a0]));
+  return isFinite(d)?d:BDEP[a0];
+}
+/* The layer from the depth, decided by the DATA rather than by a boundary table: the detections
+   closest in depth to the estimate vote. Nothing to drift out of date, and it cannot name a layer
+   this dataset does not contain. */
+function layerFromDepth(depthUm){
+  if(depthUm===null||!isFinite(depthUm))return null;
+  const near=[];
+  for(let i=0;i<N;i++){
+    if(BLAY[i]<0)continue;
+    near.push({i:i,dd:Math.abs(BDEP[i]-depthUm)});
+  }
+  if(!near.length)return null;
+  near.sort(function(a,b){return a.dd-b.dd;});
+  const votes={};
+  near.slice(0,15).forEach(function(o){const n=layerName(o.i);votes[n]=(votes[n]||0)+1;});
+  let bestName=null,bestN=-1;
+  for(const n in votes)if(votes[n]>bestN){bestN=votes[n];bestName=n;}
+  return bestName;
+}
 /* The panel for a cell the detector never found. Deliberately short: there is no layer tag, no
    detector pass and no diameter to show, because nothing measured this nucleus -- somebody said it
    is there. Saying so is the point of the card. */
@@ -1261,23 +1409,93 @@ function showNewNucleus(rec,distNm){
   window.CUR_POS=p.slice();
   window.CUR_CELLTYPE_DISPLAY=rec.identified||null;
   window.CUR_MICRONS_NAME=null;window.CUR_COMMUNITY_TOP_NAME=rec.identified||null;
+  /* WHOEVER NAMED IT, NAMED IT. Søren: "if I call it an astrocyte, it is an astrocyte." */
+  const named=rec.identified||"";
+  /* His row has the word in `comment`, because this form had no identity field until yesterday.
+     Offered as a prefill rather than promoted silently: a comment is a comment until somebody says
+     it is the identity, and one click is a small price for not guessing on a stranger's behalf. */
+  let fromComment="";
+  try{
+    const LN=UJ.ontology.LEAF_NAMES,c=String(rec.comment||"").trim().toLowerCase();
+    for(const slug in LN)if(String(LN[slug]).toLowerCase()===c){fromComment=LN[slug];break;}
+  }catch(_e){}
+  const depthUm=estimateDepthUm(p[0],p[1],p[2]);
+  const layerNm=layerFromDepth(depthUm);
   let h='<div class="card">';
-  h+='<div class="celltype">'+celltypeLink(p,escHtml(rec.identified||"Unnamed cell"))+'</div>';
+  h+='<div class="celltype" id="ctHeadline">'+celltypeLink(p,escHtml(named||"Unnamed cell"))+'</div>';
   h+='<div style="margin-top:6px"><span class="tag none">added by the community</span>'
-    +(rec.identified?"":' <span class="tag none">unnamed</span>')+'</div>';
+    +(layerNm?(' <span class="tag non" title="Estimated: this nucleus has no detection, so its '
+      +'depth is fitted from the '+DEPTH_FIT_K+' nearest detections and the layer is the majority '
+      +'of the detections nearest it in depth.">'+escHtml(layerNm.charAt(0).toUpperCase()+layerNm.slice(1))
+      +' (estimated)</span>'):"")
+    +(named?"":' <span class="tag none">unnamed</span>')+'</div>';
   h+='<p class="hint" style="margin-top:8px">This nucleus has no detection of its own \u2014 '
     +'somebody added it because the detector missed it. It is not in the 488 the detector found, so '
-    +'it has no diameter, layer or pass of its own.</p>';
+    +'it has no measured diameter, volume or detector pass.</p>';
+  if(depthUm!==null&&isFinite(depthUm))
+    h+='<p class="hint"><b>'+depthUm.toFixed(1)+' \u00b5m</b> below the traced pia (estimated from '
+      +'the nearest detections, not measured against the trace itself).</p>';
   h+='<div class="row" style="margin-top:6px"><div class="coord" style="flex:1">'
     +p.join(", ")+'</div></div>';
   if(rec.reporterName)h+='<p class="hint">Added by '+escHtml(rec.reporterName)
     +(rec.timestamp?(" on "+escHtml(String(rec.timestamp).slice(0,10))):"")+'.</p>';
   if(rec.comment)h+='<p class="hint">&ldquo;'+escHtml(rec.comment)+'&rdquo;</p>';
   if(distNm>0)h+='<p class="hint">'+(distNm/1000).toFixed(1)+' \u00b5m from the coordinate you typed.</p>';
-  h+='</div>';
+  /* NAME IT. Posts new_cell_no_nucleus with append:true and this row's EXACT stored coord, which
+     Code.gs matches as a string and uses to fill the blank `identified` on the row that is already
+     there -- see that branch's own comment: it exists precisely so somebody can classify a
+     location-only report later without creating a duplicate. It never overwrites, so a name
+     already agreed cannot be changed from here. */
+  h+='<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">';
+  if(named){
+    h+='<p class="hint" style="margin:0">Identified as <b>'+escHtml(named)+'</b>.</p>';
+  }else{
+    h+='<label style="display:block">What kind of cell is it?</label>';
+    if(fromComment)h+='<p class="hint" style="margin-top:0">The comment on this row says &ldquo;'
+      +escHtml(fromComment)+'&rdquo;. Confirm it below to make that the identity.</p>';
+    h+='<div class="row"><select id="addnucid" style="flex:2">'
+      +'<option value="">Choose a cell type…</option>'+newNucIdOptionsHtml()+'</select>'
+      +'<button class="idbtn" id="addnucsave" style="flex:1">Name this cell</button></div>'
+      +'<p class="hint" id="addnucmsg"></p>';
+  }
+  /* Organelles, on a cell with no nucleus id. core/panel.js's pair is self-contained and µJump has
+     logged organelles against new cells since ?newCellOrganelles=1 existed -- they key by
+     coordinate, which is all a cell with no detection has. */
+  if(typeof organelleFlagHtml==="function")h+=organelleFlagHtml();
+  h+='</div></div>';
   document.getElementById("panel").innerHTML=h;
+  /* ID_CTX is what the organelle form submits against: no nucleus id, a real coordinate. */
+  ID_CTX={nucId:"",root:"",pos:p.slice()};
+  if(typeof wireOrganelleFlag==="function"){try{wireOrganelleFlag("");}catch(_e2){}}
+  const saveEl=document.getElementById("addnucsave");
+  if(saveEl){
+    const selEl=document.getElementById("addnucid");
+    if(fromComment&&selEl)selEl.value=fromComment;
+    saveEl.addEventListener("click",function(){
+      const msg=document.getElementById("addnucmsg");
+      if(!GOOGLE_VERIFIED){ msg.textContent="Sign in first — identifications are attributed."; return; }
+      let nm="";
+      try{ nm=UJ.ontology.canonSubmitName((selEl&&selEl.value||"").trim())||""; }
+      catch(_e3){ nm=(selEl&&selEl.value||"").trim(); }
+      if(!nm){ msg.textContent="Pick a cell type first."; return; }
+      msg.textContent="sending…";
+      postReport({type:"new_cell_no_nucleus",coord:String(rec.coord),identified:nm,
+        append:true,timestamp:new Date().toISOString()},"identification").then(function(d){
+        if(d&&d.ok){
+          rec.identified=nm;              // the cache row, so the list and the panel agree at once
+          showNewNucleus(rec,distNm);
+          try{wireNewNucleusList();}catch(_e4){}
+        }else{ msg.textContent="Could not record that."; }
+      }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
+    });
+  }
 }
 function showCell(i, distNm){
+  /* An added cell is in these arrays and can be reached by every path a detection can -- nearest(),
+     a neighbour click, the filter's results, the random picker. Its panel is different because
+     what it HAS is different (no measured diameter, an estimated layer, a provenance line), not
+     because it is reached differently. */
+  if(BADDED[i]&&ADDED_REC[i]){ showNewNucleus(ADDED_REC[i],distNm||0); return; }
   CUR_IDX=i;
   const pos=[BX[i],BY[i],BZ[i]], nb=kNearest(pos[0],pos[1],pos[2],3,i);
   const lt=layerTag(i);
@@ -1689,6 +1907,11 @@ function wireCorrection(i){
           comment:(commentEl&&commentEl.value||"").trim(),
           reporterName:(typeof REPORTER_NAME!=="undefined"&&REPORTER_NAME)||"",
           timestamp:new Date().toISOString()});
+        /* AND INTO THE ARRAYS, now rather than on the next reload. Without this the cell appeared
+           in the list under the form (which reads the cache) but not in Filter and show, the
+           export or nearest() -- and "the same rights as the nuclei that have been detected"
+           cannot mean "after you reload". */
+        try{absorbAddedNuclei();}catch(_e3){}
         try{wireNewNucleusList();}catch(_e2){}
       }
     }).catch(function(e){ nmsg.textContent="failed: "+netErr(e); });
@@ -1713,19 +1936,11 @@ function doJump(){
   const raw=["x","y","z"].map(id=>parseFloat(document.getElementById(id).value));
   if(raw.some(v=>!isFinite(v)))return fail("Enter all three coordinates.");
   const v=toVoxels(raw[0],raw[1],raw[2]).map(Math.round);
+  /* ONE SEARCH, not two. This briefly had a second branch asking "is a community-added nucleus
+     nearer?" and comparing the two answers by hand. Once the added nuclei are IN the arrays
+     (absorbAddedNuclei), nearest() finds them itself and a second path could only disagree with
+     the first. Same rights means the same search. */
   const r=nearest(v[0],v[1],v[2]);
-  /* A nucleus somebody ADDED counts as a nucleus. Whichever is genuinely closer to the typed
-     coordinate wins -- there is no reason a detection should beat a hand-placed nucleus that is
-     nearer, and on this dataset most real cells have no detection at all. Before 2026-09-09 the
-     community list was not consulted at all, so pasting the coordinate of a cell you had added
-     yourself landed on whatever detection happened to be nearest and looked like the report had
-     been thrown away. */
-  const nn=nearestNewNucleus(v[0],v[1],v[2]);
-  if(nn&&(r.i<0||nn.dist<r.dist)){
-    if(nn.dist>30000) fail("Nearest nucleus is "+(nn.dist/1000).toFixed(1)+" µm away — that coordinate may be outside the tissue, which fills only about 454 × 447 µm of the 655 µm frame.");
-    showNewNucleus(nn.rec,nn.dist);
-    return;
-  }
   if(r.i<0)return fail("No nucleus found.");
   if(r.dist>30000) fail("Nearest nucleus is "+(r.dist/1000).toFixed(1)+" µm away — that coordinate may be outside the tissue, which fills only about 454 × 447 µm of the 655 µm frame.");
   showCell(r.i,r.dist);
@@ -1862,6 +2077,10 @@ function fetchLjumpIdentities(){
 }
 const LJUMP_UNCLASSIFIED_SENTINEL="__unclassified__";
 function ljumpIdentityOf(i){
+  /* An added cell has no detection id -- BID is 0 for it -- so the Master cell list cannot be
+     keyed by it, and looking it up anyway would read every added cell's identity off nucleus 0.
+     Its identity is the one on its own row, which is what the name-it control writes. */
+  if(BADDED[i]&&ADDED_REC[i])return String(ADDED_REC[i].identified||"").trim();
   const rec=IDENTITY_BY_NID&&IDENTITY_BY_NID[BID[i]];
   return rec&&rec.current?String(rec.current).trim():"";
 }
@@ -2112,13 +2331,45 @@ function buildColumnsLjump(){
         if(!cur){ unclassified++; continue; }
         counts[cur]=(counts[cur]||0)+1;
       }
+      /* EVERY CELL NAME, not only the ones already reported here. Søren, 2026-09-09: "also add
+         the cell names here so that I can filter them." This was built from `counts` alone, so on
+         a dataset with 488 nuclei and a handful of identifications the list was nearly empty and a
+         type nobody had named yet could not be filtered for at all.
+
+         The same rule µJump, δJump and πJump got this morning, in the shape a <select> allows: two
+         optgroups rather than a dimmed row. Every name is present, every count is honest, and the
+         ones with none say so instead of being absent. */
       const named=Object.keys(counts).sort(function(a,b){return a.localeCompare(b);});
+      const rest=[];
+      try{
+        const LN=UJ.ontology.LEAF_NAMES,seen={};
+        named.forEach(function(n){seen[n.toLowerCase()]=1;});
+        for(const slug in LN){
+          const nm=UJ.ontology.canonSubmitName(LN[slug])||LN[slug];
+          if(!nm||seen[nm.toLowerCase()])continue;
+          seen[nm.toLowerCase()]=1;rest.push(nm);
+        }
+        rest.sort(function(a,b){return a.localeCompare(b);});
+      }catch(_e){}
       let h='<select id="fIdentity" style="width:100%">';
       h+='<option value="">Not filtering by this</option>';
       h+='<option value="'+LJUMP_UNCLASSIFIED_SENTINEL+'">Unclassified ('+unclassified+')</option>';
-      named.forEach(function(name){
-        h+='<option value="'+escHtml(name)+'">'+escHtml(name)+' ('+counts[name]+')</option>';
-      });
+      if(named.length){
+        h+='<optgroup label="Reported in this dataset">';
+        named.forEach(function(name){
+          h+='<option value="'+escHtml(name)+'">'+escHtml(name)+' ('+counts[name]+')</option>';
+        });
+        h+='</optgroup>';
+      }
+      if(rest.length){
+        h+='<optgroup label="Not reported here yet">';
+        rest.forEach(function(name){
+          h+='<option value="'+escHtml(name)+'" title="No cell in this dataset carries this '
+            +'identity yet \u2014 pick it anyway and it starts matching the moment somebody reports '
+            +'one.">'+escHtml(name)+' (0)</option>';
+        });
+        h+='</optgroup>';
+      }
       h+='</select>';
       identBox.innerHTML=h;
       const identEl=document.getElementById("fIdentity");

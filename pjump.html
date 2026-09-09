@@ -1019,7 +1019,7 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 
   <div class="card wide">
     <h2>Cumulative community reports over time</h2>
-    <p class="sub">Every report type (identifications, discrepancies, merged-nucleus splits, organelle reports, root-ID proposals/votes, computed volumes), cumulative by day. LIVE.</p>
+    <p class="sub">Every report type (identifications, discrepancies, merged-nucleus splits, organelle reports, root-ID proposals/votes, computed volumes), cumulative by day. Computed volumes start hidden &mdash; click them in the legend to stack them in. LIVE.</p>
     <div class="plot tall" id="plotReportsOverTime"></div>
   </div>
 
@@ -1989,7 +1989,22 @@ function renderReportsOverTime(daily){
     cumByType[t]=daily.map(function(d){running+=(d.counts[t]||0);return running;});
   });
   const traces=Array.from(allTypes).map(function(t){
+    /* ── COMPUTED VOLUMES START OFF ───────────────────────────────────────────────  2026-09-09
+       Søren: "I would like for this graph that it was default that computed volumes are disabled,
+       so that you can add them by clicking but they don't show by default."
+
+       "legendonly", not visible:false -- the legend entry stays, greyed and clickable, so this is
+       a starting position rather than hidden data. One click puts the band back.
+
+       Why this band: a computed volume is a button press over geometry that was already there
+       (0.1 points, against 4 for an identification), and on a STACKED area it lifts every series
+       above it, which makes the shape of the identification work harder to read.
+
+       Case-insensitive rather than an exact match: the series name is a sheet name arriving from
+       Apps Script, and a sheet is a thing somebody can rename in a spreadsheet. */
+    const off=/computed volumes/i.test(t);
     return {type:"scatter",mode:"lines",name:t,x:dates,y:cumByType[t],
+      visible:off?"legendonly":true,
       line:{color:colorFor(t),width:2},stackgroup:"one"};
   });
   Plotly.newPlot(area.id,traces,Object.assign({},baseLayout(),{
