@@ -33,6 +33,13 @@
      UJ.organelleFilter.mode(host)           -> "" | "has" | "not"
      UJ.organelleFilter.matches(have, opts)  -> boolean, the matching rule in one place
      UJ.organelleFilter.countsFrom(n, kindsOf) -> {kind: count}
+
+   WHAT THE NUMBER IS, because it has been misread once (Søren, 2026-09-09: "I don't get why
+   Nucleoplasmic reticulum says 1, when there are hundreds of them?"): it is CELLS CARRYING THE
+   STRUCTURE, over the cells somebody has examined -- never a count of organelles. Every caller
+   dedupes per cell, because the number beside a checkbox has to be the number of cells that
+   checkbox can return, or it is lying about the filter it sits on. The panel now says so on screen
+   and in the tooltip; it was right all along and simply silent about its unit.
    See render()'s own comment for opts. */
 window.UJ = window.UJ || {};
 UJ.organelleFilter = (function(){
@@ -128,7 +135,10 @@ UJ.organelleFilter = (function(){
           + '<input type="checkbox" class="' + esc(cls) + '" value="' + esc(k.value) + '" '
           + 'style="width:auto"' + (was[k.value] ? ' checked' : '') + '> '
           + esc(k.label)
-          + (showCounts ? ' <span class="nsub" style="color:var(--mut)">' + fmt(n) + '</span>' : '')
+          + (showCounts ? ' <span class="nsub" style="color:var(--mut)" title="'
+              + fmt(n) + ' cell' + (n === 1 ? '' : 's') + ' carry at least one. This counts CELLS, '
+              + 'not organelles \u2014 a cell with twenty of them counts once, and a cell nobody has '
+              + 'examined yet counts zero.">' + fmt(n) + '</span>' : '')
           + '</label>';
         if (extra[k.value]) h += extra[k.value];
       });
@@ -137,7 +147,9 @@ UJ.organelleFilter = (function(){
     h += '</div>';
     if (showCounts){
       h += '<p class="hint" style="margin:6px 0 0">'
-        + (total ? fmt(total) + ' organelle annotation' + (total === 1 ? '' : 's') + ' reported here so far.'
+        + (total ? 'Each number is how many CELLS carry that structure \u2014 not how many of the '
+                   + 'structure there are. A cell with twenty counts once; a cell nobody has examined '
+                   + 'yet counts zero.'
                  : 'Nobody has annotated an organelle in this dataset yet — every count is zero, so a '
                    + '&ldquo;has&rdquo; filter will return nothing.')
         + '</p>';
