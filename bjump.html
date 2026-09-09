@@ -383,7 +383,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 11:03</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 06:30</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1373,7 +1373,7 @@ function kNearest(vx,vy,vz,k,excl){
 }
 
 /* ── Neuroglancer state ─────────────────────────────────────────────────────────────── */
-function buildState(pos, segId, srcIdx){
+function buildState(pos, segId, srcIdx, cellSegIds){
   const V=UJ.cfg.viewer, S=UJ.cfg.shader;
   const hoe=S("#0080ff",0,184,0,150), tau=S("#ff0000",1,63,0,40),
         mic=S("#00ff00",16,100,0,100), amy=S("#ff00ff",0,255,0,255);
@@ -1381,6 +1381,29 @@ function buildState(pos, segId, srcIdx){
      Both segmentation layers are present either way, so the user can toggle between them. */
   const inSecgan = srcIdx===1 ? [String(segId)] : [];
   const in32     = srcIdx===2 ? [String(segId)] : [];
+  /* Community-proposed root IDs for this cell (bjumpCellSegIds -- see its own comment). βJump has
+     exactly ONE segmentation, "secgan16", so every proposal belongs in the SECGAN layer whatever
+     volume the nucleus's own id came from; a nucleus with no native segment at all gets its
+     proposals here and nothing else. Anything already selected is skipped rather than repeated. */
+  const extras=[];
+  (cellSegIds||[]).forEach(function(x){
+    const id=String(x||"");
+    if(id&&id!=="0"&&inSecgan.indexOf(id)<0&&in32.indexOf(id)<0&&extras.indexOf(id)<0)extras.push(id);
+  });
+  extras.forEach(function(id){inSecgan.push(id);});
+  const segSecgan={type:"segmentation",source:V.seg,tab:"segments",segments:inSecgan,
+    name:"Segmentation (SECGAN 16nm)"};
+  const seg32={type:"segmentation",source:V.seg32,tab:"segments",segments:in32,
+    name:"Segmentation (32nm)",visible:srcIdx===2};
+  /* ONE CELL, ONE COLOUR -- and only when there is more than one id to reconcile. Neuroglancer
+     hashes a segment id to a colour, so a proposal would otherwise arrive as a differently
+     coloured object beside the cell it is meant to BE. Named rather than matched, because that
+     hash is computed on the GPU; see BJUMP_CELL_COLOR. A cell with no proposals is left with the
+     colour it has always had. */
+  if(extras.length){
+    segSecgan.segmentColors=bjumpOneColour(inSecgan,BJUMP_CELL_COLOR);
+    if(in32.length)seg32.segmentColors=bjumpOneColour(in32,BJUMP_CELL_COLOR);
+  }
   const layers=[
     {type:"image",source:V.em,tab:"source",name:"EM (CLAHE)"},
     {type:"image",source:V.emSecgan,tab:"source",name:"EM (SECGAN 16nm)",visible:false},
@@ -1392,9 +1415,8 @@ function buildState(pos, segId, srcIdx){
      shader:mic.shader,shaderControls:mic.shaderControls},
     {type:"image",source:V.amyloid,tab:"rendering",blend:"additive",name:"Amyloid-beta",visible:false,
      shader:amy.shader,shaderControls:amy.shaderControls},
-    {type:"segmentation",source:V.seg,tab:"segments",segments:inSecgan,name:"Segmentation (SECGAN 16nm)"},
-    {type:"segmentation",source:V.seg32,tab:"segments",segments:in32,name:"Segmentation (32nm)",
-     visible:srcIdx===2},
+    segSecgan,
+    seg32,
     {type:"segmentation",source:V.synapses,tab:"segments",segments:[],name:"Synapses",visible:false}
   ];
   /* nm -> m by DIVISION, not *1e-9: 30*1e-9 is exact here, but 8*1e-9 is not, and dividing keeps
@@ -1412,8 +1434,9 @@ function buildState(pos, segId, srcIdx){
      days with no div to render into. A function nothing calls is not a feature. */
     crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
-function viewerUrl(pos, segId, srcIdx){
-  return UJ.cfg.viewer.base + "#!" + encodeURIComponent(JSON.stringify(buildState(pos,segId,srcIdx)));
+function viewerUrl(pos, segId, srcIdx, cellSegIds){
+  return UJ.cfg.viewer.base + "#!"
+       + encodeURIComponent(JSON.stringify(buildState(pos,segId,srcIdx,cellSegIds)));
 }
 
 /* ── rendering ──────────────────────────────────────────────────────────────────────── */
@@ -1469,7 +1492,10 @@ function coordSpan(x,y,z){
 function celltypeLink(pos,innerHtml){
   const i=CUR_IDX;
   if(i==null) return innerHtml;
-  const u=viewerUrl([BX[i],BY[i],BZ[i]],BSEG[i],BSRC[i]);
+  /* Proposals included: the name IS the viewer link (Søren, 2026-08-16), so this is where a
+     corrected segmentation has to show up. Written before the proposals have loaded, and
+     rewritten by bjumpRefreshViewerLinks() the moment they do. */
+  const u=viewerUrl([BX[i],BY[i],BZ[i]],BSEG[i],BSRC[i],bjumpCellSegIds(i,BSEG[i]));
   return '<a href="'+escHtml(u)+'" target="_blank" rel="noopener" title="Open this nucleus in Neuroglancer" '
        + 'style="color:var(--accent);text-decoration:none">'+innerHtml
        + ' <span style="font-size:.7em;opacity:.75">&#8599;</span></a>';
@@ -1875,6 +1901,61 @@ async function bjumpExtraRootIdsFor(nucleusId,mainRootIdStr){
    root ID for the CURRENTLY DISPLAYED cell (CUR_EXTRA_ROOTS is only ever populated for that one
    cell) -- used wherever a single "this cell's segment" id is needed for display/highlighting
    (the Synapse contacts viewer link, mesh-proximity search) even when hasMesh(i) is false. */
+/* ── ONE CELL, ONE COLOUR, IN NEUROGLANCER TOO ────────────────────────────── 2026-09-09 ──
+   Søren: "when I propose new root IDs it does not add them to the neuroglancer mesh. Please
+   remember they should be the same color as the original one."
+
+   The proposals panel above has fed the mesh, PowerPoint, volume and proximity search since
+   2026-08-19 (via core/mesh.js's extraImg65RootIds, which reads CUR_EXTRA_ROOTS by name) and fed
+   no viewer state at all: buildState() took ONE segment id. So a cell whose segmentation had been
+   corrected opened as the old fragment, and a nucleus whose only id was a proposal opened with
+   nothing selected.
+
+   #ff3b3b is not a new decision -- it is the colour the Cell-contacts and Synapse viewers on this
+   page already give "this nucleus". Pinning is: Neuroglancer hashes a segment id to a colour on
+   the GPU, so two ids of one cell come out two unrelated colours, and reproducing that hash in JS
+   to match the original would be a guess with a shelf life. Naming the colour is the only way to
+   keep the promise, and it is kept ONLY when there are proposals -- a cell without them looks
+   exactly as it always has. */
+const BJUMP_CELL_COLOR="#ff3b3b";
+/* This cell's segment ids: its own first, then every community proposal of the qualifying type,
+   de-duplicated. `mainRootIdStr` is passed explicitly because the callers do not agree on what
+   the main id is -- the viewer link uses BSEG[i], the contacts and synapse viewers use
+   bjumpEffectiveRootId(i), which falls back to the first proposal when there is no native
+   segment. Proposals are only ever loaded for the cell on screen, hence the CUR_IDX guard: asking
+   for another cell's ids here would silently hand back this one's. */
+function bjumpCellSegIds(i,mainRootIdStr){
+  const qualifyingType=(UJ.cfg.mesh&&UJ.cfg.mesh.extraRootSegType)||"secgan16";
+  const main=String((mainRootIdStr==null?(BSEG[i]||""):(mainRootIdStr||""))||"");
+  const ids=[];
+  if(main&&main!=="0")ids.push(main);
+  if(i===CUR_IDX)(CUR_EXTRA_ROOTS||[]).forEach(function(r){
+    const st=(r&&r.segType)||qualifyingType;
+    if(st!==qualifyingType)return;                       // another volume's id is another cell
+    const id=String((r&&r.id)||"");
+    if(id&&id!=="0"&&ids.indexOf(id)<0)ids.push(id);
+  });
+  return ids;
+}
+/* Every id painted the same, which is the whole request. */
+function bjumpOneColour(ids,colour){
+  const m={};
+  (ids||[]).forEach(function(id){if(id)m[String(id)]=colour||BJUMP_CELL_COLOR;});
+  return m;
+}
+/* The headline link is written by showCell() BEFORE the proposals have been fetched, so it has to
+   be rewritten when they land -- and again after every propose/vote/remove, each of which reloads
+   the panel. The click-time viewers (contacts, synapses) need no such thing: they read
+   CUR_EXTRA_ROOTS when the button is pressed. */
+function bjumpRefreshViewerLinks(){
+  try{
+    const i=CUR_IDX;
+    if(i==null)return;
+    const u=viewerUrl([BX[i],BY[i],BZ[i]],BSEG[i],BSRC[i],bjumpCellSegIds(i,BSEG[i]));
+    const links=document.querySelectorAll('#ctHeadline a[href*="#!"]');
+    for(let k=0;k<links.length;k++)links[k].href=u;
+  }catch(e){}
+}
 function bjumpEffectiveRootId(i){
   if(BSEG[i])return String(BSEG[i]);
   if(i===CUR_IDX&&CUR_EXTRA_ROOTS&&CUR_EXTRA_ROOTS.length)return String(CUR_EXTRA_ROOTS[0].id);
@@ -1888,6 +1969,10 @@ function loadBjumpRootIdPanel(nid){
   const qualifyingType=UJ.cfg.mesh.extraRootSegType||"secgan16";
   const render=(list)=>{
     CUR_EXTRA_ROOTS=list.map(function(x){return {id:x.rootId,segType:x.segType||qualifyingType};}).filter(function(o){return o.id;});
+    /* The headline's Neuroglancer link was built by showCell() before this fetch resolved, so it
+       still points at the cell's own id alone. Rewrite it here -- and again after every propose,
+       vote or remove, each of which reloads this panel 1.5 s later. 2026-09-09. */
+    bjumpRefreshViewerLinks();
     const isOwner=OWNER_EMAIL&&REPORTER_EMAIL===OWNER_EMAIL;
     const n=list.length;
     let body='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Segmentation and nucleus detection are often patchy — one cell can span several meshes, or have none at all. Proposed IDs are folded into this nucleus\'s own mesh/PowerPoint/volume downloads for everyone; vote whether each belongs.</div>';
@@ -2144,8 +2229,11 @@ function bjumpContactPaletteColor(idx){
 function buildBjumpCellContactsAllViewerState(i,rootIdStr,cellType,rows){
   const layers=bjumpCellContactsViewerLayers();
   const centerLayerName=cellType||"This nucleus";
+  /* The cell is its own id AND its community-proposed ones, all in the red this page already
+     gives "this nucleus" -- 2026-09-09, see bjumpCellSegIds. */
+  const centerIds=bjumpCellSegIds(i,rootIdStr);
   layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:centerLayerName,
-    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+    segments:centerIds,segmentColors:bjumpOneColour(centerIds,BJUMP_CELL_COLOR),objectAlpha:0.85});
   const matchedRootIds=Array.from(new Set(rows.filter(r=>r.rootId).map(r=>String(r.rootId))));
   if(matchedRootIds.length){
     const colors={};matchedRootIds.forEach(function(r){colors[r]="#3fb950";});
@@ -2187,8 +2275,9 @@ function openBjumpCellContactsAllViewer(i,rootIdStr,cellType,rows){
 function buildBjumpCellContactsSingleViewerState(i,rootIdStr,cellType,row){
   const layers=bjumpCellContactsViewerLayers();
   const centerLayerName=cellType||"This nucleus";
+  const centerIds=bjumpCellSegIds(i,rootIdStr);          // proposals included -- 2026-09-09
   layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:centerLayerName,
-    segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+    segments:centerIds,segmentColors:bjumpOneColour(centerIds,BJUMP_CELL_COLOR),objectAlpha:0.85});
   const otherLayerName=(row.cellType||"Nearby nucleus")+" (nuc "+row.nucleusId+")";
   if(row.rootId){
     layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:otherLayerName,
@@ -2505,9 +2594,10 @@ function bjumpSynapseViewerLayers(){
 function openBjumpSynapseViewer(i, rootIdStr, cellType, synapseIdStr){
   const layers=bjumpSynapseViewerLayers();
   const centerLayerName=cellType||"This nucleus";
-  if(rootIdStr){
+  const centerIds=bjumpCellSegIds(i,rootIdStr);          // proposals included -- 2026-09-09
+  if(centerIds.length){
     layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:centerLayerName,
-      segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+      segments:centerIds,segmentColors:bjumpOneColour(centerIds,BJUMP_CELL_COLOR),objectAlpha:0.85});
   }
   const synLayerName="Synapse "+synapseIdStr;
   layers.push({type:"segmentation",source:UJ.cfg.viewer.synapses,tab:"source",name:synLayerName,
@@ -2536,9 +2626,10 @@ function openBjumpSynapseViewer(i, rootIdStr, cellType, synapseIdStr){
 function buildBjumpSynapseAllViewerState(i,rootIdStr,cellType,synapseIds){
   const layers=bjumpSynapseViewerLayers();
   const centerLayerName=cellType||"This nucleus";
-  if(rootIdStr){
+  const centerIds=bjumpCellSegIds(i,rootIdStr);          // proposals included -- 2026-09-09
+  if(centerIds.length){
     layers.push({type:"segmentation",source:UJ.cfg.viewer.seg,tab:"source",name:centerLayerName,
-      segments:[String(rootIdStr)],segmentColors:{[String(rootIdStr)]:"#ff3b3b"},objectAlpha:0.85});
+      segments:centerIds,segmentColors:bjumpOneColour(centerIds,BJUMP_CELL_COLOR),objectAlpha:0.85});
   }
   const synLayerName="Synapses ("+synapseIds.length+")";
   if(synapseIds.length){

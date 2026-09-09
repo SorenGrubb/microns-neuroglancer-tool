@@ -548,7 +548,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 21:04</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 06:30</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11844,6 +11844,16 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     /* The explainer is the only thing the Blender tick changes on this page -- there is no Nuclei
        or Vasculature tick to dim -- so the closure is short. Run once at build time as well as on
        change, so a fresh row is right before anything is clicked. */
+    /* WRITTEN OUT, not read off UJ.cfg.mesh.caveTokenKey, and the reason is storagekeycheck.js:
+       a key built from an expression is one that check cannot follow, which makes its two real
+       rules -- no two tools on the same key, every private key prefixed with its own page --
+       unenforceable. The config still holds this same string for the Connectivity panel that
+       writes the token; the assertion below is what stops the two from drifting. 2026-09-09. */
+    const DJUMP_CAVE_TOKEN_KEY="djump_cave_token";
+    if(UJ.cfg.mesh&&UJ.cfg.mesh.caveTokenKey&&UJ.cfg.mesh.caveTokenKey!==DJUMP_CAVE_TOKEN_KEY){
+      console.warn("CAVE token key mismatch: config says "+UJ.cfg.mesh.caveTokenKey
+                  +", this panel reads "+DJUMP_CAVE_TOKEN_KEY);
+    }
     (function(){
       const bl=row.querySelector(".colab-blender"), help=row.querySelector(".rbox-blender-help");
       if(!bl||!help)return;
@@ -11852,7 +11862,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
          saved token it is not rendered at all rather than rendered dead -- the same rule the
          Nuclei and Vasculature ticks follow on the other tools. */
       const cavLab=row.querySelector(".colab-cave-lab"), cav=row.querySelector(".colab-cave");
-      const haveToken=()=>{try{return !!localStorage.getItem(UJ.cfg.mesh&&UJ.cfg.mesh.caveTokenKey||"djump_cave_token");}catch(_e){return false;}};
+      const haveToken=()=>{try{return !!localStorage.getItem(DJUMP_CAVE_TOKEN_KEY);}catch(_e){return false;}};
       const sync=()=>{
         help.style.display=bl.checked?"":"none";
         if(cavLab)cavLab.style.display=(UJ.cfg.em&&UJ.cfg.em.segCaveAuth&&haveToken())?"flex":"none";
@@ -11880,7 +11890,7 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       const cavEl=row.querySelector(".colab-cave");
       let caveToken="";
       if(cavEl&&cavEl.checked){
-        try{caveToken=localStorage.getItem((UJ.cfg.mesh&&UJ.cfg.mesh.caveTokenKey)||"djump_cave_token")||"";}catch(_e){caveToken="";}
+        try{caveToken=localStorage.getItem(DJUMP_CAVE_TOKEN_KEY)||"";}catch(_e){caveToken="";}
         if(!caveToken)alert("No CAVE token is saved in this browser, so none can be included. Enter one in the Connectivity panel first, or untick the box and let Colab ask for it.");
       }
       if(!wantEM&&!wantSeg&&!wantMeshes){alert("Tick at least one of EM, Segmentation, or Cell 3D model.");return;}
