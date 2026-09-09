@@ -496,6 +496,9 @@ UJ.regionbox = (function(){
             return [0, 0, -t * (r[2] || 0)];
           })(),
           boxNM: boxNM, boxLabel: boxLabel, cells: cells,
+          /* Nanometres per voxel -- for the box centre drawn on the video, in the coordinates
+             the pages show. opts.res first, for the reason segOffsetNm gives above. */
+          resNm: opts.res || (UJ.cfg && UJ.cfg.res) || null,
           vascExtent: vxEl ? vxEl.value : "box",
           /* The TOOL'S OWN colours, read from its :root block, in the dark values whatever
              theme the page is showing -- the render's background is the dark one either way.
