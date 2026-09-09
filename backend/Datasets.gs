@@ -433,9 +433,12 @@ function combinedLeaderboardEndpoint(e) {
     var u = byEmail[email] || (byEmail[email] = { points: 0, reports: 0, per: {}, order: [] });
     u.points += pts;
     u.reports += reps;
-    /* A dataset row exists for anybody the rebuild saw; a row with no reports in it is not a tool
-       the person has "reported in", and drawing its letter would claim they had. */
-    if (ds && reps > 0) {
+    /* POINTS OR REPORTS -- see the same fix in index.html's pooling fallback. A dataset row
+       exists for anybody the rebuild saw, and a row with points but no reports is still a tool the
+       person has worked in: χJump and ωJump earn points through their own state stores and report
+       zero "reports" (measured 2026-09-09: 570.3/0 and 1987/0), so a reports-only gate would hide
+       exactly those two the moment this endpoint went live. */
+    if (ds && (reps > 0 || pts > 0)) {
       if (!u.per.hasOwnProperty(ds)) u.order.push(ds);
       u.per[ds] = (u.per[ds] || 0) + pts;
     }

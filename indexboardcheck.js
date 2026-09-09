@@ -151,8 +151,10 @@ const BOARD = {
     ujump: [{ handle: "Søren Grubb", points: 1471.1, reports: 250 },
             { handle: "Hesham", points: 369.3, reports: 125 }],
     pjump: [{ handle: "Søren Grubb", points: 70.7, reports: 15 }],
-    /* points but no reports — a computed volume. It must add to the total and NOT earn a letter. */
-    djump: [{ handle: "Søren Grubb", points: 0.3, reports: 0 }],
+    /* Points but no reports. MEASURED on the live backend, 2026-09-09: χJump answers 570.3/0 and
+       ωJump 1987/0 — their work goes through their own state stores, not the report sheets. So
+       this MUST earn a letter; a reports-only gate hid two whole tools for a day. */
+    wjump: [{ handle: "Søren Grubb", points: 1987, reports: 0 }],
     xjump: null                                   /* one tool down must not take the board down */
   };
   ({ p, seen } = await open(url => {
@@ -173,10 +175,10 @@ const BOARD = {
   })));
   ok(pooled.length === 2, "the pooled board has one row per person, not per tool",
      pooled.length + " rows");
-  ok(/1,542 points/.test(pooled[0].num) && /265 reports/.test(pooled[0].num),
+  ok(/3,529 points/.test(pooled[0].num) && /265 reports/.test(pooled[0].num),
      "points and reports are summed across tools", pooled[0].num);
-  ok(pooled[0].letters.join("") === "µπ",
-     "...with a letter per tool REPORTED in, points-only ones excluded",
+  ok(pooled[0].letters.join("") === "ωµπ",
+     "...with a letter per tool WORKED in — points count, not just reports",
      pooled[0].letters.join("") || "(none)");
   ok(pooled[1].name.indexOf("Hesham") >= 0, "everybody on any board is included", pooled[1].name);
   const pnote = (await p.textContent("#lbAllNote")).trim();

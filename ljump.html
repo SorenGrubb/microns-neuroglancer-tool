@@ -1165,6 +1165,118 @@ function cellLabel(i){
 }
 
 /* ── the cell panel ─────────────────────────────────────────────────────────────────── */
+/* ── community-added nuclei ───────────────────────────────────────────────────────────────
+   λJump's detector is size-tuned at 7.5 µm and finds about 46 % of the cells a direct count
+   predicts, with the shortfall concentrated in small glial nuclei (see the About card). So the
+   nuclei somebody adds by hand are not an edge case here, they are most of the tissue -- which is
+   why this tool needed the read-back µJump has had since the mode existed, and was the one without
+   it.
+
+   Matched by COORDINATE PROXIMITY rather than by id, because a cell with no detection has no id to
+   key on. Fetched once, eagerly, so it is already cached by the time anybody jumps. */
+let NEW_NUC_CACHE=null,NEW_NUC_FETCHED=false;
+function newNucCoord(rec){
+  const p=String((rec&&rec.coord)||"").split(/[\s,;]+/).filter(Boolean).map(Number);
+  return (p.length>=3&&p.every(isFinite))?p.slice(0,3):null;
+}
+async function fetchNewNuclei(){
+  if(NEW_NUC_CACHE)return NEW_NUC_CACHE;
+  if(!REPORT_ENDPOINT)return null;
+  try{
+    const ds=(UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds)||"";
+    const r=await fetch(REPORT_ENDPOINT+"?newCells=1"+(ds?"&ds="+encodeURIComponent(ds):""));
+    const d=await r.json();
+    if(!d||!d.newCells)return null;
+    /* A row with no readable coordinate cannot be jumped to or matched, and keeping it would only
+       make the count on screen bigger than the list under it. */
+    NEW_NUC_CACHE=d.newCells.filter(function(rec){return !!newNucCoord(rec);});
+    return NEW_NUC_CACHE;
+  }catch(_e){return null;}
+  finally{NEW_NUC_FETCHED=true;}
+}
+function kickNewNuclei(){ fetchNewNuclei().then(function(){ try{wireNewNucleusList();}catch(_e){} }); }
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",kickNewNuclei);
+else setTimeout(kickNewNuclei,0);
+/* Same anisotropic scaling as nearest() -- these coordinates are voxels in the same frame. */
+function nearestNewNucleus(vx,vy,vz){
+  if(!NEW_NUC_CACHE||!NEW_NUC_CACHE.length)return null;
+  let best=null,bd=Infinity;
+  for(const rec of NEW_NUC_CACHE){
+    const p=newNucCoord(rec);
+    const dx=(vx-p[0])*UJ_RX,dy=(vy-p[1])*UJ_RY,dz=(vz-p[2])*UJ_RZ;
+    const d=dx*dx+dy*dy+dz*dz;
+    if(d<bd){bd=d;best=rec;}
+  }
+  return {rec:best,dist:Math.sqrt(bd)};
+}
+function newNucIdOptionsHtml(){
+  try{
+    const LN=UJ.ontology.LEAF_NAMES,out=[];
+    for(const slug in LN)out.push(LN[slug]);
+    out.sort(function(a,b){return a.localeCompare(b);});
+    return out.map(function(nm){
+      return '<option value="'+escHtml(nm)+'">'+escHtml(nm)+'</option>';
+    }).join("");
+  }catch(_e){return "";}
+}
+/* The list under the form. Rebuilt on every panel render (the form is part of showCell's markup)
+   and again when the fetch lands, whichever is later. */
+function wireNewNucleusList(){
+  const host=document.getElementById("newnuclist");
+  if(!host)return;
+  if(!NEW_NUC_FETCHED){host.innerHTML='<p class="hint">Checking for nuclei others have added…</p>';return;}
+  const list=NEW_NUC_CACHE||[];
+  if(!list.length){host.innerHTML='<p class="hint">No nuclei have been added this way yet.</p>';return;}
+  const rows=list.slice().sort(function(a,b){
+    return String(b.timestamp||"").localeCompare(String(a.timestamp||""));
+  }).map(function(rec){
+    const p=newNucCoord(rec);
+    const who=rec.reporterName?(" &middot; "+escHtml(rec.reporterName)):"";
+    const what=rec.identified?escHtml(rec.identified)
+      :(rec.comment?('<span style="opacity:.75">'+escHtml(rec.comment)+'</span>'):'<span style="opacity:.6">unnamed</span>');
+    return '<div style="font-size:12px;padding:2px 0"><a href="#" class="newnucjump" '
+      +'data-x="'+p[0]+'" data-y="'+p[1]+'" data-z="'+p[2]+'">'+p.join(", ")+'</a> &mdash; '
+      +what+who+'</div>';
+  }).join("");
+  host.innerHTML='<p class="hint" style="margin-bottom:2px"><b>'+list.length+'</b> nucle'
+    +(list.length===1?"us has":"i have")+' been added this way. Click a coordinate to go there.</p>'
+    +'<div style="max-height:150px;overflow:auto;border:1px solid var(--line);border-radius:6px;'
+    +'padding:6px 8px">'+rows+'</div>';
+  host.querySelectorAll(".newnucjump").forEach(function(a){
+    a.addEventListener("click",function(ev){
+      ev.preventDefault();
+      document.getElementById("x").value=a.dataset.x;
+      document.getElementById("y").value=a.dataset.y;
+      document.getElementById("z").value=a.dataset.z;
+      document.getElementById("go").click();
+    });
+  });
+}
+/* The panel for a cell the detector never found. Deliberately short: there is no layer tag, no
+   detector pass and no diameter to show, because nothing measured this nucleus -- somebody said it
+   is there. Saying so is the point of the card. */
+function showNewNucleus(rec,distNm){
+  const p=newNucCoord(rec);
+  CUR_IDX=-1;CUR_NUCID="";CUR_ROOT="";
+  window.CUR_POS=p.slice();
+  window.CUR_CELLTYPE_DISPLAY=rec.identified||null;
+  window.CUR_MICRONS_NAME=null;window.CUR_COMMUNITY_TOP_NAME=rec.identified||null;
+  let h='<div class="card">';
+  h+='<div class="celltype">'+celltypeLink(p,escHtml(rec.identified||"Unnamed cell"))+'</div>';
+  h+='<div style="margin-top:6px"><span class="tag none">added by the community</span>'
+    +(rec.identified?"":' <span class="tag none">unnamed</span>')+'</div>';
+  h+='<p class="hint" style="margin-top:8px">This nucleus has no detection of its own \u2014 '
+    +'somebody added it because the detector missed it. It is not in the 488 the detector found, so '
+    +'it has no diameter, layer or pass of its own.</p>';
+  h+='<div class="row" style="margin-top:6px"><div class="coord" style="flex:1">'
+    +p.join(", ")+'</div></div>';
+  if(rec.reporterName)h+='<p class="hint">Added by '+escHtml(rec.reporterName)
+    +(rec.timestamp?(" on "+escHtml(String(rec.timestamp).slice(0,10))):"")+'.</p>';
+  if(rec.comment)h+='<p class="hint">&ldquo;'+escHtml(rec.comment)+'&rdquo;</p>';
+  if(distNm>0)h+='<p class="hint">'+(distNm/1000).toFixed(1)+' \u00b5m from the coordinate you typed.</p>';
+  h+='</div>';
+  document.getElementById("panel").innerHTML=h;
+}
 function showCell(i, distNm){
   CUR_IDX=i;
   const pos=[BX[i],BY[i],BZ[i]], nb=kNearest(pos[0],pos[1],pos[2],3,i);
@@ -1267,9 +1379,27 @@ function showCell(i, distNm){
   h+='<div class="row"><div class="coord" style="flex:2"><input type="text" id="newnuccoord" '
     +'placeholder="missed nucleus x, y, z (voxels)"></div>'
     +'<button class="idbtn" id="fixnew" style="flex:1">Add a missed nucleus</button></div>';
+  /* AN IDENTITY, not a comment. Søren, 2026-09-09: "I tried to report a missing nucleus and
+     suggested it was an astrocyte, but it did not show up as a new nucleus nor an astrocyte." His
+     row is in the sheet with identified:"" and comment:"Astrocyte" -- because this form had a
+     comment box and no identity field, so the word he typed could never be read as one. The sheet
+     has had an `identified` column all along and aggregateAll() counts this sheet as one of the
+     two that carry a real cell type.
+
+     Built from the shared ontology and submitted through canonSubmitName(), the same call this
+     tool's own identification flow makes, so a community-added astrocyte and a detected one are
+     the same string in the sheet rather than two spellings nothing can join. Flat and alphabetical
+     because ontology.js publishes no category map; the decision tree is the guided route and this
+     is the "I already know what it is" one. */
+  h+='<div class="row" style="margin-top:6px"><select id="newnucid" style="flex:1">'
+    +'<option value="">What kind of cell is it? (optional)</option>'
+    +newNucIdOptionsHtml()+'</select></div>';
   h+='<div class="row" style="margin-top:6px"><input type="text" id="newnuccomment" '
     +'placeholder="comment (optional) — what it looks like" style="flex:1"></div>';
   h+='<p class="hint" id="fixnewmsg"></p>';
+  /* Filled in by wireNewNucleusList() once the fetch lands -- so a nucleus added this way can be
+     found again by somebody who does not have its coordinate written down. */
+  h+='<div id="newnuclist"></div>';
 
   h+='<button class="jump" id="jumphere">Jump to this nucleus &#8599;</button>';
 
@@ -1521,6 +1651,9 @@ function wireCorrection(i){
      detection of its own to key against. Posts Code.gs's existing "new_cell_no_nucleus" type
      directly, coord-only plus an optional comment -- the "unclassified, location only" row
      shape it already supports. */
+  /* The form is part of showCell()'s markup, so the list is rebuilt with every panel render --
+     and again by the fetch's own .then() when that is the later of the two. */
+  try{wireNewNucleusList();}catch(_e){}
   const an=document.getElementById("fixnew");
   if(an) an.addEventListener("click",function(){
     const nmsg=document.getElementById("fixnewmsg");
@@ -1529,15 +1662,35 @@ function wireCorrection(i){
     const raw=(coordEl.value||"").trim().split(/[\s,;]+/).filter(Boolean);
     if(raw.length<3){ nmsg.textContent="Paste three numbers: x, y, z in voxels."; return; }
     const commentEl=document.getElementById("newnuccomment");
+    const idEl=document.getElementById("newnucid");
+    /* canonSubmitName, not the raw label: the ontology carries several display names that submit
+       as one canonical identity, and this form has to agree with the tool's own identification
+       flow (see its canonSubmitName call) or the same cell type arrives in the sheet under two
+       spellings and nothing can join them. */
+    let ident="";
+    try{ ident=UJ.ontology.canonSubmitName((idEl&&idEl.value||"").trim())||""; }
+    catch(_e){ ident=(idEl&&idEl.value||"").trim(); }
     nmsg.textContent="sending…";
     postReport({
       type:"new_cell_no_nucleus",
       coord:raw.slice(0,3).join(","),
+      identified:ident,
       comment:(commentEl&&commentEl.value||"").trim(),
       timestamp:new Date().toISOString()
     },"missed nucleus").then(function(d){
       nmsg.textContent=(d&&d.ok)?"Thank you — recorded.":"Could not record that.";
-      if(d&&d.ok){ coordEl.value=""; if(commentEl)commentEl.value=""; }
+      if(d&&d.ok){
+        coordEl.value=""; if(commentEl)commentEl.value=""; if(idEl)idEl.value="";
+        /* Straight into the list under the form, without waiting for a reload -- the row is
+           already saved and the cache is the only thing that does not know it yet. Sheets need a
+           moment before a re-read would return it, and re-reading to learn what we just sent is
+           slower and no more true. */
+        if(NEW_NUC_CACHE)NEW_NUC_CACHE.push({coord:raw.slice(0,3).join(","),identified:ident,
+          comment:(commentEl&&commentEl.value||"").trim(),
+          reporterName:(typeof REPORTER_NAME!=="undefined"&&REPORTER_NAME)||"",
+          timestamp:new Date().toISOString()});
+        try{wireNewNucleusList();}catch(_e2){}
+      }
     }).catch(function(e){ nmsg.textContent="failed: "+netErr(e); });
   });
 }
@@ -1561,6 +1714,18 @@ function doJump(){
   if(raw.some(v=>!isFinite(v)))return fail("Enter all three coordinates.");
   const v=toVoxels(raw[0],raw[1],raw[2]).map(Math.round);
   const r=nearest(v[0],v[1],v[2]);
+  /* A nucleus somebody ADDED counts as a nucleus. Whichever is genuinely closer to the typed
+     coordinate wins -- there is no reason a detection should beat a hand-placed nucleus that is
+     nearer, and on this dataset most real cells have no detection at all. Before 2026-09-09 the
+     community list was not consulted at all, so pasting the coordinate of a cell you had added
+     yourself landed on whatever detection happened to be nearest and looked like the report had
+     been thrown away. */
+  const nn=nearestNewNucleus(v[0],v[1],v[2]);
+  if(nn&&(r.i<0||nn.dist<r.dist)){
+    if(nn.dist>30000) fail("Nearest nucleus is "+(nn.dist/1000).toFixed(1)+" µm away — that coordinate may be outside the tissue, which fills only about 454 × 447 µm of the 655 µm frame.");
+    showNewNucleus(nn.rec,nn.dist);
+    return;
+  }
   if(r.i<0)return fail("No nucleus found.");
   if(r.dist>30000) fail("Nearest nucleus is "+(r.dist/1000).toFixed(1)+" µm away — that coordinate may be outside the tissue, which fills only about 454 × 447 µm of the 655 µm frame.");
   showCell(r.i,r.dist);

@@ -1091,9 +1091,19 @@ function toggleTheme(){ setTheme(currentTheme() === "dark" ? "light" : "dark"); 
             var e=by[h]||(by[h]={handle:h,points:0,reports:0,perDataset:{},datasets:[]});
             var p=Number(u.points)||0,rep=Number(u.reports)||0;
             e.points+=p;e.reports+=rep;
-            /* A tool where somebody has points but no reports (a computed volume, say) is not one
-               they have "reported in", and drawing its letter would claim they had. */
-            if(rep>0){
+            /* POINTS OR REPORTS. This read `rep>0` for a day, with a comment arguing that a tool
+               where somebody has points but no reports is not one they have "reported in" --
+               which is true and is the wrong question. Søren, 2026-09-09: "Why am I not attributed
+               xJump and wJump points?" Measured: χJump 570.3 points / 0 reports, ωJump 1987 / 0.
+               Their work goes through their own state stores rather than the report sheets, earns
+               points through the points index, and lands in aggregateAll()'s report tally as zero
+               -- so a reports-only gate hid exactly the two tools whose contribution model is not
+               a report. The points were always in the total; only the letters were missing.
+
+               The case the old rule guarded against -- one 0.1-point computed volume earning a
+               letter -- is worth showing anyway: that is work done in that tool, and the letter's
+               own tooltip says how much. */
+            if(rep>0||p>0){
               if(!e.perDataset.hasOwnProperty(ds))e.datasets.push(ds);
               e.perDataset[ds]=(e.perDataset[ds]||0)+p;
             }
