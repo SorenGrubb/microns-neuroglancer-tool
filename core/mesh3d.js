@@ -529,7 +529,21 @@ UJ.mesh3d = (function(){
         }).then(function(m){
           var geo = prepare(m.positions, m.indices,
             { unitNm: o.unitNm === undefined ? 1000 : o.unitNm, extentNm: o.extentNm });
-          show(host, geo, { lead: o.lead ? o.lead(root, m, geo) : null,
+          var lead = o.lead ? o.lead(root, m, geo) : null;
+          /* A fragment that did not load is not a footnote. Søren, 2026-09-09, on πJump: "I tried
+             Show in 3D and it had not included the root ID I submitted." It had tried; the mesh
+             behind that ID is 128 fragments and over 192 MB, and fetchCombinedMesh dropped it and
+             drew the rest without a word. Drawing one of two fragments and saying nothing is the
+             one outcome that reads as the proposal having been ignored. */
+          if (m.skipped && m.skipped.length){
+            lead = (lead ? lead + "<br>" : "")
+              + "<b style='color:var(--bad)'>" + m.skipped.length + " proposed root ID"
+              + (m.skipped.length > 1 ? "s are" : " is") + " not drawn here.</b> <span class='hint'>"
+              + m.skipped.map(function(s){
+                  return esc(s.rootId || "(unknown)") + " — " + esc(s.message); }).join("; ")
+              + "</span>";
+          }
+          show(host, geo, { lead: lead,
                             emptyMessage: "This cell has no mesh geometry to draw." });
         }).catch(function(e){
           host.innerHTML = "<div class='m3d'><div class='m3d-err'>Could not load the mesh: "

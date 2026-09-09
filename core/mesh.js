@@ -729,6 +729,11 @@ UJ.mesh=(()=>{
         meshes.push(m);usedIds.push(rootIds[i]);
       }catch(err){
         console.warn("[uJump mesh] root ID "+rootIds[i]+" unavailable, skipping:",err&&err.message);
+        /* WHICH id failed, not just that one did. Dropping a root ID and carrying on is right --
+           one unfetchable fragment should not cost the whole cell -- but doing it silently is how
+           Søren concluded (2026-09-09, πJump) that his proposed root ID had been ignored, when in
+           fact its mesh is 128 fragments and over 192 MB and the size guard refuses it. */
+        try{err.rootId=rootIds[i];}catch(_e){}
         failures.push(err);
       }
     }
@@ -740,9 +745,14 @@ UJ.mesh=(()=>{
       err.meshCached=allCached;throw err;
     }
     const mainUnavailable=usedIds.indexOf(String(mainRootIdStr))<0;
+    /* Every candidate that was asked for and did not arrive, in the caller's hands rather than only
+       in the console. Empty on the ordinary path, so a caller that ignores it is unchanged. */
+    const skipped=failures.map(function(e){
+      return {rootId:(e&&e.rootId)||"",message:(e&&e.message)||"unavailable",meshCached:!!(e&&e.meshCached)};
+    });
     if(meshes.length===1){
       const m=meshes[0];
-      return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds:usedIds,mainUnavailable};
+      return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds:usedIds,mainUnavailable,skipped};
     }
     let totalV=0,totalI=0,bytes=0;
     meshes.forEach(m=>{totalV+=m.positions.length;totalI+=m.indices.length;bytes+=m.bytes||0;});
@@ -753,7 +763,7 @@ UJ.mesh=(()=>{
       for(let k=0;k<m.indices.length;k++)indices[iOff+k]=m.indices[k]+vCount;
       vOff+=m.positions.length;iOff+=m.indices.length;vCount+=m.positions.length/3;
     });
-    return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:meshes.length,rootIds:usedIds,mainUnavailable};
+    return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:meshes.length,rootIds:usedIds,mainUnavailable,skipped};
   }
   /* ---------- the EXPORT half, split out from the FETCH half (2026-09-01) ----------
      Søren asked for χJump's cb2 cells to get the same three buttons these tools have: a .glb, a

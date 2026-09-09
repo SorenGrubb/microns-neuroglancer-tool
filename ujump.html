@@ -5279,11 +5279,17 @@ function decorateMeshVolButtons(){
       if(btn.style.display!==wantDisplay)btn.style.display=wantDisplay;
       return;
     }
-    const savedFragCount=known.fragmentCount||1;
+    /* combinedFrom, when a compute in THIS session set it, is how many root IDs were attempted;
+       fragmentCount is how many produced geometry. Comparing against the attempted count is what
+       stops a cell with a permanently-unfetchable proposed fragment from reading as out of date
+       forever. A row read back from the sheet has no combinedFrom and falls through unchanged. */
+    const savedFragCount=known.combinedFrom||known.fragmentCount||1;
     const stale=curFragCount>savedFragCount;
     if(volEl){
       const valSpan=volEl.querySelector(".idval");
-      const volStr="≈ "+Math.round(known.volumeUm3).toLocaleString()+" µm³";
+      const volStr="≈ "+Math.round(known.volumeUm3).toLocaleString()+" µm³"
+        +((known.skipped&&known.skipped.length)?" — "+known.skipped.length+" fragment"+(known.skipped.length>1?"s":"")+" missing":"")
+        +(known.unsaved?" — not saved":"");
       const volTitle=(stale?(curFragCount-savedFragCount)+" additional root ID"+(curFragCount-savedFragCount>1?"s have":" has")+" been proposed since this was computed — may be out of date. ":"")
         +"Computed from the decoded mesh geometry"+(known.timestamp?" on "+String(known.timestamp).slice(0,10):"")
         +(savedFragCount>1?" ("+savedFragCount+" fragments combined)":"")+". Click to copy.";
@@ -5291,7 +5297,21 @@ function decorateMeshVolButtons(){
       if(valSpan&&valSpan.title!==volTitle)valSpan.title=volTitle;
       if(volEl.style.display!=="flex")volEl.style.display="flex";
     }
-    if(btn.dataset.volFresh==="1")return; // the click handler already set the button's final state itself
+    /* data-vol-fresh means the click handler owns this button's state. It stops being true the
+       moment the world moves under it: another root ID proposed since (stale), or a result the save
+       gate refused and that still needs signing in (unsaved). Until 2026-09-09 this was an
+       unconditional return, which is exactly how a volume computed while signed out hid its own
+       button for the rest of the session with nothing left to click. */
+    if(btn.dataset.volFresh==="1"&&!stale&&!known.unsaved)return;
+    if(stale||known.unsaved)btn.dataset.volFresh="";
+    if(known.unsaved){
+      if(btn.style.display!=="")btn.style.display="";
+      const uTitle="This volume was computed but not saved. "+(known.unsavedWhy
+        ||"Sign in with Google (top right) and run it again.")+" Clicking recomputes it and saves it.";
+      if(btn.dataset.origLabel!=="Save volume"||btn.title!==uTitle){
+        btn.textContent="Save volume";btn.dataset.origLabel="Save volume";btn.title=uTitle;}
+      return;
+    }
     if(!stale){
       if(btn.style.display!=="none")btn.style.display="none";
       return;
@@ -5461,6 +5481,37 @@ function segTypeLabel(t){return t==="img35"?"Seg35":(t==="nucleus35"?"Nucleus·3
    img65 fragments) -- per-row instances inside the merged report form don't touch it, since
    their extra IDs belong to a not-yet-real sub-cell, not to whatever nucleus is currently on
    screen behind the report form. */
+/* ── THE ROW IS NOT THERE YET ────────────────────────────────────────────────────  2026-09-09
+   Søren, on πJump: "When I found that this glia was missing a root ID i first pasted it in and
+   submitted, then nothing happened, when I did it again, it did work."
+
+   Nothing was wrong with the submit. The panel re-read itself 1500 ms later, Apps Script had not
+   finished appending the row, the re-read returned the OLD list, and the panel redrew unchanged --
+   which is indistinguishable from a submit that did nothing. The second click "worked" because by
+   then the FIRST one's row was visible. The backend upserts by root ID, so two clicks left one row:
+   the sheet looked fine and the page looked broken.
+
+   A longer fixed delay only moves the line. This polls until the change is actually there, and the
+   caller says what "there" means -- an ID that has appeared, one that has gone, a vote count that
+   has moved -- so the same helper serves propose, remove and vote without any of them guessing.
+   Gives up after ~9 s with one last render, so a write that genuinely failed still ends in a
+   truthful panel rather than a spinner. */
+function reloadRootIdPanelWhen(nid,containerEl,ready){
+  var tries=0;
+  (function again(){
+    tries++;
+    fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(nid))
+      .then(function(r){return r.json();})
+      .then(function(d){
+        var list=(d&&d.rootIds)||[];
+        var done=false;
+        try{done=!ready||!!ready(list);}catch(_e){done=true;}
+        if(done||tries>=10){loadRootIdPanel(nid,containerEl);return;}
+        setTimeout(again,900);
+      })
+      .catch(function(){loadRootIdPanel(nid,containerEl);});
+  })();
+}
 function loadRootIdPanel(nid,containerEl){
   const el=containerEl||document.getElementById("rootIdPanel");
   if(!containerEl)CUR_EXTRA_ROOTS=[];
@@ -5515,18 +5566,27 @@ function loadRootIdPanel(nid,containerEl){
     tog.addEventListener("click",(e)=>{e.preventDefault();setOpen(bod.style.display==="none");});
     el.querySelectorAll(".ridcopy").forEach(b=>b.addEventListener("click",()=>{navigator.clipboard&&navigator.clipboard.writeText(b.dataset.rid);const o=b.textContent;b.textContent="copied";setTimeout(()=>b.textContent=o,800);}));
     el.querySelectorAll(".ridvote").forEach(b=>b.addEventListener("click",()=>{
-      if(postReport({type:"vote_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid,vote:Number(b.dataset.v)},"Vote recorded — thank you.")){if(!containerEl)window.__ridOpen=true;setTimeout(()=>loadRootIdPanel(nid,containerEl),1500);}
+      const wasRow=list.filter(function(x){return String(x.rootId)===String(b.dataset.rid);})[0];
+      const wasNet=wasRow?Number(wasRow.net):null;
+      if(postReport({type:"vote_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid,vote:Number(b.dataset.v)},"Vote recorded — thank you.")){if(!containerEl)window.__ridOpen=true;
+        reloadRootIdPanelWhen(nid,containerEl,function(l){
+          var r=l.filter(function(x){return String(x.rootId)===String(b.dataset.rid);})[0];
+          return !r||wasNet===null||Number(r.net)!==wasNet;});}
     }));
     el.querySelectorAll(".ridremove").forEach(b=>b.addEventListener("click",()=>{
       if(!confirm("Remove proposed ID "+b.dataset.rid+" from this cell for everyone?"))return;
-      if(postReport({type:"remove_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid},"Removed.")){if(!containerEl)window.__ridOpen=true;setTimeout(()=>loadRootIdPanel(nid,containerEl),1500);}
+      if(postReport({type:"remove_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:b.dataset.rid},"Removed.")){if(!containerEl)window.__ridOpen=true;
+        reloadRootIdPanelWhen(nid,containerEl,function(l){
+          return !l.some(function(x){return String(x.rootId)===String(b.dataset.rid);});});}
     }));
     const pb=el.querySelector("#ridPropose");
     if(pb)pb.addEventListener("click",()=>{
       const v=((el.querySelector("#ridInput")||{}).value||"").trim();
       const stv=((el.querySelector("#ridType")||{}).value)||"img65";
       if(!/^\d{5,}$/.test(v)){alert("Enter a numeric ID (the long segment or nucleus ID from Neuroglancer).");return;}
-      if(postReport({type:"propose_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:v,segType:stv},"Proposed — thank you.")){if(!containerEl)window.__ridOpen=true;setTimeout(()=>loadRootIdPanel(nid,containerEl),1500);}
+      if(postReport({type:"propose_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:v,segType:stv},"Proposed — thank you.")){if(!containerEl)window.__ridOpen=true;
+        reloadRootIdPanelWhen(nid,containerEl,function(l){
+          return l.some(function(x){return String(x.rootId)===String(v);});});}
     });
     if(containerEl||window.__ridOpen)setOpen(true);
   };
@@ -6318,12 +6378,35 @@ document.addEventListener("click",(e)=>{
            the first combined root ID MeshDL actually used (info.rootIds[0]) so the saved/cached
            entry is traceable, matching computedVolCacheKeys()'s "nuc:"+nucleusId fallback key. */
         const effectiveRootId=rootId||(info.rootIds&&info.rootIds[0])||"";
+        /* ── A COMPUTE THAT WAS NOT SAVED MUST NOT LOCK THE BUTTON ──────────────────  2026-09-09
+           Søren, on πJump: "I clicked calculate volume, and it did that without me being signed in.
+           But, there was no option to recalculate when I was signed in."
+
+           Computing signed out is deliberate (see maybeSaveComputedVolume): the number is for you,
+           and most people trying it are not signed in. What was NOT deliberate is what followed --
+           the button hid itself for the rest of the session (data-vol-fresh) and the result went
+           into _computedVolumesMap as though it had been saved, so signing in afterwards left no
+           way to record it, on this cell, ever. The gate is asked here, BEFORE the button's state
+           is decided, and when it refuses the button stays and says what it is now for. */
+        const volGate=saveGateNote();
         volBtn.dataset.volFresh="1";
-        volBtn.dataset.origLabel="Compute volume";
-        volBtn.style.display="none";
+        volBtn.dataset.origLabel=volGate?"Save volume":"Compute volume";
+        volBtn.textContent=volBtn.dataset.origLabel;
+        volBtn.style.display=volGate?"":"none";
         if(window._computedVolumesMap){
           const freshEntry={volumeUm3:info.volumeUm3||0,nucVolumeUm3:volNucVolUm3||0,cellType:volLiveCellType||"",
-            fragmentCount:info.fragmentCount||1,timestamp:new Date().toISOString()};
+            fragmentCount:info.fragmentCount||1,
+            /* How many root IDs were ATTEMPTED, not how many produced geometry -- what "stale"
+               has to compare against. πJump's proposed 648518346341354380 is 128 fragments and
+               over 192 MB, refused by the size guard every single time, so counting only what
+               arrived would leave this cell permanently "out of date", offering a recalculate that
+               could never change its answer. Session-only: the sheet has no column for it, and a
+               row read back without one falls through to fragmentCount, which is today's
+               behaviour unchanged. */
+            combinedFrom:(info.fragmentCount||1)+((info.skipped&&info.skipped.length)||0),
+            skipped:(info.skipped||[]).slice(),
+            unsaved:!!volGate, unsavedWhy:volGate||"",
+            timestamp:new Date().toISOString()};
           computedVolCacheKeys(effectiveRootId,volNucleusId).forEach(function(key){window._computedVolumesMap[key]=freshEntry;});
         }
         const rowEl=volBtn.closest(".idrow");
@@ -6331,11 +6414,15 @@ document.addEventListener("click",(e)=>{
         if(volEl){
           const valSpan=volEl.querySelector(".idval");
           const combinedStr=info.fragmentCount>1?" ("+info.fragmentCount+" fragments combined)":"";
-          /* ASKED BEFORE THE SAVE, so the tooltip written below states what is about to
-             happen rather than repeating a hope. The call itself is still made further down. */
-          const volGate=saveGateNote();
+          /* volGate was asked above, before the button's state was decided -- so the tooltip states
+             what is about to happen rather than repeating a hope, and the button and the sentence
+             cannot disagree. */
+          const skippedN=(info.skipped&&info.skipped.length)||0;
+          const skippedStr=skippedN?(" "+skippedN+" proposed root ID"+(skippedN>1?"s were":" was")
+            +" NOT included: "+info.skipped.map(function(s){return s.rootId+" ("+s.message+")";}).join("; ")+"."):"";
           if(valSpan){
             valSpan.textContent="≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"
+              +(skippedN?" — "+skippedN+" fragment"+(skippedN>1?"s":"")+" missing":"")
               +(volGate?" — not saved":"");
             valSpan.dataset.c=String(Math.round(info.volumeUm3*100)/100);
             /* mainUnavailable (2026-08, Søren: main root ID's mesh was "cached unavailable" but a
@@ -6346,7 +6433,7 @@ document.addEventListener("click",(e)=>{
             /* IT USED TO SAY "Saved to the shared dashboard just now" WHATEVER HAPPENED --
                signed in or not, saved or dropped. That is the one sentence a page must not get
                wrong: it removes the only reason somebody would sign in and do it again. */
-            valSpan.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices)"+combinedStr+" — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure."+fallbackStr+" "+(volGate||"Saved to the shared dashboard just now.")+" Click to copy.";
+            valSpan.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices)"+combinedStr+" — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure."+fallbackStr+skippedStr+" "+(volGate||"Saved to the shared dashboard just now.")+" Click to copy.";
           }
           volEl.style.display="flex";
         }
@@ -9425,6 +9512,16 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       window.__COMM_ROWTYPE=map;
     }catch(_e){window.__COMM_ROWTYPE=window.__COMM_ROWTYPE||{};}
     ALL_IDENTITIES=null; // force rebuild so the override is reflected wherever ALL_IDENTITIES is read
+    /* ...and the numbers beside the type checkboxes, which filterTypeTally() now reads
+       __COMM_ROWTYPE for. This fetch resolves AFTER the filter panel is first drawn, so without a
+       rebuild the counts would keep their pre-community values for the life of the page and a cell
+       somebody just identified would go on reading as zero. Safe to call at any time: the builder
+       carries the ticked boxes across a rebuild. typeof-guarded because this fires at init, which
+       can be before the filter panel's own IIFE has defined either function. */
+    try{
+      if(typeof window.buildFilterTypeCheckboxes==="function")window.buildFilterTypeCheckboxes();
+      if(typeof window.buildNearTypeCheckboxes==="function")window.buildNearTypeCheckboxes();
+    }catch(_e2){}
   }
   window.ensureCommunityOverride=ensureCommunityOverride;
   ensureCommunityOverride(); // fire-and-forget at init so the override is usually ready before first use
@@ -9614,9 +9711,19 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     for(let i=0;i<N;i++){
       const ot=OWN_TYPE[i];
       if(ot!==255){add(OWN_TYPE_NAMES[ot]);continue;}
-      const k=NT[i];if(k===0)continue;
       const mg=mergedInfo(i);
       if(mg){for(const m of mg)add(m.type);continue;}
+      /* THE COMMUNITY LOOKUP COMES BEFORE THE "NO PREDICTION, SKIP" BAIL, and the order is the
+         whole fix. buildAllIdentities() learned this on 2026-08-30 -- Søren identified a microglia
+         by bounding box and it never appeared under the Microglia checkbox, because the override
+         was consulted after `if(t===0)continue` and MICrONS makes no prediction at all for exactly
+         the types people report most. This tally kept the old order until 2026-09-09 ("I have
+         reported some cells in pJump but they do not show up in the filter"), which is why a cell
+         he had named himself counted as nothing. Same precedence as buildAllIdentities: own >
+         merged breakdown > community > prediction. */
+      const covr=window.__COMM_ROWTYPE?window.__COMM_ROWTYPE[String(NID[i])]:null;
+      if(covr){add(covr);continue;}
+      const k=NT[i];if(k===0)continue;
       add(CT_NAMES[k-1]);
     }
     for(let i=0;i<ST_N;i++)add(OWN_TYPE_NAMES[ST_TYPE[i]]);
@@ -9640,14 +9747,36 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      the two lists' :checked state never collides in activeTypeSet()/activeNearTypeSet(). */
   window.buildTypeCheckboxesInto=function(container,cls){
     if(!container)return;
+    /* What is ticked survives a rebuild. Before the counts were redrawn on the community fetch
+       this never came up -- the list was built once, at init, with nothing checked. It does now,
+       and silently clearing somebody's selection while they are choosing would be worse than the
+       stale numbers this rebuild exists to fix. */
+    const was={};
+    container.querySelectorAll("input[type=checkbox]").forEach(function(cb){if(cb.checked)was[cb.value]=1;});
     const tally=filterTypeTally();
     const countFor=v=>{const al=TYPE_ALIASES[v]||[v];let n=0;for(const a of al)n+=(tally.get(a)||0);return n;};
     let html="";
     for(const cat of CATEGORY_ORDER){
-      const members=(CATEGORY_MEMBERS[cat]||[]).filter(n=>countFor(n)>0);
+      /* EVERY member, not only the ones with cells -- δJump's 2026-09-02 shape, brought here
+         2026-09-09 on the same request ("It would be nice if all the possible cells are just
+         greyed out until they are identified"). The 2026-08-20 rule this replaces was "only offer
+         a type that EXISTS", and it was right about the thing it fixed: ticking a checkbox and
+         getting nothing back, with no hint why. That is still not allowed -- an empty type is
+         DIMMED, its count says 0, and its tooltip says what that means. Shown, and shown to be
+         empty. ηJump has drawn its zero-count pools this way since it was written. */
+      const members=CATEGORY_MEMBERS[cat]||[];
       if(!members.length)continue;
       html+='<div style="margin-top:8px"><b style="font-size:12px;color:var(--mut)">'+cat+'</b><div class="toggles" style="margin-top:4px">';
-      for(const n of members)html+='<label style="font-size:12px" title="'+typeTitle(n)+'"><input type="checkbox" class="'+cls+'" value="'+n+'"> '+n+' <span class="nsub">'+countFor(n).toLocaleString()+'</span></label>';
+      for(const n of members){
+        const c=countFor(n), empty=!c;
+        const tip=empty
+          ? typeTitle(n)+" — no cell in this dataset carries this identity yet. Tick it anyway: it "
+            +"starts matching the moment somebody reports one."
+          : typeTitle(n);
+        html+='<label style="font-size:12px'+(empty?';opacity:.55':'')+'" title="'+tip+'">'
+          +'<input type="checkbox" class="'+cls+'" value="'+n+'"'+(was[n]?' checked':'')+'> '+n
+          +' <span class="nsub">'+c.toLocaleString()+'</span></label>';
+      }
       html+="</div></div>";
     }
     container.innerHTML=html;
