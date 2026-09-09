@@ -383,7 +383,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 06:30</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 16:01</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -957,6 +957,11 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/synmesh.js"></script>
 <script src="core/synvol.js"></script>
 <script src="core/points.js"></script>
+<!-- core/matchcount.js -- what "Preview matches" says once it has some. Søren, 2026-09-09:
+     "it would be helpful if the preview matches told me how many matches there are after i
+     click it ... Please make it consistent." The count goes on the BUTTON on every tool, in
+     one wording, from one file -- the same reason core/points.js is a file. -->
+<script src="core/matchcount.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/organelles.js"></script>
 <script src="core/ontology.js"></script>
@@ -3636,16 +3641,28 @@ function buildColumnsBjump(){
   // identity <select>, which is only added to the DOM after fetchBjumpIdentities() resolves
   // (below), can wire the exact same invalidate-on-change behaviour the static inputs get from
   // the querySelectorAll sweep further down.
+  /* THE COUNT GOES ON THE BUTTON, as it does on every other tool -- 2026-09-09, Søren: "I
+     noticed that hJump and maybe also bJump doesnt do it". It did, in the status line below,
+     which is the place nobody looks. That line stays; the button is what changed. */
+  /* core/matchcount.js if it loaded, no-ops if it did not: these files are deployed one at a
+     time, and a page that arrives before the module it needs must lose the count on the button,
+     not the whole filter panel. xjumppagecheck.js found this by loading the page without it.
+     Resolved AT CALL TIME -- the pattern core/gamify.js uses and says so: a value captured when
+     this script ran would freeze whatever had loaded by then. */
+  function MC(){return (window.UJ&&UJ.matchcount)||{set:function(){},idle:function(){},busy:function(){}};}
+  const NUCLEI={one:"nucleus",many:"nuclei"};
   function invalidatePreview(){
     lastMatches=null;
     dlBtn.disabled=true;
     dlBtn.title="Click \"Preview matches\" first";
     statusEl.textContent="";
+    MC().idle();
     UJ.stepthrough.initStepThrough(null);
   }
   function runPreview(){
     lastMatches=runFilterBjump();
     const n=lastMatches.length;
+    MC().set(n,{noun:NUCLEI});
     statusEl.textContent=n===0?"No matching nuclei — adjust filters.":
       n.toLocaleString()+" matching "+(n===1?"nucleus":"nuclei")+" found.";
     dlBtn.disabled=n===0;

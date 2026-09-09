@@ -433,7 +433,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 21:04</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 16:01</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -898,6 +898,11 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/blenderexport.js"></script>
 <script src="core/organellefilter.js"></script>
 <script src="core/points.js"></script>
+<!-- core/matchcount.js -- what "Preview matches" says once it has some. Søren, 2026-09-09:
+     "it would be helpful if the preview matches told me how many matches there are after i
+     click it ... Please make it consistent." The count goes on the BUTTON on every tool, in
+     one wording, from one file -- the same reason core/points.js is a file. -->
+<script src="core/matchcount.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/organelles.js"></script>
 <script src="core/ontology.js"></script>
@@ -3508,10 +3513,20 @@ function runFilter(){
   initHjumpStepThrough(rows);
 }
 
+  /* core/matchcount.js if it loaded, no-ops if it did not: these files are deployed one at a
+   time, and a page that arrives before the module it needs must lose the count on the button,
+   not the whole filter panel. xjumppagecheck.js found this by loading the page without it.
+   Resolved AT CALL TIME -- the pattern core/gamify.js uses and says so: a value captured when
+   this script ran would freeze whatever had loaded by then. */
+function MC(){return (window.UJ&&UJ.matchcount)||{set:function(){},idle:function(){},busy:function(){}};}
 function renderFilterResults(){
   const rows=FILTER.rows, st=document.getElementById("filterStatus"),
         out=document.getElementById("filterResults"),
         xb=document.getElementById("filterXlsx"), vb=document.getElementById("filterViewer");
+  /* ON THE BUTTON as well as here -- 2026-09-09, Søren named this tool: "hJump ... doesnt do
+     it". It did, in this line, which sits under the buttons and is read by nobody. The line
+     stays: the share of the volume is worth knowing and does not fit on a button. */
+  MC().set(rows.length);
   st.textContent=fmt(rows.length)+" of "+fmt(N)+" cells match ("+(100*rows.length/N).toFixed(1)+"%).";
   xb.disabled=!rows.length; xb.title=rows.length?"":"Preview matches first";
   /* The viewer link is capped. Neuroglancer will happily accept thousands of segment IDs, but the
@@ -3662,8 +3677,22 @@ function downloadFilterExcel(){
     document.getElementById("filterMorphKey").value="";
     document.getElementById("filterRegionOn").checked=false;
     FILTER.rows=[]; renderFilterResults();
+    MC().idle();                                      // Reset clears the count too -- 2026-09-09
     initHjumpStepThrough(null);
   });
+  /* AND IT GOES BACK TO "Preview matches" WHEN A FILTER CHANGES. This page had no staleness
+     handling at all: the previous count sat on screen while the filters underneath it said
+     something else, which is a button making a claim about a query nobody is running. The other
+     six tools invalidate; now so does this one. 2026-09-09. */
+  const fcard=document.getElementById("filterCard")||run.closest(".card");
+  if(fcard){
+    const stale=function(e){
+      if(e&&e.target&&/^(filterRun|filterXlsx|filterViewer|regionAddBox)$/.test(e.target.id))return;
+      MC().idle();
+    };
+    fcard.addEventListener("input",stale);
+    fcard.addEventListener("change",stale);
+  }
   addRegionBox();                                   // start with one empty box
   const addB=document.getElementById("regionAddBox");
   if(addB) addB.addEventListener("click",function(){ addRegionBox(); });

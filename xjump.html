@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-08 21:03</span></p>
+ctrl-shift-R.">build 2026-09-09 15:59</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -1259,6 +1259,9 @@ UJ.cfg.mesh = {};
      mean everywhere: the same fix made in one tool's own chip reached that tool only, and
      Søren's next screenshot was the next tool still showing 1786.5000000000002. -->
 <script src="core/points.js"></script>
+<!-- core/matchcount.js -- one wording for "Preview matches" across all seven filter panels.
+     Søren, 2026-09-09: "Please make it consistent." -->
+<script src="core/matchcount.js"></script>
 <!-- core/gamify.js -- the account chip, the profile dashboard, the leaderboard and
      "Download your work". Søren, 2026-09-02: "you can't click it to open the leaderboard
      and your stats. It should be the same as in uJump." It is the same file six other
@@ -7791,9 +7794,15 @@ UJ.app = (function(){
 
   /* THE COUNT LIVES ON THE BUTTON, as it does in µJump: a separate line of text below a button is
      a line people do not look at, and this is the one number the whole panel exists to produce. */
+  /* core/matchcount.js if it loaded, no-ops if it did not: these files are deployed one at a
+     time, and a page that arrives before the module it needs must lose the count on the button,
+     not the whole filter panel. xjumppagecheck.js found this by loading the page without it.
+     Resolved AT CALL TIME -- the pattern core/gamify.js uses and says so: a value captured when
+     this script ran would freeze whatever had loaded by then. */
+  function MC(){return (window.UJ&&UJ.matchcount)||{set:function(){},idle:function(){},busy:function(){}};}
   function invalidatePreview(){
     RESULT = null;
-    if (el("filterRun")) el("filterRun").textContent = "Preview matches";
+    if (el("filterRun")) MC().idle();
     ["filterDownload", "filterViewerAll"].forEach(function(id){
       if (el(id)) el(id).disabled = true; });
     if (window.UJ.stepthrough) UJ.stepthrough.initStepThrough(null);
@@ -7801,10 +7810,10 @@ UJ.app = (function(){
   }
   function previewFilter(){
     var r = runFilter(), n = r.matches.length;
-    if (el("filterRun"))
-      el("filterRun").textContent = n
-        ? "Preview matches — " + n.toLocaleString() + " cell" + (n === 1 ? "" : "s")
-        : "Preview matches — none match";
+    /* One wording across the family -- see core/matchcount.js. This page said
+       "Preview matches — 1,234 cells" and the other six said "1,234 matching cells found".
+       2026-09-09. */
+    MC().set(n);
     ["filterDownload", "filterViewerAll"].forEach(function(id){
       if (el(id)) el(id).disabled = !n; });
     if (window.UJ.stepthrough)

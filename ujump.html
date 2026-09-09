@@ -494,6 +494,11 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/blenderexport.js"></script>
 <script src="core/organellefilter.js"></script>
 <script src="core/points.js"></script>
+<!-- core/matchcount.js -- what "Preview matches" says once it has some. Søren, 2026-09-09:
+     "it would be helpful if the preview matches told me how many matches there are after i
+     click it ... Please make it consistent." The count goes on the BUTTON on every tool, in
+     one wording, from one file -- the same reason core/points.js is a file. -->
+<script src="core/matchcount.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/organelles.js"></script>
 <script src="core/ontology.js"></script>
@@ -517,7 +522,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-08 21:04</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-09 16:01</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -11520,19 +11525,23 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
   const runBtn=document.getElementById("filterRun");
   const dlBtn=document.getElementById("filterDownload");
   const viewAllBtn=document.getElementById("filterViewerAll");
-  /* The match count lives ON the "Preview matches" button rather than in a separate line of text
-     (per Søren) -- it's the result of pressing that button, so it belongs there, and it stays in
-     view next to the Download / 3D buttons it gates instead of sitting further down the panel.
-     RUN_BTN_IDLE is the label to fall back to whenever there's no live result to report: on load,
-     and again whenever a filter change invalidates the previous preview. */
-  const RUN_BTN_IDLE="Preview matches";
-  function setRunBtnLabel(txt){if(runBtn)runBtn.textContent=txt;}
+  /* The match count lives ON the "Preview matches" button rather than in a separate line of
+     text (per Søren) -- it's the result of pressing that button, so it belongs there, and it
+     stays in view next to the Download / 3D buttons it gates instead of sitting further down the
+     panel. The WORDING moved to core/matchcount.js on 2026-09-09, when the other six tools
+     adopted this page's phrasing: "Please make it consistent." Nothing here changes on screen. */
+  /* core/matchcount.js if it loaded, no-ops if it did not: these files are deployed one at a
+     time, and a page that arrives before the module it needs must lose the count on the button,
+     not the whole filter panel. xjumppagecheck.js found this by loading the page without it.
+     Resolved AT CALL TIME -- the pattern core/gamify.js uses and says so: a value captured when
+     this script ran would freeze whatever had loaded by then. */
+  function MC(){return (window.UJ&&UJ.matchcount)||{set:function(){},idle:function(){},busy:function(){}};}
+  function setRunBtnCount(n){if(runBtn)MC().set(n);}
   let lastResult=null;
   function invalidateFilterResult(){
     if(lastResult===null)return;
     lastResult=null;
-    setRunBtnLabel(RUN_BTN_IDLE);
-    if(runBtn)runBtn.title="Filters changed since the last preview — click to refresh the match count";
+    MC().idle();
     if(dlBtn){dlBtn.disabled=true;dlBtn.title="Filters changed since last preview — click \"Preview matches\" again";}
     if(viewAllBtn){viewAllBtn.disabled=true;viewAllBtn.title="Filters changed since last preview — click \"Preview matches\" again";}
     UJ.stepthrough.initStepThrough(null);
@@ -11582,8 +11591,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       runBtn.disabled=false;
       /* Count reported on the button itself. toLocaleString() because these run to six figures
          (105,951 for an unfiltered preview) and an unseparated run of digits is hard to read. */
-      setRunBtnLabel(noMatches?"No matching cells — adjust filters":nMatch.toLocaleString()+" matching cell"+(nMatch===1?"":"s")+" found");
-      runBtn.title=noMatches?"":"Click again to re-run the filters";
+      setRunBtnCount(nMatch);
       UJ.stepthrough.initStepThrough(lastResult.matches);
     },10);
   });
