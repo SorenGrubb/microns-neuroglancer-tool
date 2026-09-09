@@ -404,10 +404,57 @@ UJ.mesh=(()=>{
      code all consume it unchanged.
 
      There are no LODs here, so there is nothing to trade detail against size with: every
-     fragment is part of the surface and dropping one leaves a hole. The size guard is therefore
-     a hard refusal with a readable message rather than a silent downgrade. */
-  const LEGACY_MAX_BYTES=192*1048576;
+     fragment is part of the surface and dropping one leaves a hole. That was the whole argument
+     for a hard refusal at 192 MB, and it was right about fragments and wrong about detail --
+     detail can be thrown away WITHIN a fragment instead. Søren, 2026-09-09, on a 145-fragment
+     pinky100 segment: "maybe the fragments are large for pJump, please fix it."
+
+     So: above LEGACY_SIMPLIFY_ABOVE the path switches on vertex clustering and keeps going, and
+     the refusal moves out to a size that means "this is not a cell" rather than "this is a big
+     cell". Everything that comes back from a simplified fetch says so -- see `simplified` on the
+     return, and its readers in fetchCombinedMesh, core/mesh3d.js and the volume tooltip. */
+  const LEGACY_MAX_BYTES=1536*1048576;      // the honest "open it in Neuroglancer" ceiling
+  const LEGACY_SIMPLIFY_ABOVE=64*1048576;   // past here, detail is traded for arrival
+  const LEGACY_GRID_START_NM=200;           // 0.2 µm cells; doubles if the budget is passed again
   const LEGACY_PARALLEL=6;
+  /* ── vertex clustering (Rossignac & Borrel 1993) ────────────────────────────────────────────
+     Snap every vertex to a cell of a fixed global grid, keep one representative per cell, drop the
+     triangles whose three corners end up in the same one. Cheap, single pass, and -- the reason it
+     is the right algorithm HERE rather than something that preserves curvature better -- it is
+     PURELY LOCAL: no fragment needs to know what any other fragment did.
+
+     The representative is the cell CENTRE, deliberately. Rossignac & Borrel keep the most
+     "important" vertex of the cell, which is better-looking on a single mesh and wrong for this
+     one: these fragments are decoded independently, so two fragments sharing a boundary vertex
+     would each pick from their own set and could choose different points for the same cell,
+     opening a crack along every chunk boundary. A centre depends on the cell alone, so every
+     fragment agrees without communicating. The cost is a faint blockiness at the grid size, which
+     is what "simplified" means and what the panel now says.
+
+     Units are the caller's: this runs on raw fragment vertices, which are absolute nanometres. */
+  function clusterDecimate(verts,idx,gridNm){
+    const n=verts.length/3;
+    const cellOf=new Map();
+    const remap=new Int32Array(n);
+    const out=[];
+    for(let v=0;v<n;v++){
+      const cx=Math.floor(verts[v*3]/gridNm),cy=Math.floor(verts[v*3+1]/gridNm),cz=Math.floor(verts[v*3+2]/gridNm);
+      const key=cx+"|"+cy+"|"+cz;
+      let ni=cellOf.get(key);
+      if(ni===undefined){
+        ni=out.length/3;cellOf.set(key,ni);
+        out.push((cx+0.5)*gridNm,(cy+0.5)*gridNm,(cz+0.5)*gridNm);
+      }
+      remap[v]=ni;
+    }
+    const oi=[];
+    for(let t=0;t+2<idx.length;t+=3){
+      const a=remap[idx[t]],b=remap[idx[t+1]],c=remap[idx[t+2]];
+      if(a===b||b===c||a===c)continue;   // no area left after the snap
+      oi.push(a,b,c);
+    }
+    return {verts:new Float32Array(out),idx:new Uint32Array(oi)};
+  }
   function decodeLegacyFragment(u8){
     if(u8.length<4)throw new Error("fragment shorter than its own header");
     const dv=new DataView(u8.buffer,u8.byteOffset,u8.byteLength);
@@ -447,19 +494,40 @@ UJ.mesh=(()=>{
     if(!frags.length)throw new Error("mesh manifest for "+rootIdStr+" lists no fragments");
     onProgress&&onProgress(0.05,frags.length+" fragments…");
     const parts=new Array(frags.length);
-    let done=0,bytes=0,failed=0;
+    let done=0,bytes=0,failed=0,grid=0,rawVerts=0;
+    /* Crossing the budget sets (or doubles) the grid and brings everything already in memory to
+       the new size, so the finished surface is uniform rather than fine where it started and
+       coarse where it ran out of room. Synchronous on purpose: several fetches are in flight, and
+       a pass that awaited nothing cannot be interleaved with another fragment arriving. */
+    function coarsen(){
+      grid=grid?grid*2:LEGACY_GRID_START_NM;
+      for(let k=0;k<parts.length;k++)
+        if(parts[k])parts[k]=clusterDecimate(parts[k].verts,parts[k].idx,grid);
+      onProgress&&onProgress(0.05+0.9*(done/frags.length),
+        "simplifying to "+(grid/1000).toFixed(2)+" µm…");
+    }
     async function one(i){
       let r=null;
       try{ r=await fetch(objUrl(frags[i])); }catch(_e){ r=null; }
       if(!r||!r.ok){ failed++; return; }
       const u8=new Uint8Array(await r.arrayBuffer());
       bytes+=u8.length;
-      if(bytes>LEGACY_MAX_BYTES)throw new Error("mesh is larger than "+mb(LEGACY_MAX_BYTES)+
-        " ("+frags.length+" fragments). This format has no coarser level to fall back to, so it "+
-        "cannot be downgraded — open the cell in Neuroglancer instead.");
-      try{ parts[i]=decodeLegacyFragment(u8); }catch(e){ failed++; }
+      if(bytes>LEGACY_MAX_BYTES)throw new Error("mesh is over "+mb(LEGACY_MAX_BYTES)+
+        " ("+frags.length+" fragments, still arriving). At this size it is a large merged segment "+
+        "rather than one cell — open it in Neuroglancer, which streams instead of downloading.");
+      let d=null;
+      try{ d=decodeLegacyFragment(u8); }catch(e){ failed++; }
+      if(d){
+        rawVerts+=d.verts.length/3;
+        if(!grid&&bytes>LEGACY_SIMPLIFY_ABOVE){parts[i]=d;coarsen();}
+        else parts[i]=grid?clusterDecimate(d.verts,d.idx,grid):d;
+        /* Past twice the budget the grid is not paying for itself yet. Doubling re-decimates what
+           is already here at the coarser size, which is cheap because it is already small. */
+        if(grid&&bytes>LEGACY_SIMPLIFY_ABOVE*2*(grid/LEGACY_GRID_START_NM))coarsen();
+      }
       done++;
-      if(done%4===0)onProgress&&onProgress(0.05+0.9*(done/frags.length),"fetching "+done+"/"+frags.length+"…");
+      if(done%4===0)onProgress&&onProgress(0.05+0.9*(done/frags.length),
+        (grid?"simplifying ":"fetching ")+done+"/"+frags.length+"…");
     }
     for(let i=0;i<frags.length;i+=LEGACY_PARALLEL){
       const batch=[];
@@ -481,7 +549,12 @@ UJ.mesh=(()=>{
       for(let k=0;k<g.idx.length;k++)indices[io+k]=g.idx[k]+base;
       vo+=g.verts.length;io+=g.idx.length;
     }
-    return {positions,indices,lod:0,numLods:1,bytes,legacyFragments:frags.length,legacyFailed:failed};
+    /* A simplified mesh is not the published geometry, and nothing downstream can tell by
+       looking. Said here so the 3D panel can print it and the volume tooltip can call its own
+       number an estimate -- a volume that quietly moved a few percent because the mesh happened to
+       be large would be the worst thing this change could do. */
+    const simplified=grid?{gridUm:grid/1000,fromVertices:rawVerts,toVertices:positions.length/3}:null;
+    return {positions,indices,lod:0,numLods:1,bytes,legacyFragments:frags.length,legacyFailed:failed,simplified};
   }
   /* ── graphene (chunked-graph) meshes, e.g. V1DD's CAVE-served segmentation ──────────────────
      Verified 2026-08-30 against seung-lab/cloud-volume's public source (datasource/graphene/mesh/
@@ -750,9 +823,13 @@ UJ.mesh=(()=>{
     const skipped=failures.map(function(e){
       return {rootId:(e&&e.rootId)||"",message:(e&&e.message)||"unavailable",meshCached:!!(e&&e.meshCached)};
     });
+    /* Which of the combined root IDs came back simplified, and how coarsely. Null when none were,
+       which is every ordinary cell -- so a caller that ignores it is unchanged. */
+    const simplified=[];
+    meshes.forEach(function(m,k){ if(m&&m.simplified)simplified.push(Object.assign({rootId:usedIds[k]},m.simplified)); });
     if(meshes.length===1){
       const m=meshes[0];
-      return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds:usedIds,mainUnavailable,skipped};
+      return {positions:m.positions,indices:m.indices,lod:m.lod,numLods:m.numLods,bytes:m.bytes,fragmentCount:1,rootIds:usedIds,mainUnavailable,skipped,simplified};
     }
     let totalV=0,totalI=0,bytes=0;
     meshes.forEach(m=>{totalV+=m.positions.length;totalI+=m.indices.length;bytes+=m.bytes||0;});
@@ -763,7 +840,7 @@ UJ.mesh=(()=>{
       for(let k=0;k<m.indices.length;k++)indices[iOff+k]=m.indices[k]+vCount;
       vOff+=m.positions.length;iOff+=m.indices.length;vCount+=m.positions.length/3;
     });
-    return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:meshes.length,rootIds:usedIds,mainUnavailable,skipped};
+    return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:meshes.length,rootIds:usedIds,mainUnavailable,skipped,simplified};
   }
   /* ---------- the EXPORT half, split out from the FETCH half (2026-09-01) ----------
      Søren asked for χJump's cb2 cells to get the same three buttons these tools have: a .glb, a
@@ -808,16 +885,23 @@ UJ.mesh=(()=>{
     return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3};
   }
   async function downloadRoot(rootIdStr,onProgress,forceRecheck){
-    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount,rootIds,mainUnavailable}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount,rootIds,mainUnavailable,skipped,simplified}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
     /* When there's no main root ID (community-only combine), fall back to the first combined ID
        so the filename is still a real, traceable segmentation ID rather than a blank/underscore. */
     const idForName=rootIdStr||rootIds[0];
-    const tag=fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod;
+    /* A decimated mesh says so IN ITS FILENAME. A toast is read once and a .glb is opened for
+       years; somebody measuring this file in Blender next spring has no other way to know its
+       vertices were merged onto a grid because the published mesh was too large to download
+       whole. The grid size is in the name for the same reason. */
+    const simpTag=(simplified&&simplified.length)
+      ?("_simplified"+String(Math.max.apply(null,simplified.map(function(s){return s.gridUm;}))).replace(".","p")+"um")
+      :"";
+    const tag=(fragmentCount>1?"_combined"+fragmentCount:"_lod"+lod)+simpTag;
     onProgress&&onProgress(1,"saving…");
     const saved=saveGlb({positions:rawPositions,indices:rawIndices},
       {name:"microns_"+idForName+tag,filename:"microns_"+idForName+tag+"_um"});
     return {lod,numLods,bytes,vertices:saved.vertices,filename:saved.filename,
-            fragmentCount,rootIds,mainUnavailable};
+            fragmentCount,rootIds,mainUnavailable,skipped,simplified};
   }
   /* ---------- Mesh volume (on-demand, per Søren's request 2026-07-30) ----------
      Nucleus volume (see NV/nucVolumeStr near the top of the file) is precomputed and free to
@@ -836,10 +920,15 @@ UJ.mesh=(()=>{
      reported to the user as an ESTIMATE, not an exact figure. Positions are already in this tool's
      usual µm mesh-download units, so no extra scaling is needed. */
   async function computeVolume(rootIdStr,onProgress,forceRecheck){
-    const {positions,indices,fragmentCount,rootIds,mainUnavailable}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+    /* skipped/simplified travel with the number, and the page prints both -- a root ID that
+       could not be fetched, and a surface that was decimated to fit, each change what the volume
+       means. They were dropped here at first, which made the tooltip that reads them unreachable:
+       this destructure names its fields, so a field added upstream reaches the caller only if it
+       is named here too. */
+    const {positions,indices,fragmentCount,rootIds,mainUnavailable,skipped,simplified}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
     onProgress&&onProgress(0.98,"computing volume…");
     const v=volumeOf({positions,indices});
-    return {volumeUm3:v.volumeUm3,vertices:v.vertices,fragmentCount,rootIds,mainUnavailable};
+    return {volumeUm3:v.volumeUm3,vertices:v.vertices,fragmentCount,rootIds,mainUnavailable,skipped,simplified};
   }
   /* ---------- PowerPoint (.pptx) with a live, auto-spinning 3D model ----------
      PPTXSK is a ~32KB skeleton .pptx -- ONE slide holding a 3D-model placeholder with the

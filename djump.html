@@ -6519,11 +6519,20 @@ document.addEventListener("click",(e)=>{
           /* volGate was asked above, before the button's state was decided -- so the tooltip states
              what is about to happen rather than repeating a hope, and the button and the sentence
              cannot disagree. */
+          /* A volume measured on a decimated surface is not the volume of the published mesh.
+             Vertex clustering keeps the shape and moves the number by a little, so the tooltip
+             says which surface it came from rather than letting a few percent pass unremarked. */
+          const simpN=(info.simplified&&info.simplified.length)||0;
+          const simpStr=simpN?(" Computed from a SIMPLIFIED surface (vertices merged onto a "
+            +Math.max.apply(null,info.simplified.map(function(s){return s.gridUm;})).toFixed(2)
+            +" µm grid because the published mesh was too large to download whole), so treat it as "
+            +"approximate rather than as this cell's measured volume."):"";
           const skippedN=(info.skipped&&info.skipped.length)||0;
           const skippedStr=skippedN?(" "+skippedN+" proposed root ID"+(skippedN>1?"s were":" was")
             +" NOT included: "+info.skipped.map(function(s){return s.rootId+" ("+s.message+")";}).join("; ")+"."):"";
           if(valSpan){
             valSpan.textContent="≈ "+Math.round(info.volumeUm3).toLocaleString()+" µm³"
+              +(simpN?" — simplified mesh":"")
               +(skippedN?" — "+skippedN+" fragment"+(skippedN>1?"s":"")+" missing":"")
               +(volGate?" — not saved":"");
             valSpan.dataset.c=String(Math.round(info.volumeUm3*100)/100);
@@ -6535,7 +6544,7 @@ document.addEventListener("click",(e)=>{
             /* IT USED TO SAY "Saved to the shared dashboard just now" WHATEVER HAPPENED --
                signed in or not, saved or dropped. That is the one sentence a page must not get
                wrong: it removes the only reason somebody would sign in and do it again. */
-            valSpan.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices)"+combinedStr+" — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure."+fallbackStr+skippedStr+" "+(volGate||"Saved to the shared dashboard just now.")+" Click to copy.";
+            valSpan.title="Estimated from the decoded mesh geometry ("+info.vertices.toLocaleString()+" vertices)"+combinedStr+" — small gaps at fragment boundaries in the raw MICrONS mesh mean this is an estimate, not an exact figure."+fallbackStr+simpStr+skippedStr+" "+(volGate||"Saved to the shared dashboard just now.")+" Click to copy.";
           }
           volEl.style.display="flex";
         }

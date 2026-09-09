@@ -535,6 +535,19 @@ UJ.mesh3d = (function(){
              behind that ID is 128 fragments and over 192 MB, and fetchCombinedMesh dropped it and
              drew the rest without a word. Drawing one of two fragments and saying nothing is the
              one outcome that reads as the proposal having been ignored. */
+          /* A cell that arrived only because it was decimated says so, in the same place the
+             size line is -- the panel is where somebody decides whether to trust what they see. */
+          if (m.simplified && m.simplified.length){
+            var g = Math.max.apply(null, m.simplified.map(function(s){ return s.gridUm; }));
+            var kept = m.simplified.reduce(function(a,s){ return a + (s.toVertices||0); }, 0);
+            var from = m.simplified.reduce(function(a,s){ return a + (s.fromVertices||0); }, 0);
+            lead = (lead ? lead + "<br>" : "")
+              + "<b>Simplified to fit.</b> <span class='hint'>This mesh was too large to download "
+              + "whole, so vertices were merged onto a " + g.toFixed(2) + " µm grid ("
+              + from.toLocaleString() + " → " + kept.toLocaleString()
+              + " vertices). The shape is right; fine detail is not. Open it in Neuroglancer for "
+              + "the published geometry.</span>";
+          }
           if (m.skipped && m.skipped.length){
             lead = (lead ? lead + "<br>" : "")
               + "<b style='color:var(--bad)'>" + m.skipped.length + " proposed root ID"
