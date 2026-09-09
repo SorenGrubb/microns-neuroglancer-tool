@@ -9908,6 +9908,41 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     for(let i=0;i<ST_HASCENT.length;i++){ if(ST_HASCENT[i])cent++; }
     for(let i=0;i<ST_HASCIL.length;i++){ if(ST_HASCIL[i])cil++; }
     counts.centriole=cent; counts.cilium=cil;
+    /* ── ALSO DENSE, AND ALSO OWN-VERIFIED: the embedded plug/hole snapshot ────────  2026-09-09
+       Søren: "I still don't get why there is only 1 NR type II ... if that is because it only shows
+       the ones that are reported, then that should be changed to reported and verified. I know
+       that there are many of them."
+
+       He is right and the backend is also right: there is exactly ONE community report of an NR-II.
+       What this function never knew is that the page carries its own, own-verified, dense set --
+       ORGANDATA.HOLES (astrocyte holes = NR type II) and ORGANDATA.PLUGS (microglia plugs),
+       embedded on 2026-08-07 precisely so these organelles would be usable without a backend round
+       trip. Every other reader of them already exists: the Excel export, the Neuroglancer point
+       layers, the cell panel's own "N astrocyte holes (NR type II) reported" line. Only the number
+       beside the checkbox was still counting reports alone, on a page that can draw two hundred.
+
+       Keyed by nucdata INDEX (the same key space as cildata's OV_IDX), so the nucleus id has to be
+       looked up to dedupe against the community map below. typeof-guarded because this snapshot is
+       µJump's -- minnie65 indices out of "All own data.xlsx"; the other datasets have no such
+       block, and zero is the honest answer for them. */
+    const denseCells={};
+    (function(){
+      if(typeof ORGANDATA==="undefined"||!ORGANDATA)return;
+      const fromMap=function(kind,map){
+        if(!map)return;
+        let n=0;
+        Object.keys(map).forEach(function(idx){
+          const v=map[idx];
+          if(!v||!v.length)return;
+          n++;
+          const nid=String((typeof NID!=="undefined"&&NID[Number(idx)])||"");
+          if(nid)(denseCells[kind]=denseCells[kind]||{})[nid]=1;
+        });
+        if(n)counts[kind]=(counts[kind]||0)+n;
+      };
+      fromMap("microglia_plug",ORGANDATA.PLUGS);
+      fromMap("nucleoplasmic_reticulum_2",ORGANDATA.HOLES);
+    })();
     /* Sparse, from the community map: one count per CELL that carries the kind, not per report,
        so two cilia logged on one cell count once -- otherwise the number beside the checkbox
        would not be the number of cells the filter can return, which is what a user reads it as. */
@@ -9918,6 +9953,10 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
           const k=String(o.kind||"").toLowerCase();
           if(!k||seen[k])return; seen[k]=1;
           if(k==="centriole"||k==="cilium")return;   // already counted densely above
+          /* ...and so is a cell the embedded snapshot already claimed for this kind. Without this
+             an astrocyte with both an embedded hole and somebody's NR-II report would count twice,
+             and the number would stop being "cells this filter can return". */
+          if(denseCells[k]&&denseCells[k][String(nid)])return;
           counts[k]=(counts[k]||0)+1;
         });
       });
