@@ -10491,18 +10491,42 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
          mean "nobody has reported one here" than a genuine absence, since there's no dense
          own-verified fallback the way there is for cilium/centriole. */
       if(organelleSel){
-        /* Centriole and cilium keep reading the DENSE own-verified arrays computed just above --
-           unchanged data source, unchanged behaviour for those two. Every other kind reads the
-           sparse community map, where "not annotated" is far more likely to mean "nobody has
-           looked" than a genuine absence, which is what the control's own wording says. */
+        /* ── THE MATCHER READS WHAT THE COUNTER READS ────────────────────────────────  2026-09-10
+           Søren: "when I filter for astrocytes near the glia limitans, I can see that they have NR
+           type II in many of them, but if I tick this box, it finds 0 results. Why?"
+
+           Because this list named exactly two dense sources -- centriole and cilium -- and let
+           every other kind fall through to the community map. On 2026-09-09 the COUNT beside the
+           checkbox learned about two more (ORGANDATA.HOLES, the embedded own-verified astrocyte
+           holes = NR type II, and ORGANDATA.PLUGS, the microglia plugs) and this did not. So the
+           panel said 191 cells carry an NR type II while the filter could find the ONE that had
+           been reported through the community form.
+
+           Which is the exact failure the count's own tooltip rules out: the number beside a
+           checkbox has to be the number of cells the filter can return. denseHas() names the four
+           sources once, so a kind added to one side cannot be forgotten on the other.
+
+           row.space!=="N" and the typeof guard: the snapshot is keyed by µJump's own nucdata index,
+           and a standalone or merged-sub row has none. */
         const orgNid=String(rowNucId(row)||"");
         const orgReports=(window.ORG_MAP&&orgNid)?window.ORG_MAP[orgNid]:null;
-        const hasOne=k=>k==="centriole"?hasCent
-                       :k==="cilium"?hasCil
-                       :!!(orgReports&&orgReports.some(o=>o.kind===k));
+        const denseHas=function(k){
+          if(k==="centriole")return hasCent;
+          if(k==="cilium")return hasCil;
+          if(row.space!=="N"||typeof ORGANDATA==="undefined"||!ORGANDATA)return false;
+          if(k==="nucleoplasmic_reticulum_2")
+            return !!(typeof holesForNucIdx==="function"&&holesForNucIdx(row.i));
+          if(k==="microglia_plug")
+            return !!(typeof plugsForNucIdx==="function"&&plugsForNucIdx(row.i));
+          return false;
+        };
+        const hasOne=k=>denseHas(k)||!!(orgReports&&orgReports.some(o=>o.kind===k));
         const hasKind=organelleKinds.length
           ? organelleKinds.some(hasOne)
-          : (hasCent||hasCil||!!(orgReports&&orgReports.length));
+          /* "Annotated with anything at all" has to see the same four sources, or ticking nothing
+             would find fewer cells than ticking everything. */
+          : (hasCent||hasCil||denseHas("nucleoplasmic_reticulum_2")||denseHas("microglia_plug")
+             ||!!(orgReports&&orgReports.length));
         const organelleMatch=organelleSel==="has"?hasKind:organelleSel==="not"?!hasKind:true;
         if(!organelleMatch)return null;
       }
