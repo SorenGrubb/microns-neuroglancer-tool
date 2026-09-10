@@ -481,6 +481,12 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <p class="hint" style="margin-top:4px">Voxels here are <b>4 &times; 4 &times; 40&nbsp;nm &mdash; identical to
 &micro;Jump's minnie65</b>, so a coordinate means the same thing in both tools and nothing needs converting.</p>
 <p class="err" id="err"></p>
+<!-- Recently viewed cells. Native <details> so it remembers nothing but its own open state and
+     needs no script to collapse; the list inside is filled by renderRecent(). -->
+<details id="recentBox" style="margin-top:10px;display:none">
+  <summary style="cursor:pointer">Recently viewed cells</summary>
+  <div id="recentList" style="margin-top:6px"></div>
+</details>
 </div>
 
 <div id="panel"></div>
@@ -1220,6 +1226,24 @@ else setTimeout(kickNewNuclei,0);
 
    Depth is estimated BEFORE N grows, so the plane fit is over detections only -- an added cell must
    never be used to place another added cell. */
+/* ── A STABLE ID FOR A CELL WITH NO DETECTION ─────────────────────────────────────────────
+   Everything identity does in this family is keyed on a NUMERIC nucleus id -- bjumpIdentities()
+   returns `Number(nid)`, the Master cell list is keyed by it, votes and history address it. A cell
+   without one cannot take part, which is why an added cell's name had to live on its own row where
+   the first writer won and nobody could disagree.
+
+   Derived from the coordinate rather than assigned by the server: every client computes the same id
+   from the same row, with no new state to keep and nothing to deploy. FNV-1a, mapped into a band
+   starting at a million -- this dataset's detections are 1..488, so the two cannot meet. The
+   dataset key is inside the hash so two tools cannot collide with each other either. Across a
+   thousand added cells the chance of two hashing alike is about 0.02 %. */
+const ADDED_ID_BASE=1000000, ADDED_ID_SPAN=1000000000;
+function addedNucleusId(coordStr){
+  const s=((UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds)||"")+"|"+String(coordStr||"").replace(/\s+/g,"");
+  let h=0x811c9dc5;
+  for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
+  return ADDED_ID_BASE+(h%ADDED_ID_SPAN);
+}
 function absorbAddedNuclei(){
   const list=(NEW_NUC_CACHE||[]).filter(function(r){return !!newNucCoord(r);});
   const cut=function(a){return Array.prototype.slice.call(a,0,N_DET);};
@@ -1231,8 +1255,10 @@ function absorbAddedNuclei(){
   list.forEach(function(rec){
     const p=newNucCoord(rec);
     bx.push(p[0]);by.push(p[1]);bz.push(p[2]);
-    /* 0, because detection ids run 1..N_DET and 0 therefore cannot collide with one. */
-    bid.push(0);
+    /* A REAL ID, derived from the coordinate -- see addedNucleusId(). It was 0 until 2026-09-10,
+       which meant every added cell shared one id and none of them could be identified, voted on or
+       favourited through the machinery every detection uses. */
+    bid.push(addedNucleusId(rec.coord));
     /* NaN, not 0: every numeric range filter here compares with < and >, and NaN fails both -- so
        an added cell is EXCLUDED from "diameter 5 to 8 µm" rather than arriving as a spurious zero.
        Nothing measured this nucleus, and a filter about measurements should not match it. */
@@ -1388,6 +1414,63 @@ function layerFromDepth(depthUm){
   for(const n in votes)if(votes[n]>bestN){bestN=votes[n];bestName=n;}
   return bestName;
 }
+/* ── RECENTLY VIEWED CELLS ────────────────────────────────────────────────────────────────
+   Søren, 2026-09-10: "We need to show 'Recent' for lJump, like for uJump."
+
+   Coordinates, not indices or ids. Nucleus ids here are assigned 1..N in sort order, so refitting
+   the detector renumbers all of them -- which is why every report row carries a coord too -- and an
+   index stops meaning anything the moment absorbAddedNuclei() changes how many cells there are. A
+   coordinate survives both and lands on the right cell whether it was detected or added.
+
+   The NAME is resolved when the list is drawn rather than when the cell was visited, so a cell
+   identified since you looked at it reads correctly instead of keeping a stale label. */
+const LJ_RECENT_KEY="ljump_recent_v1", LJ_RECENT_MAX=12;
+function ljRecentRead(){
+  try{ const v=JSON.parse(localStorage.getItem(LJ_RECENT_KEY)||"[]"); return Array.isArray(v)?v:[]; }
+  catch(_e){ return []; }
+}
+function ljRecentWrite(list){
+  try{ localStorage.setItem(LJ_RECENT_KEY,JSON.stringify(list.slice(0,LJ_RECENT_MAX))); }catch(_e){}
+}
+function noteRecent(i){
+  const key=[BX[i],BY[i],BZ[i]].join(",");
+  const list=ljRecentRead().filter(function(r){return r&&r.coord!==key;});
+  list.unshift({coord:key,added:!!BADDED[i],t:Date.now()});
+  ljRecentWrite(list);
+  renderRecent();
+}
+/* Resolves each remembered coordinate back to whatever is there NOW -- so a cell that has been
+   identified, or a coordinate that has since gained a closer added nucleus, reads as it is today. */
+function renderRecent(){
+  const box=document.getElementById("recentBox"),host=document.getElementById("recentList");
+  if(!box||!host)return;
+  const list=ljRecentRead();
+  if(!list.length){ box.style.display="none"; return; }
+  box.style.display="";
+  host.innerHTML=list.map(function(r){
+    const p=String(r.coord).split(",").map(Number);
+    const hit=nearest(p[0],p[1],p[2]);
+    let label="";
+    if(hit.i>=0){
+      const nm=ljumpIdentityOf(hit.i);
+      label=nm?escHtml(nm):(BADDED[hit.i]?"unnamed":("Nucleus "+BID[hit.i]));
+      if(BADDED[hit.i])label+=' <span style="opacity:.65">&middot; added</span>';
+    }else label='<span style="opacity:.6">not found</span>';
+    return '<div style="font-size:12px;padding:2px 0"><a href="#" class="recentjump" '
+      +'data-c="'+escHtml(r.coord)+'">'+escHtml(r.coord)+'</a> &mdash; '+label+'</div>';
+  }).join("");
+  host.querySelectorAll(".recentjump").forEach(function(a){
+    a.addEventListener("click",function(ev){
+      ev.preventDefault();
+      const p=String(a.dataset.c).split(",");
+      document.getElementById("x").value=p[0];
+      document.getElementById("y").value=p[1];
+      document.getElementById("z").value=p[2];
+      document.getElementById("go").click();
+    });
+  });
+}
+document.addEventListener("DOMContentLoaded",function(){ try{renderRecent();}catch(_e){} });
 function showCell(i, distNm){
   /* ── ONE PANEL FOR BOTH KINDS ────────────────────────────────────────────────────────────
      Søren, 2026-09-09, with the two screenshots side by side: "Why does this look different, from
@@ -1403,6 +1486,7 @@ function showCell(i, distNm){
   const added=!!(BADDED[i]&&ADDED_REC[i]);
   const rec=added?ADDED_REC[i]:null;
   CUR_IDX=i;
+  try{noteRecent(i);}catch(_er){}
   const pos=[BX[i],BY[i],BZ[i]], nb=kNearest(pos[0],pos[1],pos[2],3,i);
   const lt=layerTag(i);
   /* Empty for an added cell, and every id-keyed thing below is skipped because of it rather than
@@ -1416,14 +1500,15 @@ function showCell(i, distNm){
   window.CUR_MICRONS_NAME=null; window.CUR_COMMUNITY_TOP_NAME=null;
   ID_CTX={nucId:CUR_NUCID,root:"",pos:pos.slice()};
 
-  const addedName=added?String(rec.identified||"").trim():"";
+  /* The consensus name if there is one, the row's own only as a fallback -- same rule as
+     ljumpIdentityOf(), so the headline and the filter can never disagree. */
+  const addedName=added?ljumpIdentityOf(i):"";
   let h='<div class="card">';
-  /* No favourite star on an added cell: favourites key on a nucleus id, every added cell has id 0,
-     and one shared star across all of them would be worse than none. The right fix is a backend
-     key that is not a detection id; until then this is absent rather than wrong. */
+  /* The star works for both now: an added cell has a real id to key a favourite on. It was
+     absent yesterday only because every added cell shared id 0 and would have shared one star. */
   h+='<div class="celltype" id="ctHeadline" data-unclassified="1" data-microns-name="">'
     + celltypeLink(pos,added?escHtml(addedName||"Unnamed cell"):('Nucleus '+BID[i]))
-    + ((!added&&typeof favStarHtml==="function")?favStarHtml(String(BID[i]),"",pos[0],pos[1],pos[2]):"")
+    + ((typeof favStarHtml==="function")?favStarHtml(String(BID[i]),"",pos[0],pos[1],pos[2]):"")
     + (added?'':' <small>no classifier for this dataset</small>')+'</div>';
 
   h+='<div style="margin-top:6px">'
@@ -1452,10 +1537,10 @@ function showCell(i, distNm){
   }
   h+='</div>';
 
-  /* The agree?/disagree pills, directly under the headline exactly where µJump puts them. They
-     vote on an identification keyed by a NUCLEUS ID, so an added cell has nothing for them to
-     address; its identity lives on its own row. */
-  if(!added)h+='<div id="idVotePanel" style="margin:5px 0 2px"></div>';
+  /* The agree?/disagree pills, directly under the headline exactly where µJump puts them. For
+     BOTH kinds since 2026-09-10: an added cell's identity is an ordinary identification keyed by an
+     ordinary id, so it can be agreed with and disagreed with like any other. */
+  h+='<div id="idVotePanel" style="margin:5px 0 2px"></div>';
 
   const depthTxt=isFinite(BDEP[i])
     ? (BDEP[i]<0?Math.abs(BDEP[i]).toFixed(0)+' &micro;m ABOVE the pia'
@@ -1494,17 +1579,13 @@ function showCell(i, distNm){
 
   /* The whole point of the tool. There is no machine prediction, so this panel is the only
      place a cell type ever comes from. */
+  /* THE SAME PANEL FOR BOTH. This briefly printed a static line for an added cell, because its
+     name lived on its own row and there was nothing to list. With a real id there is: every
+     identification of it is an ordinary report, the most popular one wins, and the history shows
+     who said what. */
   h+='<label style="margin-top:18px;display:block">Community identifications</label>';
-  if(added){
-    /* Keyed by nucleus id everywhere else; an added cell's identity is the one on its own row. */
-    h+='<div class="meta">'+(addedName
-      ? ('Identified as <b>'+escHtml(addedName)+'</b>'
-         +(rec.reporterName?(' by '+escHtml(rec.reporterName)):'')+'.')
-      : 'Nobody has named this cell yet.')+'</div>';
-  }else{
-    h+='<div class="meta" id="commReports"></div>';
-    h+='<div id="classHistoryPanel" style="margin:10px 0 0"></div>';
-  }
+  h+='<div class="meta" id="commReports"></div>';
+  h+='<div id="classHistoryPanel" style="margin:10px 0 0"></div>';
 
   h+='<label style="margin-top:18px;display:block">What is this cell?</label>';
   h+='<div class="idcta warn"><div class="idcta-top">'
@@ -1524,10 +1605,14 @@ function showCell(i, distNm){
   if(added){
     h+='</div>';
     document.getElementById("panel").innerHTML=h;
-    ID_CTX={nucId:"",root:"",pos:pos.slice()};
+    /* A real nucleus id, so the organelle form, the vote widget and the identification all key to
+       the same cell the Master cell list knows about. */
+    ID_CTX={nucId:String(BID[i]),root:"",pos:pos.slice()};
     window.CUR_CELLTYPE_DISPLAY=addedName||null;
     window.CUR_POS=pos.slice();
     window.CUR_MICRONS_NAME=null; window.CUR_COMMUNITY_TOP_NAME=addedName||null;
+    /* The same community load a detection gets: reports, votes, history. */
+    loadCommunity(i);
     if(typeof UJ.tree!=="undefined"&&UJ.tree.start)try{UJ.tree.start();}catch(_et){}
     if(typeof wireOrganelleFlag==="function"){try{wireOrganelleFlag("");}catch(_eo){}}
     try{wireNewNucleusList();}catch(_ew){}
@@ -1762,28 +1847,12 @@ function submitIdentification(slug){
   const nm=UJ.ontology.canonSubmitName(UJ.ontology.LEAF_NAMES[slug]||slug);
   const cmtEl=document.getElementById("idfComment");
   msg.textContent="sending…";
-  /* ── THE SAME PANEL, A DIFFERENT ROW ─────────────────────────────────────────────────────
-     An added cell has no nucleus id, so "new_identification" has nothing to key to. Code.gs's
-     new_cell_no_nucleus branch with append:true fills the blank `identified` on the row that is
-     already there, matched on its exact stored coord -- which its own comment says is what that
-     path exists for. Same tree, same type-ahead, same certainty; only the destination differs,
-     because that is the only thing that does. */
-  if(BADDED[i]&&ADDED_REC[i]){
-    const rec=ADDED_REC[i];
-    postReport({
-      type:"new_cell_no_nucleus", append:true,
-      coord:String(rec.coord),
-      identified:nm,
-      path:UJ.tree.pathText(),
-      comment:(cmtEl&&cmtEl.value||"").trim(),
-      certainty:certainty,
-      timestamp:new Date().toISOString()
-    }, nm).then(function(d){
-      msg.textContent=(d&&d.ok)?("Recorded: "+nm+". Thank you."):"Could not record that.";
-      if(d&&d.ok){ rec.identified=nm; showCell(i,null); try{wireNewNucleusList();}catch(_e){} }
-    }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
-    return;
-  }
+  /* ONE REPORT TYPE FOR BOTH KINDS. This briefly appended the name to the added cell's own
+     "New cells" row, because it had no id to key an identification to. It has one now
+     (addedNucleusId), so identifying an added cell is an ORDINARY new_identification -- which is
+     what makes it correctable: the Master cell list takes every identification of that id and the
+     most popular wins, exactly as for a detection. A name written into a row was a name nobody
+     could disagree with. */
   postReport({
     type:"new_identification",
     nucleusId:BID[i],
@@ -1872,6 +1941,25 @@ function wireCorrection(i){
     try{ ident=UJ.ontology.canonSubmitName((idEl&&idEl.value||"").trim())||""; }
     catch(_e){ ident=(idEl&&idEl.value||"").trim(); }
     nmsg.textContent="sending…";
+    /* TWO REPORTS, because they are two different claims. The row records that a nucleus EXISTS
+       at this coordinate -- a fact about the volume. The identification is somebody's opinion about
+       what it is, and it goes through the same path every other identification takes so that the
+       next person can disagree and the most popular name wins. Writing the opinion into the row's
+       `identified` column, as this did until 2026-09-10, made the first opinion unchallengeable. */
+    const addedId=addedNucleusId(raw.slice(0,3).join(","));
+    if(ident){
+      postReport({
+        type:"new_identification",
+        nucleusId:addedId,
+        rootId:"",
+        coord:raw.slice(0,3).join(","),
+        identified:ident,
+        path:"",
+        comment:"",
+        certainty:"",
+        timestamp:new Date().toISOString()
+      }, ident);
+    }
     postReport({
       type:"new_cell_no_nucleus",
       coord:raw.slice(0,3).join(","),
@@ -1948,6 +2036,23 @@ document.getElementById("rand").addEventListener("click",function(){
 const REPORT_ENDPOINT = UJ.cfg.backend.endpoint;
 const GOOGLE_CLIENT_ID = UJ.cfg.backend.clientId;
 const OWNER_EMAIL = UJ.cfg.backend.ownerEmail;
+/* THE TOKEN PAYLOAD IS UTF-8, AND atob() IS NOT.                                    2026-09-10
+   Søren: "Why am I spelled two different ways now?" -- his own list showing "SÃ¸ren Grubb" beside
+   "Søren Grubb". atob() returns a BINARY STRING, one character per byte: "ø" (U+00F8) is the two
+   UTF-8 bytes 0xC3 0xB8, and reading those as two characters gives "Ã¸". The correct spelling in
+   the same list came from the SERVER, which verifies the token through Google's tokeninfo and gets
+   real UTF-8 -- so the two spellings were two sources, one of them decoding wrongly here.
+
+   Bytes first, then a UTF-8 decode. The try/catch is not decoration: a token is base64url and a
+   malformed one must not take sign-in down with it. */
+function jwtPayload(cred){
+  try{
+    var b=atob(String(cred).split(".")[1].replace(/-/g,"+").replace(/_/g,"/"));
+    var u=new Uint8Array(b.length);
+    for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
+    return JSON.parse(new TextDecoder("utf-8").decode(u));
+  }catch(_e){ return {}; }
+}
 let GOOGLE_VERIFIED=false, GOOGLE_CREDENTIAL=null, REPORTER_NAME="";
 /* ── THE TOKEN'S OWN EXPIRY ──────────────────────────────────────────────────────  2026-09-03
    Google's ID token lasts about an hour. Until today this page took it once and used it until the
@@ -1976,7 +2081,7 @@ function signInMsg(){
 }
 function handleGoogleCred(resp){
   try{
-    const p=JSON.parse(atob(String(resp.credential).split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
+    const p=jwtPayload(resp.credential);
     REPORTER_NAME=p.name||""; GOOGLE_CREDENTIAL=resp.credential; GOOGLE_VERIFIED=true;
     GOOGLE_EXP=(Number(p.exp)||0)*1000;
     /* A minute before it lapses, ask for a new one. No re-render: a redraw would wipe whatever
@@ -1992,6 +2097,20 @@ function handleGoogleCred(resp){
 function netErr(e){ return (e&&e.message)?e.message:"network error"; }
 /* Every write carries ds so the backend routes it to the λJump spreadsheet. */
 function postReport(payload,okMsg){
+  /* ── NEVER SIGNED IN AT ALL ──────────────────────────────────────────────────────────────
+     Søren, 2026-09-10: "when you are not logged in while submitting, there should be a warning!"
+
+     The expired-token case below has been refused before the round trip for weeks. A user who had
+     never signed in fell straight through it: the post went out with credential:null, the server
+     answered "unauthenticated", and that only reached the eye at call sites that print d.error --
+     which not all of them do. Refused the same way, in the same shape, before anything is sent. */
+  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){
+    askSignInAgain();
+    var notIn="You are not signed in \u2014 nothing was submitted. Sign in with Google (top right) "
+      +"and try again; every contribution names who made it.";
+    if(typeof showSubmitToast==="function") showSubmitToast(false, notIn);
+    return Promise.resolve({ok:false, error:notIn});
+  }
   /* REFUSED HERE, BEFORE THE ROUND TRIP, when the token is already dead -- and answered in the
      shape every call site in this page already handles ({ok:false, error}), so the sentence
      reaches every message line and every toast without one of them being edited. */
@@ -2060,12 +2179,14 @@ function fetchLjumpIdentities(){
 }
 const LJUMP_UNCLASSIFIED_SENTINEL="__unclassified__";
 function ljumpIdentityOf(i){
-  /* An added cell has no detection id -- BID is 0 for it -- so the Master cell list cannot be
-     keyed by it, and looking it up anyway would read every added cell's identity off nucleus 0.
-     Its identity is the one on its own row, which is what the name-it control writes. */
-  if(BADDED[i]&&ADDED_REC[i])return String(ADDED_REC[i].identified||"").trim();
+  /* THE MASTER CELL LIST FIRST, for both kinds -- an added cell has a real id now, so the consensus
+     that decides every other cell's name decides its name too, and a second identification can
+     overturn the first. The row's own `identified` is only a fallback, for a cell added before
+     anybody identified it through the normal flow. */
   const rec=IDENTITY_BY_NID&&IDENTITY_BY_NID[BID[i]];
-  return rec&&rec.current?String(rec.current).trim():"";
+  if(rec&&rec.current)return String(rec.current).trim();
+  if(BADDED[i]&&ADDED_REC[i])return String(ADDED_REC[i].identified||"").trim();
+  return "";
 }
 
 let ORGANELLES_BY_NID=null, ORGANELLES_FETCH=null;

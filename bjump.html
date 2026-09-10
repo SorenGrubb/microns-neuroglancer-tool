@@ -3201,6 +3201,23 @@ document.getElementById("dscount").textContent =
 const REPORT_ENDPOINT = UJ.cfg.backend.endpoint;
 const GOOGLE_CLIENT_ID = UJ.cfg.backend.clientId;
 const OWNER_EMAIL = UJ.cfg.backend.ownerEmail;
+/* THE TOKEN PAYLOAD IS UTF-8, AND atob() IS NOT.                                    2026-09-10
+   Søren: "Why am I spelled two different ways now?" -- his own list showing "SÃ¸ren Grubb" beside
+   "Søren Grubb". atob() returns a BINARY STRING, one character per byte: "ø" (U+00F8) is the two
+   UTF-8 bytes 0xC3 0xB8, and reading those as two characters gives "Ã¸". The correct spelling in
+   the same list came from the SERVER, which verifies the token through Google's tokeninfo and gets
+   real UTF-8 -- so the two spellings were two sources, one of them decoding wrongly here.
+
+   Bytes first, then a UTF-8 decode. The try/catch is not decoration: a token is base64url and a
+   malformed one must not take sign-in down with it. */
+function jwtPayload(cred){
+  try{
+    var b=atob(String(cred).split(".")[1].replace(/-/g,"+").replace(/_/g,"/"));
+    var u=new Uint8Array(b.length);
+    for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
+    return JSON.parse(new TextDecoder("utf-8").decode(u));
+  }catch(_e){ return {}; }
+}
 let GOOGLE_VERIFIED=false, GOOGLE_CREDENTIAL=null, REPORTER_NAME="";
 /* ── THE TOKEN'S OWN EXPIRY ──────────────────────────────────────────────────────  2026-09-03
    Google's ID token lasts about an hour. Until today this page took it once and used it until the
@@ -3229,7 +3246,7 @@ function signInMsg(){
 }
 function handleGoogleCred(resp){
   try{
-    const p=JSON.parse(atob(String(resp.credential).split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
+    const p=jwtPayload(resp.credential);
     REPORTER_NAME=p.name||""; GOOGLE_CREDENTIAL=resp.credential; GOOGLE_VERIFIED=true;
     GOOGLE_EXP=(Number(p.exp)||0)*1000;
     /* A minute before it lapses, ask for a new one. No re-render: a redraw would wipe whatever

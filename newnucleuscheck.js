@@ -148,8 +148,16 @@ const NEW_CELLS = [
   ok(arr.N === arr.N_DET + 3, "the added cells are appended to the arrays",
      arr.N_DET + " detected + 3 = " + arr.N);
   ok(arr.detStillWhole, "...without disturbing the detections");
-  ok(arr.added === 1 && arr.id === 0,
-     "...marked as added, with no detection id to collide with one", "BID=" + arr.id);
+  /* A REAL id since 2026-09-10, in a reserved band above the detections — that is what lets an
+     added cell take part in identification, voting and consensus at all. */
+  ok(arr.added === 1 && arr.id >= 1000000 && arr.id < 2000000000,
+     "...with a real nucleus id in the reserved band, not 0", "BID=" + arr.id);
+  ok(await p.evaluate(() => {
+       const a = addedNucleusId("102833,23184,348"), b = addedNucleusId(" 102833 , 23184 , 348 ");
+       const c = addedNucleusId("102833,23184,349");
+       return a === b && a !== c && a >= 1000000;
+     }),
+     "...derived from the coordinate, so every client computes the same one");
   ok(!isFinite(arr.dia) && !isFinite(arr.vol),
      "...with NaN where nothing was measured, so a range filter excludes them",
      "dia=" + arr.dia + " vol=" + arr.vol);
@@ -229,17 +237,22 @@ const NEW_CELLS = [
   }, both.ai);
   await p.waitForTimeout(600);
   const nameIt = posts.slice(before).map(s => { try { return JSON.parse(s); } catch (e) { return {}; } })[0];
-  ok(nameIt && nameIt.type === "new_cell_no_nucleus" && nameIt.append === true,
-     "the guided identification appends to the added cell's own row",
-     nameIt && (nameIt.type + " append=" + nameIt.append));
+  /* AN ORDINARY IDENTIFICATION, which is the whole of "not a parallel world": the Master cell
+     list takes every identification of that id and the most popular wins, so somebody else can
+     disagree. A name written into the cell's own row was a name nobody could correct. */
+  ok(nameIt && nameIt.type === "new_identification",
+     "identifying an added cell files an ordinary identification, not a row edit",
+     nameIt && nameIt.type);
+  ok(nameIt && Number(nameIt.nucleusId) >= 1000000,
+     "...against its own reserved-band id", nameIt && String(nameIt.nucleusId));
+  ok(await p.evaluate((nid) => Number(nid) === BID[BADDED.findIndex(
+       (f, k) => f && ADDED_REC[k] && ADDED_REC[k].comment === "Astrocyte")],
+       String(nameIt && nameIt.nucleusId)),
+     "...the same id the arrays hold for it, so consensus and the panel address one cell");
   ok(nameIt && nameIt.coord === "102833,23184,348",
-     "...matched on that row's exact coord", nameIt && nameIt.coord);
+     "...carrying the coord too, which survives a re-detection", nameIt && nameIt.coord);
   ok(nameIt && nameIt.identified === "Astrocyte", "...with the name", nameIt && nameIt.identified);
   ok(nameIt && nameIt.certainty === "3", "...and the certainty the panel asked for", nameIt && nameIt.certainty);
-  const after = await p.evaluate(() =>
-    document.querySelector("#panel .celltype").textContent.replace(/\s+/g, " ").trim());
-  ok(/Astrocyte/.test(after), "...and the panel is redrawn under its new name", after.slice(0, 40));
-
   ok(await p.evaluate(() => !!document.getElementById("idfOrganelleToggle")) ||
      await p.evaluate(() => !!document.querySelector("#panel #idbox")),
      "an added cell can still carry organelles and be identified");
@@ -259,6 +272,51 @@ const NEW_CELLS = [
      "...with the never-reported ones grouped and honest about it",
      idOpts && idOpts.groups.join(" | "));
   ok(idOpts && idOpts.hasUnreported, "...and their count shown as 0 rather than hidden");
+
+  /* ── one spelling ──────────────────────────────────────────────────────────────────────────
+     Søren: "Why am I spelled two different ways now?" — atob() hands back one character per BYTE,
+     so the two UTF-8 bytes of "ø" became "Ã¸". Driven on a real token payload rather than asserted
+     from the source. */
+  const spelling = await p.evaluate(() => {
+    const payload = btoa(unescape(encodeURIComponent(JSON.stringify({ name: "Søren Grubb" }))))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return { good: jwtPayload("h." + payload + ".s").name,
+             junk: JSON.stringify(jwtPayload("not a token")) };
+  });
+  ok(spelling.good === "Søren Grubb", "the name decodes as UTF-8, one spelling", spelling.good);
+  ok(spelling.junk === "{}", "...and a malformed token returns nothing instead of throwing");
+
+  /* ── a submit with nobody signed in ────────────────────────────────────────────────────── */
+  const beforeUnsigned = posts.length;
+  const refused = await p.evaluate(async () => {
+    GOOGLE_VERIFIED = false; GOOGLE_CREDENTIAL = null;
+    const r = await postReport({ type: "new_identification", nucleusId: 1 }, "x");
+    return { ok: r && r.ok, err: (r && r.error) || "" };
+  });
+  ok(refused.ok === false, "an unsigned submit is refused");
+  ok(/not signed in/i.test(refused.err), "...with a warning that says so", refused.err.slice(0, 48) + "…");
+  ok(posts.length === beforeUnsigned, "...and nothing is sent to the server",
+     (posts.length - beforeUnsigned) + " extra post(s)");
+
+  /* ── Recently viewed ───────────────────────────────────────────────────────────────────── */
+  const recent = await p.evaluate(() => {
+    showCell(3, 0); showCell(7, 0);
+    const box = document.getElementById("recentBox");
+    const rows = Array.from(document.querySelectorAll("#recentList .recentjump")).map(a => a.dataset.c);
+    return { shown: box && box.style.display !== "none", rows,
+             newestFirst: rows[0] === [BX[7], BY[7], BZ[7]].join(","),
+             stored: (() => { try { return JSON.parse(localStorage.getItem("ljump_recent_v1")).length; }
+                              catch (e) { return -1; } })() };
+  });
+  ok(recent.shown, "the Recently viewed panel appears once a cell has been looked at");
+  ok(recent.newestFirst, "...newest first", recent.rows[0]);
+  ok(recent.stored >= 2, "...and survives a reload, keyed by coordinate rather than by index",
+     recent.stored + " remembered");
+  const wentBack = await p.evaluate(() => {
+    document.querySelector("#recentList .recentjump").click();
+    return document.getElementById("panel").textContent.replace(/\s+/g, " ").trim().slice(0, 40);
+  });
+  ok(wentBack.length > 0, "...and clicking one goes back there", wentBack);
 
   await b.close();
   console.log(fails ? "\nRESULT: " + fails + " FAILED" : "\nRESULT: ALL CHECKS PASSED");
