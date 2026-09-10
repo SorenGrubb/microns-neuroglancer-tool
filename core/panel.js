@@ -769,8 +769,9 @@ function wireOrganellePaste(container,rowsEl,addRow){
     const r=O.markersFromLink(box.value,null);
     if(!r.ok){note.innerHTML='<span style="color:var(--bad)">'+escHtml(r.error)+'</span>';return;}
     if(!r.points.length){
-      note.innerHTML='<span style="color:var(--bad)">That link has no markers on it. '
-        +'Ctrl+click the structures in the viewer first, then copy the whole address bar.</span>';
+      note.innerHTML='<span style="color:var(--bad)">That link has no annotations on it. '
+        +'Mark the structures in the viewer first \u2014 a point, or a LINE for anything with two '
+        +'ends like a cilium or an NR type II \u2014 then copy the whole address bar.</span>';
       return;
     }
     const kind=kindSel.value;

@@ -96,17 +96,49 @@ UJ.organelles = (function(){
     try { st = JSON.parse(t); }
     catch (e){ return { ok:false, points:[],
       error:"that link's state is not valid JSON \u2014 copy the whole address bar, not part of it" }; }
+    /* ── EVERY ANNOTATION SHAPE NEUROGLANCER DRAWS ──────────────────────────────────────────
+       Søren, 2026-09-10: "with a new annotation tab and a line annotation it did not find any
+       markers... for structures like NR type II and primary cilia it would be helpful if it could
+       recognize line annotations."
+
+       This read `a.point` and nothing else. A POINT annotation has `point`; a LINE has `pointA`
+       and `pointB`; an axis-aligned BOUNDING BOX has the same pair; an ELLIPSOID has `center`. A
+       link full of lines therefore came back empty.
+
+       Lines are not a convenience here, they are the right shape: the two kinds he named are the
+       ontology's two VECTOR kinds -- a cilium is base and tip, an NR type II is endpoint 1 and
+       endpoint 2 -- so one line is one complete row, drawn in one gesture, already in order.
+       Two separate points have to be clicked in the right sequence and paired afterwards.
+
+       A two-ended marker is kept as {a,b}; a one-ended one stays a bare [x,y,z], which is what
+       every existing caller and every existing check already handles. rowsFromPoints below decides
+       what a two-ended marker means for the kind being logged. */
     var pts = [];
+    var seen = { point:0, line:0, box:0, ellipsoid:0, unreadable:0 };
+    var trip = function(v){
+      if (!v || v.length !== 3) return null;
+      if (!v.every(function(n){ return isFinite(Number(n)); })) return null;
+      return v.map(Number);
+    };
     (st.layers || []).forEach(function(l){
       if (!l || l.type !== "annotation") return;
       if (layerName && l.name !== layerName) return;
       (l.annotations || []).forEach(function(a){
-        if (a && a.point && a.point.length === 3
-            && a.point.every(function(v){ return isFinite(Number(v)); }))
-          pts.push(a.point.map(Number));
+        if (!a) return;
+        var A = trip(a.pointA), B = trip(a.pointB);
+        if (A && B){
+          pts.push({ a:A, b:B });
+          seen[a.type === "axis_aligned_bounding_box" ? "box" : "line"]++;
+          return;
+        }
+        var P = trip(a.point);
+        if (P){ pts.push(P); seen.point++; return; }
+        var C = trip(a.center);
+        if (C){ pts.push(C); seen.ellipsoid++; return; }
+        seen.unreadable++;
       });
     });
-    return { ok:true, points: pts };
+    return { ok:true, points: pts, seen: seen };
   }
 
   /* ONE PASTE OF MARKERS, ONE KIND -- how many markers does a row of this kind take?
@@ -125,15 +157,43 @@ UJ.organelles = (function(){
 
      An odd marker is KEPT as a row with an empty second point and reported, not dropped -- losing
      a click somebody made is worse than showing them an empty field they can see and fill. */
+  /* A marker is either a bare [x,y,z] (a point annotation, and the shape every caller and check
+     already passes) or {a,b} (a line or a box, both of which have two ends). */
+  function markerEnds(m){
+    if (Array.isArray(m)) return { a:m, b:null };
+    return { a:(m && m.a) || null, b:(m && m.b) || null };
+  }
+  /* Voxels, so a half-voxel midpoint is rounded rather than carried -- every coordinate this tool
+     writes elsewhere is an integer voxel and a ".5" in one column would be the odd one out. */
+  function midpoint(a, b){
+    return [Math.round((a[0]+b[0])/2), Math.round((a[1]+b[1])/2), Math.round((a[2]+b[2])/2)];
+  }
   function rowsFromPoints(kind, points){
-    var pts = points || [], out = [];
+    var pts = points || [], out = [], odd = false;
     if (!isVector(kind)){
-      pts.forEach(function(p){ out.push({ kind: kind, a: p, b: null }); });
+      /* ONE LINE IS ONE STRUCTURE. Splitting it into two rows would invent a second mitochondrion
+         out of a gesture that marked one, so a two-ended marker collapses to its midpoint. */
+      pts.forEach(function(m){
+        var e = markerEnds(m);
+        if (!e.a) return;
+        out.push({ kind: kind, a: e.b ? midpoint(e.a, e.b) : e.a, b: null });
+      });
       return { rows: out, odd: false };
     }
-    for (var i = 0; i < pts.length; i += 2)
-      out.push({ kind: kind, a: pts[i], b: (i + 1 < pts.length) ? pts[i + 1] : null });
-    return { rows: out, odd: pts.length % 2 === 1 };
+    /* A vector kind wants two ends. A line already IS two ends, in the order they were drawn, so it
+       becomes one row with no pairing and no odd-marker case. Loose points still pair up in click
+       order exactly as before -- including the odd one, kept as a half-filled row rather than
+       dropped, because losing a click somebody made is worse than showing a field they can fill. */
+    var pending = null;
+    pts.forEach(function(m){
+      var e = markerEnds(m);
+      if (!e.a) return;
+      if (e.b){ out.push({ kind: kind, a: e.a, b: e.b }); return; }
+      if (pending){ out.push({ kind: kind, a: pending, b: e.a }); pending = null; }
+      else pending = e.a;
+    });
+    if (pending){ out.push({ kind: kind, a: pending, b: null }); odd = true; }
+    return { rows: out, odd: odd };
   }
 
   /* "2× centriole · 1× mitochondrion". Unrecognised kinds are shown rather than dropped -- a row
