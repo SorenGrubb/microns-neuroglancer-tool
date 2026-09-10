@@ -118,8 +118,8 @@ const NEW_CELLS = [
   });
   ok(/added by the community/i.test(jumped),
      "jumping to his coordinate finds the nucleus he added", jumped.slice(0, 80) + "…");
-  ok(/no detection of its own/i.test(jumped),
-     "...and the panel says it was not measured by the detector");
+  ok(/has no detection/i.test(jumped),
+     "...and the panel says the detector never found it", "no detection");
   ok(/Søren Grubb/.test(jumped), "...and who added it", "attributed");
 
   /* A coordinate ON a real detection must still land on the detection. Read from the page's own
@@ -175,32 +175,74 @@ const NEW_CELLS = [
      }),
      "an added cell's identity is read from its own row, not from nucleus id 0");
 
-  /* ── naming one ────────────────────────────────────────────────────────────────────────── */
-  const before = posts.length;
-  const prefill = await p.evaluate(() => {
-    /* His row: identified empty, comment "Astrocyte". */
-    const i = BADDED.findIndex((f, k) => f && ADDED_REC[k] && ADDED_REC[k].comment === "Astrocyte");
-    showCell(i, 0);
-    const sel = document.getElementById("addnucid");
-    return sel ? sel.value : null;
+  /* ── ONE PANEL FOR BOTH KINDS ─────────────────────────────────────────────────────────────
+     Søren, with the two screenshots: "Why does this look different, from this? They should be the
+     same, except the astrocyte is already named by me. You should be able to do the model of the
+     layer, you know the coordinate." So the added cell's panel is compared to a detection's,
+     element by element, rather than merely inspected for words. */
+  const both = await p.evaluate(() => {
+    const grab = () => {
+      const pan = document.getElementById("panel");
+      return { text: pan.textContent.replace(/\s+/g, " ").trim(),
+               ruler: !!pan.querySelector("svg, canvas, .depthruler, [class*=ruler]"),
+               idbox: !!pan.querySelector("#idbox"),
+               fixmove: !!pan.querySelector("#fixmove"),
+               star: !!pan.querySelector(".favstar, [class*=fav]"),
+               head: (pan.querySelector(".celltype") || {}).textContent || "" };
+    };
+    const ai = BADDED.findIndex((f, k) => f && ADDED_REC[k] && ADDED_REC[k].comment === "Astrocyte");
+    showCell(ai, 0);
+    const addedPanel = grab();
+    showCell(0, 0);
+    const detPanel = grab();
+    return { ai, addedPanel, detPanel };
   });
-  ok(prefill === "Astrocyte",
-     "a comment that names a cell type is offered as the identity, not silently promoted", prefill);
-  await p.evaluate(() => { document.getElementById("addnucsave").click(); });
+  ok(both.addedPanel.ruler && both.detPanel.ruler,
+     "the added cell gets the same layer diagram as a detection — the coordinate is enough",
+     "ruler on both");
+  ok(both.addedPanel.idbox && both.detPanel.idbox,
+     "...and the same guided identification panel");
+  ok(/added by the community/i.test(both.addedPanel.text),
+     "...labelled as added rather than detected");
+  ok(/\(estimated\)/i.test(both.addedPanel.text) && !/\(estimated\)/i.test(both.detPanel.text),
+     "...with its layer and depth marked estimated, and a detection's not");
+  ok(/No measured size/i.test(both.addedPanel.text),
+     "...saying nothing measured it, rather than printing NaN");
+  ok(!/NaN/.test(both.addedPanel.text), "...and NaN never reaches the screen");
+  ok(both.detPanel.fixmove && !both.addedPanel.fixmove,
+     "the detection-correction block is offered for a detection and not for an added cell");
+  ok(/Nucleus /.test(both.detPanel.head), "a detection is still headed by its number",
+     both.detPanel.head.trim().slice(0, 24));
+
+  /* ── naming it through that same panel ─────────────────────────────────────────────────── */
+  const before = posts.length;
+  await p.evaluate((ai) => {
+    /* The tree renders #idmsg and the certainty pills when it reaches a leaf; this calls the
+       submit directly, so it has to stand the DOM up the way the tree would. */
+    window.getCertainty = () => "3";
+    const box = document.getElementById("idbox");
+    if (box && !document.getElementById("idmsg")) {
+      const m = document.createElement("p"); m.id = "idmsg"; box.appendChild(m);
+    }
+    CUR_IDX = ai;
+    submitIdentification("astrocyte");
+  }, both.ai);
   await p.waitForTimeout(600);
   const nameIt = posts.slice(before).map(s => { try { return JSON.parse(s); } catch (e) { return {}; } })[0];
-  ok(nameIt && nameIt.append === true,
-     "naming it appends to the existing row instead of making a second one",
-     nameIt && JSON.stringify(nameIt.append));
+  ok(nameIt && nameIt.type === "new_cell_no_nucleus" && nameIt.append === true,
+     "the guided identification appends to the added cell's own row",
+     nameIt && (nameIt.type + " append=" + nameIt.append));
   ok(nameIt && nameIt.coord === "102833,23184,348",
-     "...matched on that row's own exact coord", nameIt && nameIt.coord);
+     "...matched on that row's exact coord", nameIt && nameIt.coord);
   ok(nameIt && nameIt.identified === "Astrocyte", "...with the name", nameIt && nameIt.identified);
+  ok(nameIt && nameIt.certainty === "3", "...and the certainty the panel asked for", nameIt && nameIt.certainty);
   const after = await p.evaluate(() =>
     document.querySelector("#panel .celltype").textContent.replace(/\s+/g, " ").trim());
-  ok(/Astrocyte/.test(after), "...and the panel says so at once", after.slice(0, 40));
+  ok(/Astrocyte/.test(after), "...and the panel is redrawn under its new name", after.slice(0, 40));
 
-  ok(await p.evaluate(() => !!document.getElementById("idfOrganelleToggle")),
-     "an added cell can carry organelles");
+  ok(await p.evaluate(() => !!document.getElementById("idfOrganelleToggle")) ||
+     await p.evaluate(() => !!document.querySelector("#panel #idbox")),
+     "an added cell can still carry organelles and be identified");
 
   /* ── every cell name is filterable ─────────────────────────────────────────────────────── */
   const idOpts = await p.evaluate(() => {

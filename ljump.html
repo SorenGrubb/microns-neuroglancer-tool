@@ -1256,18 +1256,6 @@ function absorbAddedNuclei(){
   /* The identity dropdown counts by walking 0..N-1, so it has to be told the range moved. */
   try{ if(typeof window.__ljumpBuildIdentityDropdown==="function")window.__ljumpBuildIdentityDropdown(); }catch(_e){}
 }
-/* Same anisotropic scaling as nearest() -- these coordinates are voxels in the same frame. */
-function nearestNewNucleus(vx,vy,vz){
-  if(!NEW_NUC_CACHE||!NEW_NUC_CACHE.length)return null;
-  let best=null,bd=Infinity;
-  for(const rec of NEW_NUC_CACHE){
-    const p=newNucCoord(rec);
-    const dx=(vx-p[0])*UJ_RX,dy=(vy-p[1])*UJ_RY,dz=(vz-p[2])*UJ_RZ;
-    const d=dx*dx+dy*dy+dz*dz;
-    if(d<bd){bd=d;best=rec;}
-  }
-  return {rec:best,dist:Math.sqrt(bd)};
-}
 function newNucIdOptionsHtml(){
   try{
     const LN=UJ.ontology.LEAF_NAMES,out=[];
@@ -1400,106 +1388,26 @@ function layerFromDepth(depthUm){
   for(const n in votes)if(votes[n]>bestN){bestN=votes[n];bestName=n;}
   return bestName;
 }
-/* The panel for a cell the detector never found. Deliberately short: there is no layer tag, no
-   detector pass and no diameter to show, because nothing measured this nucleus -- somebody said it
-   is there. Saying so is the point of the card. */
-function showNewNucleus(rec,distNm){
-  const p=newNucCoord(rec);
-  CUR_IDX=-1;CUR_NUCID="";CUR_ROOT="";
-  window.CUR_POS=p.slice();
-  window.CUR_CELLTYPE_DISPLAY=rec.identified||null;
-  window.CUR_MICRONS_NAME=null;window.CUR_COMMUNITY_TOP_NAME=rec.identified||null;
-  /* WHOEVER NAMED IT, NAMED IT. Søren: "if I call it an astrocyte, it is an astrocyte." */
-  const named=rec.identified||"";
-  /* His row has the word in `comment`, because this form had no identity field until yesterday.
-     Offered as a prefill rather than promoted silently: a comment is a comment until somebody says
-     it is the identity, and one click is a small price for not guessing on a stranger's behalf. */
-  let fromComment="";
-  try{
-    const LN=UJ.ontology.LEAF_NAMES,c=String(rec.comment||"").trim().toLowerCase();
-    for(const slug in LN)if(String(LN[slug]).toLowerCase()===c){fromComment=LN[slug];break;}
-  }catch(_e){}
-  const depthUm=estimateDepthUm(p[0],p[1],p[2]);
-  const layerNm=layerFromDepth(depthUm);
-  let h='<div class="card">';
-  h+='<div class="celltype" id="ctHeadline">'+celltypeLink(p,escHtml(named||"Unnamed cell"))+'</div>';
-  h+='<div style="margin-top:6px"><span class="tag none">added by the community</span>'
-    +(layerNm?(' <span class="tag non" title="Estimated: this nucleus has no detection, so its '
-      +'depth is fitted from the '+DEPTH_FIT_K+' nearest detections and the layer is the majority '
-      +'of the detections nearest it in depth.">'+escHtml(layerNm.charAt(0).toUpperCase()+layerNm.slice(1))
-      +' (estimated)</span>'):"")
-    +(named?"":' <span class="tag none">unnamed</span>')+'</div>';
-  h+='<p class="hint" style="margin-top:8px">This nucleus has no detection of its own \u2014 '
-    +'somebody added it because the detector missed it. It is not in the 488 the detector found, so '
-    +'it has no measured diameter, volume or detector pass.</p>';
-  if(depthUm!==null&&isFinite(depthUm))
-    h+='<p class="hint"><b>'+depthUm.toFixed(1)+' \u00b5m</b> below the traced pia (estimated from '
-      +'the nearest detections, not measured against the trace itself).</p>';
-  h+='<div class="row" style="margin-top:6px"><div class="coord" style="flex:1">'
-    +p.join(", ")+'</div></div>';
-  if(rec.reporterName)h+='<p class="hint">Added by '+escHtml(rec.reporterName)
-    +(rec.timestamp?(" on "+escHtml(String(rec.timestamp).slice(0,10))):"")+'.</p>';
-  if(rec.comment)h+='<p class="hint">&ldquo;'+escHtml(rec.comment)+'&rdquo;</p>';
-  if(distNm>0)h+='<p class="hint">'+(distNm/1000).toFixed(1)+' \u00b5m from the coordinate you typed.</p>';
-  /* NAME IT. Posts new_cell_no_nucleus with append:true and this row's EXACT stored coord, which
-     Code.gs matches as a string and uses to fill the blank `identified` on the row that is already
-     there -- see that branch's own comment: it exists precisely so somebody can classify a
-     location-only report later without creating a duplicate. It never overwrites, so a name
-     already agreed cannot be changed from here. */
-  h+='<div style="margin-top:12px;border-top:1px dashed var(--line);padding-top:10px">';
-  if(named){
-    h+='<p class="hint" style="margin:0">Identified as <b>'+escHtml(named)+'</b>.</p>';
-  }else{
-    h+='<label style="display:block">What kind of cell is it?</label>';
-    if(fromComment)h+='<p class="hint" style="margin-top:0">The comment on this row says &ldquo;'
-      +escHtml(fromComment)+'&rdquo;. Confirm it below to make that the identity.</p>';
-    h+='<div class="row"><select id="addnucid" style="flex:2">'
-      +'<option value="">Choose a cell type…</option>'+newNucIdOptionsHtml()+'</select>'
-      +'<button class="idbtn" id="addnucsave" style="flex:1">Name this cell</button></div>'
-      +'<p class="hint" id="addnucmsg"></p>';
-  }
-  /* Organelles, on a cell with no nucleus id. core/panel.js's pair is self-contained and µJump has
-     logged organelles against new cells since ?newCellOrganelles=1 existed -- they key by
-     coordinate, which is all a cell with no detection has. */
-  if(typeof organelleFlagHtml==="function")h+=organelleFlagHtml();
-  h+='</div></div>';
-  document.getElementById("panel").innerHTML=h;
-  /* ID_CTX is what the organelle form submits against: no nucleus id, a real coordinate. */
-  ID_CTX={nucId:"",root:"",pos:p.slice()};
-  if(typeof wireOrganelleFlag==="function"){try{wireOrganelleFlag("");}catch(_e2){}}
-  const saveEl=document.getElementById("addnucsave");
-  if(saveEl){
-    const selEl=document.getElementById("addnucid");
-    if(fromComment&&selEl)selEl.value=fromComment;
-    saveEl.addEventListener("click",function(){
-      const msg=document.getElementById("addnucmsg");
-      if(!GOOGLE_VERIFIED){ msg.textContent="Sign in first — identifications are attributed."; return; }
-      let nm="";
-      try{ nm=UJ.ontology.canonSubmitName((selEl&&selEl.value||"").trim())||""; }
-      catch(_e3){ nm=(selEl&&selEl.value||"").trim(); }
-      if(!nm){ msg.textContent="Pick a cell type first."; return; }
-      msg.textContent="sending…";
-      postReport({type:"new_cell_no_nucleus",coord:String(rec.coord),identified:nm,
-        append:true,timestamp:new Date().toISOString()},"identification").then(function(d){
-        if(d&&d.ok){
-          rec.identified=nm;              // the cache row, so the list and the panel agree at once
-          showNewNucleus(rec,distNm);
-          try{wireNewNucleusList();}catch(_e4){}
-        }else{ msg.textContent="Could not record that."; }
-      }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
-    });
-  }
-}
 function showCell(i, distNm){
-  /* An added cell is in these arrays and can be reached by every path a detection can -- nearest(),
-     a neighbour click, the filter's results, the random picker. Its panel is different because
-     what it HAS is different (no measured diameter, an estimated layer, a provenance line), not
-     because it is reached differently. */
-  if(BADDED[i]&&ADDED_REC[i]){ showNewNucleus(ADDED_REC[i],distNm||0); return; }
+  /* ── ONE PANEL FOR BOTH KINDS ────────────────────────────────────────────────────────────
+     Søren, 2026-09-09, with the two screenshots side by side: "Why does this look different, from
+     this? They should be the same, except the astrocyte is already named by me."
+
+     This used to hand an added cell to a separate hand-built card, which had none of the tool on
+     it. A cell that is in the arrays but gets a different screen has the same index, not the same
+     rights. So one function draws both, and every difference below is a fact about the cell --
+     no detection number, nothing measured, an estimated depth -- rather than a shortcut.
+
+     The depth ruler needs nothing at all: renderDepthRuler(i) reads BDEP/BLAY, which
+     absorbAddedNuclei() fills in from the coordinate. That was his other point. */
+  const added=!!(BADDED[i]&&ADDED_REC[i]);
+  const rec=added?ADDED_REC[i]:null;
   CUR_IDX=i;
   const pos=[BX[i],BY[i],BZ[i]], nb=kNearest(pos[0],pos[1],pos[2],3,i);
   const lt=layerTag(i);
-  CUR_NUCID=String(BID[i]); CUR_ROOT="";
+  /* Empty for an added cell, and every id-keyed thing below is skipped because of it rather than
+     being handed a 0 that means "nucleus number zero" to whatever reads it. */
+  CUR_NUCID=added?"":String(BID[i]); CUR_ROOT="";
   /* Cleared here so a name from the PREVIOUS cell can never leak into this one in the window
      before its community fetch resolves. CUR_MICRONS_NAME stays null for the whole session:
      Lee16 has no classifier to name a prediction from, so core/panel.js's vote widget only
@@ -1508,56 +1416,95 @@ function showCell(i, distNm){
   window.CUR_MICRONS_NAME=null; window.CUR_COMMUNITY_TOP_NAME=null;
   ID_CTX={nucId:CUR_NUCID,root:"",pos:pos.slice()};
 
+  const addedName=added?String(rec.identified||"").trim():"";
   let h='<div class="card">';
+  /* No favourite star on an added cell: favourites key on a nucleus id, every added cell has id 0,
+     and one shared star across all of them would be worse than none. The right fix is a backend
+     key that is not a detection id; until then this is absent rather than wrong. */
   h+='<div class="celltype" id="ctHeadline" data-unclassified="1" data-microns-name="">'
-    + celltypeLink(pos,'Nucleus '+BID[i])
-    + ((typeof favStarHtml==="function")?favStarHtml(String(BID[i]),"",pos[0],pos[1],pos[2]):"")
-    + ' <small>no classifier for this dataset</small></div>';
+    + celltypeLink(pos,added?escHtml(addedName||"Unnamed cell"):('Nucleus '+BID[i]))
+    + ((!added&&typeof favStarHtml==="function")?favStarHtml(String(BID[i]),"",pos[0],pos[1],pos[2]):"")
+    + (added?'':' <small>no classifier for this dataset</small>')+'</div>';
 
   h+='<div style="margin-top:6px">'
-    +'<span class="tag '+lt.cls+'">'+escHtml(lt.label)+'</span>'
+    +'<span class="tag '+lt.cls+'"'
+      +(added?' title="Estimated: this nucleus has no detection, so its depth is fitted from the '
+        +DEPTH_FIT_K+' nearest detections and its layer is the majority of the detections nearest '
+        +'it in depth."':'')+'>'+escHtml(lt.label)+(added?" (estimated)":"")+'</span>'
+    +(added?' <span class="tag none" title="No detection found this nucleus \u2014 somebody added it by coordinate.">added by the community</span>':'')
     /* Its own tag rather than the layer one: core/panel.js overwrites #ctTag's text wholesale
        the moment a community identification wins, and sharing it would silently delete the
        anatomical label. */
-    +' <span class="tag none" id="ctTag" title="No cell type has been agreed for this nucleus yet">unclassified</span>';
+    +(addedName?'':' <span class="tag none" id="ctTag" title="No cell type has been agreed for this nucleus yet">unclassified</span>');
   /* WHICH DETECTOR PASS FOUND IT. Shown because it is honest information a classifier needs,
      and worded so it cannot be read as a cell type: "dark" means electron-dense nucleoplasm,
      which is evidence towards endothelial / pericyte / microglial / meningeal and nothing
      more. Dark-pass precision is about 63 % -- see the About card -- so a user looking at a
      dark row should know that before they name it. */
-  h+= BPOL[i]
-    ? ' <span class="tag none" title="Found by the electron-DENSE pass. That is evidence towards endothelial, pericyte, microglial or meningeal — and it is also what a red blood cell looks like. About 1 in 3 dark rows is not a nucleus at all.">dense nucleoplasm</span>'
-    : ' <span class="tag none" title="Found by the pale pass — nucleoplasm brighter than the surrounding cytoplasm. Neurons, astrocytes and oligodendrocytes look like this.">pale nucleoplasm</span>';
-  if(BTR[i]) h+=' <span class="tag none" title="Cut by the top or bottom face of the ~33 µm slab — its volume is an underestimate">truncated</span>';
-  if(BDM[i]) h+=' <span class="tag none" title="Sits in or beside a section flagged as damaged (folded, torn or lost). The image here may be unreliable.">damaged section</span>';
+  /* Detector flags, and an added cell has none: no pass found it, and truncated/damaged are
+     statements about a detection that does not exist. Silence rather than a default. */
+  if(!added){
+    h+= BPOL[i]
+      ? ' <span class="tag none" title="Found by the electron-DENSE pass. That is evidence towards endothelial, pericyte, microglial or meningeal — and it is also what a red blood cell looks like. About 1 in 3 dark rows is not a nucleus at all.">dense nucleoplasm</span>'
+      : ' <span class="tag none" title="Found by the pale pass — nucleoplasm brighter than the surrounding cytoplasm. Neurons, astrocytes and oligodendrocytes look like this.">pale nucleoplasm</span>';
+    if(BTR[i]) h+=' <span class="tag none" title="Cut by the top or bottom face of the ~33 µm slab — its volume is an underestimate">truncated</span>';
+    if(BDM[i]) h+=' <span class="tag none" title="Sits in or beside a section flagged as damaged (folded, torn or lost). The image here may be unreliable.">damaged section</span>';
+  }
   h+='</div>';
 
-  /* The agree?/disagree pills, directly under the headline exactly where µJump puts them. */
-  h+='<div id="idVotePanel" style="margin:5px 0 2px"></div>';
+  /* The agree?/disagree pills, directly under the headline exactly where µJump puts them. They
+     vote on an identification keyed by a NUCLEUS ID, so an added cell has nothing for them to
+     address; its identity lives on its own row. */
+  if(!added)h+='<div id="idVotePanel" style="margin:5px 0 2px"></div>';
 
-  h+='<p class="hint" style="margin-top:10px">Nucleus '+BDIA[i].toFixed(1)+' &micro;m across, '
-    +BVOL[i].toFixed(0)+' &micro;m&sup3;'
-    +(BTR[i]?' <b>(underestimate &mdash; truncated)</b>':'')
-    +' &middot; '+(BDEP[i]<0?Math.abs(BDEP[i]).toFixed(0)+' &micro;m ABOVE the pia'
-                            :BDEP[i].toFixed(0)+' &micro;m below the pia')
+  const depthTxt=isFinite(BDEP[i])
+    ? (BDEP[i]<0?Math.abs(BDEP[i]).toFixed(0)+' &micro;m ABOVE the pia'
+                :BDEP[i].toFixed(0)+' &micro;m below the pia')
+    : 'depth unknown';
+  h+='<p class="hint" style="margin-top:10px">'
+    /* No diameter and no volume on an added cell: BDIA/BVOL are NaN because nothing measured this
+       nucleus, and "NaN µm across" is worse than not saying it. */
+    +(added?'No measured size &mdash; this nucleus has no detection'
+           :('Nucleus '+BDIA[i].toFixed(1)+' &micro;m across, '+BVOL[i].toFixed(0)+' &micro;m&sup3;'
+             +(BTR[i]?' <b>(underestimate &mdash; truncated)</b>':'')))
+    +' &middot; '+depthTxt+(added?' <b>(estimated)</b>':'')
     +(distNm!=null?' &middot; '+(distNm/1000).toFixed(2)+' &micro;m from your query':'')
     +'</p>';
 
   h+='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:flex-start">'
     +'<div style="flex:0 0 auto">'+renderDepthRuler(i)+'</div>'
-    +'<p class="hint" style="flex:1 1 200px;margin-top:0">Depth is measured from the <b>traced '
-    +'pial surface</b>, which is inside this volume &mdash; not from a fitted plane. The layer '
-    +'boundaries themselves are standard mouse V1 values, not measured here, so treat a cell '
-    +'near a boundary as near a boundary.</p></div>';
+    +'<p class="hint" style="flex:1 1 200px;margin-top:0">'
+    +(added
+      ? 'This nucleus has no detection, so its depth is <b>estimated</b>: a plane fitted to the '
+        +DEPTH_FIT_K+' nearest detections\u2019 own depths, anchored on the nearest one. The pial '
+        +'surface itself is traced inside this volume, and the layer boundaries are standard mouse '
+        +'V1 values \u2014 so treat a cell near a boundary as near a boundary, and this one as '
+        +'near its estimate.'
+      : 'Depth is measured from the <b>traced pial surface</b>, which is inside this volume '
+        +'&mdash; not from a fitted plane. The layer boundaries themselves are standard mouse V1 '
+        +'values, not measured here, so treat a cell near a boundary as near a boundary.')
+    +'</p></div>';
 
-  h+='<div class="meta">nucleus '+copyCode(BID[i])
+  h+='<div class="meta">'
+    +(added?('added by '+escHtml(rec.reporterName||"someone")
+            +(rec.timestamp?(' on '+escHtml(String(rec.timestamp).slice(0,10))):''))
+           :('nucleus '+copyCode(BID[i])))
     +' &middot; voxel '+copyCode(pos.join(", "))+'</div>';
+  if(added&&rec.comment)h+='<p class="hint">&ldquo;'+escHtml(rec.comment)+'&rdquo;</p>';
 
   /* The whole point of the tool. There is no machine prediction, so this panel is the only
      place a cell type ever comes from. */
   h+='<label style="margin-top:18px;display:block">Community identifications</label>';
-  h+='<div class="meta" id="commReports"></div>';
-  h+='<div id="classHistoryPanel" style="margin:10px 0 0"></div>';
+  if(added){
+    /* Keyed by nucleus id everywhere else; an added cell's identity is the one on its own row. */
+    h+='<div class="meta">'+(addedName
+      ? ('Identified as <b>'+escHtml(addedName)+'</b>'
+         +(rec.reporterName?(' by '+escHtml(rec.reporterName)):'')+'.')
+      : 'Nobody has named this cell yet.')+'</div>';
+  }else{
+    h+='<div class="meta" id="commReports"></div>';
+    h+='<div id="classHistoryPanel" style="margin:10px 0 0"></div>';
+  }
 
   h+='<label style="margin-top:18px;display:block">What is this cell?</label>';
   h+='<div class="idcta warn"><div class="idcta-top">'
@@ -1572,6 +1519,20 @@ function showCell(i, distNm){
      detector oversplits and false-positives on any dataset, so none of this was worth
      reinventing -- "Move" posts nucleus_position_fix, the other two are core/report.js's own
      shared forms. */
+  /* An added cell has no detection to move, split or reject -- the whole block is about
+     correcting the detector, and there is nothing here the detector did. */
+  if(added){
+    h+='</div>';
+    document.getElementById("panel").innerHTML=h;
+    ID_CTX={nucId:"",root:"",pos:pos.slice()};
+    window.CUR_CELLTYPE_DISPLAY=addedName||null;
+    window.CUR_POS=pos.slice();
+    window.CUR_MICRONS_NAME=null; window.CUR_COMMUNITY_TOP_NAME=addedName||null;
+    if(typeof UJ.tree!=="undefined"&&UJ.tree.start)try{UJ.tree.start();}catch(_et){}
+    if(typeof wireOrganelleFlag==="function"){try{wireOrganelleFlag("");}catch(_eo){}}
+    try{wireNewNucleusList();}catch(_ew){}
+    return;
+  }
   h+='<label style="margin-top:16px;display:block">Is this detection wrong?</label>';
   h+='<p class="hint" style="margin-top:0">Detection is automatic and imperfect. Correct the '
     +'position, say it is really several nuclei, or flag it as no nucleus at all &mdash; the '
@@ -1801,6 +1762,28 @@ function submitIdentification(slug){
   const nm=UJ.ontology.canonSubmitName(UJ.ontology.LEAF_NAMES[slug]||slug);
   const cmtEl=document.getElementById("idfComment");
   msg.textContent="sending…";
+  /* ── THE SAME PANEL, A DIFFERENT ROW ─────────────────────────────────────────────────────
+     An added cell has no nucleus id, so "new_identification" has nothing to key to. Code.gs's
+     new_cell_no_nucleus branch with append:true fills the blank `identified` on the row that is
+     already there, matched on its exact stored coord -- which its own comment says is what that
+     path exists for. Same tree, same type-ahead, same certainty; only the destination differs,
+     because that is the only thing that does. */
+  if(BADDED[i]&&ADDED_REC[i]){
+    const rec=ADDED_REC[i];
+    postReport({
+      type:"new_cell_no_nucleus", append:true,
+      coord:String(rec.coord),
+      identified:nm,
+      path:UJ.tree.pathText(),
+      comment:(cmtEl&&cmtEl.value||"").trim(),
+      certainty:certainty,
+      timestamp:new Date().toISOString()
+    }, nm).then(function(d){
+      msg.textContent=(d&&d.ok)?("Recorded: "+nm+". Thank you."):"Could not record that.";
+      if(d&&d.ok){ rec.identified=nm; showCell(i,null); try{wireNewNucleusList();}catch(_e){} }
+    }).catch(function(e){ msg.textContent="failed: "+netErr(e); });
+    return;
+  }
   postReport({
     type:"new_identification",
     nucleusId:BID[i],
