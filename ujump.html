@@ -526,7 +526,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-11 06:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-11 06:40</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -5496,8 +5496,44 @@ function noteSaveResult(payload){
       showSubmitToast(false,what+" was not saved — "+res.error+".");
   });
 }
+/* ── CAN A WRITE GO OUT RIGHT NOW? ───────────────────────────────────────────────  2026-09-11
+   Søren: "It should warn you BEFORE submitting anything that you are not logged in... Also, one
+   warning is enough, we don't need a warning for each submission."
+
+   postReport() asks this question too, but it asks it once per call -- correct for a form that
+   posts a single row, three blocking alerts for one that posts a structure per row. This is the
+   same question asked ONCE, before the first post, by anything that posts more than one thing.
+
+   Returns "" when the write can go out and the sentence to show when it cannot, having already
+   offered the sign-in prompt -- so the offer arrives BEFORE the failure rather than after three of
+   them. Deliberately the same shape as saveGateNote() below it, which has done this for the volume
+   writes since 2026-09-02; the two now differ only in their wording. */
+function reportGateBlock(){
+  if(!REPORT_ENDPOINT)
+    return "Reporting isn't wired up yet \u2014 this page has no backend configured.";
+  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90&&typeof handleGoogleExpiry==="function")
+    handleGoogleExpiry();
+  if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){
+    if(window.google&&google.accounts&&google.accounts.id){try{google.accounts.id.prompt();}catch(_gp){}}
+    return "Please sign in with Google before submitting \u2014 use the account button in the "
+      + "top-right corner, then try again.\n\nNothing has been sent, so your work is still here: "
+      + "sign in and press Submit again.";
+  }
+  return "";
+}
+
+/* The same modal twice in a row is noise, not information. The gate above means no loop in this
+   file should reach postReport() unsigned at all -- but "should" is not a guarantee, and three
+   stacked alerts is a poor way to discover a path that slipped through. */
+var REPORT_ALERT_MSG="",REPORT_ALERT_AT=0;
+function reportAlertOnce(msg){
+  var now=Date.now();
+  if(msg===REPORT_ALERT_MSG&&now-REPORT_ALERT_AT<5000)return;
+  REPORT_ALERT_MSG=msg;REPORT_ALERT_AT=now;
+  alert(msg);
+}
 function postReport(payload,okMsg){
-  if(!REPORT_ENDPOINT){alert("Reporting isn't wired up yet — set REPORT_ENDPOINT near the top of the script (see the comment above it) to a Google Apps Script web app URL.");return false;}
+  if(!REPORT_ENDPOINT){reportAlertOnce("Reporting isn't wired up yet — set REPORT_ENDPOINT near the top of the script (see the comment above it) to a Google Apps Script web app URL.");return false;}
   if(!GOOGLE_VERIFIED||!GOOGLE_CREDENTIAL){
     /* Some forms that call postReport() (e.g. the Root ID / Nucleus ID proposal panel) have no
        sign-in button of their own -- signing in only ever lived on the identify-result screen's
@@ -5506,10 +5542,10 @@ function postReport(payload,okMsg){
        so fire the same Google One Tap prompt it uses here too, from wherever postReport() is
        called, rather than leaving the user stuck with no way to act on the alert. */
     if(window.google&&google.accounts&&google.accounts.id){try{google.accounts.id.prompt();}catch(_gp){}}
-    alert("Please sign in with Google before submitting \u2014 use the account button in the top-right corner, then try again.\n\nContributions require a verified Google account so they can be attributed.");
+    reportAlertOnce("Please sign in with Google before submitting \u2014 use the account button in the top-right corner, then try again.\n\nContributions require a verified Google account so they can be attributed.");
     return false;
   }
-  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90){handleGoogleExpiry();alert("Your Google sign-in has expired. Please sign in with Google again, then resubmit.");return false;}
+  if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90){handleGoogleExpiry();reportAlertOnce("Your Google sign-in has expired. Please sign in with Google again, then resubmit.");return false;}
   payload.reporterName=REPORTER_NAME||"";payload.reporterEmail=REPORTER_EMAIL||"";
   payload.credential=GOOGLE_CREDENTIAL;
   postAndRead(payload).then(function(res){
@@ -7770,6 +7806,15 @@ async function bulkOrganFindCells(){
    visits, which is what actually happened. */
 function bulkOrganSubmit(){
   const btn=document.getElementById("bulkOrganSubmit");
+  /* ── ASK ONCE, BEFORE ANYTHING IS SENT ──────────────────────────────────────────  2026-09-11
+     This used to walk straight into the posting loop, so a signed-out submission raised one modal
+     per structure and then disabled the button anyway. Nothing is attempted until the gate says
+     the write can go out, and the button is left exactly as it was -- his rows are still on
+     screen, and pressing Submit again after signing in is all that is needed. */
+  if(typeof reportGateBlock==="function"){
+    const blocked=reportGateBlock();
+    if(blocked){alert(blocked);return;}
+  }
   /* `r.cellKey` as well as `r.use`: a disabled checkbox cannot be ticked through the UI, but this
      is the statement that nothing without a cell is ever posted, and it is what the check asserts. */
   const picked=BULK_ORGAN_ROWS.filter(function(r){return r.use&&r.cellKey;});
@@ -7792,8 +7837,9 @@ function bulkOrganSubmit(){
     const coord=(i>=0)?[NX[i],NY[i],NZ[i]].join(","):rows[0].a.join(",");
     const groupId=(nucId||"nonuc")+"_"+(stamp+ci)+"_org";
     rows.forEach(function(r,si){
-      posted++;
-      postReport({
+      /* Counts what actually WENT OUT, not what was attempted -- which is the difference between
+         "3 structures logged" and a green message about nothing. */
+      if(postReport({
         type:"organelle_location",
         timestamp:new Date().toISOString(),
         nucleusId:nucId,rootId:rootId,coord:coord,
@@ -7802,9 +7848,18 @@ function bulkOrganSubmit(){
         pointA:r.a.map(Math.round).join(","),
         pointB:r.b?r.b.map(Math.round).join(","):"",
         identified:"",comment:comment,path:"bulk paste"
-      });
+      })!==false)posted++;
     });
   });
+  /* A button that cannot be pressed is only honest once the work is actually done. If nothing
+     went out, say so and leave it live rather than reporting a submission that did not happen. */
+  if(!posted){
+    btn.disabled=false;btn.textContent="Submit";
+    document.getElementById("bulkOrganThanks").innerHTML=
+      '<div class="idf-flag" style="margin-top:10px">Nothing was sent \u2014 your rows are still '
+      +'here. Try Submit again.</div>';
+    return;
+  }
   btn.disabled=true;btn.textContent="submitted";
   document.getElementById("bulkOrganThanks").innerHTML=
     '<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">'
@@ -7823,11 +7878,17 @@ function bulkOrganSubmit(){
       document.getElementById("bulkOrganResolve").disabled=false;});
   });
   document.getElementById("bulkOrganSubmit").addEventListener("click",bulkOrganSubmit);
-  /* Re-arm after a submission so a second paste works without a reload. */
-  document.getElementById("bulkOrganLink").addEventListener("input",function(){
+  /* Re-arm after a submission so a second paste works without a reload. Editing the link was the
+     only way back in until 2026-09-11, which is no help at all to somebody whose submission was
+     refused with the link still correct -- "Find the cells" re-arms it too, and a refused
+     submission no longer disables it in the first place. */
+  const rearm=function(){
     const b=document.getElementById("bulkOrganSubmit");
     if(b.disabled){b.disabled=false;b.textContent="Submit";}
-  });
+  };
+  document.getElementById("bulkOrganLink").addEventListener("input",rearm);
+  document.getElementById("bulkOrganKind").addEventListener("change",rearm);
+  document.getElementById("bulkOrganResolve").addEventListener("click",rearm);
 })();
 document.getElementById("x").value="240640";document.getElementById("y").value="207872";document.getElementById("z").value="21360";
 /* Gamification (sign-in chip, profile, favourites, leaderboard, dashboard, "Download your

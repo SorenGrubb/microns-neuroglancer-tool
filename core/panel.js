@@ -953,6 +953,15 @@ function wireOrganelleForm(container,slug){
     const commentEl=container.querySelector("#organComment");
     const comment=commentEl?commentEl.value.trim():"";
     const path=((typeof ID_PATH!=="undefined"&&ID_PATH)||[]).map(n=>((typeof TREE!=="undefined"&&TREE[n])?TREE[n].q:n)).join(" > ");
+    /* One question, before the first post. This form posts a row PER STRUCTURE, so without this
+       a signed-out submission raises one modal per row and then disables the button anyway -- the
+       exact thing Søren hit in the bulk panel on 2026-09-11. Asked of the page rather than
+       assumed: µJump defines reportGateBlock(); the other tools sharing this file do not yet, and
+       keep their existing per-call behaviour until their own postReport is hardened. */
+    if(typeof reportGateBlock==="function"){
+      const blocked=reportGateBlock();
+      if(blocked){alert(blocked);return;}
+    }
     const groupId=(ID_CTX.nucId||"nonuc")+"_"+Date.now()+"_org";
     submitBtn.disabled=true;submitBtn.textContent="submitting…";
     subs.forEach((s,i)=>postReport({

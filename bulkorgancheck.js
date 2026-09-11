@@ -38,6 +38,8 @@ function link(lines, name){
   await p.route("**script.google.com/**", r => r.abort());
   await p.route("**accounts.google.com/**", r => r.abort());
   await p.route("**cdnjs.cloudflare.com/**", r => r.abort());
+  /* A real alert() blocks the page and would hang this file. */
+  await p.addInitScript(() => { window.__alerts = []; window.alert = (m) => window.__alerts.push(String(m)); });
   await p.goto("file://" + page_("ujump.html"));
   await p.waitForTimeout(5000);
 
@@ -126,6 +128,11 @@ function link(lines, name){
     UJ.segread.configure = () => ({});
     UJ.segread.resolveAt = async (v) => byX[v[0]] || blank;
     UJ.segread.nearestNucleus = async (v) => nearByX[v[0]] || { nucleusId: 0, distanceNm: 0, others: [] };
+    /* SIGNED IN. Since 2026-09-11 the panel asks reportGateBlock() once before the first post and
+       returns without touching anything if the answer is no -- so a signed-out fixture would test
+       the gate (signingatecheck.js does that) instead of the grouping this file is about. */
+    GOOGLE_VERIFIED = true; GOOGLE_CREDENTIAL = "test.credential.jwt";
+    GOOGLE_EXP = Math.floor(Date.now() / 1000) + 3600;
     window.__posted = [];
     window.postReport = (payload) => { window.__posted.push(payload); return true; };
 
