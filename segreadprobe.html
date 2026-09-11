@@ -66,6 +66,33 @@ const say = (ok, s) => { lines.push((ok ? "  ok   " : "  FAIL ") + s); out.inner
   say(warm < 50, "a repeat read is served from cache (" + warm + " ms vs " + cold + " ms for "
                  + (G.length * 2 - 1) + " cold reads)");
 
+  /* ── the three NR type II he marked at the glia limitans, 2026-09-11 ────────────────────────
+     Both astrocytes are in µJump's table with a nucleus and NO root id: the cell segmentation
+     stops before the nucleus segmentation does up here. And an NR type II carries a cytoplasmic
+     core, so it is never inside the nucleus either. Every endpoint reads 0 in both volumes; the
+     cell is found by reading the nucleus segmentation outward. */
+  const NR = [
+    { name: "marker 1", a: [171903, 81992, 26173], b: [171776, 82258, 26173], nuc: 253863 },
+    { name: "marker 2", a: [265533, 76275, 16275], b: [265488, 76688, 16272], nuc: 445951 },
+    { name: "marker 3", a: [265600, 76273, 16266], b: [265532, 76567, 16266], nuc: 445951 }
+  ];
+  say(true, "--- his three NR type II, at the glia limitans ---");
+  for (const m of NR) {
+    const at = await UJ.segread.resolveAt(m.a);
+    say(!at.inCell && !at.inNucleus,
+        m.name + ": blank in both volumes at point A (root " + at.rootId + ", nucleus " + at.nucleusId + ")");
+    let near = null;
+    for (const p of [m.a, m.b]) {
+      const n = await UJ.segread.nearestNucleus(p, 1000);
+      if (n.nucleusId && (!near || n.distanceNm < near.distanceNm)) near = n;
+    }
+    const good = !!near && near.nucleusId === m.nuc && near.others.length === 0;
+    if (!good) fails++;
+    say(good, "  ...and the wall it is in belongs to nucleus "
+             + (near ? near.nucleusId + " at " + near.distanceNm + " nm" : "NOTHING FOUND")
+             + " (want " + m.nuc + ")");
+  }
+
   out.innerHTML = lines.join("\n") + "\n\n" + (fails ? fails + " FAILED" : "ALL GOOD");
 })().catch(e => { out.innerHTML = lines.join("\n") + "\n\nTHREW: " + e.message + "\n" + e.stack; });
 </script></body></html>

@@ -297,6 +297,90 @@ UJ.segread = (function(){
              why: pair[0].why || "" };
   }
 
+  /* ── THE NUCLEUS NEAR A POINT, BY READING RATHER THAN GUESSING ───────────────  2026-09-11
+     Søren, on three NR type II he marked in astrocytes at the glia limitans: "By definition, NRs
+     are not inside the nucleus meshes, but are going through them."
+
+     He is right, and it is definitional rather than incidental. A type II nucleoplasmic reticulum
+     is an invagination of BOTH nuclear membranes carrying a "diffusion-accessible cytoplasmic
+     core" into the nucleus (Jorgens/Bermudez et al., Front. Cell Dev. Biol. 2022,
+     doi:10.3389/fcell.2022.914286). A nucleus segmentation labels nucleoplasm, so the tubule's
+     core is excluded from it -- a marker placed correctly inside an NR type II reads 0 in the
+     nucleus volume EVERY TIME. Measured on his three: all six endpoints read 0 in both volumes,
+     and a probe found nucleus 253863 at 188 nm from one and 445951 at 92-181 nm from the other
+     four.
+
+     So: sample the nucleus volume OUTWARD from the point, on the volume's own grid, nearest first.
+     This is not the "nearest nucleus" fallback rejected elsewhere in this file -- that one compares
+     a point to a list of CENTROIDS, which in a dendrite names a different cell entirely. This reads
+     the actual segmentation within a radius smaller than the structures involved: at 188 nm the
+     voxel found is the wall of the tubule the marker is in, not a neighbouring cell.
+
+     AMBIGUITY IS REPORTED, NOT RESOLVED. Once a first id is found the search keeps going a little
+     further; a second, different nucleus that close means the marker sits between two nuclei and
+     the honest answer is to say so. */
+  var OFFSETS = null, OFFSET_KEY = "";
+  function offsetsWithin(res, capNm){
+    var key = res.join(",") + "|" + capNm;
+    if (OFFSETS && OFFSET_KEY === key) return OFFSETS;
+    var r = [Math.floor(capNm / res[0]), Math.floor(capNm / res[1]), Math.floor(capNm / res[2])];
+    var list = [];
+    for (var x = -r[0]; x <= r[0]; x++)
+      for (var y = -r[1]; y <= r[1]; y++)
+        for (var z = -r[2]; z <= r[2]; z++){
+          var d = Math.sqrt(Math.pow(x * res[0], 2) + Math.pow(y * res[1], 2) + Math.pow(z * res[2], 2));
+          if (d <= capNm) list.push([x, y, z, d]);
+        }
+    list.sort(function(a, b){ return a[3] - b[3]; });
+    OFFSETS = list; OFFSET_KEY = key;
+    return list;
+  }
+
+  /* One chunk held open across a whole search. The samples are distance-ordered so they stay in
+     one chunk almost always, and a chunk of the nucleus volume is 32.8 x 32.8 x 2.56 um -- far
+     larger than any radius this is called with. Without this, a search would await a cached
+     promise tens of thousands of times for no reason. */
+  async function chunkBuf(base, scale, at){
+    return scale.sharding ? await shardedChunk(base, scale, at)
+                          : await unshardedChunk(base, scale, at);
+  }
+
+  async function nearestNucleus(vox, capNm){
+    if (!CFG) throw new Error("segread.configure() first");
+    var cap = capNm || 1000;
+    var info = await getInfo(CFG.nuc), scale = info.scales[0];
+    var v = [0, 1, 2].map(function(i){
+      return Math.floor(vox[i] * CFG.res[i] / scale.resolution[i]);
+    });
+    var offs = offsetsWithin(scale.resolution, cap);
+    var held = null, heldBuf = null;
+    var first = 0, firstD = 0, limit = cap, others = {};
+    for (var k = 0; k < offs.length; k++){
+      var o = offs[k];
+      if (o[3] > limit) break;
+      var p = [v[0] + o[0], v[1] + o[1], v[2] + o[2]];
+      if (!held || p[0] < held.start[0] || p[0] >= held.end[0]
+                || p[1] < held.start[1] || p[1] >= held.end[1]
+                || p[2] < held.start[2] || p[2] >= held.end[2]){
+        held = chunkOf(scale, p);
+        heldBuf = held ? await chunkBuf(CFG.nuc, scale, held) : null;
+      }
+      if (!held || !heldBuf) continue;              // outside the volume, or an unwritten chunk
+      var id = decodeAt(heldBuf, held.shape, scale.compressed_segmentation_block_size,
+                        [p[0] - held.start[0], p[1] - held.start[1], p[2] - held.start[2]], 1);
+      if (id === "0") continue;
+      if (!first){
+        first = Number(id); firstD = o[3];
+        /* Keep looking a little past the first hit, so "between two nuclei" is detectable. */
+        limit = Math.min(cap, o[3] * 1.5 + 128);
+        continue;
+      }
+      if (Number(id) !== first) others[id] = 1;
+    }
+    return { nucleusId: first, distanceNm: Math.round(firstD),
+             others: Object.keys(others).map(Number) };
+  }
+
   /* A small pool rather than Promise.all: a paste of two hundred markers would otherwise open two
      hundred sockets, and the browser would queue them anyway -- badly, and with no progress to
      report while it did. onProgress is called after each item so a panel can count up. */
@@ -321,7 +405,7 @@ UJ.segread = (function(){
 
   return { configure: configure, configured: configured,
            nucleusAt: nucleusAt, segmentAt: segmentAt, resolveAt: resolveAt,
-           mapPool: mapPool,
+           nearestNucleus: nearestNucleus, mapPool: mapPool,
            /* exported for the check, which drives the real decoder over real bytes */
            _decodeAt: decodeAt, _compressedMorton: compressedMorton,
            _chunkOf: chunkOf, _httpBase: httpBase };

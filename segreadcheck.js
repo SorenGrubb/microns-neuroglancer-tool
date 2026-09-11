@@ -36,25 +36,46 @@ const ok = (c, what, d) => {
    every voxel whose index has bit 0 set... no — simpler and stricter: `hi` at exactly ONE chosen
    voxel and `lo` everywhere else, so reading the wrong voxel gives the wrong answer. */
 function buildChunk(shape, block, words, at, hiValue, loValue){
+  return buildChunkOf(shape, block, words, [loValue, hiValue], [{ at: at, slot: 1 }]);
+}
+/* `table[0]` is the background everywhere; each plant puts its slot at one voxel. Enough bits for
+   the table, so two planted values (three slots) really do use 2 bits and exercise the packing.
+
+   MULTI-BLOCK, on purpose. A chunk larger than one block has a block-header array with one entry
+   per block in x-fastest order, and the reader has to index into it correctly — untested until a
+   chunk here had more than one block. The blocks share a lookup table (the format allows it: the
+   offsets simply point at the same place) and each gets its own run of encoded values. */
+function buildChunkOf(shape, block, words, table, plants){
+  const grid = [Math.ceil(shape[0] / block[0]), Math.ceil(shape[1] / block[1]),
+                Math.ceil(shape[2] / block[2])];
+  const nBlocks = grid[0] * grid[1] * grid[2];
   const nVox = block[0] * block[1] * block[2];
-  const valWords = Math.ceil(nVox * 1 / 32);            // 1 bit per voxel
-  const chan = 1;                                        // block header starts at word 1
-  const valsAbs = chan + 2;                              // straight after the 2-word header
-  const tableAbs = valsAbs + valWords;
-  const total = tableAbs + 2 * words;
-  const d = new Uint32Array(total);
+  const bits = Math.max(1, Math.ceil(Math.log2(table.length)));
+  const valWords = Math.ceil(nVox * bits / 32);
+  const chan = 1;                                        // header array starts at word 1
+  const valsBase = chan + 2 * nBlocks;
+  const tableAbs = valsBase + nBlocks * valWords;
+  const d = new Uint32Array(tableAbs + table.length * words);
   d[0] = chan;
-  d[chan]     = (tableAbs - chan) | (1 << 24);           // table offset (channel-relative), 1 bit
-  d[chan + 1] = (valsAbs - chan);                        // encoded values offset, channel-relative
-  const i = (at[0] % block[0]) + block[0] * ((at[1] % block[1]) + block[1] * (at[2] % block[2]));
-  d[valsAbs + (i >>> 5)] |= (1 << (i & 31));             // index 1 at the chosen voxel, 0 elsewhere
-  const put = (slot, v) => {
+  for (let b = 0; b < nBlocks; b++){
+    d[chan + b * 2]     = (tableAbs - chan) | (bits << 24);          // channel-relative
+    d[chan + b * 2 + 1] = (valsBase + b * valWords - chan);
+  }
+  plants.forEach(p => {
+    const bi = Math.floor(p.at[0] / block[0])
+             + grid[0] * (Math.floor(p.at[1] / block[1])
+             + grid[1] * Math.floor(p.at[2] / block[2]));
+    const i = (p.at[0] % block[0])
+            + block[0] * ((p.at[1] % block[1]) + block[1] * (p.at[2] % block[2]));
+    const bit = i * bits;
+    d[valsBase + bi * valWords + (bit >>> 5)] |= (p.slot << (bit & 31));
+  });
+  table.forEach((v, slot) => {
     if (words === 1) { d[tableAbs + slot] = Number(v) >>> 0; return; }
     const b = BigInt(v);
     d[tableAbs + slot * 2]     = Number(b & 0xffffffffn) >>> 0;
     d[tableAbs + slot * 2 + 1] = Number((b >> 32n) & 0xffffffffn) >>> 0;
-  };
-  put(0, loValue); put(1, hiValue);
+  });
   return Buffer.from(d.buffer);
 }
 
@@ -266,6 +287,60 @@ console.log("\nboth volumes at once");
      cellOnly.rootId + " / " + cellOnly.nucleusId);
   ok(cellOnly.inCell === false && cellOnly.inNucleus === false,
      "...which is what lets a panel say why it cannot place a marker");
+}
+
+/* ── the nucleus NEAR a point ────────────────────────────────────────────────────────────────
+   Søren: "By definition, NRs are not inside the nucleus meshes, but are going through them."
+
+   A type II nucleoplasmic reticulum carries a cytoplasmic core into the nucleus, so the nucleus
+   segmentation excludes it and a correctly placed marker reads 0 there every time. Measured on his
+   three: all six endpoints blank in both volumes, with the nuclei 92-188 nm away. This is the rung
+   of the ladder that finds them — by reading the segmentation outward, not by comparing the point
+   to a list of nucleus centres. */
+console.log("\nthe nucleus near a point, not the nucleus at it");
+{
+  const base = "https://h/nuc2";
+  const scale = { key: "n", size: [64, 64, 64], chunk_sizes: [[64, 64, 64]], voxel_offset: [0, 0, 0],
+                  resolution: [64, 64, 40], compressed_segmentation_block_size: [8, 8, 8] };
+  const info = Buffer.from(JSON.stringify({ data_type: "uint32", num_channels: 1, scales: [scale] }));
+  /* Nucleus 253863 planted three x-voxels from the query point: 3 x 64 nm = 192 nm, which is the
+     distance his own marker sat at. Nothing at the point itself, exactly like a real NR tubule. */
+  const chunk = buildChunkOf([64, 64, 64], [8, 8, 8], 1, [0, 253863, 445951],
+                             [{ at: [11, 4, 4], slot: 1 }]);
+  const { S } = load({ [base + "/info"]: info, [base + "/n/0-64_0-64_0-64"]: chunk });
+  S.configure({ seg: base, nuc: base, res: [64, 64, 40] });
+
+  const atPoint = await S.nucleusAt([8, 4, 4]);
+  ok(atPoint.nucleusId === 0, "the point itself is blank, as an NR marker always is");
+
+  const near = await S.nearestNucleus([8, 4, 4], 1000);
+  ok(near.nucleusId === 253863, "...and the nucleus three voxels away is found", String(near.nucleusId));
+  ok(near.distanceNm === 192, "...with the distance it was found at, in nanometres",
+     near.distanceNm + " nm");
+  ok(near.others.length === 0, "one nucleus nearby is not ambiguous");
+
+  const tooFar = await S.nearestNucleus([8, 4, 4], 100);
+  ok(tooFar.nucleusId === 0, "a cap shorter than the distance finds nothing rather than reaching",
+     "100 nm cap vs a 192 nm neighbour");
+
+  /* Two nuclei at comparable distance is the case that must NOT be resolved by preference. */
+  const both = buildChunkOf([64, 64, 64], [8, 8, 8], 1, [0, 253863, 445951],
+                            [{ at: [11, 4, 4], slot: 1 }, { at: [5, 4, 4], slot: 2 }]);
+  const { S: S2 } = load({ [base + "/info"]: info, [base + "/n/0-64_0-64_0-64"]: both });
+  S2.configure({ seg: base, nuc: base, res: [64, 64, 40] });
+  const amb = await S2.nearestNucleus([8, 4, 4], 1000);
+  ok(amb.nucleusId === 445951 && amb.others.length === 1 && amb.others[0] === 253863,
+     "two nuclei within reach are BOTH reported, nearest first",
+     amb.nucleusId + " + " + amb.others.join(","));
+
+  /* The search must not walk out of the volume or into a chunk nobody wrote. */
+  const { S: S3 } = load({ [base + "/info"]: info });
+  S3.configure({ seg: base, nuc: base, res: [64, 64, 40] });
+  const none = await S3.nearestNucleus([8, 4, 4], 1000);
+  ok(none.nucleusId === 0, "an unwritten chunk is background, not a crash");
+  const edge = await S.nearestNucleus([0, 0, 0], 1000);
+  ok(typeof edge.nucleusId === "number", "a point on the volume's corner searches without falling off",
+     "found " + edge.nucleusId);
 }
 
 console.log("\nhow a batch is run");
