@@ -349,7 +349,6 @@
       pericytes, astrocyte endfeet and the brain's waste-clearance pathway. Open tools and open
       data for identifying cells in large EM volumes.
     </p>
-    <p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-03 08:49</span></p>
     <nav aria-label="Sections of this page">
       <ul class="sitenav">
         <li><a href="#tools">The tools</a></li>
@@ -361,6 +360,7 @@
         <li><a href="#datasets">Every dataset</a></li>
       </ul>
     </nav>
+    <p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-10 21:40</span></p>
   </div>
 </header>
 
@@ -1113,9 +1113,18 @@ function toggleTheme(){ setTheme(currentTheme() === "dark" ? "light" : "dark"); 
         .then(function(){ done++; paint(done===keys.length); });
     });
   }
+  /* ── ISOLATED ON PURPOSE ──────────────────────────────────────────────────────  2026-09-10
+     This shares a <script> block with the light/dark toggle, and it used to call fetch() as its
+     first statement. Anything thrown here therefore stopped the block, and the theme button was
+     drawn but never wired -- which is what themecheck.js caught, in jsdom, where fetch does not
+     exist. A browser has fetch and Søren would not have hit that trigger, but the shape is wrong
+     either way: the least important thing on the page should not be able to break the rest of it.
+     So: everything below is contained, and the absence of fetch takes the same route as an
+     unavailable endpoint rather than being a special case. */
   (function loadCombinedLeaderboard(){
     var el=document.getElementById("lbAll");
     if(!el)return;
+    if(typeof fetch!=="function"){try{lbPoolPerTool();}catch(_nf){}return;}
     fetch(LB_ENDPOINT+"?combinedLeaderboard=1").then(function(r){return r.json();}).then(function(d){
       var rows=(d&&d.leaderboard)||null;
       /* An old deployment answers doGet's fallback -- {"reports":[],"mergedGroups":[],...}, no

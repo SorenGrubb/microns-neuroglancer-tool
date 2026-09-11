@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>segread probe</title>
+<style>body{font:13px/1.5 ui-monospace,monospace;background:#0d1117;color:#e6edf3;padding:16px}
+.ok{color:#3fb950}.bad{color:#f85149}</style></head><body>
+<h3>core/segread.js against real MICrONS data</h3>
+<pre id="out">running…</pre>
+<script src="core/segread.js"></script>
+<script>
+/* Ground truth taken from µJump's OWN embedded nucleus table (nucdata: NB nucleus ids, XB/YB/ZB
+   voxel centroids at 4/4/40 nm, HB/LB/HI root ids). If the reader disagrees with the table the
+   tool already shows, the reader is wrong. */
+const G = [
+  { nuc: 730537, vox: [381312, 273984, 19993], root: null },
+  { nuc: 373879, vox: [228816, 239776, 19593], root: "864691136090135607" },
+  { nuc: 201858, vox: [146848, 213600, 26267], root: "864691135373893678" },
+  { nuc: 408486, vox: [245024, 244416, 25074], root: "864691135194387242" },
+  { nuc: 598774, vox: [334096, 273472, 20713], root: "864691135741608653" },
+  { nuc: 375326, vox: [227440, 247200, 17032], root: "864691135454412650" },
+  { nuc: 406597, vox: [245040, 228160, 27086], root: "864691136908951918" }
+];
+const out = document.getElementById("out");
+const lines = [];
+const say = (ok, s) => { lines.push((ok ? "  ok   " : "  FAIL ") + s); out.innerHTML = lines.join("\n"); };
+
+(async () => {
+  UJ.segread.configure({
+    seg: "precomputed://gs://iarpa_microns/minnie/minnie65/seg_m1300",
+    nuc: "precomputed://https://bossdb-open-data.s3.amazonaws.com/iarpa_microns/minnie/minnie65/nuclei",
+    res: [4, 4, 40]
+  });
+  let fails = 0;
+  const t0 = performance.now();
+  for (const g of G) {
+    try {
+      const n = await UJ.segread.nucleusAt(g.vox);
+      const good = n.nucleusId === g.nuc;
+      if (!good) fails++;
+      say(good, "nucleus at " + g.vox.join(",") + " -> " + n.nucleusId + " (want " + g.nuc + ")"
+                + (n.why ? "  [" + n.why + "]" : ""));
+    } catch (e) { fails++; say(false, "nucleus " + g.nuc + " threw: " + e.message); }
+    if (g.root) {
+      try {
+        const s = await UJ.segread.segmentAt(g.vox);
+        const good = s.rootId === g.root;
+        if (!good) fails++;
+        say(good, "  cell at same point -> " + s.rootId + " (want " + g.root + ")");
+      } catch (e) { fails++; say(false, "segment for " + g.nuc + " threw: " + e.message); }
+    }
+  }
+  const cold = Math.round(performance.now() - t0);
+
+  /* Empty space must be a clean zero with a reason, never a throw and never a wrong id. */
+  try {
+    const e1 = await UJ.segread.segmentAt([10, 10, 100]);
+    say(e1.rootId === "0", "far outside the tissue -> rootId " + e1.rootId + " [" + e1.why + "]");
+    const e2 = await UJ.segread.nucleusAt([10, 10, 100]);
+    say(e2.nucleusId === 0, "...and nucleusId " + e2.nucleusId + " [" + e2.why + "]");
+  } catch (e) { fails++; say(false, "empty space threw: " + e.message); }
+
+  /* The cache is the whole reason a bulk paste is affordable: the second read of a point in the
+     same chunk must not go back to the network. */
+  const t1 = performance.now();
+  await UJ.segread.segmentAt(G[1].vox);
+  await UJ.segread.nucleusAt(G[1].vox);
+  const warm = Math.round(performance.now() - t1);
+  say(warm < 50, "a repeat read is served from cache (" + warm + " ms vs " + cold + " ms for "
+                 + (G.length * 2 - 1) + " cold reads)");
+
+  out.innerHTML = lines.join("\n") + "\n\n" + (fails ? fails + " FAILED" : "ALL GOOD");
+})().catch(e => { out.innerHTML = lines.join("\n") + "\n\nTHREW: " + e.message + "\n" + e.stack; });
+</script></body></html>
