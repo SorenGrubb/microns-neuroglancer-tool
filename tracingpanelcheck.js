@@ -76,6 +76,91 @@ function link(annotations){
 
   await p.evaluate(() => { document.getElementById("tracingPanel").open = true; });
 
+  console.log("\nwhat it is comes from the list, not a text box");
+  {
+    const l = await p.evaluate(() => {
+      const w = document.getElementById("tracingWhat");
+      const row = document.getElementById("tracingNameRow");
+      const opts = [...w.options];
+      const set = (v) => { w.value = v; w.dispatchEvent(new Event("change", { bubbles: true })); };
+      const out = { n: opts.length,
+                    groups: [...w.querySelectorAll("optgroup")].map(g => g.label),
+                    first: opts.slice(0, 2).map(o => o.value).join(","),
+                    last: opts[opts.length - 1].value };
+      set("__cell");    out.cellBox = row.style.display !== "none";
+      out.cellWhat = tracingWhat();
+      set("__nucleus"); out.nucWhat = tracingWhat();
+      set("__other");   out.otherBox = row.style.display !== "none";
+      document.getElementById("tracingName").value = "a thing with no name";
+      out.otherWhat = tracingWhat();
+      const organ = opts.map(o => o.value)
+        .find(v => v && v.indexOf("__") !== 0 && /lyso/.test(v)) || "";
+      if (organ){ set(organ); out.organBox = row.style.display !== "none";
+                  out.organWhat = tracingWhat(); }
+      return out;
+    });
+    ok(l.n > 40, "the whole organelle ontology is on the list", l.n + " options");
+    ok(l.first === "__cell,__nucleus",
+       "...with the whole cell and its nucleus first, because they are not organelles", l.first);
+    ok(l.groups[0] === "The cell itself" && l.groups[l.groups.length - 1] === "Not on the list",
+       "...the ontology's own groups in between, unchanged",
+       l.groups.length + " groups: " + l.groups.slice(0, 3).join(" / ") + " \u2026");
+    ok(l.last === "__other", "...and 'something else' last of all", l.last);
+    ok(!l.cellBox && l.otherBox && l.organBox === false,
+       "the text box appears for 'something else' and for NOTHING else",
+       "cell " + l.cellBox + ", other " + l.otherBox + ", organelle " + l.organBox);
+    ok(l.cellWhat.kind === "cell" && l.cellWhat.name === "Whole cell",
+       "the whole cell is its own kind", JSON.stringify(l.cellWhat));
+    ok(l.nucWhat.kind === "nucleus" && l.nucWhat.name === "Nucleus",
+       "...and so is the nucleus", JSON.stringify(l.nucWhat));
+    ok(l.organWhat && /lyso/.test(l.organWhat.kind) && /^[A-Z]/.test(l.organWhat.name)
+       && l.organWhat.name !== l.organWhat.kind,
+       "an organelle carries the ontology's VALUE and its LABEL \u2014 not the value twice, which is "
+       + "what a module-level labelOf() would have given on this page",
+       JSON.stringify(l.organWhat));
+    ok(l.otherWhat.kind === "other" && l.otherWhat.name === "a thing with no name",
+       "...and only 'something else' takes its name from what was typed",
+       JSON.stringify(l.otherWhat));
+  }
+
+  console.log("\nwhat is already at that coordinate");
+  {
+    const r = await p.evaluate(async () => {
+      /* The read itself is core/segread.js's, live-proven against the real bucket and covered by
+         segreadcheck.js; what is under test here is what the CARD does with the answer. */
+      UJ.segread.configure = () => ({});
+      UJ.segread.resolveAt = async () => ({ rootId: "864691135234029401", nucleusId: 253863,
+                                            inCell: true, inNucleus: true });
+      const nuc = document.getElementById("tracingNucId"), root = document.getElementById("tracingRootId");
+      nuc.value = ""; root.value = "";
+      await tracingResolveAt([240640, 207872, 21360]);
+      const filled = { nuc: nuc.value, root: root.value,
+                       say: document.getElementById("tracingAtSay").innerText };
+      /* Typed by hand, it must survive a second resolve. */
+      nuc.value = "999"; root.value = "888";
+      await tracingResolveAt([240640, 207872, 21360]);
+      filled.keptNuc = nuc.value; filled.keptRoot = root.value;
+      /* And nothing there is an answer, not a silence. */
+      UJ.segread.resolveAt = async () => ({ rootId: "0", nucleusId: 0,
+                                            inCell: false, inNucleus: false });
+      nuc.value = ""; root.value = "";
+      await tracingResolveAt([1, 2, 3]);
+      filled.emptySay = document.getElementById("tracingAtSay").innerText;
+      filled.emptyNuc = nuc.value;
+      return filled;
+    });
+    ok(r.nuc === "253863" && r.root === "864691135234029401",
+       "the nucleus and the cell at that coordinate fill themselves in",
+       r.nuc + " / " + r.root);
+    ok(/nucleus 253863/.test(r.say) && /cell 864691135234029401/.test(r.say),
+       "...and the card says what it found, so a prefilled id is not just a number", r.say);
+    ok(r.keptNuc === "999" && r.keptRoot === "888",
+       "a value typed by hand is never overwritten", r.keptNuc + " / " + r.keptRoot);
+    ok(r.emptyNuc === "" && /Nothing is segmented/.test(r.emptySay),
+       "and nothing there is said out loud \u2014 it is usually the reason for tracing at all",
+       r.emptySay.slice(0, 60));
+  }
+
   console.log("\nthe card's own coordinate");
   {
     const c = await p.evaluate(async () => {
@@ -345,6 +430,10 @@ function link(annotations){
     window.__alerts = [];
     document.getElementById("tracingLink").value = url;
     document.getElementById("tracingRead").click();
+    /* The name is no longer typed: it comes from the list, and "something else" is the one
+       option that takes a typed one. */
+    const w1 = document.getElementById("tracingWhat");
+    w1.value = "__other"; w1.dispatchEvent(new Event("change", { bubbles: true }));
     document.getElementById("tracingName").value = "astrocyte at the glia limitans";
     document.getElementById("tracingColor").value = "#40e28c";
     document.getElementById("tracingNucId").value = "253863";
@@ -416,6 +505,8 @@ function link(annotations){
     GOOGLE_VERIFIED = false; GOOGLE_CREDENTIAL = "";
     document.getElementById("tracingLink").value = url;
     document.getElementById("tracingRead").click();
+    const w2 = document.getElementById("tracingWhat");
+    w2.value = "__other"; w2.dispatchEvent(new Event("change", { bubbles: true }));
     document.getElementById("tracingName").value = "second tracing";
     document.getElementById("tracingShare").click();
     const out = { alerts: window.__alerts.length, posted: window.__posted.length };
@@ -461,6 +552,8 @@ function link(annotations){
       const before = TRACINGS_KEPT.length;
       document.getElementById("tracingLink").value = url;
       document.getElementById("tracingRead").click();
+      const w3 = document.getElementById("tracingWhat");
+      w3.value = "__other"; w3.dispatchEvent(new Event("change", { bubbles: true }));
       document.getElementById("tracingName").value = "astrocyte at the glia limitans";
       document.getElementById("tracingKeep").click();
       return { before: before, after: TRACINGS_KEPT.length,

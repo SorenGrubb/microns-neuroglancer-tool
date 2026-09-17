@@ -221,6 +221,48 @@ console.log("\nthe mapping it returns, which is what a click goes through");
      "the centre is the centre at every level too", String(fine.toolAt(100, 100)));
 }
 
+console.log("\nmagnification, which is the only zoom here that is free");
+{
+  /* The mip list stops at 8 nm/px; a lysosome is ~500 nm, sixty pixels at that. `zoom` draws each
+     source voxel zoom x zoom, so the pad goes closer than the data does -- and because the window
+     in VOXELS shrinks as it magnifies, it fetches LESS, not more. */
+  const one = fakeCanvas(), four = fakeCanvas();
+  fetched = [];
+  const v1 = await E.drawSection(one, { centre: [240640, 207872, 21360], mip: 0,
+                                        w: 256, h: 256, lo: 0, hi: 255 });
+  const c1 = fetched.length;
+  fetched = [];
+  const v4 = await E.drawSection(four, { centre: [240640, 207872, 21360], mip: 0, zoom: 4,
+                                         w: 256, h: 256, lo: 0, hi: 255 });
+  const c4 = fetched.length;
+  ok(v4.zoom === 4 && v4.nmPerPx === 8 && v4.effNmPerPx === 2,
+     "the data stays 8 nm and the SCREEN becomes 2 nm a pixel \u2014 two numbers, not one",
+     v4.nmPerPx + " nm data, " + v4.effNmPerPx + " nm/px on screen");
+  ok(v4.vw === 64 && v4.vh === 64 && v4.w === 256,
+     "...a 256 pixel canvas over a 64 voxel window", v4.vw + " voxels into " + v4.w + " pixels");
+  ok(c4 <= c1, "...which costs no more chunks than 1x, and usually fewer",
+     c4 + " chunks at 4x against " + c1 + " at 1x");
+  ok(Math.abs(v4.umAcross - v1.umAcross / 4) < 1e-9,
+     "...and a quarter of the tissue is on screen", v4.umAcross + " um against " + v1.umAcross);
+
+  /* THE FOUR PIXELS OF ONE VOXEL ARE THE SAME VOXEL. A magnification that interpolated would put
+     an edge where the data has none, and he is placing vertices on edges. */
+  const a0 = four.px(128, 128), b0 = four.px(129, 128), c0 = four.px(128, 129);
+  ok(a0 === b0 && a0 === c0, "each voxel is a solid block, not a smoothed one \u2014 a vertex goes on "
+     + "a boundary the data has", a0 + "/" + b0 + "/" + c0);
+  const vv = E._toScale(INFO.scales[0], [240640, 207872, 21360]);
+  ok(a0 === VAL(vv[0], vv[1], vv[2]), "...and it is the right voxel", a0 + " vs " + VAL(vv[0], vv[1], vv[2]));
+
+  /* THE MAPPING FOLLOWS, or a contour drawn zoomed in lands somewhere else when you zoom out. */
+  ok(String(v4.toolAt(128, 128)) === "240640,207872,21360",
+     "the middle pixel still maps to the coordinate the pad opened at", String(v4.toolAt(128, 128)));
+  ok(String(v4.pxAt([240640, 207872, 21360])) === "128,128",
+     "...and back", String(v4.pxAt([240640, 207872, 21360])));
+  ok(Math.abs(v4.pxPerToolVoxel - 4 / 8 * 4) < 1e-9,
+     "...and a tool voxel is four times as many pixels, so the close radius stays put on screen",
+     v4.pxPerToolVoxel);
+}
+
 console.log("\noutside the volume is grey, not black and not tissue");
 {
   const cv = fakeCanvas();

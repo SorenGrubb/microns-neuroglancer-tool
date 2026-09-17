@@ -363,6 +363,7 @@ UJ.blender = (function(){
       lines.push("TRACINGS = [");
       tracings.forEach(function(t){
         lines.push("    {'name': " + pyStr(t.name || "traced")
+                   + ", 'kind': " + pyStr(t.kind || "")
                    + ", 'type': " + pyStr(t.type || "traced")
                    + ", 'traced_by': " + pyStr(t.traced_by || "")
                    + (t.color ? ", 'color': " + pyStr(t.color) : "")

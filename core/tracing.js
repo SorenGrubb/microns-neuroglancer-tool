@@ -298,7 +298,7 @@ UJ.tracing = (function(){
       var z = Math.round(r.z);
       perZ[z] = (perZ[z] || 0);
       var row = { type: "traced_structure", structureId: id,
-                  name: meta.name || "", cellType: meta.cellType || "",
+                  name: meta.name || "", kind: meta.kind || "", cellType: meta.cellType || "",
                   color: meta.color || "", nucleusId: meta.nucleusId || "",
                   rootId: meta.rootId || "",
                   z: z, ringIndex: perZ[z], points: encodePoints(r.points),
@@ -324,6 +324,7 @@ UJ.tracing = (function(){
       var who = String(r.reporterName || r.tracedBy || "");
       var key = id + "|" + who;
       var s = by[key] || (by[key] = { structureId: id, tracedBy: who, name: r.name || "",
+                                      kind: r.kind || "",
                                     cellType: r.cellType || "", color: r.color || "",
                                     nucleusId: r.nucleusId || "", rootId: r.rootId || "",
                                     tracedBy: r.reporterName || r.tracedBy || "", rings: [] });

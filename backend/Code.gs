@@ -2932,11 +2932,20 @@ function doPost(e){
     if(sh.getLastRow()===0){
       sh.appendRow(["timestamp","structureId","groupId","name","cellType","color","nucleusId","rootId","z","ringIndex","points","pointCount","subIndex","subCount","comment","path","reporterName","reporterEmail"]);
     }
+    /* `kind` is the ontology's own value for what was outlined -- "lysosome", or this card's own
+       "cell" / "nucleus" / "other" (2026-09-17, Søren: "Instead of free text, we need it to have a
+       dropdown to select an organelle type like the list we have for identification of
+       organelles"). `name` beside it is the label a person reads. Added through
+       ensureHeaderColumn rather than the one-time header branch above, because by the time it
+       existed the sheet already had rows: see that function's own comment for why the one-time
+       branch alone would leave the column headerless. */
+    ensureHeaderColumn(sh,"kind");
     sh.appendRow([d.timestamp||new Date().toISOString(),d.structureId||"",d.groupId||"",
                   d.name||"",d.cellType||"",d.color||"",d.nucleusId||"",d.rootId||"",
                   (d.z===0?0:(d.z||"")),(d.ringIndex===0?0:(d.ringIndex||"")),
                   d.points||"",d.pointCount||"",d.subIndex||"",d.subCount||"",
-                  d.comment||"",d.path||"",d.reporterName||"",d.reporterEmail||""]);
+                  d.comment||"",d.path||"",d.reporterName||"",d.reporterEmail||"",
+                  d.kind||""]);
     // Deliberately nothing else. Not upsertMasterCellRow (a drawing is not an identity claim),
     // not upsertMasterCellOrganelle (a contour is not an organelle location), no vote sheet.
   } else if(d.type==="not_a_nucleus"){
@@ -4167,7 +4176,8 @@ function doGet(e){
           iName=h.indexOf("name"),iType=h.indexOf("cellType"),iCol=h.indexOf("color"),
           iNuc=h.indexOf("nucleusId"),iRoot=h.indexOf("rootId"),iZ=h.indexOf("z"),
           iRi=h.indexOf("ringIndex"),iPts=h.indexOf("points"),iPc=h.indexOf("pointCount"),
-          iCm=h.indexOf("comment"),iRn=h.indexOf("reporterName"),iRe=h.indexOf("reporterEmail");
+          iCm=h.indexOf("comment"),iRn=h.indexOf("reporterName"),iRe=h.indexOf("reporterEmail"),
+          iKind=h.indexOf("kind");
       for(var ti=1;ti<data.length;ti++){
         var row=data[ti],sid=String(row[iSid]||"");
         if(!sid)continue;
@@ -4175,7 +4185,7 @@ function doGet(e){
         var gid=String(iGid>=0?(row[iGid]||""):"");
         var k=sid+"|"+String(iRe>=0?(row[iRe]||""):"");
         var t=out[k];
-        if(!t){t=out[k]={structureId:sid,groupId:gid,name:"",cellType:"",color:"",
+        if(!t){t=out[k]={structureId:sid,groupId:gid,name:"",kind:"",cellType:"",color:"",
                          nucleusId:"",rootId:"",tracedBy:"",comment:"",timestamp:"",
                          sections:0,contours:0,vertices:0};
                order.push(k);zseen[k]={};t.groupId=gid;}
@@ -4183,6 +4193,7 @@ function doGet(e){
         // Metadata comes from whichever row of the winning group was seen last -- every row of one
         // submission carries the same values, so "last" and "any" agree; this just avoids caring.
         t.name=String(row[iName]||"");
+        if(iKind>=0)t.kind=String(row[iKind]||"");
         if(iType>=0)t.cellType=String(row[iType]||"");
         if(iCol>=0)t.color=String(row[iCol]||"");
         if(iNuc>=0)t.nucleusId=String(row[iNuc]||"");
@@ -4195,7 +4206,7 @@ function doGet(e){
         zseen[k][String(row[iZ])]=1;
         if(want){
           if(!t.rows)t.rows=[];
-          t.rows.push({structureId:sid,name:t.name,cellType:t.cellType,color:t.color,
+          t.rows.push({structureId:sid,name:t.name,kind:t.kind,cellType:t.cellType,color:t.color,
                        nucleusId:t.nucleusId,rootId:t.rootId,
                        z:Number(row[iZ]||0),ringIndex:Number(row[iRi]||0),
                        points:String(row[iPts]||""),reporterName:t.tracedBy});

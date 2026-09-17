@@ -76,10 +76,13 @@ HTML = [
 </div>
 <div id="tracePadWrap" style="display:none;margin-top:10px">
 <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
-<select id="tracePadMip" style="flex:0 0 auto" title="One canvas pixel is one voxel of this level, so this is the zoom. Only levels that keep 40 nm sections are offered &mdash; coarser ones average several sections into one, and a tracing is section by section. 32 nm/px shows the most tissue but costs three times the chunks, because its chunks are half as wide: measured 2026-09-17, ~30 chunks at 8 and 16 nm against ~90 at 32.">
-<option value="1" selected>16 nm/px &mdash; about 9 &micro;m across</option>
-<option value="0">8 nm/px &mdash; 4.5 &micro;m, full detail</option>
-<option value="2">32 nm/px &mdash; 18 &micro;m, slower to load</option>
+<select id="tracePadMip" style="flex:0 0 auto" title="How much of the section is on the pad. Above 8 nm the number is the data&rsquo;s own resolution; below it the 8 nm voxels are simply drawn larger, which is what putting vertices on a 500 nm organelle needs. Only levels that keep 40 nm sections are used &mdash; coarser ones average several sections into one, and a tracing is section by section. The widest view is also the slowest to load: its chunks are half as wide, so it costs about three times as many (measured 2026-09-17).">
+<option value="2:1">18 &micro;m across &mdash; 32 nm data, slower to load</option>
+<option value="1:1" selected>9 &micro;m &mdash; 16 nm data, a whole cell</option>
+<option value="0:1">4.5 &micro;m &mdash; 8 nm data, full detail</option>
+<option value="0:2">2.2 &micro;m &mdash; 8 nm data, drawn 2&times;</option>
+<option value="0:4">1.1 &micro;m &mdash; 8 nm data, drawn 4&times;</option>
+<option value="0:8">0.6 &micro;m &mdash; 8 nm data, drawn 8&times; (an organelle)</option>
 </select>
 <button class="idbtn" id="tracePadPrev" style="flex:0 0 auto" title="Back one step (, key)">&#9664;</button>
 <span class="hint" id="tracePadZ" style="flex:0 0 auto;min-width:130px;text-align:center">&nbsp;</span>
@@ -90,7 +93,7 @@ HTML = [
 <div style="position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111">
 <canvas id="tracePad" width="560" height="460" style="display:block;cursor:crosshair;touch-action:none"></canvas>
 </div>
-<p class="hint" id="tracePadSay" style="margin-top:6px">Click each vertex round the cell. The first one is drawn as a ring &mdash; click it again to close the contour. Drag to pan, <b>,</b> and <b>.</b> step a section.</p>
+<p class="hint" id="tracePadSay" style="margin-top:6px">Click each vertex round the cell. The first one is drawn as a ring &mdash; click it again to close the contour. <b>Shift+click</b> moves the field there, shift+drag or a plain drag pans it, and <b>,</b> and <b>.</b> step a section.</p>
 <div class="row" style="gap:8px;margin-top:6px">
 <button class="idbtn" id="tracePadUse" style="flex:1 1 auto">Use these contours</button>
 <button class="idbtn" id="tracePadClose" style="flex:0 0 auto">Close the pad</button>
@@ -119,7 +122,9 @@ async function padDraw(){
   const cv = document.getElementById("tracePad");
   if (PAD_BUSY) return;
   PAD_BUSY = true;
-  const mip = +document.getElementById("tracePadMip").value;
+  const sel = document.getElementById("tracePadMip");
+  const pick = String(sel.value).split(":");
+  const mip = +pick[0], zoom = +(pick[1] || 1);
   try{
     /* Fill the card rather than sitting in a black band: the canvas' pixel width IS the number of
        voxels drawn, so it is set from the space available rather than fixed in the markup. Capped,
@@ -127,7 +132,7 @@ async function padDraw(){
     const host = cv.parentElement;
     const wide = Math.max(320, Math.min(880, (host && host.clientWidth ? host.clientWidth - 2 : 560)));
     PAD_VIEW = await UJ.emtiles.drawSection(cv, {
-      centre: PAD_CENTRE, mip: mip, w: wide, h: cv.height,
+      centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height,
       onProgress: function(d, n){ if (d < n) padSay("Loading the section\\u2026 " + d + "/" + n); }
     });
     padPaint();
@@ -193,7 +198,9 @@ var PAD_PAINTING = false;
 
 function padZLabel(){
   const el = document.getElementById("tracePadZ");
-  if (el) el.textContent = "z " + PAD.z + (PAD_VIEW ? "  \\u00b7  " + PAD_VIEW.nmPerPx + " nm/px" : "");
+  if (el) el.textContent = "z " + PAD.z
+    + (PAD_VIEW ? "  \\u00b7  " + (Math.round(PAD_VIEW.umAcross * 10) / 10) + " \\u00b5m across  \\u00b7  "
+                  + PAD_VIEW.nmPerPx + " nm data" : "");
 }
 
 function padStep(dir){
@@ -216,6 +223,36 @@ function padOpen(){
   PAD_VIEW = null; PAD_PAINTING = false;
   document.getElementById("tracePadWrap").style.display = "";
   padDraw();
+  tracingResolveAt(got.pos);
+}
+
+/* WHAT IS ALREADY THERE, READ RATHER THAN ASKED FOR.  2026-09-17
+   Søren: "If the nucleus or cell mesh already exists at the location put in the coordinates, those
+   should be prefilled." core/segread.js answers exactly that from the same segmentation the rest of
+   the tool uses, so the two id boxes fill themselves.
+
+   It never overwrites something already typed, and it SAYS what it found: a prefilled id with no
+   explanation is a number to distrust, and "nothing is segmented there" is itself the answer when
+   the reason for tracing is that the segmentation has missed the cell. */
+async function tracingResolveAt(pos){
+  const say=document.getElementById("tracingAtSay");
+  const nucEl=document.getElementById("tracingNucId"), rootEl=document.getElementById("tracingRootId");
+  if(!say||!nucEl||!rootEl)return;
+  try{
+    UJ.segread.configure({seg:SRC.seg,nuc:SRC.nuc,res:UJ.cfg.res});
+  }catch(e){say.textContent="";return;}
+  say.textContent="Reading what is at "+pos.join(", ")+"\\u2026";
+  try{
+    const r=await UJ.segread.resolveAt(pos);
+    const bits=[];
+    if(r.nucleusId){ if(!nucEl.value.trim())nucEl.value=String(r.nucleusId);
+                     bits.push("nucleus "+r.nucleusId); }
+    if(r.rootId&&r.rootId!=="0"){ if(!rootEl.value.trim())rootEl.value=String(r.rootId);
+                                  bits.push("cell "+r.rootId); }
+    say.textContent=bits.length
+      ? "At that coordinate: "+bits.join(", ")+" \\u2014 filled in below."
+      : "Nothing is segmented at that coordinate, which is usually why you are tracing it.";
+  }catch(e){ say.textContent="Could not read the segmentation there: "+String(e&&e.message||e); }
 }
 
 (function wirePad(){
@@ -265,6 +302,25 @@ function padOpen(){
     if (!PAD_VIEW || !down) return;
     const wasPan = moved;
     const from = down; down = null;
+    /* SHIFT MOVES THE FIELD.  2026-09-17
+       Søren: "it should be possible to move the field around using shift+click." Held down, shift
+       means "go there" rather than "put a vertex there": a click recentres on the point, a drag
+       pans by it. Explicit, so it works mid-contour -- the vertices are in dataset voxels and do
+       not move when the view does, which is the whole reason they are stored that way. */
+    if (e.shiftKey){
+      if (wasPan){
+        const a0 = PAD_VIEW.toolAt(from[0], from[1]), b0 = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
+        PAD_CENTRE = [PAD_CENTRE[0] - (b0[0] - a0[0]), PAD_CENTRE[1] - (b0[1] - a0[1]), PAD.z];
+      } else {
+        const t0 = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
+        PAD_CENTRE = [t0[0], t0[1], PAD.z];
+      }
+      PAD_PAINTING = false;
+      padDraw();
+      padSay("Moved to " + PAD_CENTRE[0] + ", " + PAD_CENTRE[1] + ". "
+        + (PAD.pending.length ? PAD.pending.length + " vertices still on this contour." : ""));
+      return;
+    }
     if (wasPan){
       const a = PAD_VIEW.toolAt(from[0], from[1]), b = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
       PAD_CENTRE = [PAD_CENTRE[0] - (b[0] - a[0]), PAD_CENTRE[1] - (b[1] - a[1]), PAD.z];

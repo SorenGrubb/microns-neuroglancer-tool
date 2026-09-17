@@ -73,7 +73,7 @@ function share(cred, sid, gid, rings, extra){
   let i = 0;
   return rings.map(r => post(Object.assign({
     type: "traced_structure", credential: cred, structureId: sid, groupId: gid,
-    name: "astrocyte at the glia limitans", cellType: "Astrocyte", color: "#40e28c",
+    name: "Lysosome", kind: "lysosome", cellType: "Astrocyte", color: "#40e28c",
     nucleusId: "253863", z: r.z, ringIndex: r.ring || 0, points: r.points,
     pointCount: r.points.split(";").length, subIndex: ++i, subCount: rings.length,
     reporterName: "SOMEBODY ELSE ENTIRELY", reporterEmail: "spoof@x",
@@ -129,8 +129,12 @@ console.log("\nthe index: who traced what, without the contours");
   ok("one entry", r.tracings.length === 1, r.tracings.length);
   const t = r.tracings[0];
   ok("...named, typed and coloured as he saved it",
-     t.name === "astrocyte at the glia limitans" && t.cellType === "Astrocyte"
+     t.name === "Lysosome" && t.cellType === "Astrocyte"
      && t.color === "#40e28c" && t.nucleusId === "253863", JSON.stringify(t.cellType));
+  /* THE ONTOLOGY'S OWN VALUE, not just the label. 2026-09-17: a tracing typed "Lysosome" one day
+     and "lysosome" the next is two things to the filter, the dashboard and the organelle card;
+     `kind` is what makes a traced lysosome the same thing as a reported one. */
+  ok("...and carrying the ontology's own value for what it is", t.kind === "lysosome", t.kind);
   ok("...attributed", t.tracedBy === "Søren Grubb", t.tracedBy);
   ok("...counting 3 contours over 2 sections", t.contours === 3 && t.sections === 2,
      t.contours + " contours, " + t.sections + " sections");
@@ -146,7 +150,8 @@ console.log("\nand the rows, when asked for one tracing by id");
   ok("every contour comes back", rows.length === 3, rows.length);
   ok("...in core/tracing.js's own field names, so rowsToStructures reads them unchanged",
      rows.every(x => "structureId" in x && "z" in x && "ringIndex" in x && "points" in x
-                     && "reporterName" in x), JSON.stringify(Object.keys(rows[0])));
+                     && "reporterName" in x && "kind" in x), JSON.stringify(Object.keys(rows[0])));
+  ok("...with the kind on every one of them", rows.every(x => x.kind === "lysosome"), rows[0].kind);
   ok("...with the coordinates untouched", rows[0].points === "1040,2000;1060,2000;1060,2030",
      rows[0].points);
 }
