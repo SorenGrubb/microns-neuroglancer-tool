@@ -79,6 +79,52 @@ function link(annotations){
 
   await p.evaluate(() => { document.getElementById("tracingPanel").open = true; });
 
+  /* ── THE BOXES FOLLOW THE CELL YOU LOOKED UP ─────────────────────────────────  2026-09-17
+     Søren: *"If a cell has been looked up in the cell identity window, that cell's coordinates
+     should be in the cells trace coordinate window."* They did once, on opening the card and only
+     while empty -- so looking up a SECOND cell left the first one's coordinate sitting there, which
+     is the case that matters because it traces the wrong cell without saying anything. */
+  console.log("\nthe coordinate follows the cell you look up");
+  {
+    const follows = await p.evaluate(async () => {
+      const box = () => ["tracingX", "tracingY", "tracingZ"]
+        .map(i => document.getElementById(i).value).join(",");
+      const out = {};
+      out.title = document.querySelector("#tracingCard summary").textContent;
+      window.CUR_POS = [100, 200, 300];
+      out.first = box();
+      /* A SECOND cell: the boxes are no longer empty, which is where this used to stop. */
+      window.CUR_POS = [400, 500, 600];
+      out.second = box();
+      out.say = document.getElementById("tracingPosSay").textContent;
+      /* Typed by hand: never overwritten, and said out loud rather than silently disagreed with. */
+      document.getElementById("tracingX").value = "111";
+      document.getElementById("tracingY").value = "222";
+      document.getElementById("tracingZ").value = "333";
+      window.CUR_POS = [700, 800, 900];
+      out.typed = box();
+      out.offer = document.getElementById("tracingPosSay").textContent;
+      const take = document.getElementById("tracingPosTake");
+      out.hasButton = !!take;
+      if (take) take.click();
+      out.taken = box();
+      return out;
+    });
+    ok(/Trace a cell or organelle/.test(follows.title),
+       "the card is called “Trace a cell or organelle”", follows.title.slice(0, 40));
+    ok(follows.first === "100,200,300", "a looked-up cell fills the boxes", follows.first);
+    ok(follows.second === "400,500,600",
+       "...and a SECOND cell replaces it, which is the case that used to stop at the first",
+       follows.second);
+    ok(/looked up/.test(follows.say), "...saying where the numbers came from", follows.say);
+    ok(follows.typed === "111,222,333",
+       "a coordinate typed by hand is never overwritten by the next lookup", follows.typed);
+    ok(follows.hasButton && /not what is in the boxes/.test(follows.offer),
+       "...but the disagreement is said, with a button, rather than left to be discovered",
+       follows.offer.slice(0, 60));
+    ok(follows.taken === "700,800,900", "...and the button takes the cell on screen", follows.taken);
+  }
+
   console.log("\nwhat it is comes from the list, not a text box");
   {
     const l = await p.evaluate(() => {
@@ -1286,6 +1332,126 @@ function link(annotations){
   ok(gone.after === gone.before - 1 && gone.stored === gone.after,
      "Remove takes it out of the export and out of storage",
      gone.before + " -> " + gone.after);
+
+  /* ── A DRAFT SURVIVES THE PAGE ─────────────────────────────────────────────────  2026-09-17
+     Søren: *"you should be able to save a draft of your progress and continue editing it later
+     before submitting."* "Later" is the word that matters, so this RELOADS THE PAGE between saving
+     and resuming. Anything less tests a variable, not a draft.
+
+     Last, deliberately: it reloads, so everything before it would have to be set up again. */
+  console.log("\na draft, put down and picked up after a reload");
+  {
+    const stub = () => {
+      UJ.emtiles.configure = () => ({});
+      UJ.emtiles.configured = () => true;
+      UJ.emtiles.drawSection = async (cv, o) => {
+        const g = cv.getContext("2d");
+        g.fillStyle = "#444"; g.fillRect(0, 0, cv.width, cv.height);
+        const k = 8;
+        const x0 = o.centre[0] - (cv.width >> 1) * k, y0 = o.centre[1] - (cv.height >> 1) * k;
+        return { mip: 2, mips: 3, nmPerPx: 32, z: o.centre[2], w: cv.width, h: cv.height, chunks: 1,
+                 toolAt: (px, py) => [Math.round(x0 + px * k), Math.round(y0 + py * k), o.centre[2]],
+                 pxAt: (t) => [Math.round((t[0] - x0) / k), Math.round((t[1] - y0) / k)],
+                 pxPerToolVoxel: 1 / k };
+      };
+    };
+    const saved = await p.evaluate(async ({ src }) => {
+      eval("(" + src + ")()");
+      document.getElementById("tracingPanel").open = true;
+      ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
+        document.getElementById(id).value = [240640, 207872, 33000][i];
+      });
+      document.getElementById("tracePadOpen").click();
+      await new Promise(r => setTimeout(r, 200));
+      /* Two sections, and a half-drawn contour on the second -- a draft that dropped the contour in
+         progress would lose the work of whoever was interrupted mid-cell, which is most of them. */
+      [[100, 100], [200, 100], [200, 200]].forEach(q => {
+        const t = PAD_VIEW.toolAt(q[0], q[1]);
+        UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
+      });
+      UJ.tracepad.closeRing(PAD);
+      padStep(1);
+      await new Promise(r => setTimeout(r, 200));
+      [[110, 110], [210, 110], [210, 210]].forEach(q => {
+        const t = PAD_VIEW.toolAt(q[0], q[1]);
+        UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
+      });
+      UJ.tracepad.closeRing(PAD);
+      const t = PAD_VIEW.toolAt(300, 300);
+      UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
+      padRings();
+      document.getElementById("tracingNucId").value = "253863";
+      document.getElementById("tracingRootId").value = "864691135570733037";
+      PAD_EDIT_ID = "hers_1";                       // as if this were an edit of a shared tracing
+      /* The autosave is coalesced to about a second; wait for it rather than pressing the button,
+         because the point is that nobody has to press the button. */
+      await new Promise(r => setTimeout(r, 1600));
+      const raw = localStorage.getItem("ujump_tracing_draft_v1");
+      return { raw: !!raw, d: raw ? JSON.parse(raw) : null,
+               bar: document.getElementById("tracingDraftBar").textContent,
+               zs: PAD.rings.map(r => r.z).join(",") };
+    }, { src: stub.toString() });
+    ok(saved.raw && saved.d.rings.length === 2,
+       "the pad saves itself as you draw — no button pressed",
+       saved.d && saved.d.rings.length + " contours");
+    ok(saved.d.pending.length === 1,
+       "...including the contour still being drawn", saved.d.pending.length + " vertex");
+    ok(saved.d.editId === "hers_1" && saved.d.nucId === "253863",
+       "...and WHICH tracing it is, with what has been filled in",
+       saved.d.editId + " / " + saved.d.nucId);
+    ok(/Unfinished tracing kept/.test(saved.bar), "...and the card says so", saved.bar.slice(0, 60));
+
+    await p.reload();
+    await p.waitForTimeout(4000);
+    const back = await p.evaluate(() => ({
+      bar: document.getElementById("tracingDraftBar").textContent,
+      shown: document.getElementById("tracingDraftBar").style.display !== "none",
+      resume: !!document.getElementById("draftResume"),
+      padShut: document.getElementById("tracePadWrap").style.display === "none" }));
+    ok(back.shown && back.resume && /Unfinished tracing kept/.test(back.bar),
+       "AFTER A RELOAD the card still offers it", back.bar.slice(0, 70));
+    ok(back.padShut, "...without reopening the pad by itself");
+
+    const resumed = await p.evaluate(async ({ src }) => {
+      eval("(" + src + ")()");
+      document.getElementById("tracingPanel").open = true;
+      document.getElementById("draftResume").click();
+      await new Promise(r => setTimeout(r, 400));
+      return { rings: PAD.rings.length, zs: PAD.rings.map(r => r.z).join(","),
+               pending: PAD.pending.length, z: PAD.z,
+               edit: PAD_EDIT_ID, nuc: document.getElementById("tracingNucId").value,
+               shown: document.getElementById("tracePadWrap").style.display !== "none",
+               say: document.getElementById("tracingStatus").textContent,
+               first: PAD.rings[0].points[0].join(",") };
+    }, { src: stub.toString() });
+    ok(resumed.shown && resumed.rings === 2 && resumed.zs === saved.zs,
+       "Resume puts every contour back, on the sections they were drawn on", resumed.zs);
+    ok(resumed.first.length > 3, "...with their coordinates", resumed.first);
+    ok(resumed.pending === 1, "...and the half-drawn contour with them", resumed.pending);
+    ok(resumed.edit === "hers_1" && resumed.nuc === "253863",
+       "...still a version of the tracing it was an edit of, and still of that cell",
+       resumed.edit + " / " + resumed.nuc);
+    ok(/version of a tracing already in the dataset/.test(resumed.say),
+       "...and it says which of the two it is", resumed.say.slice(0, 70));
+
+    const finished = await p.evaluate(() => {
+      window.__posted = [];
+      window.postReport = (x) => { window.__posted.push(x); return true; };
+      PAD.pending = [];
+      document.getElementById("tracePadUse").click();
+      const w = document.getElementById("tracingWhat");
+      w.value = "__cell"; w.dispatchEvent(new Event("change", { bubbles: true }));
+      document.getElementById("tracingKeep").click();
+      return { draft: localStorage.getItem("ujump_tracing_draft_v1"),
+               bar: document.getElementById("tracingDraftBar").style.display,
+               edit: PAD_EDIT_ID };
+    });
+    ok(finished.draft === null,
+       "adding it to the dataset ends the draft — the list is where it continues from now",
+       String(finished.draft));
+    ok(finished.bar === "none", "...and the bar goes with it", finished.bar);
+    ok(finished.edit === "", "...and nothing is still being edited", '"' + finished.edit + '"');
+  }
 
   const newErrors = errors.filter(e => !/atob/.test(e));
   ok(newErrors.length === 0, "the page still loads with no new errors",

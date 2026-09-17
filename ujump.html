@@ -533,7 +533,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 09:47</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 10:16</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -736,11 +736,12 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
      Outline it section by section, paste the link, and it becomes a cell in the Blender file. -->
 <div class="card" id="tracingCard">
 <details id="tracingPanel">
-<summary style="cursor:pointer;font-weight:600">Trace a cell &mdash; outline it, and it joins the 3D export</summary>
+<summary style="cursor:pointer;font-weight:600">Trace a cell or organelle &mdash; outline it, and it joins the dataset</summary>
 <p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Open a viewer and ring the cell with <b>point</b> annotations &mdash; <b>ctrl+click</b> once per vertex, going round one way; a plain click does nothing &mdash; then step a section with <b>,</b> or <b>.</b> and go round again. Paste the whole address bar back here. Three points to a section, two sections minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>
 <label style="margin-top:10px">Where to open it <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; voxels, the same as the coordinate box at the top of this tab</span></label>
 <div class="row"><div class="coord"><input type="text" id="tracingX" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="tracingY" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="tracingZ" inputmode="decimal" placeholder="z"></div></div>
-<p class="hint" style="margin-top:4px">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically. Filled in from the cell on screen when you have one.</p>
+<p class="hint" style="margin-top:4px">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically. Filled in from the cell you look up, and kept in step with it until you type a coordinate of your own.</p>
+<p class="hint" id="tracingPosSay" style="margin-top:4px"></p>
 <div class="row" style="gap:8px;margin-top:8px">
 <button class="idbtn" id="tracePadOpen" style="flex:1 1 auto" title="Draws the EM section here and gives you a real polygon tool: click each vertex, click the first one again to close. No viewer a link can reach has one.">Trace it here &mdash; polygon tool</button>
 <button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate in the boxes above, with an empty annotation layer called &quot;tracing&quot; already selected and the point tool already active.">Open a viewer instead</button>
@@ -795,6 +796,7 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 </details>
 <div class="row" style="gap:8px;margin-top:6px">
 <button class="idbtn" id="tracePadUse" style="flex:1 1 auto">Use these contours</button>
+<button class="idbtn" id="tracePadDraft" style="flex:0 0 auto" title="Keeps everything as it stands — the contours, the section you are on, the view, and whatever you have filled in below — in this browser, so you can close the page and carry on later. It saves itself as you go; this is the button for making sure.">Save draft</button>
 <button class="idbtn" id="tracePadClose" style="flex:0 0 auto">Close the pad</button>
 </div>
 <!-- THE SHAPE, WHILE IT IS STILL BEING MADE.  2026-09-17. Søren: "there should also be a window
@@ -810,6 +812,12 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 </div>
 <div id="tracePad3DHost" style="margin-top:6px"></div>
 </div>
+<!-- BELOW THE PAD, NOT ABOVE IT.  2026-09-17. This bar appears by itself, a second or so after the
+     first contour is closed, and anything that appears ABOVE the canvas pushes the canvas down
+     under a pointer that is in the middle of drawing on it. Caught by tracingpanelcheck.js, whose
+     click coordinates went stale the moment the bar arrived -- which is the same thing happening to
+     a person, one click at a time. -->
+<div id="tracingDraftBar" style="display:none;margin-top:8px;font-size:12px"></div>
 <p class="hint" style="margin-top:6px"><b>There is no polygon tool.</b> Measured 2026-09-17: the MICrONS viewer offers point, bounding box, line and ellipsoid and nothing else; Spelunker adds a <i>polyline</i> that draws on screen but never reaches the link; BrainSharer's polygon tool needs an account and ignores a pasted link. Points are one click per vertex and come back in the order you clicked them, which is why they are what this asks for &mdash; a ring of <b>line</b> annotations is read too, at two clicks a segment.</p>
 <label style="margin-top:10px">Neuroglancer link</label>
 <textarea id="tracingLink" placeholder="Paste the whole address bar, with your contours on it."></textarea>
@@ -7880,17 +7888,75 @@ function tracingPos(){
   return {error:"Type a coordinate above, or search a cell first \u2014 the viewer has to open somewhere."};
 }
 
-/* Pre-fill from the cell on screen, but only when nothing has been typed, so it never overwrites
-   him. Runs on load and every time the card is opened, because he may search a cell after opening
-   it and the boxes should follow. */
-function tracingFillPos(){
-  const ids=["tracingX","tracingY","tracingZ"];
-  const els=ids.map(function(i){return document.getElementById(i);});
-  if(els.some(function(e){return !e;}))return;
-  if(els.some(function(e){return String(e.value||"").trim()!=="";}))return;
-  if(!(window.CUR_POS&&window.CUR_POS.length===3))return;
-  els.forEach(function(e,i){e.value=window.CUR_POS[i];});
+/* ── THE BOXES FOLLOW THE CELL YOU LOOKED UP ────────────────────────────────────  2026-09-17
+   Søren: *"If a cell has been looked up in the cell identity window, that cell's coordinates should
+   be in the cells trace coordinate window."*
+
+   They did, once: on load and when the card was opened, and only while the boxes were EMPTY. Which
+   meant the ordinary order of work did not work. Open the card, look at a cell, look at a second
+   cell -- the boxes still hold the first one, because they are no longer empty, and nothing here
+   ever looked again.
+
+   TWO CHANGES. The fill now happens whenever a cell is looked up, not only when the card is opened;
+   and "empty" became "still ours" -- the boxes are refilled when they hold exactly what this
+   function last put there, which is the real question (has he typed a coordinate of his own?) and
+   not the one that was being asked.
+
+   A COORDINATE HE TYPED IS NEVER OVERWRITTEN. It says so instead, with a button, because silently
+   leaving stale coordinates in place is how you trace the wrong cell. */
+var TRACING_POS_AUTO = "";
+function tracingPosEls(){
+  return ["tracingX","tracingY","tracingZ"].map(function(i){ return document.getElementById(i); });
 }
+function tracingPosNow(){
+  return tracingPosEls().map(function(e){ return e ? String(e.value||"").trim() : ""; }).join(",");
+}
+function tracingFillPos(force){
+  const els = tracingPosEls();
+  if (els.some(function(e){ return !e; })) return;
+  if (!(window.CUR_POS && window.CUR_POS.length === 3)) return;
+  const want = window.CUR_POS.map(function(n){ return String(Math.round(n)); });
+  const now = tracingPosNow();
+  const ours = (now === ",,") || (now === TRACING_POS_AUTO);
+  const say = document.getElementById("tracingPosSay");
+  if (!ours && !force){
+    /* His own coordinate stands. But the cell on screen has moved on from it, and that is worth
+       one sentence and one button rather than a silent disagreement. */
+    if (say && now !== want.join(",")){
+      say.innerHTML = 'The cell on screen is at <b>' + escHtml(want.join(", ")) + '</b>, which is '
+        + 'not what is in the boxes. <button type="button" class="hist-chip" id="tracingPosTake">'
+        + 'use the cell on screen</button>';
+      const take = document.getElementById("tracingPosTake");
+      if (take) take.addEventListener("click", function(){ tracingFillPos(true); });
+    }
+    return;
+  }
+  els.forEach(function(e, i){ e.value = want[i]; });
+  TRACING_POS_AUTO = want.join(",");
+  if (say) say.textContent = "From the cell you looked up.";
+  /* The pad is not moved under him: it is a view he may be drawing in, and a cell lookup is not a
+     request to abandon it. The boxes are where the NEXT pad opens. */
+}
+
+/* WHY A PROPERTY AND NOT A POLL. CUR_POS is assigned in four places in this file -- the own-record
+   panel, the nucleus panel, the URL restore, the community panel -- and none of them is an event
+   this card could listen to. Wrapping the property makes every one of them an event without any of
+   them knowing, which is the only version of this that cannot fall out of step by being forgotten
+   at the fifth assignment. Feature-detected and reversible: if defineProperty is refused, the card
+   behaves exactly as it did before. */
+(function watchCurPos(){
+  try {
+    var held = window.CUR_POS;
+    Object.defineProperty(window, "CUR_POS", {
+      configurable: true,
+      get: function(){ return held; },
+      set: function(v){
+        held = v;
+        try { tracingFillPos(false); } catch (e){}
+      }
+    });
+  } catch (e){}
+})();
 
 function tracingOpen(){
   const got=tracingPos();
@@ -7942,6 +8008,11 @@ function tracingKeep(){
   document.getElementById("tracingFound").style.display="none";
   document.getElementById("tracingLink").value="";
   const sent=tracingPublish(t);
+  /* IT IS NOT A DRAFT ANY MORE. Kept locally and queued or shared, and either way the way back to
+     it is the list -- so a stale draft here would be a second, older copy of the same cell waiting
+     to be resumed on top of it. */
+  draftClear();
+  PAD_EDIT_ID = "";
   tracingRenderList();
   tracingSay(sent
     ?'\u201c'+t.name+'\u201d is in the dataset and in this page\u2019s 3D export. Anybody can open '
@@ -8167,6 +8238,158 @@ function pad3DSoon(){
   }, wait);
 }
 
+/* ── A DRAFT, SO A TRACING CAN BE PUT DOWN AND PICKED UP ────────────────────────  2026-09-17
+   Søren: *"you should be able to save a draft of your progress and continue editing it later
+   before submitting."*
+
+   Tracing a cell over forty sections is not one sitting, and until now the only two states were
+   "in the page" and "in the dataset": a reload lost everything, and the way to keep work was to
+   add a half-finished tracing to the shared record, which is the wrong thing to do with a half-
+   finished tracing.
+
+   IT SAVES ITSELF. Every closed contour, every deleted one, every step to another section and every
+   field below writes the draft, coalesced to a second or so. A button is kept as well, because
+   "did that save?" deserves an answer, but nobody should have to remember it.
+
+   WHAT A DRAFT IS: the contours, the half-drawn one, the section, where the view sits, the zoom and
+   the step, everything filled in below, and -- the part that matters when somebody else's tracing
+   is being extended -- WHICH TRACING IT IS. Resuming a draft of an edit still adds a version to
+   that tracing rather than a new one beside it.
+
+   IT LIVES IN THIS BROWSER, in localStorage, and the bar says so. Nothing is sent: a draft is
+   explicitly the state before anything is shared, and putting unfinished geometry in the dataset to
+   keep it safe is exactly what this exists to avoid.
+
+   ONE DRAFT, NOT A PILE. Starting a fresh pad while one is kept says so rather than overwriting it
+   quietly, and the draft survives until it is resumed, discarded, or replaced by drawing something
+   new. A tracing that has been ADDED clears its draft: it is in the dataset, which is a better
+   place to continue from -- open it from the list below and it comes back in full. */
+const TRACING_DRAFT_KEY = "ujump_tracing_draft_v1";
+var TRACING_DRAFT_SOON = null;
+
+function draftRead(){
+  try {
+    const d = JSON.parse(localStorage.getItem(TRACING_DRAFT_KEY) || "null");
+    return (d && Array.isArray(d.rings)) ? d : null;
+  } catch (_e){ return null; }
+}
+function draftWrite(d){
+  try { localStorage.setItem(TRACING_DRAFT_KEY, JSON.stringify(d)); }
+  catch (_e){ padSay("This browser refused to keep the draft \u2014 it is out of storage. Your "
+    + "contours are still on the pad.", true); }
+}
+function draftClear(){
+  try { localStorage.removeItem(TRACING_DRAFT_KEY); } catch (_e){}
+  draftRender();
+}
+
+function draftNow(){
+  if (!PAD) return null;
+  const val = function(id){ const e = document.getElementById(id); return e ? e.value : ""; };
+  const found = document.getElementById("tracingFound");
+  return { v: 1, at: new Date().toISOString(),
+           rings: PAD.rings.map(function(r){ return { z: r.z, points: r.points }; }),
+           pending: PAD.pending.slice(),
+           z: PAD.z, centre: PAD_CENTRE ? PAD_CENTRE.slice() : null,
+           mip: val("tracePadMip"), step: val("tracePadStep"),
+           editId: PAD_EDIT_ID || "",
+           structureId: (TRACING_PENDING && TRACING_PENDING.id) || "",
+           used: !!(found && found.style.display !== "none"),
+           what: val("tracingWhat"), name: val("tracingName"), type: val("tracingType"),
+           color: val("tracingColor"), nucId: val("tracingNucId"), rootId: val("tracingRootId"),
+           typeTouched: !!TRACING_TYPE_TOUCHED };
+}
+function draftSave(explicit){
+  const d = draftNow();
+  if (!d) return null;
+  if (!d.rings.length && !d.pending.length && !d.used){
+    /* An empty pad is not a draft, and saving it would quietly destroy the one already kept. */
+    if (explicit) padSay("Nothing to save yet \u2014 close a contour first.", true);
+    return null;
+  }
+  draftWrite(d); draftRender();
+  if (explicit) padSay("Draft saved in this browser. Close the page if you like \u2014 the pad "
+    + "reopens where you left it, on the same section.");
+  return d;
+}
+function draftSoon(){
+  if (TRACING_DRAFT_SOON) return;
+  TRACING_DRAFT_SOON = setTimeout(function(){
+    TRACING_DRAFT_SOON = null;
+    try { draftSave(false); } catch (e){}
+  }, 1200);
+}
+
+function draftWhen(iso){
+  try {
+    const d = new Date(iso), now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    return sameDay ? "today at " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                   : d.toLocaleString();
+  } catch (e){ return "earlier"; }
+}
+function draftRender(){
+  const bar = document.getElementById("tracingDraftBar");
+  if (!bar) return;
+  const d = draftRead();
+  if (!d){ bar.style.display = "none"; bar.innerHTML = ""; return; }
+  const zs = {};
+  (d.rings || []).forEach(function(r){ zs[r.z] = 1; });
+  const wrap = document.getElementById("tracePadWrap");
+  const padOpen = wrap && wrap.style.display !== "none";
+  bar.style.display = "";
+  bar.innerHTML = '<b>Unfinished tracing kept in this browser</b> \u2014 ' + d.rings.length
+    + ' contour' + (d.rings.length === 1 ? '' : 's') + ' on ' + Object.keys(zs).length + ' section'
+    + (Object.keys(zs).length === 1 ? '' : 's') + ', saved ' + draftWhen(d.at)
+    + (d.editId ? ' (a version of a tracing already in the dataset)' : '') + '. '
+    + (padOpen ? '' : '<button type="button" class="hist-chip" id="draftResume">Resume it</button> ')
+    + '<button type="button" class="hist-chip" id="draftDrop">Discard</button>';
+  const r = document.getElementById("draftResume");
+  if (r) r.addEventListener("click", function(){ draftResume(); });
+  const x = document.getElementById("draftDrop");
+  if (x) x.addEventListener("click", function(){
+    /* Asked, because this is the one button here that destroys work and there is no undo for it. */
+    if (window.confirm("Discard the unfinished tracing kept in this browser? It has not been added "
+      + "to the dataset, and this cannot be undone.")) draftClear();
+  });
+}
+
+function draftResume(){
+  const d = draftRead();
+  if (!d) return;
+  if (!UJ.emtiles.configured())
+    UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
+  PAD = UJ.tracepad.create();
+  PAD.rings = (d.rings || []).map(function(r){
+    return { z: Math.round(r.z),
+             points: (r.points || []).map(function(p){ return [Math.round(p[0]), Math.round(p[1])]; }) };
+  });
+  PAD.pending = (d.pending || []).map(function(p){ return [Math.round(p[0]), Math.round(p[1])]; });
+  PAD.z = Math.round(d.z || (PAD.rings[0] && PAD.rings[0].z) || 0);
+  PAD_CENTRE = (d.centre && d.centre.length === 3) ? d.centre.slice() : [0, 0, PAD.z];
+  PAD_CENTRE[2] = PAD.z;
+  PAD_VIEW = null; PAD_BASE_READY = false;
+  PAD_EDIT_ID = d.editId || "";
+  const set = function(id, v){ const e = document.getElementById(id); if (e && v) e.value = v; };
+  set("tracePadMip", d.mip); set("tracePadStep", d.step);
+  set("tracingWhat", d.what); set("tracingName", d.name); set("tracingType", d.type);
+  set("tracingColor", d.color); set("tracingNucId", d.nucId); set("tracingRootId", d.rootId);
+  TRACING_TYPE_TOUCHED = !!d.typeTouched;
+  const nameRow = document.getElementById("tracingNameRow");
+  if (nameRow) nameRow.style.display = (d.what === "__other") ? "" : "none";
+  document.getElementById("tracePadWrap").style.display = "";
+  padDraw();
+  if (d.used && PAD.rings.length){
+    TRACING_PENDING = { rings: UJ.tracepad.toRings(PAD), id: d.structureId || undefined };
+    document.getElementById("tracingFound").style.display = "";
+  }
+  draftRender();
+  tracingSay("Draft resumed \u2014 " + PAD.rings.length + " contour"
+    + (PAD.rings.length === 1 ? "" : "s") + " back on the pad, on section " + PAD.z + ". "
+    + (d.editId ? "It is a version of a tracing already in the dataset, and adding it stays that."
+                : "Nothing has been shared yet; it goes into the dataset when you add it."));
+}
+
 /* ── THE DATASET'S TRACINGS, AND ADDING TO ONE ──────────────────────────────────  2026-09-17
    Søren: *"other people should be able to add to it or edit it."*
 
@@ -8273,6 +8496,7 @@ async function tracingOpenShared(sid, btn){
        ids somebody else filled in. */
     PAD_EDIT_ID = st.structureId;
     TRACING_PENDING = { rings: UJ.tracepad.toRings(PAD), id: st.structureId };
+    draftSoon();          // an edit is draftable from the moment it is opened
     const what = document.getElementById("tracingWhat");
     if (what){
       const has = [].slice.call(what.options).some(function(o){ return o.value === st.kind; });
@@ -8471,9 +8695,10 @@ function padPaint(){
    mean "Undo until it is gone" -- that is the difference between correcting a tracing and starting
    it again. */
 function padRings(){
-  /* The preview follows the contours from here: this is called after every close, every delete and
-     every reload of a section, which is every way the set of rings can change. */
+  /* The preview and the draft both follow the contours from here: this is called after every close,
+     every delete and every reload of a section, which is every way the set of rings can change. */
   pad3DSoon();
+  draftSoon();
   const box = document.getElementById("tracePadRings");
   if (!box || !PAD) return;
   const here = UJ.tracepad.onSection(PAD);
@@ -8522,6 +8747,13 @@ function padOpen(){
      leave its id attached, or the next cell you draw would be filed as the next version of theirs.
      The ghosts go too: they belong to the ids that were in the boxes. */
   PAD_EDIT_ID = ""; TRACING_PENDING = null; PAD3D_MESHES = null; PAD3D_KEY = "";
+  /* A kept draft is not thrown away by opening the pad -- but it WILL be replaced once something is
+     drawn here, and being told that before it happens is the whole difference. */
+  const kept = draftRead();
+  if (kept && kept.rings.length)
+    tracingSay("There is an unfinished tracing kept in this browser — " + kept.rings.length
+      + " contour(s), saved " + draftWhen(kept.at) + ". Resume it from the bar above, or carry on "
+      + "here and it is replaced as soon as you close a contour.");
   document.getElementById("tracePadWrap").style.display = "";
   padDraw();
   tracingResolveAt(got.pos);
@@ -8668,11 +8900,14 @@ async function tracingResolveAt(pos){
   });
   document.getElementById("tracePadClose").addEventListener("click", function(){
     document.getElementById("tracePadWrap").style.display = "none";
+    draftSave(false); draftRender();      // closing the pad is not losing the work
     /* The panel goes with the pad, and its context is handed back rather than left for the browser
        to reclaim when it runs out. */
     pad3DRelease(); PAD3D_ON = false;
     const h3 = document.getElementById("tracePad3DHost"); if (h3) h3.innerHTML = "";
   });
+  const pd = document.getElementById("tracePadDraft");
+  if (pd) pd.addEventListener("click", function(){ draftSave(true); });
   const p3 = document.getElementById("tracePad3D");
   if (p3) p3.addEventListener("click", function(){
     PAD3D_ON = !PAD3D_ON;
@@ -8756,7 +8991,7 @@ async function tracingResolveAt(pos){
     if (dragging){
       const wasDrag = moved;
       dragging = null;
-      if (wasDrag){ padPaint(); pad3DSoon();
+      if (wasDrag){ padPaint(); pad3DSoon(); draftSoon();
         /* Named for the machine reading it: "right-click" is not a gesture a Mac trackpad has. */
         padSay("Point moved. " + PAD_RIGHT.charAt(0).toUpperCase() + PAD_RIGHT.slice(1)
         + " a point to delete it, or a line to put a new point in the middle of it."); return; }
@@ -8946,6 +9181,14 @@ async function tracingResolveAt(pos){
     const el=document.getElementById(id);
     if(el)el.addEventListener("change",tracingSuggestType);
   });
+  /* Everything you fill in is part of the draft: a resumed tracing that had forgotten which cell it
+     was of would have to be identified twice. */
+  ["tracingWhat","tracingName","tracingType","tracingColor","tracingNucId","tracingRootId"]
+    .forEach(function(id){
+      const el=document.getElementById(id);
+      if(el)el.addEventListener("change",function(){ if(PAD)draftSoon(); });
+    });
+  draftRender();
   const typeSel=document.getElementById("tracingType");
   if(typeSel)typeSel.addEventListener("change",function(){TRACING_TYPE_TOUCHED=true;});
   const tPanel=document.getElementById("tracingPanel");
