@@ -733,11 +733,15 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div class="card" id="tracingCard">
 <details id="tracingPanel">
 <summary style="cursor:pointer;font-weight:600">Trace a cell &mdash; outline it, and it joins the 3D export</summary>
-<p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Outline it in the viewer section by section &mdash; a <b>polygon</b> if your viewer has the tool, otherwise a ring of <b>line</b> annotations &mdash; then paste the whole address bar here. Two sections is the minimum; every fifth section is about half a percent off the real volume, every fortieth is eleven.</p>
+<p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Open a viewer, ring the cell with <b>line</b> annotations on one section &mdash; <b>ctrl+click</b> each end of each segment; a plain click does nothing &mdash; step a section with <b>,</b> and <b>.</b>, and go round again. Then paste the whole address bar back here. Two sections is the minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>
+<div class="row" style="gap:8px;margin-top:8px">
+<button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate on screen, with an empty annotation layer called &quot;tracing&quot; already selected and the line tool already active.">Open a viewer to trace in</button>
+</div>
+<p class="hint" style="margin-top:6px">Measured 2026-09-17, in the browser: Spelunker keeps line annotations in the address bar, so they survive the paste. Its <i>polyline</i> tool draws on screen but never reaches the link, and BrainSharer's polygon tool needs an account and ignores a pasted link &mdash; so a ring of lines is the route that actually works.</p>
 <label style="margin-top:10px">Neuroglancer link</label>
 <textarea id="tracingLink" placeholder="Paste the whole address bar, with your contours on it."></textarea>
 <div class="row" style="gap:8px;margin-top:8px">
-<div class="coord" style="flex:1 1 auto"><input type="text" id="tracingLayer" placeholder="Annotation layer name (optional)"></div>
+<div class="coord" style="flex:1 1 auto"><input type="text" id="tracingLayer" placeholder="Annotation layer name (optional)" title="Which annotation layer to read. Leave it empty and it does the right thing on its own: a layer called &quot;tracing&quot; (what the button above makes) wins if the link has one, and the Cortical layers bands are never read as contours."></div>
 <button class="idbtn" id="tracingRead" style="flex:0 0 auto">Read the contours</button>
 </div>
 <p class="hint" id="tracingStatus"></p>
@@ -7675,13 +7679,59 @@ function tracingCurrent(){
            rings:TRACING_PENDING.rings};
   const nid=(document.getElementById("tracingNucId").value||"").trim();
   if(nid)t.nucleus_id=nid;
+  /* A STABLE ID, ASSIGNED ONCE.  2026-09-17
+     Keep and Share have to be talking about the same structure, and a second Share after tracing
+     more sections has to be a new VERSION of this cell rather than a rival to it -- that is what
+     the backend's (structureId, reporterEmail, groupId) versioning keys on. Frozen on
+     TRACING_PENDING the first time this function gets as far as a name, so renaming afterwards
+     renames the same structure instead of forking it.
+
+     Reusing a kept tracing's id when the names match is the working pattern: paste a link covering
+     more of the cell you already outlined, same name, share, and the older version is superseded
+     rather than duplicated. */
+  if(!TRACING_PENDING.id){
+    const prior=(TRACINGS_KEPT||[]).filter(function(x){return x&&x.id&&x.name===name;})[0];
+    TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(name);
+  }
+  t.id=TRACING_PENDING.id;
   return t;
+}
+
+/* ── SOMEWHERE TO GO AND DRAW ────────────────────────────────────────────────────  2026-09-17
+   Søren: "I don't see any link to a neuroglancer instance anywhere where I can go and use the
+   polygon tool to trace a cell." There wasn't one, and the tool the card named does not exist in
+   any viewer a link can reach -- see src/a_viewer_to_trace_in.py for what was measured.
+
+   Same state buildState() gives the jump arrow -- his viewer, his layer ticks, this coordinate --
+   plus an empty annotation layer with the line tool live. */
+function tracingOpen(){
+  const pos=(window.CUR_POS&&window.CUR_POS.length===3)?window.CUR_POS.slice():null;
+  if(!pos){tracingSay("Search a coordinate or a cell first \u2014 the viewer opens where you are.",true);return;}
+  let st;
+  try{st=buildState(pos);}catch(e){tracingSay("Could not build a viewer link: "+String(e&&e.message||e),true);return;}
+  /* The Cortical layers bands are `line` annotations in a local annotation layer, so leaving them
+     on the link he traces over means ringsFromLink() chains them in with his contours into rings
+     that span the dataset. They are also a thick grid over the picture he is trying to draw on. */
+  st.layers=(st.layers||[]).filter(function(l){
+    return !(l&&l.type==="annotation"&&/cortical layers/i.test(String(l.name||"")));});
+  st.layers=st.layers.filter(function(l){return !(l&&l.type==="annotation"&&l.name==="tracing");});
+  st.layers.push({type:"annotation",source:"local://annotations",tool:"annotateLine",
+                  tab:"annotations",name:"tracing",annotations:[]});
+  st.selectedLayer={layer:"tracing",visible:true};
+  st.layout="xy";   // tracing happens on sections; the 3D pane only takes the width
+  const viewerEl=document.getElementById("viewer");
+  const base=(viewerEl&&viewerEl.value)||"https://spelunker.cave-explorer.org/";
+  window.open(base+"#!"+encodeURIComponent(JSON.stringify(st)),"_blank","noopener");
+  tracingSay("Viewer opened at "+pos.join(", ")+", on a layer called \u201ctracing\u201d with the line "
+    +"tool live. Ctrl+click each end of a segment; , and . step a section. Paste the address bar back here.");
 }
 
 function tracingKeep(){
   const t=tracingCurrent();
   if(!t)return;
-  TRACINGS_KEPT.push(t);
+  // Keeping the same tracing twice used to put the cell in the Blender scene twice.
+  const at=TRACINGS_KEPT.findIndex(function(x){return x&&x.id&&x.id===t.id;});
+  if(at>=0)TRACINGS_KEPT.splice(at,1,t); else TRACINGS_KEPT.push(t);
   tracingWrite(TRACINGS_KEPT);
   tracingRenderList();
   TRACING_PENDING=null;
@@ -7697,17 +7747,21 @@ function tracingShare(){
     const blocked=reportGateBlock();
     if(blocked){alert(blocked);return;}
   }
-  const rows=UJ.tracing.ringsToRows(t.rings,{name:t.name,cellType:t.type,color:t.color,
-                                             nucleusId:t.nucleus_id||""});
+  /* One act of sharing, one groupId, N contour rows -- the convention merged_split and
+     organelle_location already use, and the one Code.gs's ?tracings=1 reads to decide which
+     version of a tracing is current. Without it, every re-share would be a duplicate. */
+  const gid="trace_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7);
+  const rows=UJ.tracing.ringsToRows(t.rings,{structureId:t.id,name:t.name,cellType:t.type,
+                                             color:t.color,nucleusId:t.nucleus_id||""});
   let posted=0;
   rows.forEach(function(r,i){
-    if(postReport(Object.assign({timestamp:new Date().toISOString(),
+    if(postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid,
                                  subIndex:i+1,subCount:rows.length},r))!==false)posted++;
   });
   if(!posted){tracingSay("Nothing was sent \u2014 the tracing is still here.",true);return;}
   tracingSay(posted+" contour"+(posted===1?"":"s")+" shared. If the backend has not been "
-    +"redeployed since 2026-09-16 it will record them as an unknown type \u2014 the tracing is "
-    +"kept here either way.");
+    +"redeployed since 2026-09-17 it will refuse them as an unknown type \u2014 the tracing is "
+    +"kept here either way. Sharing the same name again replaces this version.");
 }
 
 (function wireTracing(){
@@ -7725,6 +7779,8 @@ function tracingShare(){
   document.getElementById("tracingRead").addEventListener("click",function(){
     try{tracingReadLink();}catch(e){tracingSay(String(e&&e.message||e),true);}
   });
+  const openBtn=document.getElementById("tracingOpen");
+  if(openBtn)openBtn.addEventListener("click",tracingOpen);
   document.getElementById("tracingKeep").addEventListener("click",tracingKeep);
   document.getElementById("tracingShare").addEventListener("click",tracingShare);
 })();

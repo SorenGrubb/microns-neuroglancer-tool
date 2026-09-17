@@ -76,6 +76,44 @@ function link(annotations){
 
   await p.evaluate(() => { document.getElementById("tracingPanel").open = true; });
 
+  console.log("\nthe button that gives him somewhere to draw");
+  {
+    const v = await p.evaluate(() => {
+      window.__opened = [];
+      window.open = (u) => { window.__opened.push(u); return null; };
+      window.CUR_POS = null;
+      document.getElementById("tracingOpen").click();
+      const refused = document.getElementById("tracingStatus").innerText;
+      window.CUR_POS = [240640, 207872, 21360];
+      document.getElementById("tracingOpen").click();
+      const u = window.__opened[window.__opened.length - 1] || "";
+      let s = null;
+      try { s = JSON.parse(decodeURIComponent(u.split("#!")[1] || "")); } catch (e) {}
+      return { refused: refused, n: window.__opened.length, base: u.split("#!")[0], state: s };
+    });
+    ok(/coordinate or a cell first/i.test(v.refused) && v.n === 1,
+       "with nothing on screen it says where to start, and opens nothing",
+       v.refused.slice(0, 55));
+    const ann = ((v.state && v.state.layers) || []).filter(l => l.type === "annotation");
+    const tr = ann.find(l => l.name === "tracing");
+    ok(!!tr, "the link carries an annotation layer called tracing");
+    ok(!!tr && tr.tool === "annotateLine",
+       "...with the LINE tool live \u2014 measured 2026-09-17 as the only kind that reaches the "
+       + "address bar; the polyline tool draws and is never serialised", tr && tr.tool);
+    ok(!!tr && Array.isArray(tr.annotations) && tr.annotations.length === 0,
+       "...and empty, so everything that comes back is his");
+    ok(!!v.state && !!v.state.selectedLayer && v.state.selectedLayer.layer === "tracing",
+       "...and selected, so the tools are on screen rather than three clicks away");
+    ok(!ann.some(l => /cortical layers/i.test(l.name || "")),
+       "the Cortical layers bands are NOT on it \u2014 they are lines, and would chain into his contours");
+    ok(!!v.state && v.state.layout === "xy",
+       "the layout is a section, not a section plus a 3D pane",
+       v.state && JSON.stringify(v.state.layout));
+    ok(String(v.state && v.state.position) === "240640,207872,21360",
+       "...centred where he was", String(v.state && v.state.position));
+    ok(/^https?:\/\//.test(v.base), "and it opens the viewer chosen at the top of the tab", v.base);
+  }
+
   console.log("\nreading a pasted outline");
   const read = await p.evaluate(async ({ url }) => {
     document.getElementById("tracingLink").value = url;
@@ -188,8 +226,15 @@ function link(annotations){
     window.__alerts = [];
     document.getElementById("tracingShare").click();
     out.after = window.__posted.length;
-    out.rows = window.__posted.map(x => ({ t: x.type, z: x.z, n: x.name,
+    out.rows = window.__posted.map(x => ({ t: x.type, z: x.z, n: x.name, sid: x.structureId,
+                                           gid: x.groupId,
                                            pts: (x.points || "").split(";").length }));
+    /* A SECOND share of the same tracing. Same structureId, new groupId -- that pair is what the
+       backend keys "this replaces the older version" on, so a re-share after tracing five more
+       sections is a correction rather than a rival tracing of the same cell. */
+    window.__posted = [];
+    document.getElementById("tracingShare").click();
+    out.again = window.__posted.map(x => ({ sid: x.structureId, gid: x.groupId }));
     return out;
   }, { url: link(polygon(2000, 3000, 600, 25, 10, "s1")
         .concat(polygon(2005, 3005, 610, 24, 10, "s2"))) });
@@ -200,6 +245,39 @@ function link(annotations){
   ok(String(shared.rows.map(r => r.z)) === "600,610", "...one per section",
      String(shared.rows.map(r => r.z)));
   ok(shared.rows.every(r => r.pts === 10), "...with all ten points of each contour");
+  ok(shared.rows.every(r => r.sid && r.sid === shared.rows[0].sid),
+     "...every row carrying the SAME structureId, which is how they find each other again",
+     shared.rows[0].sid);
+  ok(shared.rows.every(r => r.gid && r.gid === shared.rows[0].gid),
+     "...and the same groupId, one per act of sharing", shared.rows[0].gid);
+  ok(shared.again.length === 2 && shared.again[0].sid === shared.rows[0].sid,
+     "sharing it again keeps the structureId \u2014 it is the same cell",
+     shared.again.length && shared.again[0].sid);
+  ok(shared.again.length === 2 && shared.again[0].gid !== shared.rows[0].gid,
+     "...with a NEW groupId, which is what makes it a new version rather than a duplicate",
+     shared.again.length && shared.again[0].gid);
+
+  console.log("\nkeeping the same tracing twice");
+  {
+    const twice = await p.evaluate(({ url }) => {
+      const before = TRACINGS_KEPT.length;
+      document.getElementById("tracingLink").value = url;
+      document.getElementById("tracingRead").click();
+      document.getElementById("tracingName").value = "astrocyte at the glia limitans";
+      document.getElementById("tracingKeep").click();
+      return { before: before, after: TRACINGS_KEPT.length,
+               ids: TRACINGS_KEPT.map(t => t.id),
+               stored: JSON.parse(localStorage.getItem("ujump_tracings_v1") || "[]").length };
+    }, { url: link(polygon(1000, 2000, 500, 44, 12, "r1")
+          .concat(polygon(1005, 2005, 505, 42, 12, "r2"),
+                  polygon(1010, 2010, 510, 40, 12, "r3"))) });
+    ok(twice.after === twice.before,
+       "keeping a fuller tracing of a cell already kept REPLACES it \u2014 it used to be in the "
+       + "Blender scene twice", twice.before + " -> " + twice.after);
+    ok(twice.ids.every(i => !!i) && new Set(twice.ids).size === twice.ids.length,
+       "...and every kept tracing has an id of its own", twice.ids.join(", "));
+    ok(twice.stored === twice.after, "...with storage saying the same", twice.stored);
+  }
 
   console.log("\nremoving one");
   const gone = await p.evaluate(() => {

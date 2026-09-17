@@ -2913,6 +2913,32 @@ function doPost(e){
     // centriole and primary cilium data did not show in the Master cell list even though it was
     // listed in the organelle locations") -- see upsertMasterCellOrganelle()'s own comment above.
     upsertMasterCellOrganelle(d.nucleusId,d.kind,d.pointA,d.pointB,d.coord);
+  } else if(d.type==="traced_structure"){
+    /* A cell somebody outlined by hand, one row per contour — see this file's header for why this
+       branch writes nowhere else. Stage 1 of the tracing feature (2026-09-16) posts these from
+       µJump's Jump tab; core/tracing.js turns a pasted Neuroglancer link into exactly these rows
+       and turns them back into rings on the way out.
+
+       z AND ringIndex ARE LEGITIMATELY 0. `d.z||""` would write "" for section 0 and for the first
+       ring of every section, which is most of them — the coordinate would survive and the ring
+       order would not. Hence the explicit ===0 tests, which nothing else in this chain needs
+       because nothing else in this chain has a meaningful zero.
+
+       points is the whole contour as one string (core/tracing.js's encodePoints: "x,y x,y ..."),
+       because a cell traced on 40 sections is 40 rows either way and a row per VERTEX would be
+       tens of thousands. pointCount is stored beside it so the index read-back can report a size
+       without parsing anything. */
+    var sh=ss.getSheetByName("Traced structures")||ss.insertSheet("Traced structures");
+    if(sh.getLastRow()===0){
+      sh.appendRow(["timestamp","structureId","groupId","name","cellType","color","nucleusId","rootId","z","ringIndex","points","pointCount","subIndex","subCount","comment","path","reporterName","reporterEmail"]);
+    }
+    sh.appendRow([d.timestamp||new Date().toISOString(),d.structureId||"",d.groupId||"",
+                  d.name||"",d.cellType||"",d.color||"",d.nucleusId||"",d.rootId||"",
+                  (d.z===0?0:(d.z||"")),(d.ringIndex===0?0:(d.ringIndex||"")),
+                  d.points||"",d.pointCount||"",d.subIndex||"",d.subCount||"",
+                  d.comment||"",d.path||"",d.reporterName||"",d.reporterEmail||""]);
+    // Deliberately nothing else. Not upsertMasterCellRow (a drawing is not an identity claim),
+    // not upsertMasterCellOrganelle (a contour is not an organelle location), no vote sheet.
   } else if(d.type==="not_a_nucleus"){
     // Flags a MICrONS nucleus detection as a false positive (segmentation artifact, not a
     // real nucleus at all) rather than forcing a cell-type identification onto it.
@@ -4105,6 +4131,79 @@ function doGet(e){
     }
     return ContentService.createTextOutput(JSON.stringify({newCells:newCells}))
       .setMimeType(ContentService.MimeType.JSON);
+  }
+  if(e.parameter.tracings==="1"){
+    /* Hand-traced structures, back out. Two shapes from one route:
+         ?tracings=1                    -> the index: who traced what, how big, when. No contours.
+         ?tracings=1&structureId=<id>   -> the same entries plus `rows`, in the field names
+                                           core/tracing.js's rowsToStructures() already reads.
+       The index exists because contour text dominates this sheet — an index of 200 tracings is a
+       few kB, the contours behind them are megabytes — and because the list a user picks from
+       needs none of it.
+
+       KEYED BY (structureId, reporterEmail), NOT structureId. No consensus here, by Søren's
+       instruction, so two people outlining the same cell are two tracings and stay two tracings;
+       folding them together would BE the consensus handling he asked not to have. reporterName is
+       returned (attribution is the record's purpose — the same deliberate exception ?newCells=1
+       makes); reporterEmail is used as the key and never sent.
+
+       LATEST GROUP WINS. The sheet is append-only and never reordered, so scanning forward the
+       last groupId seen for a tracing is its newest submission; a new groupId therefore resets the
+       accumulators rather than adding to them. That is what makes "outline five more sections and
+       share again" a correction instead of a duplicate, with the older version still in the sheet.
+       Rows written before groupId existed all carry "" and so accumulate as one version — there is
+       no version information in them to recover.
+
+       Whole-sheet read, like ?newCells=1 and ?newCellOrganelles=1 beside it. Right for as long as
+       this sheet is thousands of rows rather than the master list's 150k; if it outgrows that, it
+       wants a PointsIndex.gs-style precompute, not a cleverer scan. */
+    var ss=SS();
+    var sh=ss.getSheetByName("Traced structures");
+    var want=String(e.parameter.structureId||"");
+    var out={},order=[],zseen={};
+    if(sh&&sh.getLastRow()>=2){
+      var data=sh.getDataRange().getValues(),h=data[0];
+      var iTs=h.indexOf("timestamp"),iSid=h.indexOf("structureId"),iGid=h.indexOf("groupId"),
+          iName=h.indexOf("name"),iType=h.indexOf("cellType"),iCol=h.indexOf("color"),
+          iNuc=h.indexOf("nucleusId"),iRoot=h.indexOf("rootId"),iZ=h.indexOf("z"),
+          iRi=h.indexOf("ringIndex"),iPts=h.indexOf("points"),iPc=h.indexOf("pointCount"),
+          iCm=h.indexOf("comment"),iRn=h.indexOf("reporterName"),iRe=h.indexOf("reporterEmail");
+      for(var ti=1;ti<data.length;ti++){
+        var row=data[ti],sid=String(row[iSid]||"");
+        if(!sid)continue;
+        if(want&&sid!==want)continue;
+        var gid=String(iGid>=0?(row[iGid]||""):"");
+        var k=sid+"|"+String(iRe>=0?(row[iRe]||""):"");
+        var t=out[k];
+        if(!t){t=out[k]={structureId:sid,groupId:gid,name:"",cellType:"",color:"",
+                         nucleusId:"",rootId:"",tracedBy:"",comment:"",timestamp:"",
+                         sections:0,contours:0,vertices:0};
+               order.push(k);zseen[k]={};t.groupId=gid;}
+        if(gid!==t.groupId){t.groupId=gid;t.contours=0;t.vertices=0;zseen[k]={};if(t.rows)t.rows=[];}
+        // Metadata comes from whichever row of the winning group was seen last -- every row of one
+        // submission carries the same values, so "last" and "any" agree; this just avoids caring.
+        t.name=String(row[iName]||"");
+        if(iType>=0)t.cellType=String(row[iType]||"");
+        if(iCol>=0)t.color=String(row[iCol]||"");
+        if(iNuc>=0)t.nucleusId=String(row[iNuc]||"");
+        if(iRoot>=0)t.rootId=String(row[iRoot]||"");
+        if(iCm>=0)t.comment=String(row[iCm]||"");
+        if(iRn>=0)t.tracedBy=String(row[iRn]||"");
+        t.timestamp=String(row[iTs]||"");
+        t.contours++;
+        t.vertices+=Number(row[iPc]||0)||0;
+        zseen[k][String(row[iZ])]=1;
+        if(want){
+          if(!t.rows)t.rows=[];
+          t.rows.push({structureId:sid,name:t.name,cellType:t.cellType,color:t.color,
+                       nucleusId:t.nucleusId,rootId:t.rootId,
+                       z:Number(row[iZ]||0),ringIndex:Number(row[iRi]||0),
+                       points:String(row[iPts]||""),reporterName:t.tracedBy});
+        }
+      }
+    }
+    var tracings=order.map(function(k){var t=out[k];t.sections=Object.keys(zseen[k]).length;return t;});
+    return gJson({tracings:tracings});
   }
   if(e.parameter.newCellOrganelles==="1"){
     // Bulk mode for centriole/cilium ("organelle_location") reports logged against a

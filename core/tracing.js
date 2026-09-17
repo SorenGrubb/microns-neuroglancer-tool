@@ -144,8 +144,23 @@ UJ.tracing = (function(){
     var seen = { volumes: 0, polygons: 0, lines: 0, unreadable: 0, mixedZ: 0 };
     var byId = {}, polys = [], vols = [], loose = [], layers = 0;
 
-    (st.layers || []).forEach(function(l){
-      if (!l || l.type !== "annotation") return;
+    /* WHICH ANNOTATION LAYERS COUNT, when nobody named one.  2026-09-17
+       A pasted µJump link normally carries "Cortical layers" -- the pia/white-matter bands, which
+       are `line` annotations in a local annotation layer exactly like a hand-drawn contour. Read
+       as contours they chain into rings spanning the whole dataset, quietly, and the result still
+       meshes. So: never read them.
+
+       And a link from the card's own "Open a viewer to trace in" button carries a layer called
+       "tracing". If one is there, it is the answer and nothing else needs looking at -- which
+       means the layer box can stay empty in the ordinary case instead of being a name he has to
+       match by hand. */
+    var annLayers = (st.layers || []).filter(function(l){
+      return l && l.type === "annotation" && !/^cortical layers$/i.test(String(l.name || ""));
+    });
+    if (!layerName && annLayers.some(function(l){ return l.name === "tracing"; }))
+      layerName = "tracing";
+
+    annLayers.forEach(function(l){
       if (layerName && l.name !== layerName) return;
       layers++;
       (l.annotations || []).forEach(function(a){
@@ -272,7 +287,16 @@ UJ.tracing = (function(){
       if (!r) return;
       var id = r.structureId || "";
       if (!id) return;
-      var s = by[id] || (by[id] = { structureId: id, name: r.name || "",
+      /* KEYED BY TRACING *AND* TRACER.  2026-09-17
+         No consensus handling here, by instruction -- so two people who outline the same cell are
+         two tracings and must stay two tracings. Keying by structureId alone interleaved their
+         rings into a single object whose shape depended on who posted last, which is consensus
+         handling arrived at by accident, and the worst kind: silent, and wrong in a way that looks
+         like a mesh. `reporterName` is what the backend sends back; `tracedBy` is what a structure
+         already read once carries, so a round trip through this function is stable. */
+      var who = String(r.reporterName || r.tracedBy || "");
+      var key = id + "|" + who;
+      var s = by[key] || (by[key] = { structureId: id, tracedBy: who, name: r.name || "",
                                     cellType: r.cellType || "", color: r.color || "",
                                     nucleusId: r.nucleusId || "", rootId: r.rootId || "",
                                     tracedBy: r.reporterName || r.tracedBy || "", rings: [] });

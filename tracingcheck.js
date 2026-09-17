@@ -176,6 +176,38 @@ console.log("\nthe round trip through the sheet");
      "...in the {z, points} shape trace_mesh takes");
 }
 
+console.log("\ntwo people, one cell");
+{
+  /* No consensus handling, by instruction -- so the same structureId traced by two people is two
+     tracings. Keyed by id alone, their rings interleaved into one object whose shape depended on
+     who posted last: consensus handling arrived at by accident, and invisible, because the result
+     still meshes. */
+  const rows = [
+    { structureId: "s1", name: "astrocyte", z: 500, ringIndex: 0, points: "1,1;9,1;9,9",
+      reporterName: "S\u00f8ren Grubb" },
+    { structureId: "s1", name: "astrocyte", z: 505, ringIndex: 0, points: "2,2;8,2;8,8",
+      reporterName: "S\u00f8ren Grubb" },
+    { structureId: "s1", name: "astrocyte", z: 500, ringIndex: 0, points: "3,3;7,3;7,7",
+      reporterName: "Somebody Else" }
+  ];
+  const back = T.rowsToStructures(rows);
+  ok(back.length === 2, "the same cell traced by two people is two structures", back.length);
+  const mine = back.find(s => s.tracedBy === "S\u00f8ren Grubb");
+  const theirs = back.find(s => s.tracedBy === "Somebody Else");
+  ok(!!mine && mine.rings.length === 2 && !!theirs && theirs.rings.length === 1,
+     "...each holding only its own contours",
+     (mine && mine.rings.length) + " and " + (theirs && theirs.rings.length));
+  ok(!!mine && mine.structureId === "s1" && !!theirs && theirs.structureId === "s1",
+     "...and both still say which cell they are of");
+
+  /* A structure read once and fed back in must not split again -- rowsToStructures reads
+     reporterName, toTracings writes traced_by, and a re-read has to agree with the first. */
+  const again = T.rowsToStructures(T.ringsToRows(mine.rings, { structureId: "s1", name: "astrocyte" })
+    .map(r => Object.assign({ tracedBy: "S\u00f8ren Grubb" }, r)));
+  ok(again.length === 1 && again[0].tracedBy === "S\u00f8ren Grubb",
+     "and a round trip through the rows again is stable, on tracedBy as well as reporterName");
+}
+
 console.log("\nrows out of order, which a sheet gives no guarantee against");
 {
   const rows = [
@@ -187,6 +219,51 @@ console.log("\nrows out of order, which a sheet gives no guarantee against");
   ok(String(back[0].rings.map(r => r.z + ":" + r.ringIndex)) === "500:0,500:1,520:0",
      "they come back sorted by section, then by ring within it",
      String(back[0].rings.map(r => r.z + ":" + r.ringIndex)));
+}
+
+console.log("\nthe bands \u00b5Jump puts on its own links are not contours");
+{
+  /* buildLayerAnnotationLayers() draws the pia/white-matter boundaries as `line` annotations in a
+     local annotation layer called "Cortical layers". They are indistinguishable, shape-wise, from
+     a hand-drawn contour segment -- so before 2026-09-17 a link carrying both came back as rings
+     that chained his outline to a band spanning the dataset, and MESHED, which is the failure mode
+     this project cares about most: wrong, and it still produces an object. */
+  const bands = { type: "annotation", name: "Cortical layers", annotations: [
+    { type: "line", id: "b1", pointA: [0, 0, 500], pointB: [90000, 1000, 500] },
+    { type: "line", id: "b2", pointA: [90000, 1000, 500], pointB: [90000, 90000, 505] },
+    { type: "line", id: "b3", pointA: [90000, 90000, 505], pointB: [0, 0, 505] }
+  ]};
+  const m1 = polygonOf(circle(1000, 2000, 500, 40, 16), "t1");
+  const m2 = polygonOf(circle(1005, 2005, 505, 38, 16), "t2");
+  const mine = { type: "annotation", name: "tracing",
+                 annotations: [m1.poly, m2.poly].concat(m1.lines, m2.lines) };
+  const url = (layers) => "https://neuroglancer.example/#!"
+    + encodeURIComponent(JSON.stringify({ layers: layers }));
+
+  const both = T.ringsFromLink(url([bands, mine]));
+  ok(both.ok === true && both.rings.length === 2,
+     "a link with the bands AND a tracing gives back the tracing only",
+     both.rings.length + " rings");
+  ok(both.ok && both.rings.every(r => r.points.every(p => p[0] < 2000 && p[1] < 3000)),
+     "...every point is his cell's, not a band's corner at 90000");
+
+  /* Without a "tracing" layer there is no preference to exercise -- the bands must still be out. */
+  const loose = { type: "annotation", name: "annotation",
+                  annotations: [m1.poly, m2.poly].concat(m1.lines, m2.lines) };
+  const noName = T.ringsFromLink(url([bands, loose]));
+  ok(noName.ok === true && noName.rings.length === 2,
+     "and with the layer called anything else, the bands are still not read",
+     noName.rings.length + " rings");
+
+  const only = T.ringsFromLink(url([bands]));
+  ok(only.ok === false && /no annotation layer/.test(only.error || ""),
+     "a link carrying nothing BUT the bands says it has no annotation layer, rather than meshing them",
+     only.error);
+
+  /* The layer box still wins when he fills it in -- the preference is a default, not a rule. */
+  const named = T.ringsFromLink(url([bands, mine, loose]), "annotation");
+  ok(named.ok === true && named.rings.length === 2,
+     "naming a layer by hand still overrides all of it", named.rings.length + " rings");
 }
 
 console.log("\nwhat it refuses, and what it says");
