@@ -559,7 +559,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 13:53</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 14:47</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -5440,7 +5440,15 @@ function decorateMeshVolButtons(){
        unconditional return, which is exactly how a volume computed while signed out hid its own
        button for the rest of the session with nothing left to click. */
     if(btn.dataset.volFresh==="1"&&!stale&&!known.unsaved)return;
-    if(stale||known.unsaved)btn.dataset.volFresh="";
+    /* ── THE WRITE THAT FROZE THE PAGE ──────────────────────────────────────────  2026-09-17
+       This line was unconditional. Setting an attribute to the value it already holds still
+       produces a mutation record; the observer below watches data-vol-fresh on exactly these
+       buttons; so it called this function, which wrote again. MutationObserver callbacks are
+       microtasks, so the queue never drained: no repaint, no timers, nothing. The page stopped
+       dead showing whatever the progress callback had last put on the button — 97% one time, 100%
+       the next — and Søren reported both as hangs, which they were.
+       An unsaved volume (every compute made while signed out) is what put it in this branch. */
+    if((stale||known.unsaved)&&btn.dataset.volFresh!=="")btn.dataset.volFresh="";
     if(known.unsaved){
       if(btn.style.display!=="")btn.style.display="";
       const uTitle="This volume was computed but not saved. "+(known.unsavedWhy
@@ -5494,7 +5502,16 @@ document.addEventListener("DOMContentLoaded",function(){
     return false;
   }
   const mo=new MutationObserver(function(records){
-    if(mutationTouchesMeshVol(records))decorateMeshVolButtons();
+    if(!mutationTouchesMeshVol(records))return;
+    decorateMeshVolButtons();
+    /* ── ITS OWN WRITES ARE NOT NEWS ────────────────────────────────────────────  2026-09-17
+       decorateMeshVolButtons() writes `disabled` and `data-vol-fresh` on the very buttons this
+       observer watches for `disabled` and `data-vol-fresh`. As long as each of those writes
+       changes something, that settles after one pass; the moment one of them writes a value that
+       is already there, it is a loop of microtasks with no exit, and the whole tab freezes.
+       Discarding the records this call just produced makes that structural rather than a rule
+       every future edit to the function has to remember. */
+    mo.takeRecords();
   });
   mo.observe(panel,{childList:true,subtree:true,attributes:true,attributeFilter:["disabled","data-vol-fresh"]});
 });

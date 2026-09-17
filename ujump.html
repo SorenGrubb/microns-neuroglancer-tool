@@ -533,7 +533,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 14:23</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 14:47</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -5561,7 +5561,15 @@ function decorateMeshVolButtons(){
        unconditional return, which is exactly how a volume computed while signed out hid its own
        button for the rest of the session with nothing left to click. */
     if(btn.dataset.volFresh==="1"&&!stale&&!known.unsaved)return;
-    if(stale||known.unsaved)btn.dataset.volFresh="";
+    /* ── THE WRITE THAT FROZE THE PAGE ──────────────────────────────────────────  2026-09-17
+       This line was unconditional. Setting an attribute to the value it already holds still
+       produces a mutation record; the observer below watches data-vol-fresh on exactly these
+       buttons; so it called this function, which wrote again. MutationObserver callbacks are
+       microtasks, so the queue never drained: no repaint, no timers, nothing. The page stopped
+       dead showing whatever the progress callback had last put on the button — 97% one time, 100%
+       the next — and Søren reported both as hangs, which they were.
+       An unsaved volume (every compute made while signed out) is what put it in this branch. */
+    if((stale||known.unsaved)&&btn.dataset.volFresh!=="")btn.dataset.volFresh="";
     if(known.unsaved){
       if(btn.style.display!=="")btn.style.display="";
       const uTitle="This volume was computed but not saved. "+(known.unsavedWhy
@@ -5615,7 +5623,16 @@ document.addEventListener("DOMContentLoaded",function(){
     return false;
   }
   const mo=new MutationObserver(function(records){
-    if(mutationTouchesMeshVol(records))decorateMeshVolButtons();
+    if(!mutationTouchesMeshVol(records))return;
+    decorateMeshVolButtons();
+    /* ── ITS OWN WRITES ARE NOT NEWS ────────────────────────────────────────────  2026-09-17
+       decorateMeshVolButtons() writes `disabled` and `data-vol-fresh` on the very buttons this
+       observer watches for `disabled` and `data-vol-fresh`. As long as each of those writes
+       changes something, that settles after one pass; the moment one of them writes a value that
+       is already there, it is a loop of microtasks with no exit, and the whole tab freezes.
+       Discarding the records this call just produced makes that structural rather than a rule
+       every future edit to the function has to remember. */
+    mo.takeRecords();
   });
   mo.observe(panel,{childList:true,subtree:true,attributes:true,attributeFilter:["disabled","data-vol-fresh"]});
 });
@@ -8396,21 +8413,72 @@ async function pad3DDraw(){
   PAD3D_BUSY = true;
   try {
     const res = (window.UJ && UJ.cfg && UJ.cfg.res) || [4, 4, 40];
-    const g = UJ.traceloft.loft(rings, res);
+    /* ── EACH STRUCTURE ON ITS OWN, IN ITS OWN COLOUR ──────────────────────────────  2026-09-17
+       Søren: *"I would like if the different segmented meshes also have different colors in the 3D
+       window."* Two things were wrong here and the colour was the visible one. Every contour on the
+       pad went into ONE loft, so a contour belonging to number 2 and a contour belonging to number
+       3 on the same section were treated as two contours of a SINGLE object and lofted to each
+       other across the gap between them — the preview was not three organelles in one colour, it
+       was one impossible organelle. Grouping by structure is what makes them separate surfaces;
+       painting each in the colour its chip already carries is what he asked for. */
+    const byInst = {}, order = [];
+    rings.forEach(function(r){
+      const k = r.inst || 0;
+      if (!byInst[k]){ byInst[k] = []; order.push(k); }
+      byInst[k].push(r);
+    });
+    order.sort(function(a, b){ return a - b; });
+    const lofts = [];
+    order.forEach(function(k){
+      /* One structure failing to loft — a single stray vertex, a contour that is a line — must not
+         cost the others their picture. */
+      let lg = null;
+      try { lg = UJ.traceloft.loft(byInst[k], res); } catch (_e){ lg = null; }
+      if (lg && lg.positions && lg.positions.length) lofts.push({ inst: k, g: lg });
+    });
+    if (!lofts.length){ pad3DNote("Nothing to draw yet."); PAD3D_BUSY = false; return; }
+
     let ghosts = [];
     const wantGhosts = !!(document.getElementById("tracePadGhosts") || {}).checked;
     if (wantGhosts) ghosts = await pad3DGhostMeshes();
 
-    /* ONE FRAME FOR ALL THREE, centred on the tracing. A cell mesh is tens of micrometres and a
-       tracing is a few, so letting each centre on itself would draw them concentric -- which looks
-       right and is a lie about where the tracing sits in the cell. The span is opened out when
-       there are ghosts so the surroundings are visible rather than filling the view; the tracing is
-       still the subject, and the wheel does the rest. */
-    const first = UJ.mesh3d.prepare(g.positions, g.indices, { unitNm: 1 });
-    if (first.empty){ pad3DNote("Nothing to draw yet."); PAD3D_BUSY = false; return; }
-    const frame = { mid: first.mid, span: first.span * (ghosts.length ? 2.5 : 1) };
-    const geo = UJ.mesh3d.prepare(g.positions, g.indices, { unitNm: 1, frame: frame });
-    const drawn = ghosts.map(function(x){
+    /* ONE FRAME FOR EVERYTHING, over the union of every structure and then the cell around them —
+       see prepare()'s own comment. Letting each centre on itself would stack two mitochondria on
+       top of one another, which looks like a picture and is a lie about where they are. The span is
+       opened out when there are ghosts so the surroundings are visible rather than filling the
+       view; the tracing is still the subject, and the wheel does the rest. */
+    const raw = lofts.map(function(L){
+      return UJ.mesh3d.prepare(L.g.positions, L.g.indices, { unitNm: 1 });
+    });
+    const lo = raw[0].lo.slice(), hi = raw[0].hi.slice();
+    raw.forEach(function(q){
+      for (let i = 0; i < 3; i++){
+        if (q.lo[i] < lo[i]) lo[i] = q.lo[i];
+        if (q.hi[i] > hi[i]) hi[i] = q.hi[i];
+      }
+    });
+    const frame = { mid: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2],
+                    span: (Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1)
+                          * (ghosts.length ? 2.5 : 1) };
+    const geos = lofts.map(function(L){
+      return UJ.mesh3d.prepare(L.g.positions, L.g.indices, { unitNm: 1, frame: frame });
+    });
+    /* THE ONE BEING DRAWN IS THE SUBJECT, so the lighting and the wheel favour it — and it is the
+       one whose shape you are deciding about right now. The rest are drawn SOLID beside it, not
+       see-through: they are traced work, not context, and the see-through tier belongs to the cell
+       and the nucleus that surround all of them. */
+    let subject = 0;
+    lofts.forEach(function(L, i){ if (L.inst === (PAD ? (PAD.inst || 0) : 0)) subject = i; });
+    if (geos[subject].empty) subject = 0;
+    const geo = geos[subject];
+    if (geo.empty){ pad3DNote("Nothing to draw yet."); PAD3D_BUSY = false; return; }
+    const siblings = [];
+    geos.forEach(function(q, i){
+      if (i === subject || q.empty) return;
+      siblings.push({ geo: q, tint: padInstTint(lofts[i].inst), alpha: 1 });
+    });
+
+    const drawn = siblings.concat(ghosts.map(function(x){
       return { geo: UJ.mesh3d.prepare(x.mesh.positions, x.mesh.indices,
                                       { unitNm: 1000, frame: frame }),
                /* The cell fainter than the nucleus: it is the larger surface and the one you are
@@ -8424,24 +8492,36 @@ async function pad3DDraw(){
                   exactly the confusion the reservation exists to prevent. */
                tint: x.what === "cell" ? [0.72, 0.72, 0.74]
                                        : (UJ.mesh3d.NUC_TINT || [0.23, 0.45, 0.85]) };
-    });
+    }));
     pad3DRelease();
-    const um = [0, 1, 2].map(function(i){ return (first.hi[i] - first.lo[i]) / 1000; });
+    const um = [0, 1, 2].map(function(i){ return (hi[i] - lo[i]) / 1000; });
+    const nContours = lofts.reduce(function(n, L){ return n + (L.g.contours || 0); }, 0);
+    const zSeen = {};
+    rings.forEach(function(r){ zSeen[r.z] = 1; });
+    const nSections = Object.keys(zSeen).length;
     let lead = "<b>A preview, not the export’s surface.</b> <span class='hint'>The contours "
-      + "lofted section to section — " + g.contours + " contour" + (g.contours === 1 ? "" : "s")
-      + " on " + g.sections + " section" + (g.sections === 1 ? "" : "s") + ", "
+      + "lofted section to section — " + nContours + " contour" + (nContours === 1 ? "" : "s")
+      + " on " + nSections + " section" + (nSections === 1 ? "" : "s") + ", "
       + um.map(function(v){ return v.toFixed(1); }).join(" × ") + " µm. The Blender export "
       + "fills each section and marches cubes over the stack, which is smoother and treats a "
       + "contour drawn inside another as a hole.</span>";
-    if (g.flat)
+    if (lofts.length > 1)
+      lead += "<br><span class='hint'>" + lofts.length + " structures, each lofted on its own and "
+        + "in the colour of its chip above — "
+        + lofts.map(function(L){
+            return '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;'
+              + 'background:' + escHtml(padInstColour(L.inst)) + '"></span> ' + (L.inst + 1); }).join(", ")
+        + ". The one you are drawing is the brightest.</span>";
+    if (lofts.every(function(L){ return L.g.flat; }))
       lead += "<br><span class='hint'>One section only, so this is a flat outline. Step with "
         + "<b>,</b> or <b>.</b> and go round again to give it a shape.</span>";
-    if (drawn.length)
+    if (ghosts.length)
       lead += "<br><span class='hint'>See-through around it: "
-        + drawn.map(function(d, i){ return ghosts[i].what; }).join(" and ") + ".</span>";
+        + ghosts.map(function(d){ return d.what; }).join(" and ") + ".</span>";
     if (PAD3D_NOTE && wantGhosts)
       lead += "<br><span class='hint'>" + escHtml(PAD3D_NOTE) + ".</span>";
     UJ.mesh3d.show(host, geo, { lead: lead, ghosts: drawn, view: PAD3D_VIEW,
+                                tint: padInstTint(lofts[subject].inst),
                                 emptyMessage: "Nothing to draw yet." });
   } catch (e){
     pad3DNote("Could not build the preview: " + String(e && e.message || e));
@@ -8957,6 +9037,15 @@ function padInstColour(i){
   var k = String(i || 0);
   if (!PAD_INST_COLOUR[k]) PAD_INST_COLOUR[k] = UJ.tracing.instanceColour(i || 0);
   return PAD_INST_COLOUR[k];
+}
+/* The same colour the chip and the fill use, as the 0..1 triple the WebGL panel wants — so the
+   surface in the 3D window and the outline on the pad are the same colour by construction rather
+   than by two lists kept in step by hand. Falls back to the palette's first entry, which is what a
+   structure with no colour of its own has always been drawn in. */
+function padInstTint(i){
+  var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(padInstColour(i) || ""));
+  if (!m) return null;
+  return [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255];
 }
 /* #rrggbb with an alpha, for the fill under a contour. Written out rather than reached for through
    a colour library, because this is the only place in the file that needs it. */

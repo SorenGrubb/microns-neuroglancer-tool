@@ -1433,6 +1433,93 @@ function link(annotations){
        "...naming both surfaces, so nobody reads this one as the one they will download");
     ok(/Hide the 3D view/.test(prev.label), "...and the button now closes it", prev.label);
   }
+  /* ── EACH STRUCTURE ITS OWN SURFACE, ITS OWN COLOUR ──────────────────────────────  2026-09-17
+     Søren: *"I would like if the different segmented meshes also have different colors in the 3D
+     window."* The colour was the visible half. The other half was that every contour on the pad
+     went into ONE loft, so a contour of number 2 and a contour of number 3 on the same section were
+     lofted TO EACH OTHER across the gap between them — the preview was not three organelles in one
+     colour, it was one organelle that does not exist. Both halves are checked: the geometry (two
+     separate surfaces, not one bridged one) and the paint (two colours actually on the canvas). */
+  console.log("\ntwo structures in the 3D window");
+  {
+    const two = await p.evaluate(async () => {
+      document.getElementById("tracePadGhosts").checked = false;
+      window.__padSnap = { rings: PAD.rings.slice(), inst: PAD.inst || 0 };
+      /* Two boxes FAR APART on the same two sections. Lofted together they would be joined by a
+         bridge running between them; lofted apart they are two boxes and the middle is empty. */
+      PAD.rings = [
+        { z: 700, inst: 0, points: [[1000,2000],[1200,2000],[1200,2200],[1000,2200]] },
+        { z: 705, inst: 0, points: [[1010,2010],[1190,2010],[1190,2190],[1010,2190]] },
+        { z: 700, inst: 1, points: [[1600,2000],[1800,2000],[1800,2200],[1600,2200]] },
+        { z: 705, inst: 1, points: [[1610,2010],[1790,2010],[1790,2190],[1610,2190]] }
+      ];
+      UJ.tracepad.setInstance(PAD, 0);
+      PAD3D_KEY = null;
+      padRings();
+      await new Promise(r => setTimeout(r, 900));
+      const host = document.getElementById("tracePad3DHost");
+      const cols = [padInstColour(0), padInstColour(1)];
+      const tints = [padInstTint(0), padInstTint(1)];
+      /* The two palette colours differ mostly in the red channel, so "more red than the other" is
+         the honest discriminator here rather than a named hue. */
+      const redder = tints[1][0] > tints[0][0] ? 1 : 0;
+      const a = UJ.mesh3d.probePixels((r, g, bb) => g > 60 && r < g - 30);          // the greener one
+      const bPix = UJ.mesh3d.probePixels((r, g, bb) => g > 60 && r >= g - 30);      // the redder one
+      /* Printed when it fails, so a calibration problem in this check cannot be mistaken for the
+         feature being broken. */
+      const lit = UJ.mesh3d.probePixels((r, g, bb) => r + g + bb > 90);
+      return { text: host.textContent, cols: cols, tints: tints, redder: redder,
+               a: a, b: bPix, lit: lit, canvas: !!host.querySelector("canvas") };
+    });
+    ok(two.canvas, "the preview redraws with both structures on it");
+    ok(two.cols[0] !== two.cols[1], "the two structures have different colours", two.cols.join(" / "));
+    ok(/2 structures/.test(two.text) && /each lofted on its own/.test(two.text),
+       "...and the panel says each one is lofted on its own",
+       two.text.replace(/\s+/g, " ").match(/2 structures[^.]*/)[0].slice(0, 80));
+    /* The pixel counts are the assertion that survives a refactor of any of the words above. */
+    ok(two.a > 60 && two.b > 60,
+       "BOTH COLOURS ARE ACTUALLY ON THE CANVAS — not one colour twice",
+       two.a + " px of one, " + two.b + " px of the other, " + two.lit + " px lit at all");
+  }
+
+  console.log("...and they are two surfaces, not one bridged together");
+  {
+    const sep = await p.evaluate(() => {
+      const res = UJ.cfg.res;
+      const all = UJ.tracepad.toRings(PAD);
+      const one = UJ.traceloft.loft(all.filter(r => (r.inst || 0) === 0), res);
+      const two = UJ.traceloft.loft(all.filter(r => (r.inst || 0) === 1), res);
+      const both = UJ.traceloft.loft(all, res);
+      const spanX = (g) => {
+        let lo = Infinity, hi = -Infinity;
+        for (let i = 0; i < g.positions.length; i += 3){
+          if (g.positions[i] < lo) lo = g.positions[i];
+          if (g.positions[i] > hi) hi = g.positions[i];
+        }
+        return hi - lo;
+      };
+      return { one: Math.round(spanX(one)), two: Math.round(spanX(two)),
+               both: Math.round(spanX(both)),
+               tris: [one.indices.length / 3, two.indices.length / 3, both.indices.length / 3] };
+    });
+    ok(sep.one < sep.both / 2.5 && sep.two < sep.both / 2.5,
+       "lofted apart, each structure is its own small box; lofted together they span the gap",
+       sep.one + " nm and " + sep.two + " nm vs " + sep.both + " nm across");
+    ok(sep.tris[0] > 0 && sep.tris[1] > 0,
+       "...and both are real surfaces", sep.tris.join(" / ") + " triangles");
+  }
+
+  /* LEAVES NO TRACE. This section writes PAD.rings directly and calls padRings(), which schedules a
+     draft autosave -- and the draft sections further down are about a draft they made themselves.
+     Snapshotting the pad and cancelling the pending autosave is what keeps this check from being
+     the reason another one fails, which is a failure that teaches nobody anything. */
+  await p.evaluate(() => {
+    if (window.TRACING_DRAFT_SOON){ clearTimeout(TRACING_DRAFT_SOON); TRACING_DRAFT_SOON = null; }
+    try { localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e) {}
+    if (window.__padSnap){ PAD.rings = window.__padSnap.rings; UJ.tracepad.setInstance(PAD, window.__padSnap.inst); }
+    PAD3D_KEY = null;
+  });
+
 
   console.log("\nremoving one");
   const gone = await p.evaluate(() => {
@@ -1900,6 +1987,7 @@ function link(annotations){
        back.secText.join(" | "));
     ok(back.cur === 1, "...and the pad is back on the one that was being drawn", back.cur);
   }
+
 
   const newErrors = errors.filter(e => !/atob/.test(e));
   ok(newErrors.length === 0, "the page still loads with no new errors",
