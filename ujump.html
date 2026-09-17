@@ -734,8 +734,11 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <details id="tracingPanel">
 <summary style="cursor:pointer;font-weight:600">Trace a cell &mdash; outline it, and it joins the 3D export</summary>
 <p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Open a viewer, ring the cell with <b>line</b> annotations on one section &mdash; <b>ctrl+click</b> each end of each segment; a plain click does nothing &mdash; step a section with <b>,</b> and <b>.</b>, and go round again. Then paste the whole address bar back here. Two sections is the minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>
+<label style="margin-top:10px">Where to open it <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; voxels, the same as the coordinate box at the top of this tab</span></label>
+<div class="row"><div class="coord"><input type="text" id="tracingX" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="tracingY" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="tracingZ" inputmode="decimal" placeholder="z"></div></div>
+<p class="hint" style="margin-top:4px">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically. Filled in from the cell on screen when you have one.</p>
 <div class="row" style="gap:8px;margin-top:8px">
-<button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate on screen, with an empty annotation layer called &quot;tracing&quot; already selected and the line tool already active.">Open a viewer to trace in</button>
+<button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate in the boxes above, with an empty annotation layer called &quot;tracing&quot; already selected and the line tool already active.">Open a viewer to trace in</button>
 </div>
 <p class="hint" style="margin-top:6px">Measured 2026-09-17, in the browser: Spelunker keeps line annotations in the address bar, so they survive the paste. Its <i>polyline</i> tool draws on screen but never reaches the link, and BrainSharer's polygon tool needs an account and ignores a pasted link &mdash; so a ring of lines is the route that actually works.</p>
 <label style="margin-top:10px">Neuroglancer link</label>
@@ -7704,9 +7707,42 @@ function tracingCurrent(){
 
    Same state buildState() gives the jump arrow -- his viewer, his layer ticks, this coordinate --
    plus an empty annotation layer with the line tool live. */
+/* Where the viewer opens: the card's own boxes, or the cell on screen if they are empty.
+
+   HALF-FILLED IS AN ERROR. Two of three means he is mid-type; falling back to CUR_POS there opens
+   a viewer somewhere else that looks exactly like a viewer in the right place, and he finds out two
+   sections into a tracing. All three, or none. */
+function tracingPos(){
+  const val=function(id){const el=document.getElementById(id);return el?String(el.value||"").trim():"";};
+  const raw=[val("tracingX"),val("tracingY"),val("tracingZ")];
+  const given=raw.filter(function(s){return s!=="";}).length;
+  if(given===3){
+    const p=raw.map(Number);
+    if(!p.every(function(n){return isFinite(n);}))
+      return {error:"That coordinate has something in it that is not a number."};
+    return {pos:p.map(Math.round)};
+  }
+  if(given>0)return {error:"All three of x, y and z, or leave them empty to use the cell on screen."};
+  if(window.CUR_POS&&window.CUR_POS.length===3)return {pos:window.CUR_POS.slice()};
+  return {error:"Type a coordinate above, or search a cell first \u2014 the viewer has to open somewhere."};
+}
+
+/* Pre-fill from the cell on screen, but only when nothing has been typed, so it never overwrites
+   him. Runs on load and every time the card is opened, because he may search a cell after opening
+   it and the boxes should follow. */
+function tracingFillPos(){
+  const ids=["tracingX","tracingY","tracingZ"];
+  const els=ids.map(function(i){return document.getElementById(i);});
+  if(els.some(function(e){return !e;}))return;
+  if(els.some(function(e){return String(e.value||"").trim()!=="";}))return;
+  if(!(window.CUR_POS&&window.CUR_POS.length===3))return;
+  els.forEach(function(e,i){e.value=window.CUR_POS[i];});
+}
+
 function tracingOpen(){
-  const pos=(window.CUR_POS&&window.CUR_POS.length===3)?window.CUR_POS.slice():null;
-  if(!pos){tracingSay("Search a coordinate or a cell first \u2014 the viewer opens where you are.",true);return;}
+  const got=tracingPos();
+  if(got.error){tracingSay(got.error,true);return;}
+  const pos=got.pos;
   let st;
   try{st=buildState(pos);}catch(e){tracingSay("Could not build a viewer link: "+String(e&&e.message||e),true);return;}
   /* The Cortical layers bands are `line` annotations in a local annotation layer, so leaving them
@@ -7781,6 +7817,18 @@ function tracingShare(){
   });
   const openBtn=document.getElementById("tracingOpen");
   if(openBtn)openBtn.addEventListener("click",tracingOpen);
+  /* The same paste-splitter the main coordinate box has, so "240640, 207872, 21360" copied out of
+     Neuroglancer's own readout lands in three fields. */
+  const tx=document.getElementById("tracingX");
+  if(tx)tx.addEventListener("input",function(e){
+    const p=String(e.target.value||"").split(/[\s,]+/).filter(function(s){return s!=="";});
+    if(p.length>=3){e.target.value=p[0];
+      document.getElementById("tracingY").value=p[1];
+      document.getElementById("tracingZ").value=p[2];}
+  });
+  const tPanel=document.getElementById("tracingPanel");
+  if(tPanel)tPanel.addEventListener("toggle",tracingFillPos);
+  tracingFillPos();
   document.getElementById("tracingKeep").addEventListener("click",tracingKeep);
   document.getElementById("tracingShare").addEventListener("click",tracingShare);
 })();

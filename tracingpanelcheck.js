@@ -76,12 +76,64 @@ function link(annotations){
 
   await p.evaluate(() => { document.getElementById("tracingPanel").open = true; });
 
+  console.log("\nthe card's own coordinate");
+  {
+    const c = await p.evaluate(async () => {
+      window.__opened = [];
+      window.open = (u) => { window.__opened.push(u); return null; };
+      const X = document.getElementById("tracingX"), Y = document.getElementById("tracingY"),
+            Z = document.getElementById("tracingZ"), S = document.getElementById("tracingStatus");
+      const out = {};
+      out.fields = !!X && !!Y && !!Z;
+
+      /* Pasting the whole triple into x, the way the main coordinate box does it. */
+      X.value = "240700, 207900, 21400";
+      X.dispatchEvent(new Event("input", { bubbles: true }));
+      out.split = [X.value, Y.value, Z.value].join("/");
+
+      window.CUR_POS = null;
+      document.getElementById("tracingOpen").click();
+      out.typedOpens = window.__opened.length;
+      try { out.typedAt = String(JSON.parse(decodeURIComponent(
+        (window.__opened[0] || "").split("#!")[1] || "")).position); } catch (e) { out.typedAt = ""; }
+
+      /* Half-filled: he is mid-type, and opening somewhere else would look identical to opening in
+         the right place until two sections into a tracing. */
+      window.__opened = [];
+      Z.value = "";
+      window.CUR_POS = [240640, 207872, 21360];
+      document.getElementById("tracingOpen").click();
+      out.halfOpens = window.__opened.length;
+      out.halfSays = S.innerText;
+
+      /* Cleared, it follows the cell on screen -- and the boxes say so. */
+      X.value = Y.value = Z.value = "";
+      document.getElementById("tracingPanel").open = false;
+      document.getElementById("tracingPanel").open = true;
+      await new Promise(r => setTimeout(r, 0));   // <details> fires `toggle` asynchronously
+      out.filled = [X.value, Y.value, Z.value].join(",");
+      return out;
+    });
+    ok(c.fields, "the card has x, y and z boxes of its own");
+    ok(c.split === "240700/207900/21400",
+       "...and pasting x, y, z into x splits it, like the main coordinate box", c.split);
+    ok(c.typedOpens === 1 && c.typedAt === "240700,207900,21400",
+       "a typed coordinate opens the viewer with no cell on screen at all \u2014 which is what "
+       + "\u201cthe button doesn\u2019t work\u201d was", c.typedAt);
+    ok(c.halfOpens === 0 && /all three/i.test(c.halfSays),
+       "two boxes of three opens nothing and says so, rather than quietly going somewhere else",
+       c.halfSays.slice(0, 60));
+    ok(c.filled === "240640,207872,21360",
+       "cleared and reopened, the boxes fill from the cell on screen", c.filled);
+  }
+
   console.log("\nthe button that gives him somewhere to draw");
   {
     const v = await p.evaluate(() => {
       window.__opened = [];
       window.open = (u) => { window.__opened.push(u); return null; };
       window.CUR_POS = null;
+      ["tracingX", "tracingY", "tracingZ"].forEach(i => { document.getElementById(i).value = ""; });
       document.getElementById("tracingOpen").click();
       const refused = document.getElementById("tracingStatus").innerText;
       window.CUR_POS = [240640, 207872, 21360];
@@ -91,7 +143,7 @@ function link(annotations){
       try { s = JSON.parse(decodeURIComponent(u.split("#!")[1] || "")); } catch (e) {}
       return { refused: refused, n: window.__opened.length, base: u.split("#!")[0], state: s };
     });
-    ok(/coordinate or a cell first/i.test(v.refused) && v.n === 1,
+    ok(/has to open somewhere/i.test(v.refused) && v.n === 1,
        "with nothing on screen it says where to start, and opens nothing",
        v.refused.slice(0, 55));
     const ann = ((v.state && v.state.layers) || []).filter(l => l.type === "annotation");
