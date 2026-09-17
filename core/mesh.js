@@ -124,6 +124,25 @@ UJ.mesh=(()=>{
     if(!c.has(String(rootIdStr)))return false;
     c.delete(String(rootIdStr));saveNotFoundCache();return true;
   }
+  /* ── A YIELD THAT SURVIVES A BACKGROUND TAB ───────────────────────────────────  2026-09-17
+     The decode loops used `await new Promise(requestAnimationFrame)` to hand the thread back so the
+     button could repaint. rAF does not fire in a background tab, so switching away from the page
+     mid-decode stopped the loop dead at its next yield until the tab was looked at again -- one of
+     the two ways "hanging at 97%" happens. Racing rAF against a short timeout keeps the foreground
+     behaviour exactly as it was (rAF wins at ~16 ms) and lets a hidden tab finish (setTimeout is
+     throttled to about a second in the background, which is slow, not stopped). */
+  function breathe(){
+    return new Promise(function(res){
+      var done=false,f=function(){if(done)return;done=true;res();};
+      try{requestAnimationFrame(f);}catch(_e){}
+      setTimeout(f,50);
+    });
+  }
+  /* Counts in a progress message, so "measuring 8,300,000 triangles" is not a wall of digits. */
+  function fmtCount(n){
+    n=Math.round(n);
+    return n>=1e6?(n/1e6).toFixed(1)+"M":(n>=1e4?Math.round(n/1e3)+"k":n.toLocaleString());
+  }
   async function rangeGet(url,start,end,onProgress){
     const res=await fetch(url,{headers:{Range:"bytes="+start+"-"+end}});
     if(res.status!==206)throw new Error("expected HTTP 206 for byte range, got "+res.status);
@@ -660,7 +679,7 @@ UJ.mesh=(()=>{
       for(let k=0;k<r.verts.length;k++)r.verts[k]=r.verts[k]/1000;   // nm -> µm, this file's usual frame
       vertChunks.push(r.verts);idxChunks.push(r.idx);
       totalVerts+=r.verts.length;totalIdx+=r.idx.length;decoded++;
-      if(i%8===0){onProgress&&onProgress(0.1+0.85*(i/initial.length),"fetching+decoding "+(i+1)+"/"+initial.length+"…");await new Promise(requestAnimationFrame);}
+      if(i%8===0){onProgress&&onProgress(0.1+0.85*(i/initial.length),"fetching+decoding "+(i+1)+"/"+initial.length+"…");await breathe();}
     }
     draco.destroy(decoder);
     if(!decoded)throw new Error("no fragments decoded ("+initial.length+" in the manifest, "+failed+" failed)");
@@ -737,10 +756,15 @@ UJ.mesh=(()=>{
       if(base)for(let k=0;k<r.idx.length;k++)r.idx[k]+=base;
       vertChunks.push(v);idxChunks.push(r.idx);
       totalVerts+=v.length;totalIdx+=r.idx.length;decoded++;
-      if(i%8===0){onProgress&&onProgress(0.6+0.35*(i/nF),"decoding…");await new Promise(requestAnimationFrame);}
+      if(i%8===0){onProgress&&onProgress(0.6+0.35*(i/nF),"decoding…");await breathe();}
     }
     draco.destroy(decoder);
     if(!decoded)throw new Error("no fragments decoded (LOD "+lod+", "+nF+" fragments in manifest)");
+    /* THE LAST TICK OF THE LOOP ABOVE IS NOT THE END OF THE WORK. Allocating the two flat arrays
+       and copying every chunk into them is the first of three silent synchronous stages that used
+       to follow, and on a big cell it is seconds of frozen button. Saying so costs one repaint. */
+    onProgress&&onProgress(0.95,"assembling "+fmtCount(totalVerts/3)+" vertices…");
+    await breathe();
     const positions=new Float32Array(totalVerts),indices=new Uint32Array(totalIdx);
     let vo2=0,io2=0;
     for(let i=0;i<vertChunks.length;i++){
@@ -847,13 +871,25 @@ UJ.mesh=(()=>{
     }
     let totalV=0,totalI=0,bytes=0;
     meshes.forEach(m=>{totalV+=m.positions.length;totalI+=m.indices.length;bytes+=m.bytes||0;});
+    /* The second silent stage: one full extra copy of the geometry, plus a re-offset pass over
+       every index of every mesh. It only runs when a cell HAS more than one root ID, which is
+       exactly the case Søren hit -- so the stall appeared the moment a proposed root ID started
+       being combined instead of being answered from the not-found cache. */
+    onProgress&&onProgress(0.96,"combining "+meshes.length+" meshes ("+fmtCount(totalV/3)+" vertices)…");
+    await breathe();
     const positions=new Float32Array(totalV),indices=new Uint32Array(totalI);
     let vOff=0,vCount=0,iOff=0;
-    meshes.forEach(m=>{
+    for(let mi=0;mi<meshes.length;mi++){
+      const m=meshes[mi];
       positions.set(m.positions,vOff);
-      for(let k=0;k<m.indices.length;k++)indices[iOff+k]=m.indices[k]+vCount;
+      for(let k=0;k<m.indices.length;k++){
+        indices[iOff+k]=m.indices[k]+vCount;
+        /* Every ~2M indices, not every index: the test is cheap next to the work between two of
+           them, and a mesh small enough never to reach it is over before anyone could look. */
+        if((k&2097151)===2097151){onProgress&&onProgress(0.96+0.01*((iOff+k)/totalI),"combining…");await breathe();}
+      }
       vOff+=m.positions.length;iOff+=m.indices.length;vCount+=m.positions.length/3;
-    });
+    }
     return {positions,indices,lod:null,numLods:null,bytes,fragmentCount:meshes.length,rootIds:usedIds,mainUnavailable,skipped,simplified};
   }
   /* ---------- the EXPORT half, split out from the FETCH half (2026-09-01) ----------
@@ -886,15 +922,40 @@ UJ.mesh=(()=>{
   /* Signed-tetrahedron sum (divergence theorem) -- see computeVolume()'s own comment below for why
      this is reported as an estimate rather than an exact figure. Translation-invariant, so it does
      not care whether the caller's geometry is centred. */
-  function volumeOf(geo){
-    const positions=geo.positions,indices=geo.indices;
+  function volumeOfRange(positions,indices,t0,t1){
     let vol6=0;
-    for(let t=0;t<indices.length;t+=3){
+    for(let t=t0;t<t1;t+=3){
       const ia=indices[t]*3,ib=indices[t+1]*3,ic=indices[t+2]*3;
       const ax=positions[ia],ay=positions[ia+1],az=positions[ia+2];
       const bx=positions[ib],by=positions[ib+1],bz=positions[ib+2];
       const cx=positions[ic],cy=positions[ic+1],cz=positions[ic+2];
       vol6+=ax*(by*cz-bz*cy)-ay*(bx*cz-bz*cx)+az*(bx*cy-by*cx);
+    }
+    return vol6;
+  }
+  /* Unchanged for every caller that has geometry in hand and wants a number now -- χJump's cb2
+     cells go through this one. The arithmetic lives in volumeOfRange so the chunked version below
+     cannot drift from it. */
+  function volumeOf(geo){
+    const vol6=volumeOfRange(geo.positions,geo.indices,0,geo.indices.length);
+    return {volumeUm3:Math.abs(vol6)/6,vertices:geo.positions.length/3};
+  }
+  /* ── THE THIRD SILENT STAGE ───────────────────────────────────────────────────  2026-09-17
+     One pass over every triangle of a combined cell, started in the same tick as the single
+     onProgress(0.98) that announced it -- so the button never repainted and the number never
+     appeared to be on its way. Chunked into a million triangles at a time with a breath between
+     them: the same triangles in the same order, the partial sums added at the end. */
+  async function volumeOfProgressive(geo,onProgress){
+    const positions=geo.positions,indices=geo.indices,n=indices.length;
+    const CHUNK=3*1000000;
+    let vol6=0;
+    for(let t=0;t<n;t+=CHUNK){
+      const end=Math.min(t+CHUNK,n);
+      vol6+=volumeOfRange(positions,indices,t,end);
+      if(n>CHUNK){
+        onProgress&&onProgress(0.97+0.03*(end/n),"measuring "+fmtCount(n/3)+" triangles…");
+        await breathe();
+      }
     }
     return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3};
   }
@@ -943,8 +1004,9 @@ UJ.mesh=(()=>{
        this destructure names its fields, so a field added upstream reaches the caller only if it
        is named here too. */
     const {positions,indices,fragmentCount,rootIds,mainUnavailable,skipped,simplified}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck,extraRootIds);
-    onProgress&&onProgress(0.98,"computing volume…");
-    const v=volumeOf({positions,indices});
+    onProgress&&onProgress(0.97,"measuring "+fmtCount(indices.length/3)+" triangles…");
+    await breathe();
+    const v=await volumeOfProgressive({positions,indices},onProgress);
     return {volumeUm3:v.volumeUm3,vertices:v.vertices,fragmentCount,rootIds,mainUnavailable,skipped,simplified};
   }
   /* ---------- PowerPoint (.pptx) with a live, auto-spinning 3D model ----------
@@ -1389,5 +1451,9 @@ UJ.mesh=(()=>{
           fetchCombinedMesh,buildContactGrid,nearestInContactGrid,allContactPointsWithinThreshold,
           nearestApproach,
           /* The export half, for a tool that fetches its own geometry -- see its comment above. */
-          saveGlb,savePptx,volumeOf,buildGLB};
+          /* volumeOfProgressive: the same sum, chunked and yielding, for geometry big enough that
+             doing it in one tick freezes the page. Exported both because it is the only way to
+             MEASURE that it agrees with volumeOf, and because χJump's larger cb2 cells have the
+             same problem this was written for. */
+          saveGlb,savePptx,volumeOf,volumeOfProgressive,buildGLB};
 })();

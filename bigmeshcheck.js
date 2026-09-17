@@ -80,7 +80,11 @@ function ctxWith(simplifyAbove, ceiling){
     const f = FRAGS[i];
     return { ok: true, arrayBuffer: async () => f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength) };
   };
-  vm.runInContext(fnText("core/mesh.js", "clusterDecimate") + "\n"
+  /* breathe()/fmtCount() (2026-09-17): the decode loops yield through breathe() and the progress
+     messages count with fmtCount(), so both have to come along or the lifted function throws. */
+  vm.runInContext(fnText("core/mesh.js", "breathe") + "\n"
+                + fnText("core/mesh.js", "fmtCount") + "\n"
+                + fnText("core/mesh.js", "clusterDecimate") + "\n"
                 + fnText("core/mesh.js", "decodeLegacyFragment") + "\n"
                 + fnText("core/mesh.js", "fetchLegacyMesh"), ctx);
   return ctx;
@@ -166,15 +170,19 @@ function ctxWith(simplifyAbove, ceiling){
      is exactly where a new field goes to die, so both are driven rather than read. */
   console.log("\ncomputeVolume / downloadRoot pass them through");
   const pctx = vm.createContext({ console, Map, Math, Error, Number, Object, Promise, JSON, String,
-    Float32Array, Uint32Array, Int32Array });
+    Float32Array, Uint32Array, Int32Array, setTimeout });
   pctx.CFG = {};
   pctx.extraImg65RootIds = () => [];
   pctx.fetchMesh = async () => ({ positions: new Float32Array([0,0,0, 1,0,0, 0,1,0, 0,0,1]),
     indices: new Uint32Array([0,1,2, 0,1,3, 0,2,3, 1,2,3]), lod: 0, numLods: 1, bytes: 9,
     simplified: { gridUm: 0.4, fromVertices: 99, toVertices: 4 } });
   pctx.saveGlb = (geo, o) => ({ filename: o.filename + ".glb", vertices: geo.positions.length / 3 });
-  vm.runInContext(fnText("core/mesh.js", "fetchCombinedMesh") + "\n"
+  vm.runInContext(fnText("core/mesh.js", "breathe") + "\n"
+                + fnText("core/mesh.js", "fmtCount") + "\n"
+                + fnText("core/mesh.js", "fetchCombinedMesh") + "\n"
+                + fnText("core/mesh.js", "volumeOfRange") + "\n"
                 + fnText("core/mesh.js", "volumeOf") + "\n"
+                + fnText("core/mesh.js", "volumeOfProgressive") + "\n"
                 + fnText("core/mesh.js", "computeVolume") + "\n"
                 + fnText("core/mesh.js", "downloadRoot"), pctx);
   pctx.vol = null; pctx.dl = null;
