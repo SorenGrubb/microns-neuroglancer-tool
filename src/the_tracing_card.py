@@ -160,6 +160,7 @@ import os
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SCRIPTS = '''<script src="core/segread.js"></script>
+<script src="core/segpaint.js"></script>
 <script src="core/emtiles.js"></script>
 <script src="core/tracepad.js"></script>
 <script src="core/traceloft.js"></script>
@@ -193,6 +194,11 @@ CARD = '''<div class="card" id="tracingCard">
 <div class="coord" style="flex:0 0 84px" title="How many sections a step moves. Every fifth section is about half a percent off the real volume."><input type="text" id="tracePadStep" inputmode="numeric" value="5"></div>
 <button class="idbtn" id="tracePadUndo" style="flex:0 0 auto" title="Takes back the last vertex, or the last closed contour if you have not started one">Undo</button>
 <label style="font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto" title="Press and draw all the way round the structure, then lift — the way you would with a pen on paper. Made for a pen display or a tablet, and it works with a mouse held down. The stroke is thinned to a contour you can still edit point by point. With this on, a plain drag DRAWS, so shift+drag is how you pan."><input type="checkbox" id="tracePadPen"> draw freehand (pen)</label>
+<!-- THE SEGMENTATION, UNDER THE CONTOURS.  2026-09-17. Søren: "There should be an option to show
+     the segmentation of the root ID and the nucleus ID of the cell in the EM window." Off by
+     default: it is a second volume to fetch, and a cell the segmentation does not have -- which is
+     what this pad was built for -- has nothing to show. -->
+<label style="font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto" title="Paints this cell's own segmentation over the section: the root ID in magenta and the nucleus ID in blue, from the same volumes Neuroglancer paints. It shows where the automatic segmentation thinks the boundary is, so you can see whether you are correcting it, extending it, or drawing something it never saw. Costs a second fetch, so it is off until you ask."><input type="checkbox" id="tracePadSeg"> show the segmentation</label>
 </div>
 <div style="position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111">
 <canvas id="tracePad" width="560" height="460" style="display:block;cursor:crosshair;touch-action:none"></canvas>
@@ -1963,6 +1969,45 @@ function padSay(msg, bad){
   if (el){ el.textContent = msg; el.style.color = bad ? "var(--bad)" : ""; }
 }
 
+/* ── THE SEGMENTATION, UNDER THE CONTOURS ───────────────────────────────────────  2026-09-17
+   Søren: *"There should be an option to show the segmentation of the root ID and the nucleus ID of
+   the cell in the EM window."*
+
+   The ids are the card's own boxes, which is what makes this about ONE cell rather than a coloured
+   mosaic of the whole volume: the root ID in magenta, the nucleus ID in blue, over the section the
+   pad has just drawn. Best-effort by design — a cell the segmentation does not have is exactly the
+   case this pad exists for, and the tick failing to find anything must not cost the section. */
+async function padSegOverlay(){
+  const box = document.getElementById("tracePadSeg");
+  if (!box || !box.checked || !PAD_VIEW) return null;
+  const root = (document.getElementById("tracingRootId").value || "").trim();
+  const nuc = (document.getElementById("tracingNucId").value || "").trim();
+  if (!root && !nuc){
+    padSay("Nothing to paint: fill in the cell's root ID or nucleus ID below the pad first.", true);
+    return null;
+  }
+  try {
+    if (!UJ.segpaint.configured())
+      UJ.segpaint.configure({ seg: SRC.seg, nuc: SRC.nuc, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
+    const cv = document.getElementById("tracePad");
+    const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, nuc: nuc, alpha: 0.4,
+      onProgress: function(d){ padSay("Painting the segmentation\u2026 " + d + " chunk(s)"); } });
+    /* PAINTED NOTHING IS AN ANSWER, and a different one from failing. This cell may genuinely not
+       be in this window, or not be in the segmentation at all -- which is the whole reason somebody
+       would be tracing it by hand. Saying "0 voxels" is what tells them which. */
+    if (got && got.ok && !got.painted)
+      padSay("The segmentation has nothing for "
+        + [root && ("root " + root), nuc && ("nucleus " + nuc)].filter(Boolean).join(" or ")
+        + " on this section \u2014 either it is not here, or this cell is not in it. That is what "
+        + "hand tracing is for.", true);
+    return got;
+  } catch (e){
+    padSay("Could not paint the segmentation: " + String(e && e.message || e)
+      + " \u2014 the section itself is fine.", true);
+    return null;
+  }
+}
+
 async function padDraw(){
   if (!PAD_CENTRE) return;
   const cv = document.getElementById("tracePad");
@@ -1981,6 +2026,11 @@ async function padDraw(){
       centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height,
       onProgress: function(d, n){ if (d < n) padSay("Loading the section\\u2026 " + d + "/" + n); }
     });
+    /* ── THE SEGMENTATION GOES ON BEFORE THE CAPTURE ───────────────────────────  2026-09-17
+       padCapture() snapshots the canvas as the base that every later contour repaint restores. An
+       overlay painted after it would be wiped by the first mouse move; painted here it is part of
+       the section, which is what it is. */
+    await padSegOverlay();
     /* THE ONE MOMENT THE CANVAS IS KNOWN TO HOLD A FINISHED SECTION. See padCapture. */
     padCapture();
     padPaint();
@@ -2366,6 +2416,15 @@ async function tracingResolveAt(pos){
   });
   const pg = document.getElementById("tracePadGhosts");
   if (pg) pg.addEventListener("change", function(){ PAD3D_AT = 0; pad3DDraw(); });
+  /* A full redraw rather than a paint on top: the overlay has to be under the captured base (see
+     padSegOverlay), and turning it OFF has to get the clean section back, which only a redraw can
+     do. The EM chunks are cached, so this is a repaint, not a refetch. */
+  const ps = document.getElementById("tracePadSeg");
+  if (ps) ps.addEventListener("change", function(){
+    padSay(ps.checked ? "Painting this cell's segmentation over the section\u2026"
+                      : "Segmentation off \u2014 back to the EM alone.");
+    padDraw();
+  });
   padHelpKeys();
   document.getElementById("tracePadUse").addEventListener("click", function(){
     const rings = UJ.tracepad.toRings(PAD);

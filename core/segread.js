@@ -138,6 +138,84 @@ UJ.segread = (function(){
     return (BigInt(hi) * 4294967296n + BigInt(lo)).toString();
   }
 
+  /* ── ONE WHOLE Z-PLANE, TESTED AGAINST A FEW IDS ────────────────────────────────  2026-09-17
+     Søren: *"There should be an option to show the segmentation of the root ID and the nucleus ID
+     of the cell in the EM window."*
+
+     decodeAt() above reads ONE voxel, which is right for "what cell is at this coordinate" and
+     wrong for painting: a 560-pixel window is a quarter of a million voxels, and a quarter of a
+     million calls that each re-derive a block header and allocate a BigInt is not a picture, it is
+     a stall.
+
+     So this decodes a plane in one pass, and answers the only question an overlay has: IS THIS
+     VOXEL ONE OF THE IDS I CARE ABOUT. The id comparison is on the two uint32 halves, never a
+     BigInt and never a string, so nothing is allocated per voxel. The block header is read once per
+     8x8x8 block rather than once per voxel, and a single-valued block (bits === 0, which is most of
+     them out in the neuropil) answers all 64 of its voxels with one lookup.
+
+     Returns a Uint8Array of chunkShape[0] * chunkShape[1]: 0 for none of them, otherwise 1-based
+     into `wanted`. `wanted` is [{lo, hi}] -- see UJ.segpaint.idPair(). */
+  function planeMatch(buf, chunkShape, blockSize, lz, words, wanted){
+    var d = new Uint32Array(buf);
+    var chan = d[0];                               // channel 0's block-header array
+    var g0 = Math.ceil(chunkShape[0] / blockSize[0]),
+        g1 = Math.ceil(chunkShape[1] / blockSize[1]);
+    var bz = Math.floor(lz / blockSize[2]), wz = lz % blockSize[2];
+    var out = new Uint8Array(chunkShape[0] * chunkShape[1]);
+    var nw = wanted.length;
+    if (!nw) return out;
+    /* Inlined rather than a call per voxel: at this rate the call itself is the cost. */
+    var hitOf = function(table, idx){
+      var lo, hi;
+      if (words === 1){ lo = d[table + idx] >>> 0; hi = 0; }
+      else { lo = d[table + idx * 2] >>> 0; hi = d[table + idx * 2 + 1] >>> 0; }
+      for (var k = 0; k < nw; k++) if (wanted[k].lo === lo && wanted[k].hi === hi) return k + 1;
+      return 0;
+    };
+    for (var by = 0; by < g1; by++){
+      var y0 = by * blockSize[1];
+      var ny = Math.min(blockSize[1], chunkShape[1] - y0);
+      if (ny <= 0) continue;
+      for (var bx = 0; bx < g0; bx++){
+        var x0 = bx * blockSize[0];
+        var nx = Math.min(blockSize[0], chunkShape[0] - x0);
+        if (nx <= 0) continue;
+        var hdr = chan + (bx + g0 * (by + g1 * bz)) * 2;
+        var h0 = d[hdr], h1 = d[hdr + 1];
+        /* CHANNEL-RELATIVE, exactly as in decodeAt -- read as absolute this decodes to a
+           plausible-looking nothing rather than to an error. */
+        var table = chan + (h0 & 0xffffff);
+        var bits = (h0 >>> 24) & 0xff;
+        var vals = chan + (h1 & 0xffffff);
+        var yy, xx, orow;
+        if (bits === 0){
+          var one = hitOf(table, 0);
+          if (!one) continue;
+          for (yy = 0; yy < ny; yy++){
+            orow = (y0 + yy) * chunkShape[0] + x0;
+            for (xx = 0; xx < nx; xx++) out[orow + xx] = one;
+          }
+          continue;
+        }
+        /* bits is a power of two up to 32 per the format, so an encoded index never straddles a
+           word. `1 << 32` is 1 in JavaScript, not 0x100000000, so 32 gets the mask written out. */
+        var mask = (bits >= 32) ? 0xffffffff : (((1 << bits) - 1) >>> 0);
+        var base = blockSize[0] * blockSize[1] * wz;
+        for (yy = 0; yy < ny; yy++){
+          var iRow = base + blockSize[0] * yy;
+          orow = (y0 + yy) * chunkShape[0] + x0;
+          for (xx = 0; xx < nx; xx++){
+            var bit = (iRow + xx) * bits;
+            var idx = (d[vals + (bit >>> 5)] >>> (bit & 31)) & mask;
+            var hit = hitOf(table, idx >>> 0);
+            if (hit) out[orow + xx] = hit;
+          }
+        }
+      }
+    }
+    return out;
+  }
+
   /* ── where a voxel lives ────────────────────────────────────────────────────────────────── */
   function chunkOf(scale, v){
     var ch = scale.chunk_sizes[0], off = scale.voxel_offset || [0, 0, 0];
@@ -408,7 +486,7 @@ UJ.segread = (function(){
            nearestNucleus: nearestNucleus, mapPool: mapPool,
            /* exported for the check, which drives the real decoder over real bytes */
            _decodeAt: decodeAt, _compressedMorton: compressedMorton,
-           _chunkOf: chunkOf, _httpBase: httpBase,
+           _chunkOf: chunkOf, _httpBase: httpBase, _planeMatch: planeMatch,
            /* ── and for core/emtiles.js ──────────────────────────────────────────  2026-09-17
               The EM volume is in the same bucket, with the same sharding, and its chunks are
               `raw` uint8 -- so reading one is this file's job already, and emtiles has no fetch
