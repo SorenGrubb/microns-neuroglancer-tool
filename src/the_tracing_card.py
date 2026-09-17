@@ -1122,7 +1122,14 @@ function draftNow(){
   const val = function(id){ const e = document.getElementById(id); return e ? e.value : ""; };
   const found = document.getElementById("tracingFound");
   return { v: 1, at: new Date().toISOString(),
-           rings: PAD.rings.map(function(r){ return { z: r.z, points: r.points }; }),
+           /* ── A CONTOUR REMEMBERS WHICH STRUCTURE IT IS ────────────────────  2026-09-17
+              Søren: *"When I resumed this segmentation, the second segmentation had the color of
+              the first on and said it was empty."* Exactly that: this map wrote {z, points} and
+              dropped `inst`, so every contour came back as `r.inst || 0` -- structure one's --
+              and structure two, whose contours had just been handed to structure one, was empty.
+              The colours and types below were already carried; the one field that says WHICH
+              structure a contour belongs to was not. */
+           rings: PAD.rings.map(function(r){ return { z: r.z, points: r.points, inst: r.inst || 0 }; }),
            pending: PAD.pending.slice(),
            z: PAD.z, centre: PAD_CENTRE ? PAD_CENTRE.slice() : null,
            mip: val("tracePadMip"), step: val("tracePadStep"),
@@ -1200,8 +1207,11 @@ function draftResume(){
   if (!UJ.emtiles.configured())
     UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
   PAD = UJ.tracepad.create();
+  /* inst: the other half of the fix in draftNow() above. A draft written before this existed has
+     no inst on its contours, and `|| 0` puts all of them on structure one -- which is what it
+     honestly knows, rather than guessing a split that was never written down. */
   PAD.rings = (d.rings || []).map(function(r){
-    return { z: Math.round(r.z),
+    return { z: Math.round(r.z), inst: Math.max(0, Math.round(r.inst || 0)),
              points: (r.points || []).map(function(p){ return [Math.round(p[0]), Math.round(p[1])]; }) };
   });
   PAD.pending = (d.pending || []).map(function(p){ return [Math.round(p[0]), Math.round(p[1])]; });
@@ -1720,13 +1730,19 @@ function padRings(){
   if (!box || !PAD) return;
   const here = UJ.tracepad.onSection(PAD);
   if (!here.length){ box.innerHTML = ""; return; }
+  /* WHICH NUMBER IS THIS? The chips used to count their own position on the section -- so a pad
+     with two structures showed "2 · 33 points" next to a strip chip reading "2 empty", and the two
+     2s meant different things. With more than one structure the chip says which STRUCTURE the
+     contour belongs to instead, which is the number the rest of the card is about. */
+  const severalHere = UJ.tracepad.instances(PAD).length > 1;
   box.innerHTML = '<span class="hint">On this section:</span> '
     + here.map(function(h, n){
         return '<button type="button" class="hist-chip padring" data-ring="' + h.ring + '" '
           + 'title="Delete this contour \\u2014 it belongs to number ' + ((h.inst || 0) + 1) + '">'
           + '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;'
           + 'margin-right:4px;background:' + escHtml(padInstColour(h.inst || 0)) + '"></span>'
-          + (n + 1) + ' \\u00b7 ' + h.points + ' points \\u00d7</button>';
+          + (severalHere ? ('#' + ((h.inst || 0) + 1)) : String(n + 1))
+          + ' \\u00b7 ' + h.points + ' points \\u00d7</button>';
       }).join(" ");
   [].slice.call(box.querySelectorAll(".padring")).forEach(function(b){
     b.addEventListener("click", function(){

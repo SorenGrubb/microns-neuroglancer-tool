@@ -1807,6 +1807,100 @@ function link(annotations){
     ok(finished.edit === "", "...and nothing is still being edited", '"' + finished.edit + '"');
   }
 
+  /* ── A RESUMED DRAFT KNOWS WHICH STRUCTURE EACH CONTOUR IS ────────────────────────  2026-09-17
+     Søren, with a screenshot of two contours on one section: *"When I resumed this segmentation,
+     the second segmentation had the color of the first on and said it was empty."*
+
+     draftNow() wrote `{z, points}` per contour and dropped `inst`. On resume every contour came
+     back as `r.inst || 0` — structure one's — so structure one had them all, in its colour, and
+     structure two, whose contours had just been handed away, was reported empty. The strip said
+     "2 empty" while the section below it listed two contours. Nothing was lost from the FILE; what
+     was lost was which of them belonged to what, which is the whole point of drawing two. */
+  console.log("\na draft with two structures comes back as two structures");
+  {
+    const stub = () => {
+      UJ.emtiles.configure = () => ({});
+      UJ.emtiles.configured = () => true;
+      UJ.emtiles.drawSection = async (cv, o) => {
+        const g = cv.getContext("2d");
+        g.fillStyle = "#444"; g.fillRect(0, 0, cv.width, cv.height);
+        const k = 8;
+        const x0 = o.centre[0] - (cv.width >> 1) * k, y0 = o.centre[1] - (cv.height >> 1) * k;
+        return { mip: 2, mips: 3, nmPerPx: 32, z: o.centre[2], w: cv.width, h: cv.height, chunks: 1,
+                 toolAt: (px, py) => [Math.round(x0 + px * k), Math.round(y0 + py * k), o.centre[2]],
+                 pxAt: (t) => [Math.round((t[0] - x0) / k), Math.round((t[1] - y0) / k)],
+                 pxPerToolVoxel: 1 / k };
+      };
+    };
+    const drew = await p.evaluate(async ({ src }) => {
+      eval("(" + src + ")()");
+      try { localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e) {}
+      document.getElementById("tracingPanel").open = true;
+      ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
+        document.getElementById(id).value = [240640, 207872, 33000][i];
+      });
+      document.getElementById("tracePadOpen").click();
+      await new Promise(r => setTimeout(r, 250));
+      const ring = (pts) => {
+        pts.forEach(q => { const t = PAD_VIEW.toolAt(q[0], q[1]);
+                           UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel); });
+        UJ.tracepad.closeRing(PAD);
+      };
+      /* His screenshot exactly: two contours, same section, different structures. */
+      ring([[100,100],[200,100],[200,200]]);
+      document.getElementById("tracePadNewInst").click();
+      await new Promise(r => setTimeout(r, 60));
+      ring([[300,300],[380,300],[380,380]]);
+      padRings();
+      await new Promise(r => setTimeout(r, 1600));      // the autosave, not the button
+      const raw = JSON.parse(localStorage.getItem("ujump_tracing_draft_v1") || "null");
+      return { insts: PAD.rings.map(r => r.inst || 0),
+               saved: raw && raw.rings.map(r => r.inst),
+               savedInst: raw && raw.inst,
+               colours: [padInstColour(0), padInstColour(1)] };
+    }, { src: stub.toString() });
+    ok(drew.insts.join(",") === "0,1",
+       "two contours drawn, one per structure", drew.insts.join(","));
+    ok(drew.saved && drew.saved.join(",") === "0,1",
+       "THE DRAFT CARRIES WHICH STRUCTURE EACH CONTOUR IS — the bug, in one field",
+       JSON.stringify(drew.saved));
+    ok(drew.savedInst === 1, "...and which one was being drawn", drew.savedInst);
+    ok(drew.colours[0] !== drew.colours[1],
+       "the two structures have different colours to begin with", drew.colours.join(" / "));
+
+    await p.reload();
+    await p.waitForTimeout(4000);
+    const back = await p.evaluate(async ({ src }) => {
+      eval("(" + src + ")()");
+      document.getElementById("tracingPanel").open = true;
+      document.getElementById("draftResume").click();
+      await new Promise(r => setTimeout(r, 500));
+      const chips = [].slice.call(document.querySelectorAll("#tracePadInsts .padinst"));
+      const secChips = [].slice.call(document.querySelectorAll("#tracePadRings .padring"));
+      return { insts: PAD.rings.map(r => r.inst || 0),
+               instances: UJ.tracepad.instances(PAD).map(i => i.inst + ":" + i.contours),
+               chipText: chips.map(c => c.textContent.replace(/\s+/g, " ").trim()),
+               chipSwatch: chips.map(c => (c.querySelector("span") || {}).style
+                 ? c.querySelector("span").style.background : ""),
+               secText: secChips.map(c => c.textContent.replace(/\s+/g, " ").trim()),
+               secSwatch: secChips.map(c => c.querySelector("span").style.background),
+               cur: PAD.inst };
+    }, { src: stub.toString() });
+    ok(back.insts.join(",") === "0,1",
+       "resumed, each contour is still its own structure's", back.insts.join(","));
+    ok(back.instances.join(" ") === "0:1 1:1",
+       "...so neither structure is empty", back.instances.join(" "));
+    ok(!back.chipText.some(t => /empty/.test(t)),
+       "...and the strip says so — this is the sentence he read", back.chipText.join(" | "));
+    ok(back.secSwatch.length === 2 && back.secSwatch[0] !== back.secSwatch[1],
+       "the two contours on the section are drawn in their OWN colours, not both in the first's",
+       back.secSwatch.join(" / "));
+    ok(back.secText.join(" | ").indexOf("#1") >= 0 && back.secText.join(" | ").indexOf("#2") >= 0,
+       "...and each chip says which structure it is, so its number cannot be read as a position",
+       back.secText.join(" | "));
+    ok(back.cur === 1, "...and the pad is back on the one that was being drawn", back.cur);
+  }
+
   const newErrors = errors.filter(e => !/atob/.test(e));
   ok(newErrors.length === 0, "the page still loads with no new errors",
      newErrors.join(" | ") || "none");
