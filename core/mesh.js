@@ -5,7 +5,7 @@
    Loaded as a classic <script src>, so it must appear BEFORE the main tool script; it publishes
    UJ.mesh, and the main script keeps its old name via `const MeshDL = UJ.mesh;`.
    Public surface: downloadRoot, downloadRootPptx, computeVolume, clearMeshNotFoundCache,
-   currentFragmentCount, fetchCombinedMesh.
+   forgetRootNotFound, currentFragmentCount, fetchCombinedMesh.
    External references: CUR_EXTRA_ROOTS (typeof-guarded; a top-level `let` in the main script,
    resolved at call time -- see the scope note above ORGANELLE_GROUPS in ujump.html). */
 window.UJ = window.UJ || {};
@@ -110,6 +110,20 @@ UJ.mesh=(()=>{
      this tool later adds a fallback source for non-v1300 IDs and old "not found" entries should
      be re-checked) -- not wired to any UI button since that's not something Søren asked for. */
   function clearMeshNotFoundCache(){notFoundCache=new Map();try{localStorage.removeItem(MESH_NOT_FOUND_KEY);}catch(_e){}}
+  /* ── A CACHED "NO" IS NOT FOREVER ──────────────────────────────────────────────  2026-09-17
+     Søren, µJump nucleus 264317: "I tried to add a root ID to this cell after it failed to compute
+     volume, then after it had registered it, it said cached unavailable."
+
+     The cache is right about the snapshot -- seg_m1300 is frozen, and an ID absent from its shard
+     index today will be absent tomorrow. It is wrong about the CELL: proposing a root ID is a
+     person saying this cell has another ID worth trying, and until now that changed nothing, so
+     the pair (main, proposed) stayed a dead end whichever one you clicked. One id at a time, not
+     clearMeshNotFoundCache(), so forgetting this cell's verdict costs no other cell its own. */
+  function forgetRootNotFound(rootIdStr){
+    var c=loadNotFoundCache();
+    if(!c.has(String(rootIdStr)))return false;
+    c.delete(String(rootIdStr));saveNotFoundCache();return true;
+  }
   async function rangeGet(url,start,end,onProgress){
     const res=await fetch(url,{headers:{Range:"bytes="+start+"-"+end}});
     if(res.status!==206)throw new Error("expected HTTP 206 for byte range, got "+res.status);
@@ -884,8 +898,11 @@ UJ.mesh=(()=>{
     }
     return {volumeUm3:Math.abs(vol6)/6,vertices:positions.length/3};
   }
-  async function downloadRoot(rootIdStr,onProgress,forceRecheck){
-    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount,rootIds,mainUnavailable,skipped,simplified}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+  /* extraRootIds (2026-09-17): the proposals as the BACKEND has them at click time, handed
+     straight to fetchCombinedMesh's extraRootIdsOverride. Omitted -- which is every caller that
+     existed before -- it stays undefined and the old CUR_EXTRA_ROOTS global path runs unchanged. */
+  async function downloadRoot(rootIdStr,onProgress,forceRecheck,extraRootIds){
+    const {positions:rawPositions,indices:rawIndices,lod,numLods,bytes,fragmentCount,rootIds,mainUnavailable,skipped,simplified}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck,extraRootIds);
     /* When there's no main root ID (community-only combine), fall back to the first combined ID
        so the filename is still a real, traceable segmentation ID rather than a blank/underscore. */
     const idForName=rootIdStr||rootIds[0];
@@ -919,13 +936,13 @@ UJ.mesh=(()=>{
      are combined) -- small gaps mostly cancel out in this sum but aren't corrected for, so this is
      reported to the user as an ESTIMATE, not an exact figure. Positions are already in this tool's
      usual µm mesh-download units, so no extra scaling is needed. */
-  async function computeVolume(rootIdStr,onProgress,forceRecheck){
+  async function computeVolume(rootIdStr,onProgress,forceRecheck,extraRootIds){
     /* skipped/simplified travel with the number, and the page prints both -- a root ID that
        could not be fetched, and a surface that was decimated to fit, each change what the volume
        means. They were dropped here at first, which made the tooltip that reads them unreachable:
        this destructure names its fields, so a field added upstream reaches the caller only if it
        is named here too. */
-    const {positions,indices,fragmentCount,rootIds,mainUnavailable,skipped,simplified}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+    const {positions,indices,fragmentCount,rootIds,mainUnavailable,skipped,simplified}=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck,extraRootIds);
     onProgress&&onProgress(0.98,"computing volume…");
     const v=volumeOf({positions,indices});
     return {volumeUm3:v.volumeUm3,vertices:v.vertices,fragmentCount,rootIds,mainUnavailable,skipped,simplified};
@@ -1191,8 +1208,8 @@ UJ.mesh=(()=>{
     saveBlob(blob,filename);
     return {filename,vertices:positions.length/3,barLenUm:barLen};
   }
-  async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress,forceRecheck){
-    const geo=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck);
+  async function downloadRootPptx(rootIdStr,cellTypeName,coordStr,onProgress,forceRecheck,extraRootIds){
+    const geo=await fetchCombinedMesh(rootIdStr,onProgress,forceRecheck,extraRootIds);
     const {fragmentCount,rootIds,mainUnavailable}=geo;
     /* Same "no main root ID -- community-only combine" fallback as downloadRoot() above. */
     const idForName=rootIdStr||rootIds[0];
@@ -1368,7 +1385,7 @@ UJ.mesh=(()=>{
     return out;
   }
 
-  return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache,currentFragmentCount,
+  return {downloadRoot,downloadRootPptx,computeVolume,clearMeshNotFoundCache,forgetRootNotFound,currentFragmentCount,
           fetchCombinedMesh,buildContactGrid,nearestInContactGrid,allContactPointsWithinThreshold,
           nearestApproach,
           /* The export half, for a tool that fetches its own geometry -- see its comment above. */

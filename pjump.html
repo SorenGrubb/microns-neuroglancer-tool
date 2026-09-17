@@ -539,7 +539,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 11:12</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 13:53</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -5593,19 +5593,57 @@ function reloadRootIdPanelWhen(nid,containerEl,ready){
       .catch(function(){loadRootIdPanel(nid,containerEl);});
   })();
 }
+/* ── THE FORM IS NOT MADE OF THE LIST ────────────────────────────────────────────  2026-09-17
+   Søren, on µJump: *"Also, now the propose root ID option is gone."*
+
+   loadRootIdPanel() empties #rootIdPanel, fetches ?rootIds=, and renders. Its tail was
+   `.catch(()=>{})`. So one bad response -- an Apps Script hiccup, a redeploy mid-load, anything --
+   and the element stays empty: the only way to propose a root ID for a cell vanishes, silently,
+   with the page otherwise looking perfectly healthy. The list is a fetch; the FORM is not, and it
+   renders whether or not the list arrived. When it did not, the panel says so rather than pretending
+   the cell has no proposals.
+
+   Opened on demand too: a mesh or volume failure is exactly the moment somebody needs this, and a
+   grey collapsed line is not where they will look for it. */
+function offerRootIdProposal(){
+  try{
+    var el=document.getElementById("rootIdPanel");if(!el)return;
+    var bod=el.querySelector("#ridBody"),tog=el.querySelector("#ridToggle");
+    window.__ridOpen=true;
+    if(bod&&bod.style.display==="none"){
+      bod.style.display="block";
+      if(tog)tog.textContent="\u25bc "+tog.textContent.replace(/^[\u25b6\u25bc]\s*/,"");
+    }
+  }catch(_e){}
+}
+/* ── PROPOSING IS A REASON TO CHECK AGAIN ────────────────────────────────────────  2026-09-17
+   The not-found cache is keyed by root ID and persisted, and nothing removed an entry. Compute a
+   volume, find the main root ID isn't in the seg_m1300 snapshot, propose another ID for the same
+   cell -- and the very next click still answers "cached unavailable", because the cache was never
+   told anything happened. Proposing forgets this cell's cached verdicts (the new ID, and the main
+   root ID it is being offered as an alternative to) so the next click does a real network check.
+   Only those two: a cache entry for some unrelated cell is still worth keeping. */
+function forgetCachedNoFor(proposedId){
+  try{
+    var f=UJ&&UJ.mesh&&UJ.mesh.forgetRootNotFound;if(!f)return;
+    if(proposedId)f(String(proposedId));
+    if(typeof CUR_ROOT!=="undefined"&&CUR_ROOT)f(String(CUR_ROOT));
+  }catch(_e){}
+}
 function loadRootIdPanel(nid,containerEl){
   const el=containerEl||document.getElementById("rootIdPanel");
   if(!containerEl)CUR_EXTRA_ROOTS=[];
   if(!el||!REPORT_ENDPOINT||!nid){if(el)el.innerHTML="";return;}
   el.innerHTML="";
-  const render=(list)=>{
+  const render=(list,failed)=>{
     if(!containerEl){
       CUR_EXTRA_ROOTS=list.map(function(x){return {id:x.rootId,segType:x.segType||"img65"};}).filter(function(o){return o.id;});
       try{var _h=document.getElementById("ctHeadline");if(_h&&window.CUR_POS){var _a=_h.querySelector("a[href]");if(_a)_a.href=neuroglancerLinkForPos(window.CUR_POS);}}catch(_e){}
     }
     const isOwner=OWNER_EMAIL&&REPORTER_EMAIL===OWNER_EMAIL;
     const n=list.length;
-    let body='<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Segmentation and nucleus detection are often patchy — one cell can span several meshes. Proposed IDs are added to the matching Neuroglancer layer for everyone; vote whether each belongs. Say whether each ID is a cell segment ID or a nucleus ID — they come from different segmentation volumes, and an ID only works in its own.</div>';
+    let body=(failed?'<div style="font-size:12px;color:var(--bad);margin-bottom:6px">The list of already-proposed IDs could not be read just now, so it is not shown \u2014 proposing still works, and duplicates are merged by ID.</div>':'')
+      +'<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Segmentation and nucleus detection are often patchy — one cell can span several meshes. Proposed IDs are added to the matching Neuroglancer layer for everyone; vote whether each belongs. Say whether each ID is a cell segment ID or a nucleus ID — they come from different segmentation volumes, and an ID only works in its own.</div>';
     if(n){
       list.forEach(x=>{
         var st=x.segType||"img65";
@@ -5633,7 +5671,10 @@ function loadRootIdPanel(nid,containerEl){
       +'<select id="ridType" style="min-width:96px"><option value="img65">Root ID</option><option value="nucleus65">Nucleus ID</option></select>'
       +'<input type="text" id="ridInput" placeholder="ID (number)" style="flex:1;min-width:120px">'
       +'<button class="idbtn idbtn-submit" id="ridPropose" style="padding:2px 10px">Propose</button></div>';
-    const label=()=>"additional root / nucleus IDs"+(n?" ("+n+")":"");
+    /* The word somebody hunting for this is actually looking for. It used to read "additional
+       root / nucleus IDs (1)" -- true, and no help at all to a person who has just been told a
+       root ID is unavailable and wants to offer a better one. */
+    const label=()=>"propose or vote on a root / nucleus ID for this cell"+(n?" ("+n+" proposed)":"");
     el.innerHTML='<a href="#" id="ridToggle" class="nsub" style="font-size:12px;cursor:pointer;text-decoration:underline">▶ '+label()+'</a>'
       +'<div id="ridBody" style="display:none;margin:6px 0 2px">'+body+'</div>';
     const tog=el.querySelector("#ridToggle"),bod=el.querySelector("#ridBody");
@@ -5665,13 +5706,21 @@ function loadRootIdPanel(nid,containerEl){
       const v=((el.querySelector("#ridInput")||{}).value||"").trim();
       const stv=((el.querySelector("#ridType")||{}).value)||"img65";
       if(!/^\d{5,}$/.test(v)){alert("Enter a numeric ID (the long segment or nucleus ID from Neuroglancer).");return;}
+      /* Before the post, not after it: whether or not the sheet write succeeds, the person has told
+         us this cell has another ID worth trying, and a stale cached "not found" must not be what
+         answers their next click. See forgetCachedNoFor(). */
+      forgetCachedNoFor(v);
       if(postReport({type:"propose_root_id",timestamp:new Date().toISOString(),nucleusId:nid,rootId:v,segType:stv},"Proposed — thank you.")){if(!containerEl)window.__ridOpen=true;
         reloadRootIdPanelWhen(nid,containerEl,function(l){
           return l.some(function(x){return String(x.rootId)===String(v);});});}
     });
     if(containerEl||window.__ridOpen)setOpen(true);
   };
-  fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(nid)).then(r=>r.json()).then(d=>render((d&&d.rootIds)||[])).catch(()=>{});
+  fetch(REPORT_ENDPOINT+"?rootIds="+encodeURIComponent(nid)).then(r=>r.json()).then(d=>render((d&&d.rootIds)||[]))
+    /* Renders the form with no list rather than leaving the element empty -- see the comment on
+       offerRootIdProposal() above. This one line is the whole of "the propose root ID option is
+       gone" whenever the endpoint blinks. */
+    .catch(()=>{try{render([],true);}catch(_e){}});
 }
 
 /* ---------- Connectivity: synaptic partners → Neuroglancer -----------------------------
@@ -6435,6 +6484,26 @@ function renderConnectivityToggle(el,containerId,rootId,centerPos,cellType,nucle
    2026-08-16) so hJump/H01 can reuse it. Loaded as a <script src> further up the page;
    the old name is kept so nothing else in this file had to change. */
 const MeshDL=UJ.mesh;
+/* ── THE BUTTON ASKS, RATHER THAN TRUSTING A GLOBAL ──────────────────────────────  2026-09-17
+   extraImg65RootIds() reads CUR_EXTRA_ROOTS, which holds whatever loadRootIdPanel() last resolved
+   for whichever #rootIdPanel is on screen. That is right for the cell being looked at and wrong in
+   every ordering where the fetch has not landed yet, or a second panel has rendered since, or a
+   propose is still being re-read -- and when it is wrong the cell is computed WITHOUT the ID just
+   proposed. With one candidate left, the failure is the singular "root ID ... is cached as
+   unavailable" Søren quoted, which reads as the proposal having been ignored, because it was.
+
+   fetchExtraRootIdsFor() already does this lookup (written for Cell contacts, which has the same
+   problem for every candidate cell). Returning undefined rather than [] on an empty or failed
+   lookup matters: undefined means "no override", i.e. the old global path, so a backend that is
+   down costs exactly what it cost before rather than stripping a cell of extras it does have. */
+function extrasForButton(nucleusId,rootId){
+  if(!nucleusId||typeof fetchExtraRootIdsFor!=="function")return Promise.resolve(undefined);
+  try{
+    return fetchExtraRootIdsFor(nucleusId,rootId)
+      .then(function(l){return (l&&l.length)?l:undefined;})
+      .catch(function(){return undefined;});
+  }catch(_e){return Promise.resolve(undefined);}
+}
 /* Delegated (not re-bound per render) since root ID rows get rebuilt on every jump/reclassify --
    a single document-level listener means every ".meshdl"/".pptxdl" button works regardless of
    which render function drew it. Button label doubles as the status line; no separate progress
@@ -6456,7 +6525,8 @@ document.addEventListener("click",(e)=>{
     const volLiveCellType=(volBtn.dataset.followLive==="1"&&typeof CUR_CELLTYPE_DISPLAY!=="undefined"&&CUR_CELLTYPE_DISPLAY)?CUR_CELLTYPE_DISPLAY:volBtn.dataset.celltype;
     const volNucVolUm3=volBtn.dataset.nucvol?parseFloat(volBtn.dataset.nucvol):null;
     const volNucleusId=volBtn.dataset.nucid||"";
-    MeshDL.computeVolume(rootId,(frac,msg)=>{volBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey)
+    extrasForButton(volNucleusId,rootId)
+      .then(volExtras=>MeshDL.computeVolume(rootId,(frac,msg)=>{volBtn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey,volExtras))
       .then(info=>{
         /* 2026-08-05 redesign (Søren): the number moves off the button and onto the volume idrow
            (see meshVolRowHtml()/decorateMeshVolButtons()), and the button itself is hidden right
@@ -6545,8 +6615,13 @@ document.addEventListener("click",(e)=>{
            seg_m1300 mesh snapshot) -- distinguishes "we already know this fails" from a fresh
            failure, and the label tells him how to force a real recheck instead of clicking
            uselessly again. */
-        volBtn.textContent=(err.meshCached?"⊘ cached unavailable":"✗ failed: "+err.message);
+        /* "cached unavailable" told him the page's bookkeeping, not what to do about it. The way
+           out -- shift-click for a real check, or propose a root ID that does resolve -- was in a
+           tooltip and behind a collapsed grey line. Both are now on screen at the moment they are
+           needed. */
+        volBtn.textContent=(err.meshCached?"⊘ not found \u2014 shift-click to recheck":"✗ failed: "+err.message);
         volBtn.title=String(err.message);
+        offerRootIdProposal();
         setTimeout(()=>{volBtn.textContent=origVolLabel;volBtn.disabled=false;},5000);
       });
     return;
@@ -6572,8 +6647,10 @@ document.addEventListener("click",(e)=>{
      button is marked data-follow-live -- see the comment on meshDlButtonHtml() for why the
      baked-in attribute alone goes stale after a community report resolves. */
   const liveCellType=(btn.dataset.followLive==="1"&&typeof CUR_CELLTYPE_DISPLAY!=="undefined"&&CUR_CELLTYPE_DISPLAY)?CUR_CELLTYPE_DISPLAY:btn.dataset.celltype;
-  const task=isPptx?MeshDL.downloadRootPptx(rootId,liveCellType,btn.dataset.coords,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey)
-                   :MeshDL.downloadRoot(rootId,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey);
+  const task=extrasForButton(btn.dataset.nucid||"",rootId).then(function(dlExtras){
+    return isPptx?MeshDL.downloadRootPptx(rootId,liveCellType,btn.dataset.coords,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey,dlExtras)
+                 :MeshDL.downloadRoot(rootId,(frac,msg)=>{btn.textContent=(msg||"")+" "+Math.round(frac*100)+"%";},e.shiftKey,dlExtras);
+  });
   task.then(info=>{
       const vertStr=(info.vertices>=1000?(info.vertices/1000).toFixed(0)+"k":info.vertices)+" verts";
       const combinedStr=info.fragmentCount>1?info.fragmentCount+" fragments combined, ":"";
@@ -6590,8 +6667,9 @@ document.addEventListener("click",(e)=>{
       /* meshCached: same distinction as the .meshvol handler above -- this root ID is known from
          an earlier attempt to be absent from the seg_m1300 shard index, so no network round-trip
          was even attempted this time. Shift-click forces a real recheck. */
-      btn.textContent=(err.meshCached?"⊘ cached unavailable":"✗ failed: "+err.message);
+      btn.textContent=(err.meshCached?"⊘ not found \u2014 shift-click to recheck":"✗ failed: "+err.message);
       btn.title=String(err.message);
+      offerRootIdProposal();
       setTimeout(()=>{btn.textContent=orig;btn.disabled=false;},5000);
     });
 });
