@@ -206,6 +206,39 @@ function link(annotations){
        t.afterTouch + " \u2014 " + t.touchSay.slice(0, 40));
     ok(/No cell in this dataset/.test(t.unknownSay),
        "an id no cell has says so, rather than leaving the last suggestion standing", t.unknownSay);
+
+    /* THE OTHER ID COMES FREE.  Søren: "the nucleus ID should also be put in, because you know that
+       this root ID is associated with this nucleus ID because the cell has been identified." The
+       case that prompted it: a coordinate inside a process reads a root id and NOTHING in the
+       nucleus volume, because the nucleus is elsewhere entirely. */
+    const back = await p.evaluate(() => {
+      let i = -1;
+      for (let k = 0; k < N && i < 0; k++) if (NT[k] !== 0 && rootId(k)) i = k;
+      TRACING_TYPE_TOUCHED = false;
+      const nuc = document.getElementById("tracingNucId"), root = document.getElementById("tracingRootId");
+      nuc.value = ""; root.value = rootId(i);
+      tracingSuggestType();
+      const out = { fromRoot: nuc.value, expectNuc: String(NID[i]),
+                    say: document.getElementById("tracingTypeSay").innerText };
+      /* And the other way round. */
+      nuc.value = String(NID[i]); root.value = "";
+      TRACING_TYPE_TOUCHED = false;
+      tracingSuggestType();
+      out.fromNuc = root.value; out.expectRoot = rootId(i);
+      /* Never over a value that is already there. */
+      nuc.value = "123"; root.value = rootId(i);
+      tracingSuggestType();
+      out.kept = nuc.value;
+      nuc.value = ""; root.value = "";
+      document.getElementById("tracingTypeSay").textContent = "";
+      return out;
+    });
+    ok(back.fromRoot === back.expectNuc,
+       "a root ID fills in the nucleus ID, because the record already ties them together",
+       back.fromRoot + " from the root");
+    ok(/filled in from the record/.test(back.say), "...and says where it came from", back.say.slice(-60));
+    ok(back.fromNuc === back.expectRoot, "...and a nucleus ID fills in the root ID", back.fromNuc);
+    ok(back.kept === "123", "...but never over something already there", back.kept);
   }
 
   console.log("\nwhat is already at that coordinate");
@@ -814,9 +847,13 @@ function link(annotations){
     window.__alerts = [];
     document.getElementById("tracingShare").click();
     out.after = window.__posted.length;
-    out.rows = window.__posted.map(x => ({ t: x.type, z: x.z, n: x.name, sid: x.structureId,
-                                           gid: x.groupId,
-                                           pts: (x.points || "").split(";").length }));
+    /* ONE POST FOR THE WHOLE TRACING since 2026-09-17: the geometry goes to a Drive file and the
+       sheet keeps one index row, so a share that used to be N round trips is one submission
+       carrying every contour. */
+    out.rows = window.__posted.map(x => ({ t: x.type, n: x.name, sid: x.structureId, gid: x.groupId,
+                                           sections: x.sections,
+                                           zs: (x.contours || []).map(c => c.z).join(","),
+                                           pts: (x.contours || []).map(c => (c.points || "").split(";").length).join(",") }));
     /* A SECOND share of the same tracing. Same structureId, new groupId -- that pair is what the
        backend keys "this replaces the older version" on, so a re-share after tracing five more
        sections is a correction rather than a rival tracing of the same cell. */
@@ -828,22 +865,24 @@ function link(annotations){
         .concat(polygon(2005, 3005, 610, 24, 10, "s2"))) });
   ok(shared.alerts === 1 && shared.posted === 0,
      "signed out, ONE warning and nothing posted", shared.alerts + " alerts, " + shared.posted + " posts");
-  ok(shared.after === 2, "signed in, one row per contour", shared.after + " rows");
-  ok(shared.rows.every(r => r.t === "traced_structure"), "...of the traced_structure type");
-  ok(String(shared.rows.map(r => r.z)) === "600,610", "...one per section",
-     String(shared.rows.map(r => r.z)));
-  ok(shared.rows.every(r => r.pts === 10), "...with all ten points of each contour");
-  ok(shared.rows.every(r => r.sid && r.sid === shared.rows[0].sid),
-     "...every row carrying the SAME structureId, which is how they find each other again",
-     shared.rows[0].sid);
-  ok(shared.rows.every(r => r.gid && r.gid === shared.rows[0].gid),
-     "...and the same groupId, one per act of sharing", shared.rows[0].gid);
-  ok(shared.again.length === 2 && shared.again[0].sid === shared.rows[0].sid,
-     "sharing it again keeps the structureId \u2014 it is the same cell",
-     shared.again.length && shared.again[0].sid);
-  ok(shared.again.length === 2 && shared.again[0].gid !== shared.rows[0].gid,
+  ok(shared.after === 1,
+     "signed in, ONE submission for the whole tracing \u2014 not one per contour, which is what "
+     + "filled the sheet", shared.after + " post(s)");
+  ok(shared.rows[0].t === "traced_structure", "...of the traced_structure type");
+  ok(shared.rows[0].zs === "600,610", "...carrying both contours, each on its own section",
+     shared.rows[0].zs);
+  ok(shared.rows[0].sections === 2, "...and saying how many sections that is, for the index row",
+     shared.rows[0].sections);
+  ok(shared.rows[0].pts === "10,10", "...with all ten points of each", shared.rows[0].pts);
+  ok(!!shared.rows[0].sid, "...a structureId naming the cell", shared.rows[0].sid);
+  ok(!!shared.rows[0].gid, "...and a groupId naming this act of sharing \u2014 the pair the backend "
+     + "versions on, and the pair in the Drive file's name", shared.rows[0].gid);
+  ok(shared.again.length === 1 && shared.again[0].sid === shared.rows[0].sid,
+     "sharing it again is one submission again, keeping the structureId \u2014 it is the same cell",
+     shared.again.length + " post(s), " + shared.again[0].sid);
+  ok(shared.again[0].gid !== shared.rows[0].gid,
      "...with a NEW groupId, which is what makes it a new version rather than a duplicate",
-     shared.again.length && shared.again[0].gid);
+     shared.again[0].gid);
 
   console.log("\nkeeping the same tracing twice");
   {

@@ -7871,22 +7871,22 @@ function tracingShare(){
     const blocked=reportGateBlock();
     if(blocked){alert(blocked);return;}
   }
-  /* One act of sharing, one groupId, N contour rows -- the convention merged_split and
-     organelle_location already use, and the one Code.gs's ?tracings=1 reads to decide which
-     version of a tracing is current. Without it, every re-share would be a duplicate. */
+  /* ONE POST FOR THE WHOLE TRACING.  2026-09-17
+     The geometry no longer goes into the sheet -- the backend writes it to a JSON file in Drive and
+     keeps one index row -- so a share is one submission carrying every contour, where it used to be
+     one POST per contour. groupId still names this act of sharing: it is half of the key the
+     backend versions on, and it is in the file's name.  */
   const gid="trace_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7);
-  const rows=UJ.tracing.ringsToRows(t.rings,{structureId:t.id,name:t.name,kind:t.kind||"",
+  const sub=UJ.tracing.toSubmission(t.rings,{structureId:t.id,name:t.name,kind:t.kind||"",
                                              cellType:t.type,color:t.color,
                                              nucleusId:t.nucleus_id||"",rootId:t.root_id||""});
-  let posted=0;
-  rows.forEach(function(r,i){
-    if(postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid,
-                                 subIndex:i+1,subCount:rows.length},r))!==false)posted++;
-  });
-  if(!posted){tracingSay("Nothing was sent \u2014 the tracing is still here.",true);return;}
-  tracingSay(posted+" contour"+(posted===1?"":"s")+" shared. If the backend has not been "
-    +"redeployed since 2026-09-17 it will refuse them as an unknown type \u2014 the tracing is "
-    +"kept here either way. Sharing the same name again replaces this version.");
+  if(!sub.contours.length){tracingSay("Nothing to share \u2014 that tracing has no contours on it.",true);return;}
+  const sent=postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid},sub));
+  if(sent===false){tracingSay("Nothing was sent \u2014 the tracing is still here.",true);return;}
+  tracingSay(sub.contours.length+" contour"+(sub.contours.length===1?"":"s")+" on "+sub.sections
+    +" section"+(sub.sections===1?"":"s")+" shared as one file. If the backend has not been "
+    +"redeployed since 2026-09-17 it will refuse it as an unknown type \u2014 the tracing is kept "
+    +"here either way. Sharing the same name again supersedes this version.");
 }
 
 /* ── THE PAD ─────────────────────────────────────────────────────────────────────  2026-09-17
@@ -8061,24 +8061,37 @@ function padOpen(){
 
    Either id gets there: nidToIndex() and rootIdToIndex() are the two reverse maps the Root/Nucleus
    search already builds. */
-function tracingIdentityFor(nucId, rootId){
+/* The parameters are NOT called nucId/rootId by accident: `rootId` is also the name of the page's
+   own index-to-root-id function, and a parameter called that shadows it -- which is why the first
+   version of this filled the nucleus in from a root id and never the other way round. Caught by the
+   check asserting BOTH directions rather than one. */
+function tracingIdentityFor(nucIn, rootIn){
   var i = -1, via = "";
-  if (nucId && typeof nidToIndex === "function"){
-    i = nidToIndex(String(nucId));
-    if (i >= 0) via = "nucleus " + nucId;
+  if (nucIn && typeof nidToIndex === "function"){
+    i = nidToIndex(String(nucIn));
+    if (i >= 0) via = "nucleus " + nucIn;
   }
-  if (i < 0 && rootId && typeof rootIdToIndex === "function"){
-    i = rootIdToIndex(String(rootId));
-    if (i >= 0) via = "root ID " + rootId;
+  if (i < 0 && rootIn && typeof rootIdToIndex === "function"){
+    i = rootIdToIndex(String(rootIn));
+    if (i >= 0) via = "root ID " + rootIn;
   }
   if (i < 0) return null;
+  /* THE OTHER ID COMES FREE.  2026-09-17. Søren: "the nucleus ID should also be put in, because you
+     know that this root ID is associated with this nucleus ID because the cell has been identified."
+     Exactly so -- the index IS the association, and this dataset stores both sides of it, so once
+     either id has found a cell the other one is a lookup rather than a question. It matters most in
+     the case that prompted it: a coordinate inside a process reads a root id and NOTHING in the
+     nucleus volume, because the nucleus is somewhere else entirely. */
+  var pair = { nucleusId: String(NID[i]), rootId: (typeof rootId === "function" ? rootId(i) : "") || "" };
+  function answer(name, how){ return { name: name, how: how, via: via,
+                                       nucleusId: pair.nucleusId, rootId: pair.rootId }; }
   if (typeof OWN_TYPE !== "undefined" && OWN_TYPE[i] !== 255)
-    return { name: OWN_TYPE_NAMES[OWN_TYPE[i]], how: "verified by Grubb et al.", via: via };
+    return answer(OWN_TYPE_NAMES[OWN_TYPE[i]], "verified by Grubb et al.");
   var comm = (window.__COMM_ROWTYPE || {})[String(NID[i])];
-  if (comm) return { name: comm, how: "reported by the community", via: via };
+  if (comm) return answer(comm, "reported by the community");
   var t = (typeof NT !== "undefined") ? NT[i] : 0;
-  if (t) return { name: CT_NAMES[t - 1], how: "MICrONS\u2019 prediction", via: via };
-  return { name: "", how: "no identity on file", via: via };
+  if (t) return answer(CT_NAMES[t - 1], "MICrONS\u2019 prediction");
+  return answer("", "no identity on file");
 }
 
 /* Selected for him, and said out loud WHERE IT CAME FROM: a guess with no provenance is worse than
@@ -8095,7 +8108,14 @@ function tracingSuggestType(){
   let id = null;
   try { id = tracingIdentityFor(nuc, root); } catch (e){ say.textContent = ""; return; }
   if (!id){ say.textContent = "No cell in this dataset has that nucleus ID or root ID."; return; }
-  if (!id.name){ say.textContent = "Nothing is on file for that cell yet \u2014 name its type yourself."; return; }
+  /* Fill in whichever id the cell has and the box does not. Never overwrites: a value already
+     there was either read from the segmentation or typed, and both outrank a lookup. */
+  const nucEl = document.getElementById("tracingNucId"), rootEl = document.getElementById("tracingRootId");
+  const gained = [];
+  if (id.nucleusId && !nucEl.value.trim()){ nucEl.value = id.nucleusId; gained.push("nucleus " + id.nucleusId); }
+  if (id.rootId && !rootEl.value.trim()){ rootEl.value = id.rootId; gained.push("root ID " + id.rootId); }
+  const also = gained.length ? " Its " + gained.join(" and ") + " filled in from the record." : "";
+  if (!id.name){ say.textContent = "Nothing is on file for that cell yet \u2014 name its type yourself." + also; return; }
   /* MATCHING TWO VOCABULARIES.  MICrONS records a subclass code -- "6P-CT" -- while this list
      carries the identification tree's leaf names, and the leaf for that one reads "Layer 6 CT
      pyramidal neuron (6P-CT)". The code in parentheses IS the join, and it is there on every leaf
@@ -8123,10 +8143,10 @@ function tracingSuggestType(){
   }
   if (!TRACING_TYPE_TOUCHED){
     sel.value = opt.value;
-    say.textContent = "Set to \u201c" + opt.value + "\u201d from " + id.via + " \u2014 " + id.how + ".";
+    say.textContent = "Set to \u201c" + opt.value + "\u201d from " + id.via + " \u2014 " + id.how + "." + also;
   } else {
     say.textContent = id.via.charAt(0).toUpperCase() + id.via.slice(1) + " is on file as \u201c"
-      + id.name + "\u201d (" + id.how + ").";
+      + id.name + "\u201d (" + id.how + ")." + also;
   }
 }
 

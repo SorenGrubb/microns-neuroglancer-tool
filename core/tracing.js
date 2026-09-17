@@ -308,6 +308,35 @@ UJ.tracing = (function(){
     });
   }
 
+  /* ── ONE SUBMISSION FOR A WHOLE TRACING ─────────────────────────────────────────  2026-09-17
+     Søren: "I imagine that these segmentations will quickly fill up the Google sheet and make it
+     very slow... saved in a different file on the Google drive."
+
+     So the geometry no longer goes into the sheet at all: the backend writes it to one JSON file in
+     Drive and keeps a single index row pointing at it. That makes a share ONE submission carrying
+     every contour, where it used to be one POST per contour -- µJump posts no-cors and cannot read
+     a response either way, so the old shape bought N round trips and nothing else.
+
+     ringsToRows() stays: it is still the shape a tracing comes BACK in, and rowsToStructures()
+     below is still what reads it. What changed is only which direction the sheet is involved in. */
+  function toSubmission(rings, meta){
+    meta = meta || {};
+    var id = meta.structureId || structureId(meta.name, meta.stamp);
+    var perZ = {};
+    var contours = (rings || []).map(function(r){
+      var z = Math.round(r.z);
+      perZ[z] = (perZ[z] || 0);
+      var c = { z: z, ringIndex: perZ[z], points: encodePoints(r.points) };
+      perZ[z]++;
+      return c;
+    }).filter(function(c){ return c.points; });
+    return { type: "traced_structure", structureId: id,
+             name: meta.name || "", kind: meta.kind || "", cellType: meta.cellType || "",
+             color: meta.color || "", nucleusId: meta.nucleusId || "", rootId: meta.rootId || "",
+             comment: meta.comment || "",
+             sections: Object.keys(perZ).length, contours: contours };
+  }
+
   function rowsToStructures(rows){
     var by = {};
     (rows || []).forEach(function(r){
@@ -357,7 +386,7 @@ UJ.tracing = (function(){
     });
   }
 
-  return { ringsFromLink: ringsFromLink, ringsToRows: ringsToRows,
+  return { ringsFromLink: ringsFromLink, ringsToRows: ringsToRows, toSubmission: toSubmission,
            rowsToStructures: rowsToStructures, toTracings: toTracings,
            structureId: structureId,
            encodePoints: encodePoints, decodePoints: decodePoints };
