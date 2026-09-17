@@ -409,6 +409,32 @@ function link(annotations){
        opened.drawn + " draws");
     ok(opened.z === 21360, "...on the section in the coordinate boxes", opened.z);
 
+    /* Søren: *"make a list of all the possible commands with an explanation of what they do."* In
+       the card, not in a message, because the status line above it is written over by the next
+       thing that happens. The modifier names are filled in at runtime, so this also asserts that
+       nobody is being told to press a key their keyboard does not have. */
+    const help = await p.evaluate(() => {
+      const box = document.getElementById("tracePadHelp");
+      if (!box) return null;
+      return { rows: box.querySelectorAll("tr").length,
+               mods: [].slice.call(box.querySelectorAll(".padmod")).map(e => e.textContent).join("|"),
+               rights: [].slice.call(box.querySelectorAll(".padright")).map(e => e.textContent).join("|"),
+               mac: PAD_MAC, note: (document.getElementById("padHelpMac") || {}).textContent || "",
+               text: box.textContent };
+    });
+    ok(help && help.rows >= 15, "every gesture is listed in the card itself",
+       help && help.rows + " of them");
+    ok(help && help.mods && (help.mods.indexOf("Ctrl") >= 0) === !help.mac,
+       "...with the modifier named for this machine, not for the one it was written on",
+       help && help.mods);
+    ok(help && help.rights && /right-click/.test(help.rights) === !help.mac,
+       "...and \u201cright-click\u201d only where there is a right button", help && help.rights);
+    ok(help && /whole/.test(help.text) && /Undo/.test(help.text) && /Step a section/i.test(help.text),
+       "...covering the whole-contour remove, Undo and stepping, not only the clicks");
+    ok(help && /Mac/.test(help.note),
+       "...and the page says which machine it thinks it is on, so a wrong guess is visible",
+       help && help.note.slice(0, 60));
+
     /* page.mouse does not scroll, and this card is a long way down a very long page: a box
        read without this is a real rectangle in page coordinates that no click can reach. */
     await p.locator("#tracePad").scrollIntoViewIfNeeded();
@@ -554,6 +580,104 @@ function link(annotations){
 
     /* Put it back so the rest of the section's assertions still have two sections to work with. */
     await p.evaluate(() => {
+      [[120, 120], [240, 120], [240, 240]].forEach(q => {
+        const t = PAD_VIEW.toolAt(q[0], q[1]);
+        UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
+      });
+      UJ.tracepad.closeRing(PAD);
+    });
+
+    /* ── THE WHOLE CONTOUR, AND THE MODIFIER THAT IS NOT THE SAME ON A MAC ───────  2026-09-17
+       Søren: *"ctrl+ right click should remove all the connected points in a polyline"* and
+       *"Make sure that all the commands work for mac also."* The second sentence is what makes the
+       first one interesting: CTRL+CLICK IS THE SECONDARY CLICK ON macOS, so binding this to ctrl
+       would delete a whole contour every time a Mac user tried to delete a single point. The
+       assertions below are the pair -- the modifier works on each platform, and the OTHER
+       platform's modifier does not, which is the half that protects Mac users. */
+    console.log("  and the whole contour goes on Ctrl, or Cmd on a Mac");
+    {
+      const erase = await p.evaluate(async ({ mods }) => {
+        const cv = document.getElementById("tracePad");
+        const box = cv.getBoundingClientRect();
+        const fire = (x, y, type, init) => cv.dispatchEvent(new PointerEvent(type, Object.assign(
+          { bubbles: true, cancelable: true, clientX: box.left + x, clientY: box.top + y,
+            pointerId: 1, button: 0, isPrimary: true }, init)));
+        const menu = (x, y, init) => cv.dispatchEvent(new MouseEvent("contextmenu", Object.assign(
+          { bubbles: true, cancelable: true, clientX: box.left + x, clientY: box.top + y }, init)));
+        const ring = () => PAD.rings.filter(r => r.z === PAD.z)[0];
+        const onRing = () => { const p0 = ring().points[0];
+                               const q = PAD_VIEW.pxAt([p0[0], p0[1], PAD.z]); return q; };
+
+        /* Built here rather than inherited: five points each, so deleting ONE still leaves a
+           contour to count, which is the difference the first assertion rests on. */
+        const build = () => {
+          PAD.pending = [];
+          PAD.rings = PAD.rings.filter(r => r.z !== PAD.z);
+          [[[60,60],[160,60],[180,110],[160,160],[60,160]],
+           [[300,300],[380,300],[400,340],[380,380],[300,380]]].forEach(pts => {
+            pts.forEach(xy => { const t = PAD_VIEW.toolAt(xy[0], xy[1]);
+                                UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel); });
+            UJ.tracepad.closeRing(PAD);
+          });
+        };
+        build();
+
+        const out = {};
+        /* ON A MAC: ctrl is the right-click, so it must delete the POINT, never the contour. */
+        PAD_MAC = true; PAD_MOD = "⌘ Cmd";
+        let q = onRing(), before = ring().points.length, rings = PAD.rings.length;
+        menu(q[0], q[1], { ctrlKey: true });
+        out.macCtrl = { points: before + " -> " + (ring() ? ring().points.length : 0),
+                        rings: rings + " -> " + PAD.rings.length };
+        /* ...and cmd takes the whole thing, on the LEFT button, because cmd+click makes no menu. */
+        q = onRing(); rings = PAD.rings.length;
+        fire(q[0], q[1], "pointerdown", { metaKey: true });
+        fire(q[0], q[1], "pointerup", { metaKey: true });
+        out.macCmd = { rings: rings + " -> " + PAD.rings.length,
+                       say: document.getElementById("tracePadSay").innerText };
+
+        build();                       // two contours again, to take apart on the PC path
+        PAD_MAC = false; PAD_MOD = "Ctrl";
+        rings = PAD.rings.length;
+        q = onRing();
+        menu(q[0], q[1], { ctrlKey: true });
+        out.pcCtrl = { rings: rings + " -> " + PAD.rings.length,
+                       say: document.getElementById("tracePadSay").innerText };
+        /* Cmd means nothing on a PC: it must fall through to putting a vertex down. */
+        rings = PAD.rings.length; const pend = PAD.pending.length;
+        fire(430, 430, "pointerdown", { metaKey: true });
+        fire(430, 430, "pointerup", { metaKey: true });
+        out.pcCmd = { rings: rings + " -> " + PAD.rings.length,
+                      pending: pend + " -> " + PAD.pending.length };
+        PAD.pending = [];
+        /* Pointing at nothing removes nothing, and says which key it wanted. */
+        menu(500, 30, { ctrlKey: true });
+        out.nowhere = { rings: PAD.rings.length,
+                        say: document.getElementById("tracePadSay").innerText };
+        return out;
+      }, { mods: 1 });
+      ok(/^(\d+) -> \1$/.test(erase.macCtrl.rings) && !/^(\d+) -> \1$/.test(erase.macCtrl.points),
+         "on a Mac, ctrl+click still deletes ONE POINT — it is their right-click, not a modifier",
+         "points " + erase.macCtrl.points + ", contours " + erase.macCtrl.rings);
+      ok(!/^(\d+) -> \1$/.test(erase.macCmd.rings),
+         "...and ⌘ Cmd+click takes the whole contour, on the left button",
+         erase.macCmd.rings);
+      ok(/all of it/.test(erase.macCmd.say), "...saying that is what happened",
+         erase.macCmd.say.slice(0, 40));
+      ok(!/^(\d+) -> \1$/.test(erase.pcCtrl.rings),
+         "on a PC, ctrl+right-click takes the whole contour", erase.pcCtrl.rings);
+      ok(/^(\d+) -> \1$/.test(erase.pcCmd.rings) && !/^(\d+) -> \1$/.test(erase.pcCmd.pending),
+         "...while cmd means nothing there and a click is just a click",
+         "contours " + erase.pcCmd.rings + ", vertices " + erase.pcCmd.pending);
+      ok(/Ctrl\+click a point or a line/.test(erase.nowhere.say),
+         "and pointing at nothing removes nothing, naming the key for THIS machine",
+         erase.nowhere.say.slice(0, 50));
+    }
+
+    /* Back to one contour on each of the two sections, for what follows. */
+    await p.evaluate(() => {
+      PAD.pending = [];
+      PAD.rings = PAD.rings.filter(r => r.z !== PAD.z);
       [[120, 120], [240, 120], [240, 240]].forEach(q => {
         const t = PAD_VIEW.toolAt(q[0], q[1]);
         UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
@@ -953,6 +1077,75 @@ function link(annotations){
     ok(twice.ids.every(i => !!i) && new Set(twice.ids).size === twice.ids.length,
        "...and every kept tracing has an id of its own", twice.ids.join(", "));
     ok(twice.stored === twice.after, "...with storage saying the same", twice.stored);
+  }
+
+  /* ── THE EM HAS TO MOVE WITH THE OUTLINE ───────────────────────────────────────  2026-09-17
+     Søren: *"If I shift click to move the view, it now only moves the segmentation and not the EM
+     images."*
+
+     The pad kept the drawn section as a bitmap and put it back under the contours on every repaint,
+     and one flag decided whether a given call was CAPTURING that bitmap or RESTORING it. Any
+     repaint could flip it -- including the hover repaint in pointermove, which fires on a pointer
+     that has barely moved while a pan's fetch is still in the air. Captured mid-fetch, the base was
+     the OLD section, and when the new one arrived it was painted straight back over it.
+
+     The stub here is slow ON PURPOSE and paints a colour derived from the centre it was asked for,
+     so "which section is on the canvas" is a pixel this check can read. Without the delay and the
+     twitch, the bug does not reproduce at all -- which is why it reached him. */
+  console.log("\nthe section follows the pan, even with the pointer moving");
+  {
+    const panned = await p.evaluate(async () => {
+      let asked = 0;
+      UJ.emtiles.configure = () => ({});
+      UJ.emtiles.configured = () => true;
+      UJ.emtiles.drawSection = async (cv, o) => {
+        asked++;
+        const centre = o.centre.slice();
+        /* The real reader resets the canvas size before it fetches anything, which CLEARS it --
+           part of why a stale base was visible rather than merely wrong. */
+        await new Promise(r => setTimeout(r, 40));
+        cv.width = o.w; cv.height = o.h;
+        const g = cv.getContext("2d");
+        g.fillStyle = "rgb(" + (centre[0] % 256) + ",0,0)";
+        g.fillRect(0, 0, cv.width, cv.height);
+        await new Promise(r => setTimeout(r, 40));
+        const k = 8;
+        const x0 = centre[0] - (cv.width >> 1) * k, y0 = centre[1] - (cv.height >> 1) * k;
+        return { mip: 2, mips: 3, nmPerPx: 32, z: centre[2], w: cv.width, h: cv.height, chunks: 1,
+                 toolAt: (px, py) => [Math.round(x0 + px * k), Math.round(y0 + py * k), centre[2]],
+                 pxAt: (t) => [Math.round((t[0] - x0) / k), Math.round((t[1] - y0) / k)],
+                 pxPerToolVoxel: 1 / k };
+      };
+      ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
+        document.getElementById(id).value = [240000, 207872, 21360][i];
+      });
+      document.getElementById("tracePadOpen").click();
+      await new Promise(r => setTimeout(r, 300));
+      const cv = document.getElementById("tracePad");
+      const read = () => cv.getContext("2d").getImageData(2, 2, 1, 1).data[0];
+      const before = read();
+
+      const box = cv.getBoundingClientRect();
+      const at = (x, y, type, init) => cv.dispatchEvent(new PointerEvent(type, Object.assign(
+        { bubbles: true, clientX: box.left + x, clientY: box.top + y, pointerId: 1, button: 0,
+          isPrimary: true }, init || {})));
+      /* Shift+click, a hundred pixels left of centre: recentre there. */
+      at(120, 120, "pointerdown", { shiftKey: true });
+      at(120, 120, "pointerup", { shiftKey: true });
+      /* THE TWITCH. One pixel, while the fetch is still out -- the whole bug in one event. */
+      await new Promise(r => setTimeout(r, 20));
+      at(121, 121, "pointermove", {});
+      await new Promise(r => setTimeout(r, 300));
+      return { asked: asked, before: before, after: read(),
+               centre: PAD_CENTRE.slice(), want: PAD_CENTRE[0] % 256 };
+    });
+    ok(panned.asked === 2, "shift+click asks for the section at the new centre", panned.asked);
+    ok(panned.centre[0] !== 240000, "...and the centre really moved", panned.centre.join(","));
+    ok(panned.after === panned.want,
+       "the EM ON THE CANVAS is the new section, not the old one restored over it",
+       "pixel " + panned.after + ", expected " + panned.want + " (was " + panned.before + ")");
+    ok(panned.after !== panned.before,
+       "...which is a different picture from the one before the pan, so the test can tell");
   }
 
   /* ── OPENING SOMEBODY ELSE'S TRACING AND ADDING TO IT ──────────────────────────  2026-09-17

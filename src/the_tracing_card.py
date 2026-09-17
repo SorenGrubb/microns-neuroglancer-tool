@@ -46,6 +46,26 @@ The region boundaries moved once, with that pass: SCRIPT used to start at the pa
 feature's own functions -- tracingKeep among them -- owned by no generator at all after the seven
 handed over. It now starts at the feature's header comment.
 
+── AND A THIRD PASS, AN HOUR LATER ───────────────────────────────────────────────────────────
+
+  THE EM STOPPED FOLLOWING THE PAN. *"If I shift click to move the view, it now only moves the
+    segmentation and not the EM images."* Capturing and restoring the drawn section were one
+    function choosing between them on a flag, and the hover repaint could flip it mid-fetch. Now
+    padDraw() captures and padPaint() only restores. tracingpanelcheck.js reproduces it with a slow
+    stub and one pointer twitch -- without both, it does not reproduce at all, which is how it
+    reached him.
+
+  THE WHOLE CONTOUR ON A MODIFIER. *"ctrl+ right click should remove all the connected points in a
+    polyline."*
+
+  AND IT HAD TO WORK ON A MAC. *"Make sure that all the commands work for mac also, and make a list
+    of all the possible commands with an explanation of what they do."* CTRL+CLICK IS THE SECONDARY
+    CLICK ON macOS, so ctrl there would have deleted a whole contour every time a Mac user tried to
+    delete one point: the modifier is Cmd on a Mac, Ctrl elsewhere, and it works with either button
+    because Cmd+click raises no context menu. The gesture list lives in the card (a <details> under
+    the pad), with the modifier and the word "right-click" written at runtime for the machine
+    reading it.
+
 Each is replaced BY REGION rather than by matching a snippet inside it: find where the region
 starts, find where it ends, put the whole thing there. A re-run is a no-op because the text is
 already what it writes, and there is no anchor left to drift -- the only things it has to find are
@@ -119,8 +139,34 @@ CARD = '''<div class="card" id="tracingCard">
 <canvas id="tracePad" width="560" height="460" style="display:block;cursor:crosshair;touch-action:none"></canvas>
 </div>
 <div id="tracePadRings" style="margin-top:6px"></div>
-<p class="hint" id="tracePadSay" style="margin-top:6px">Click each vertex round the cell. The first one is drawn as a ring &mdash; click it again to close the contour. <b>Shift+click</b> moves the field there, shift+drag or a plain drag pans it, and <b>,</b> and <b>.</b> step a section.<br>
-Afterwards: <b>drag a point</b> to move it, <b>right-click a point</b> to delete it, <b>right-click or double-click a line</b> to put a new point in the middle of it.</p>
+<p class="hint" id="tracePadSay" style="margin-top:6px">Click each vertex round the cell. The first one is drawn as a ring &mdash; click it again to close the contour. <b>Shift+click</b> moves the field there, shift+drag or a plain drag pans it, and <b>,</b> and <b>.</b> step a section.</p>
+<!-- EVERY GESTURE, IN ONE PLACE.  2026-09-17. Søren: "make a list of all the possible commands with
+     an explanation of what they do." The status line above is written over by the next thing that
+     happens, so it cannot be the reference; this can. The modifier names are filled in at runtime
+     (padHelpKeys) because they are not the same on a Mac -- see PAD_MAC. -->
+<details id="tracePadHelp" style="margin-top:6px">
+<summary style="cursor:pointer;font-size:12px;color:var(--mut)">Every gesture the pad understands</summary>
+<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px">
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>click</b></td><td style="padding:3px 0">Put a vertex down. The first one is drawn as an open ring.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>click the first ring</b></td><td style="padding:3px 0">Close the contour. Three vertices minimum &mdash; under that a &ldquo;close&rdquo; is a mis-click, and it is ignored.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Enter</b></td><td style="padding:3px 0">Closes it too, for anyone who expects that.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Esc</b></td><td style="padding:3px 0">Abandon the contour being drawn. Closed ones are untouched.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>drag a point</b></td><td style="padding:3px 0">Move that vertex. Works on a closed contour as well as the one in progress.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b class="padright">right-click</b> a point</td><td style="padding:3px 0">Delete that one vertex. If it takes the contour under three points the contour goes with it, and you are told so.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b class="padright">right-click</b> or <b>double-click</b> a line</td><td style="padding:3px 0">Put a new vertex in the middle of that segment &mdash; then drag it where it belongs. This is what a corner that bulges usually needs.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b class="padmod">Ctrl</b>+click a contour</td><td style="padding:3px 0">Remove the <b>whole</b> contour &mdash; every connected point of it. Point at any vertex or any line of it; either button.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>shift+click</b></td><td style="padding:3px 0">Centre the view there. Safe mid-contour: vertices are stored in dataset voxels, so moving the view never moves one.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>drag</b>, or <b>shift+drag</b></td><td style="padding:3px 0">Pan. A drag that moved more than a few pixels never leaves a vertex behind.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>,</b> and <b>.</b></td><td style="padding:3px 0">Step a section back and on &mdash; the same two keys Neuroglancer uses. By the number in the step box; every fifth section is about half a percent off the real volume.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>&#9664;</b> <b>&#9654;</b></td><td style="padding:3px 0">The same, for a mouse. A half-drawn contour belongs to its own section and is dropped when you step.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Undo</b></td><td style="padding:3px 0">The last vertex mid-contour; the last contour <i>on this section</i> between them. Never one from a section you cannot see.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>the chips</b> (1 &middot; 9 points &times;)</td><td style="padding:3px 0">One per contour on this section. Click one to delete that contour.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>the &micro;m dropdown</b></td><td style="padding:3px 0">How much of the section is on the pad. Below 8 nm the voxels are drawn larger rather than finer &mdash; the label says which. The widest view is the slowest to load.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Show it in 3D</b></td><td style="padding:3px 0">The shape so far, rebuilt after every contour. With the checkbox, the cell&rsquo;s own mesh and the nucleus are drawn see-through around it. Drag to turn, scroll to zoom.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Use these contours</b></td><td style="padding:3px 0">Hand them to the fields below, where you say what it is and add it to the dataset. Two sections minimum &mdash; a flat outline has no surface to close.</td></tr>
+</table>
+<p class="hint" id="padHelpMac" style="margin-top:4px"></p>
+</details>
 <div class="row" style="gap:8px;margin-top:6px">
 <button class="idbtn" id="tracePadUse" style="flex:1 1 auto">Use these contours</button>
 <button class="idbtn" id="tracePadClose" style="flex:0 0 auto">Close the pad</button>
@@ -774,7 +820,7 @@ async function tracingOpenShared(sid, btn){
     let cx = 0, cy = 0;
     p0.forEach(function(p){ cx += p[0]; cy += p[1]; });
     PAD_CENTRE = [Math.round(cx / p0.length), Math.round(cy / p0.length), PAD.z];
-    PAD_VIEW = null; PAD_PAINTING = false;
+    PAD_VIEW = null; PAD_BASE_READY = false;
     document.getElementById("tracePadWrap").style.display = "";
     padDraw();
 
@@ -821,6 +867,31 @@ async function tracingOpenShared(sid, btn){
    returns. Vertices are stored in TOOL voxels, so changing the zoom or panning never moves one. */
 var PAD = null, PAD_VIEW = null, PAD_BUSY = false, PAD_HOVER = null, PAD_CENTRE = null;
 
+/* ── WHICH MACHINE THIS IS, ASKED ONCE ──────────────────────────────────────────  2026-09-17
+   Søren: *"Make sure that all the commands work for mac also."* Nearly all of them already did --
+   shift, the arrow keys, comma and full stop, dragging a point, the wheel in the 3D panel are the
+   same gesture on both. ONE genuinely differs, and it is the one added today: CTRL+CLICK IS THE
+   SECONDARY CLICK ON macOS. Every ordinary right-click a Mac user makes arrives with ctrlKey set,
+   so "ctrl+click removes the whole contour" would remove a contour every time they tried to delete
+   a single point. Cmd there, Ctrl everywhere else.
+
+   navigator.userAgentData.platform where it exists; navigator.platform where it does not, which is
+   deprecated and still the only one Safari answers. Neither is spoof-proof and neither has to be:
+   the cost of guessing wrong is a gesture that does nothing, and the panel below spells out which
+   key this page thinks you have. */
+var PAD_MAC = (function(){
+  try {
+    var pl = (navigator.userAgentData && navigator.userAgentData.platform)
+          || navigator.platform || navigator.userAgent || "";
+    return /mac|iphone|ipad|ipod/i.test(pl);
+  } catch (e){ return false; }
+})();
+var PAD_MOD = PAD_MAC ? "\\u2318 Cmd" : "Ctrl";
+/* What a "right-click" is, in words, on the machine reading this. On a Mac it is ctrl+click or a
+   two-finger click; naming it "right-click" to somebody on a trackpad with no right button is the
+   kind of instruction that reads as "this feature is not for you". */
+var PAD_RIGHT = PAD_MAC ? "ctrl+click (or a two-finger click)" : "right-click";
+
 function padSay(msg, bad){
   const el = document.getElementById("tracePadSay");
   if (el){ el.textContent = msg; el.style.color = bad ? "var(--bad)" : ""; }
@@ -844,6 +915,8 @@ async function padDraw(){
       centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height,
       onProgress: function(d, n){ if (d < n) padSay("Loading the section\\u2026 " + d + "/" + n); }
     });
+    /* THE ONE MOMENT THE CANVAS IS KNOWN TO HOLD A FINISHED SECTION. See padCapture. */
+    padCapture();
     padPaint();
     padRings();
     padSay(UJ.tracepad.count(PAD).rings + " contour(s) kept, "
@@ -851,23 +924,51 @@ async function padDraw(){
                             : "click each vertex round the cell"));
   }catch(e){
     padSay("Could not read the EM there: " + String(e && e.message || e), true);
+    /* drawSection resets the canvas' width before it fetches anything, which clears it. A fetch
+       that failed would otherwise leave a blank pad with no outline on it. */
+    padPaint();
   }
   PAD_BUSY = false;
   padZLabel();
 }
 
-/* The EM is drawn once per fetch and kept as the canvas' own bitmap; every repaint of the outline
-   redraws it from a copy rather than refetching. */
-var PAD_BASE = null;
-function padPaint(){
-  const cv = document.getElementById("tracePad"), g = cv.getContext("2d");
+/* ── THE EM IS CAPTURED BY THE ONE FUNCTION THAT KNOWS IT IS FRESH ──────────────  2026-09-17
+   Søren: *"If I shift click to move the view, it now only moves the segmentation and not the EM
+   images."*
+
+   It did, and the cause was a flag rather than anything to do with panning. Capturing and restoring
+   were one function choosing between them on `PAD_PAINTING`, so ANY repaint could decide it was the
+   one holding the fresh section -- including the hover repaint in pointermove, which fires on a
+   pointer that has barely moved while a pan's fetch is still in the air:
+
+     shift+click          -> padDraw() starts; the section is still the OLD one on the canvas
+     the pointer twitches -> pointermove -> padPaint() captures THAT as the base, and flips the flag
+     the fetch lands      -> the new section is drawn, then padPaint() restores the old base over it
+                             and draws the contours at their NEW positions
+
+   Old tissue, moved outline, exactly as reported. So capturing stopped being a mode: padDraw()
+   captures, once, at the only moment the canvas is known to hold a finished section, and padPaint()
+   only ever restores. A repaint arriving mid-fetch now redraws the previous section, which is what
+   was on screen anyway. */
+var PAD_BASE = null, PAD_BASE_READY = false;
+function padBase(cv){
   if (!PAD_BASE || PAD_BASE.width !== cv.width || PAD_BASE.height !== cv.height){
     PAD_BASE = document.createElement("canvas");
     PAD_BASE.width = cv.width; PAD_BASE.height = cv.height;
+    PAD_BASE_READY = false;      // a base the wrong size is not a section, it is an empty canvas
   }
-  if (!PAD_PAINTING){ PAD_BASE.getContext("2d").drawImage(cv, 0, 0); }
-  else { g.drawImage(PAD_BASE, 0, 0); }
-  PAD_PAINTING = true;
+  return PAD_BASE;
+}
+function padCapture(){
+  const cv = document.getElementById("tracePad");
+  if (!cv) return;
+  padBase(cv).getContext("2d").drawImage(cv, 0, 0);
+  PAD_BASE_READY = true;
+}
+function padPaint(){
+  const cv = document.getElementById("tracePad"), g = cv.getContext("2d");
+  padBase(cv);
+  if (PAD_BASE_READY) g.drawImage(PAD_BASE, 0, 0);
   if (!PAD_VIEW) return;
   const px = function(t){ return PAD_VIEW.pxAt(t); };
   /* Contours already closed on THIS section, then the one being drawn. */
@@ -921,8 +1022,6 @@ function padPaint(){
     });
   }
 }
-var PAD_PAINTING = false;
-
 /* One chip per contour on this section, each with its own delete. "Delete this one" should not
    mean "Undo until it is gone" -- that is the difference between correcting a tracing and starting
    it again. */
@@ -962,7 +1061,6 @@ function padStep(dir){
   PAD.pending = [];                        // a half-drawn contour belongs to the section it is on
   PAD.z += dir * n;
   PAD_CENTRE = [PAD_CENTRE[0], PAD_CENTRE[1], PAD.z];
-  PAD_PAINTING = false;
   padDraw();
 }
 
@@ -974,7 +1072,7 @@ function padOpen(){
   PAD = UJ.tracepad.create();
   PAD.z = got.pos[2];
   PAD_CENTRE = got.pos.slice();
-  PAD_VIEW = null; PAD_PAINTING = false;
+  PAD_VIEW = null; PAD_BASE_READY = false;
   /* A FRESH PAD IS A FRESH STRUCTURE. Opening the pad after editing somebody's tracing must not
      leave its id attached, or the next cell you draw would be filed as the next version of theirs.
      The ghosts go too: they belong to the ids that were in the boxes. */
@@ -1118,7 +1216,7 @@ async function tracingResolveAt(pos){
   document.getElementById("tracePadPrev").addEventListener("click", function(){ padStep(-1); });
   document.getElementById("tracePadNext").addEventListener("click", function(){ padStep(1); });
   document.getElementById("tracePadMip").addEventListener("change", function(){
-    PAD_PAINTING = false; padDraw();
+    padDraw();
   });
   document.getElementById("tracePadUndo").addEventListener("click", function(){
     UJ.tracepad.undo(PAD); padPaint(); padRings(); padSay("Undone.");
@@ -1139,6 +1237,7 @@ async function tracingResolveAt(pos){
   });
   const pg = document.getElementById("tracePadGhosts");
   if (pg) pg.addEventListener("change", function(){ PAD3D_AT = 0; pad3DDraw(); });
+  padHelpKeys();
   document.getElementById("tracePadUse").addEventListener("click", function(){
     const rings = UJ.tracepad.toRings(PAD);
     const sections = new Set(rings.map(function(r){ return r.z; }));
@@ -1162,6 +1261,14 @@ async function tracingResolveAt(pos){
   var down = null, moved = false, dragging = null;
   cv.addEventListener("pointerdown", function(e){
     if (!PAD_VIEW) return;
+    /* THE WHOLE CONTOUR, ON A MODIFIER, AND NOT THE SAME ONE ON EVERY MACHINE.  2026-09-17
+       Søren: "ctrl+ right click should remove all the connected points in a polyline." On Windows
+       that is exactly ctrl+right-click. ON A MAC IT CANNOT BE: ctrl+click IS the secondary click
+       there, so every ordinary right-click a Mac user makes arrives with ctrlKey set, and binding
+       this to ctrl would delete a contour every time somebody tried to delete a single point. So
+       the modifier is Cmd on a Mac and Ctrl everywhere else, and it works with EITHER button --
+       Cmd+click makes no context menu, so the left button has to carry it there. */
+    if (padErase(e)){ down = null; dragging = null; padEraseAt(e); return; }
     /* LEFT BUTTON ONLY. A right-click fires pointerdown/pointerup like any other, so without this
        every right-click -- the gesture that deletes a point or adds one to a line -- ALSO dropped a
        new vertex where it was clicked. Caught by tracingpanelcheck.js driving real pointer events
@@ -1205,8 +1312,9 @@ async function tracingResolveAt(pos){
       const wasDrag = moved;
       dragging = null;
       if (wasDrag){ padPaint(); pad3DSoon();
-        padSay("Point moved. Right-click a point to delete it, or a line "
-        + "to put a new point in the middle of it."); return; }
+        /* Named for the machine reading it: "right-click" is not a gesture a Mac trackpad has. */
+        padSay("Point moved. " + PAD_RIGHT.charAt(0).toUpperCase() + PAD_RIGHT.slice(1)
+        + " a point to delete it, or a line to put a new point in the middle of it."); return; }
       /* Pressed and released on a vertex without moving: not a drag, and not a new vertex either --
          a click there means the first vertex when one is being drawn, and nothing otherwise. */
       if (!PAD.pending.length) return;
@@ -1224,7 +1332,6 @@ async function tracingResolveAt(pos){
         const t0 = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
         PAD_CENTRE = [t0[0], t0[1], PAD.z];
       }
-      PAD_PAINTING = false;
       padDraw();
       padSay("Moved to " + PAD_CENTRE[0] + ", " + PAD_CENTRE[1] + ". "
         + (PAD.pending.length ? PAD.pending.length + " vertices still on this contour." : ""));
@@ -1233,7 +1340,6 @@ async function tracingResolveAt(pos){
     if (wasPan){
       const a = PAD_VIEW.toolAt(from[0], from[1]), b = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
       PAD_CENTRE = [PAD_CENTRE[0] - (b[0] - a[0]), PAD_CENTRE[1] - (b[1] - a[1]), PAD.z];
-      PAD_PAINTING = false;
       padDraw();
       return;
     }
@@ -1257,6 +1363,9 @@ async function tracingResolveAt(pos){
   cv.addEventListener("contextmenu", function(e){
     if (!PAD_VIEW) return;
     e.preventDefault();
+    /* Ctrl+right-click on Windows and Linux lands here rather than in pointerdown, which ignores
+       every button but the left one. Cmd+right-click on a Mac lands here too. */
+    if (padErase(e)){ padEraseAt(e); return; }
     const t = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
     const k = PAD_VIEW.pxPerToolVoxel;
     const v = UJ.tracepad.hitVertex(PAD, t[0], t[1], k);
@@ -1270,12 +1379,53 @@ async function tracingResolveAt(pos){
     }
     padInsertAt(e);
   });
+  /* The gesture list is written once for both platforms and named at runtime, so nobody reads an
+     instruction for a key their keyboard does not have -- and so the page SAYS which machine it
+     thinks it is on, which is the cheap way to find out it guessed wrong. */
+  function padHelpKeys(){
+    [].slice.call(document.querySelectorAll("#tracePadHelp .padmod"))
+      .forEach(function(el){ el.textContent = PAD_MOD; });
+    [].slice.call(document.querySelectorAll("#tracePadHelp .padright"))
+      .forEach(function(el){ el.textContent = PAD_RIGHT; });
+    const mac = document.getElementById("padHelpMac");
+    if (mac) mac.textContent = PAD_MAC
+      ? "Read as a Mac: \\u201cright-click\\u201d above means ctrl+click or a two-finger click, and "
+        + "the whole-contour remove is \\u2318 Cmd \\u2014 not ctrl, because ctrl+click is already "
+        + "your right-click."
+      : "Read as a PC. On a Mac the whole-contour remove is \\u2318 Cmd instead of Ctrl, because "
+        + "ctrl+click is already the right-click there.";
+  }
+
+  /* Which modifier means "take the whole thing", by platform. Read from the event rather than
+     stored, so a page opened on one machine and a keyboard swapped under it still agrees. */
+  function padErase(e){ return PAD_MAC ? e.metaKey : e.ctrlKey; }
+  function padEraseAt(e){
+    if (!PAD_VIEW || !PAD) return;
+    const t = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
+    const k = PAD_VIEW.pxPerToolVoxel;
+    /* A point of it or a line of it: either is a way of pointing at the contour you mean, and
+       asking somebody to hit a vertex exactly when the whole thing is about to go is pedantry. */
+    const hit = UJ.tracepad.hitVertex(PAD, t[0], t[1], k)
+             || UJ.tracepad.hitEdge(PAD, t[0], t[1], k);
+    if (!hit){
+      padSay(PAD_MOD + "+click a point or a line of the contour you want to remove \\u2014 there is "
+        + "nothing under the pointer.", true);
+      return;
+    }
+    const pending = hit.ring < 0;
+    UJ.tracepad.deleteRing(PAD, hit.ring);
+    padPaint(); padRings();
+    padSay(pending
+      ? "The contour you were drawing is gone. Undo cannot bring it back \\u2014 start it again."
+      : "Contour removed, all of it. " + UJ.tracepad.count(PAD).rings + " left.");
+  }
   function padInsertAt(e){
     if (!PAD_VIEW) return;
     const t = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
     const edge = UJ.tracepad.hitEdge(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
-    if (!edge){ padSay("Nothing there to correct \\u2014 right-click a point to delete it, or a line "
-      + "to put a new point in it.", true); return; }
+    if (!edge){ padSay("Nothing there to correct \\u2014 " + PAD_RIGHT + " a point to delete it, or "
+      + "a line to put a new point in it. " + PAD_MOD + "+click removes a whole contour.",
+      true); return; }
     UJ.tracepad.insertVertex(PAD, edge, t[0], t[1]);
     padPaint(); padRings();
     padSay("Point added to that line \\u2014 drag it where it belongs.");
