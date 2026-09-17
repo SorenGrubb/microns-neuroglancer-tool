@@ -88,7 +88,14 @@ UJ.mesh3d = (function(){
        vertex 400 µm into a volume is 4e5 nm, which is fine, but a mesh frame with a large offset
        puts them at 1e11, where float32 steps in units of 8 µm and a 2 µm neurite becomes a
        staircase. lo/hi stay ABSOLUTE, because that is what a caller reports. */
-    var mid = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
+    /* ONE FRAME FOR SEVERAL MESHES.  2026-09-17
+       `o.frame` is another geometry's {mid, span}, and it exists because a tracing drawn inside its
+       own cell has to be drawn in the CELL'S place, not re-centred into the middle of the picture.
+       Without it every mesh centres on itself and three meshes that are inside one another come out
+       concentric -- which looks plausible and is a lie. Given a frame, this centres on that mid and
+       reports that span, so everything normalises identically. */
+    var mid = (o.frame && o.frame.mid) ? o.frame.mid.slice()
+            : [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
     for (i = 0; i < pos.length; i += 3){
       pos[i] -= mid[0]; pos[i+1] -= mid[1]; pos[i+2] -= mid[2];
     }
@@ -101,7 +108,8 @@ UJ.mesh3d = (function(){
       }
     }
     return { pos: pos, idx: idx, nrm: nrm, lo: lo, hi: hi, mid: mid, centred: true,
-             span: Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) || 1,
+             span: (o.frame && o.frame.span)
+                     || Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) || 1,
              oversize: oversize, vertices: pos.length/3, triangles: Math.floor(idx.length/3) };
   }
 
@@ -204,13 +212,17 @@ UJ.mesh3d = (function(){
      these meshes come from automatic segmentation and their winding is not guaranteed consistent
      -- with culling on, a fragment wound the other way renders as a HOLE, and a hole in a cell is
      precisely what somebody might be looking for. */
+  /* `alpha` is 1.0 for everything this file drew before 2026-09-17 and stays that way unless a
+     caller asks otherwise -- see the `ghosts` option on draw(). The rim term is multiplied by it
+     too: a silhouette at full strength on a 20%-opaque surface reads as a solid outline drawn round
+     a ghost, which is exactly the shape confusion transparency is there to avoid. */
   var FS = [
-    "precision mediump float; varying vec3 vn; uniform vec3 tint;",
+    "precision mediump float; varying vec3 vn; uniform vec3 tint; uniform float alpha;",
     "void main(){ vec3 n = normalize(vn); if (!gl_FrontFacing) n = -n;",
     "  float key  = max(dot(n, normalize(vec3( 0.4, 0.6, 0.8))), 0.0);",
     "  float fill = max(dot(n, normalize(vec3(-0.5,-0.3, 0.4))), 0.0) * 0.35;",
     "  float rim  = pow(1.0 - abs(n.z), 3.0) * 0.35;",
-    "  gl_FragColor = vec4(tint * (0.18 + key * 0.75 + fill) + rim, 1.0); }"
+    "  gl_FragColor = vec4(tint * (0.18 + key * 0.75 + fill) + rim * alpha, alpha); }"
   ].join("\n");
 
   function compile(gl, type, src){
@@ -234,6 +246,9 @@ UJ.mesh3d = (function(){
     if (big && !gl.getExtension("OES_element_index_uint"))
       throw new Error("this cell has " + geo.vertices.toLocaleString() + " vertices and this "
         + "browser cannot index past 65,535 — download the mesh instead");
+    /* Asked for once, here, rather than per geometry: a ghost past 65,535 vertices is the common
+       case (a whole neuron's mesh), and the extension is either present or it is not. */
+    var canBig = big || !!gl.getExtension("OES_element_index_uint");
 
     var prog = gl.createProgram();
     gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
@@ -247,16 +262,51 @@ UJ.mesh3d = (function(){
       var b = gl.createBuffer();
       gl.bindBuffer(target, b); gl.bufferData(target, data, gl.STATIC_DRAW); return b;
     }
-    var pb = buf(geo.pos, gl.ARRAY_BUFFER), nb = buf(geo.nrm, gl.ARRAY_BUFFER);
-    var ib = buf(big ? geo.idx : new Uint16Array(geo.idx), gl.ELEMENT_ARRAY_BUFFER);
+    /* ── SEVERAL MESHES, ONE OF THEM THE SUBJECT ──────────────────────────────────  2026-09-17
+       Søren, on the tracing preview: *"Preferably also with the nucleus and root ID meshes as
+       transparent."* So `o.ghosts` is a list of {geo, tint, alpha} drawn AROUND the main geometry:
+       prepared in its frame (see prepare's `frame` option), drawn after it with blending on and
+       DEPTH WRITES OFF, so a ghost never hides what is inside it and two ghosts never fight over
+       which is in front. Depth TESTING stays on, so the solid subject still occludes the parts of
+       a ghost behind it, which is what makes "inside" legible at all. */
+    function upload(g){
+      var b = g.vertices > 65535;
+      if (b && !canBig) return null;      // this one cannot be indexed; the rest still draw
+      return { pb: buf(g.pos, gl.ARRAY_BUFFER), nb: buf(g.nrm, gl.ARRAY_BUFFER),
+               ib: buf(b ? g.idx : new Uint16Array(g.idx), gl.ELEMENT_ARRAY_BUFFER),
+               n: g.idx.length, big: b };
+    }
     var aP = gl.getAttribLocation(prog, "p"), aN = gl.getAttribLocation(prog, "n");
     gl.enableVertexAttribArray(aP); gl.enableVertexAttribArray(aN);
     var uMvp = gl.getUniformLocation(prog, "mvp"), uMv = gl.getUniformLocation(prog, "mv"),
-        uTint = gl.getUniformLocation(prog, "tint");
+        uTint = gl.getUniformLocation(prog, "tint"),
+        uAlpha = gl.getUniformLocation(prog, "alpha");
+    var MAIN = upload(geo);
+    var GHOSTS = (o.ghosts || []).map(function(g){
+      if (!g || !g.geo || g.geo.empty || !g.geo.idx || !g.geo.idx.length) return null;
+      var d = upload(g.geo);
+      return d ? { d: d, tint: g.tint || null, alpha: (g.alpha === undefined ? 0.22 : g.alpha) } : null;
+    }).filter(Boolean);
     gl.enable(gl.DEPTH_TEST);
+    function drawOne(d, tint, alpha){
+      if (!d) return;
+      gl.uniform3fv(uTint, tint);
+      gl.uniform1f(uAlpha, alpha);
+      gl.bindBuffer(gl.ARRAY_BUFFER, d.pb); gl.vertexAttribPointer(aP, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, d.nb); gl.vertexAttribPointer(aN, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, d.ib);
+      gl.drawElements(gl.TRIANGLES, d.n, d.big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
+    }
 
     var norm = modelScale(1 / (geo.span || 1));
-    var view = { yaw: 0.6, pitch: 0.3, dist: 1.9 };
+    /* A CAMERA THAT SURVIVES A REDRAW.  2026-09-17. Pass an object as `o.view` and it is used and
+       MUTATED in place as the pointer turns the model, so a panel that redraws itself -- the
+       tracing preview does, after every contour -- hands the same object back and keeps the angle.
+       Left out, each panel starts where it always did. */
+    var view = o.view || {};
+    if (view.yaw === undefined) view.yaw = 0.6;
+    if (view.pitch === undefined) view.pitch = 0.3;
+    if (view.dist === undefined) view.dist = 1.9;
     var tint = o.tint || themeTint();
     var bg = o.bg || themeBg();
 
@@ -273,11 +323,15 @@ UJ.mesh3d = (function(){
       var mv = mul(translate(0, 0, -view.dist), mul(rotX(view.pitch), mul(rotY(view.yaw), norm)));
       gl.uniformMatrix4fv(uMvp, false, mul(perspective(0.9, w/h, 0.01, 100), mv));
       gl.uniformMatrix4fv(uMv, false, mv);
-      gl.uniform3fv(uTint, o.tint || themeTint());
-      gl.bindBuffer(gl.ARRAY_BUFFER, pb); gl.vertexAttribPointer(aP, 3, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, nb); gl.vertexAttribPointer(aN, 3, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
-      gl.drawElements(gl.TRIANGLES, geo.idx.length, big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
+      gl.disable(gl.BLEND); gl.depthMask(true);
+      drawOne(MAIN, o.tint || themeTint(), 1);
+      if (GHOSTS.length){
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        GHOSTS.forEach(function(g){ drawOne(g.d, g.tint || themeTint(), g.alpha); });
+        gl.depthMask(true); gl.disable(gl.BLEND);
+      }
     }
 
     var down = null;

@@ -10,9 +10,41 @@ cost more than the change that caused it.
 
 This file replaces all seven for `ujump.html`. It owns three regions and writes each one whole:
 
-  SCRIPTS  the three <script> tags the feature needs
+  SCRIPTS  the <script> tags the feature needs
   CARD     everything from <div class="card" id="tracingCard"> to the end of that card
-  SCRIPT   the pad, the card's wiring, and everything between them
+  SCRIPT   the whole tracing script block: the feature, the pad, the preview and the wiring
+
+── SECOND PASS, LATER THE SAME DAY ───────────────────────────────────────────────────────────
+Søren, having traced a cell and looked at the card:
+
+    *"I think sharing should not be an option, the meshes made should always be a part of the
+    dataset and everybody should be able to use it. Also, other people should be able to add to it
+    or edit it. While editing it, there should also be a window below to show the 3D structure
+    while it is being generated, so the user can get a view of what it looks like. Preferably also
+    with the nucleus and root ID meshes as transparent. Perhaps this should be an option, rather
+    than it loading immediately if it is slow to load."*
+
+Three changes, and the reasoning for each sits next to the code it explains:
+
+  ONE BUTTON. Keep and Share became "Add it to the dataset". Signed out it is kept and QUEUED --
+    tracingFlush() -- because refusing would be the two-button behaviour wearing one button's
+    clothes, and the work would stay on one laptop.
+
+  ANYONE MAY EDIT. A tracing is keyed by its structureId alone now, everywhere: core/tracing.js,
+    backend/Code.gs (backend/src_a_tracing_belongs_to_everyone.py) and this card's own browser,
+    which lists what is in the dataset and opens one back into the pad. Credit accumulates rather
+    than transferring; no version is ever deleted. This REVERSES yesterday's keying, and the
+    docstring of the generator that made it says why that was a misreading of "no consensus".
+
+  THE SHAPE AS IT IS DRAWN. core/traceloft.js lofts the contours, core/nucmesh.js fetches the
+    nucleus's own mesh (the nuclei volume's mesh directory -- measured when the Colab export was
+    written), and core/mesh3d.js grew transparency and a shared frame so three meshes can be drawn
+    in one place. Behind a button, and the ghosts behind a checkbox, because the tracing lofts in a
+    millisecond and a whole neuron's mesh is megabytes.
+
+The region boundaries moved once, with that pass: SCRIPT used to start at the pad, which left the
+feature's own functions -- tracingKeep among them -- owned by no generator at all after the seven
+handed over. It now starts at the feature's header comment.
 
 Each is replaced BY REGION rather than by matching a snippet inside it: find where the region
 starts, find where it ends, put the whole thing there. A re-run is a no-op because the text is
@@ -52,7 +84,9 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SCRIPTS = '''<script src="core/segread.js"></script>
 <script src="core/emtiles.js"></script>
-<script src="core/tracepad.js"></script>'''
+<script src="core/tracepad.js"></script>
+<script src="core/traceloft.js"></script>
+<script src="core/nucmesh.js"></script>'''
 
 CARD = '''<div class="card" id="tracingCard">
 <details id="tracingPanel">
@@ -91,6 +125,18 @@ Afterwards: <b>drag a point</b> to move it, <b>right-click a point</b> to delete
 <button class="idbtn" id="tracePadUse" style="flex:1 1 auto">Use these contours</button>
 <button class="idbtn" id="tracePadClose" style="flex:0 0 auto">Close the pad</button>
 </div>
+<!-- THE SHAPE, WHILE IT IS STILL BEING MADE.  2026-09-17. Søren: "there should also be a window
+     below to show the 3D structure while it is being generated, so the user can get a view of what
+     it looks like. Preferably also with the nucleus and root ID meshes as transparent. Perhaps this
+     should be an option, rather than it loading immediately if it is slow to load." Behind a
+     button for exactly that reason: the tracing itself lofts in a millisecond, but a whole cell's
+     mesh is megabytes and nobody should pay for it per contour. Once open it follows every closed
+     contour. -->
+<div class="row" style="gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+<button class="idbtn" id="tracePad3D" style="flex:1 1 auto" title="Lofts the contours you have drawn into a surface and draws it here. Not the export's surface -- that one is built by filling each section and running marching cubes, and it is smoother; this is the same silhouette, now.">Show it in 3D</button>
+<label style="font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto" title="Fetches the cell's own mesh for the root ID and the nucleus mesh for the nucleus ID, and draws both see-through around your tracing, so you can see where it sits. Megabytes for a whole neuron, which is why it is a choice."><input type="checkbox" id="tracePadGhosts" checked> with the cell and nucleus, see-through</label>
+</div>
+<div id="tracePad3DHost" style="margin-top:6px"></div>
 </div>
 <p class="hint" style="margin-top:6px"><b>There is no polygon tool.</b> Measured 2026-09-17: the MICrONS viewer offers point, bounding box, line and ellipsoid and nothing else; Spelunker adds a <i>polyline</i> that draws on screen but never reaches the link; BrainSharer's polygon tool needs an account and ignores a pasted link. Points are one click per vertex and come back in the order you clicked them, which is why they are what this asks for &mdash; a ring of <b>line</b> annotations is read too, at two clicks a segment.</p>
 <label style="margin-top:10px">Neuroglancer link</label>
@@ -130,18 +176,644 @@ Afterwards: <b>drag a point</b> to move it, <b>right-click a point</b> to delete
 </div>
 </div>
 <p class="hint" id="tracingAtSay" style="margin-top:4px"></p>
+<!-- ONE BUTTON, BECAUSE SHARING IS NOT A CHOICE.  2026-09-17. Søren: "I think sharing should not
+     be an option, the meshes made should always be a part of the dataset and everybody should be
+     able to use it." There were two buttons here, Keep and Share, and the second one was the half
+     that needed a sign-in -- which meant the ordinary path was to press the first and leave the
+     work on one laptop. Now finishing a tracing does both. Signed out it is still kept, and it
+     goes up on its own the moment you sign in; see tracingFlush() for why that is a queue rather
+     than a refusal. -->
 <div class="row" style="gap:8px;margin-top:10px">
-<button class="idbtn" id="tracingKeep" style="flex:1 1 auto">Keep it &mdash; include in the 3D export</button>
-<button class="idbtn" id="tracingShare" style="flex:0 0 auto" title="Posts one row per contour to the shared record, so other people can use this tracing. Needs a Google sign-in.">Share</button>
+<button class="idbtn" id="tracingKeep" style="flex:1 1 auto" title="Adds this tracing to the shared dataset, where anyone can use it and anyone can extend it, and keeps it in this page's own 3D export. Needs a Google sign-in to be attributed — without one it waits here until you sign in.">Add it to the dataset &mdash; and to your 3D export</button>
 </div>
 </div>
 <div id="tracingList" style="margin-top:12px"></div>
+<!-- THE DATASET'S TRACINGS, TO ADD TO.  2026-09-17. Søren: "other people should be able to add to
+     it or edit it." Reading them back is what makes that possible at all: the index costs one
+     sheet scan and opens no files, and only the tracing you choose to open is fetched. -->
+<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+<div class="row" style="gap:8px">
+<button class="idbtn" id="tracingBrowse" style="flex:1 1 auto" title="Every tracing anyone has added, newest version first. Open one and its contours come into the pad, where you can extend it onto more sections or correct a contour; adding it again is its next version, with your name added to its contributors and nothing of the old one deleted.">Show the tracings in the dataset</button>
+</div>
+<div id="tracingShared" style="margin-top:8px"></div>
+</div>
 </details>
 </div>
 </div>
 '''
 
-SCRIPT = '''/* ── THE PAD ─────────────────────────────────────────────────────────────────────  2026-09-17
+SCRIPT = '''/* ── TRACING A CELL THE SEGMENTATION DOES NOT HAVE ──────────────────────────────  2026-09-16
+   Paste a link of contours, keep it, and it rides into the Blender export as an ordinary cell.
+
+   ONE BUTTON, AND IT DOES BOTH HALVES.  2026-09-17. Søren: *"I think sharing should not be an
+   option, the meshes made should always be a part of the dataset and everybody should be able to
+   use it."* There were two -- Keep, which was local, and Share, which needed a sign-in -- and the
+   predictable result was that the easy one got pressed and the work stayed on one laptop.
+
+   THE EXPORT STILL DOES NOT WAIT FOR THE BACKEND, which is why the local half survives: a tracing
+   is written to localStorage first, so the Blender download works signed out, offline, and against
+   a backend nobody has redeployed. The share is attempted immediately after, and if there is no
+   sign-in it is QUEUED rather than refused -- tracingFlush() sends it the moment one appears.
+
+   NO CONSENSUS, AND NO OWNER EITHER. Nothing votes on a tracing; the newest version of it simply
+   is it. But anyone may extend or correct one -- Søren, same message: *"other people should be
+   able to add to it or edit it"* -- so credit accumulates instead of transferring, and no version
+   is ever deleted. */
+const TRACING_KEY="ujump_tracings_v1";
+let TRACINGS_KEPT=[];
+function tracingRead(){
+  try{ const v=JSON.parse(localStorage.getItem(TRACING_KEY)||"[]"); return Array.isArray(v)?v:[]; }
+  catch(_e){ return []; }
+}
+function tracingWrite(list){
+  try{ localStorage.setItem(TRACING_KEY,JSON.stringify(list)); }catch(_e){}
+}
+function tracingSay(msg,bad){
+  const el=document.getElementById("tracingStatus");
+  if(el)el.innerHTML=bad?'<span style="color:var(--bad)">'+escHtml(msg)+'</span>':escHtml(msg);
+}
+/* Held between "Read the contours" and "Keep it", so the name and colour are chosen AFTER seeing
+   what was found rather than before. */
+let TRACING_PENDING=null;
+
+function tracingRenderList(){
+  const host=document.getElementById("tracingList");
+  if(!host)return;
+  if(!TRACINGS_KEPT.length){
+    host.innerHTML='<p class="hint">Nothing traced yet. A kept tracing is included in every '
+      +'Blender download from this page until you remove it.</p>';
+    return;
+  }
+  host.innerHTML='<label>Kept tracings &mdash; these go into the 3D export</label>'
+    +TRACINGS_KEPT.map(function(t,i){
+      const sections=new Set((t.rings||[]).map(function(r){return r.z;})).size;
+      return '<div style="display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);'
+        +'padding:5px 0;font-size:12px">'
+        +'<span style="width:11px;height:11px;border-radius:2px;flex:0 0 auto;background:'
+          +escHtml(t.color||"#3a6b5a")+'"></span>'
+        +'<span style="flex:1 1 auto">'+escHtml(t.name||"traced")
+          +' <span style="opacity:.7">&middot; '+escHtml(t.type||"traced")+'</span></span>'
+        +'<span style="opacity:.7">'+(t.rings||[]).length+' contour'
+          +((t.rings||[]).length===1?"":"s")+' on '+sections+' section'+(sections===1?"":"s")+'</span>'
+        /* A tracing that has not reached the dataset says so HERE, where the tracing is, rather
+           than in a status line that the next action overwrites. */
+        +(t.pending_share
+            ?'<span style="color:var(--warn);font-weight:600" title="Kept here, not in the shared '
+             +'dataset yet. Sign in with Google and it goes up on its own.">waiting for sign-in</span>'
+            :'<span style="opacity:.55" title="In the shared dataset — anyone can open it and add '
+             +'to it.">in the dataset</span>')
+        +'<button class="idbtn tracingdrop" data-n="'+i+'" style="padding:2px 9px;font-size:12px">'
+        +'Remove</button></div>';
+    }).join("");
+  host.querySelectorAll(".tracingdrop").forEach(function(b){
+    b.addEventListener("click",function(){
+      TRACINGS_KEPT.splice(Number(b.dataset.n),1);
+      tracingWrite(TRACINGS_KEPT);tracingRenderList();
+    });
+  });
+}
+
+function tracingReadLink(){
+  const link=document.getElementById("tracingLink").value;
+  const layer=(document.getElementById("tracingLayer").value||"").trim();
+  document.getElementById("tracingFound").style.display="none";
+  TRACING_PENDING=null;
+  const r=UJ.tracing.ringsFromLink(link,layer||null);
+  if(!r.ok){tracingSay(r.error,true);return;}
+  /* The whole paste is ONE structure unless the viewer said otherwise with a Volume. Somebody
+     outlining one cell in one layer means one cell; a structure per contour is never wanted. */
+  const rings=r.rings;
+  const sections=new Set(rings.map(function(x){return x.z;}));
+  const named=(r.structures.find(function(s){return s.name;})||{}).name||"";
+  TRACING_PENDING={rings:rings};
+  if(named)document.getElementById("tracingName").value=named;
+  const zs=Array.from(sections).sort(function(a,b){return a-b;});
+  const gaps=zs.length>1?Math.round((zs[zs.length-1]-zs[0])/(zs.length-1)):0;
+  /* WHICH SHAPE IT READ, in words. The same link is organelle markers to the bulk card and a
+     contour to this one -- the box it is pasted into is what decides -- so saying "from 36 points"
+     rather than just "3 contours" makes pasting the wrong link into the wrong box visible. */
+  const fromWhat={points:"from "+r.seen.points+" points",lines:"from line annotations",
+                  polygons:"from polygons",volume:"from a traced volume"};
+  const src=fromWhat[(r.structures[0]||{}).from||""]||"";
+  tracingSay(rings.length+" contour"+(rings.length===1?"":"s")+(src?" "+src:"")+" on "+sections.size
+    +" section"+(sections.size===1?"":"s")+", z "+zs[0]+"\\u2013"+zs[zs.length-1]
+    +(gaps?" (about every "+gaps+" section"+(gaps===1?"":"s")+")":"")
+    +(r.seen.mixedZ?" \\u2014 "+r.seen.mixedZ+" contour(s) span more than one section, which is "
+      +"usually a stray point":""));
+  if(sections.size<2){
+    tracingSay("Only one section has a contour on it. A flat outline has no surface to close \\u2014 "
+      +"outline the cell on at least two sections.",true);
+    return;
+  }
+  document.getElementById("tracingFound").style.display="";
+}
+
+/* What the dropdown means, in one place: the value that travels with the tracing and the label
+   a person reads. "__cell" and "__nucleus" are this card's own, everything else is the ontology's
+   own value, and "__other" is the only one that takes its name from a text box. */
+function tracingWhat(){
+  const sel=document.getElementById("tracingWhat");
+  const v=sel?sel.value:"__other";
+  if(v==="__cell")return {kind:"cell",name:"Whole cell"};
+  if(v==="__nucleus")return {kind:"nucleus",name:"Nucleus"};
+  if(v==="__other"){
+    const typed=(document.getElementById("tracingName").value||"").trim();
+    return {kind:"other",name:typed};
+  }
+  /* The label from whichever vocabulary this page carries. µJump defines its own
+     ORGANELLE_KIND_BY_VALUE in core/ontology.js and leaves UJ.organelleData unset, so
+     UJ.organelles.labelOf() would hand back the raw value -- "nucleoplasmic_reticulum_2" where the
+     dropdown says "Nucleoplasmic reticulum type II". Asked of the page first, the module second,
+     so this works on a tool that has either. */
+  const k=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined")?ORGANELLE_KIND_BY_VALUE[v]:null;
+  return {kind:v,name:(k&&k.label)||UJ.organelles.labelOf(v)};
+}
+
+function tracingCurrent(){
+  if(!TRACING_PENDING)return null;
+  const w=tracingWhat();
+  const name=w.name;
+  if(!name){tracingSay("Type what it is, or pick it from the list \\u2014 the name becomes the "
+    +"object's name in Blender.",true);
+    document.getElementById("tracingName").focus();return null;}
+  const t={name:name,kind:w.kind,type:document.getElementById("tracingType").value||"traced",
+           color:document.getElementById("tracingColor").value||"#3a6b5a",
+           traced_by:(typeof REPORTER_NAME!=="undefined"&&REPORTER_NAME)||"",
+           rings:TRACING_PENDING.rings};
+  const nid=(document.getElementById("tracingNucId").value||"").trim();
+  if(nid)t.nucleus_id=nid;
+  const rid=(document.getElementById("tracingRootId").value||"").trim();
+  if(rid)t.root_id=rid;
+  /* A STABLE ID, ASSIGNED ONCE.  2026-09-17
+     Keep and Share have to be talking about the same structure, and a second Share after tracing
+     more sections has to be a new VERSION of this cell rather than a rival to it -- that is what
+     the backend's (structureId, reporterEmail, groupId) versioning keys on. Frozen on
+     TRACING_PENDING the first time this function gets as far as a name, so renaming afterwards
+     renames the same structure instead of forking it.
+
+     Reusing a kept tracing's id when the names match is the working pattern: paste a link covering
+     more of the cell you already outlined, same name, share, and the older version is superseded
+     rather than duplicated. */
+  if(!TRACING_PENDING.id){
+    const prior=(TRACINGS_KEPT||[]).filter(function(x){return x&&x.id&&x.name===name;})[0];
+    TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(name);
+  }
+  t.id=TRACING_PENDING.id;
+  return t;
+}
+
+/* ── SOMEWHERE TO GO AND DRAW ────────────────────────────────────────────────────  2026-09-17
+   Søren: "I don't see any link to a neuroglancer instance anywhere where I can go and use the
+   polygon tool to trace a cell." There wasn't one, and the tool the card named does not exist in
+   any viewer a link can reach -- see src/a_viewer_to_trace_in.py for what was measured.
+
+   Same state buildState() gives the jump arrow -- his viewer, his layer ticks, this coordinate --
+   plus an empty annotation layer with the line tool live. */
+/* Where the viewer opens: the card's own boxes, or the cell on screen if they are empty.
+
+   HALF-FILLED IS AN ERROR. Two of three means he is mid-type; falling back to CUR_POS there opens
+   a viewer somewhere else that looks exactly like a viewer in the right place, and he finds out two
+   sections into a tracing. All three, or none. */
+function tracingPos(){
+  const val=function(id){const el=document.getElementById(id);return el?String(el.value||"").trim():"";};
+  const raw=[val("tracingX"),val("tracingY"),val("tracingZ")];
+  const given=raw.filter(function(s){return s!=="";}).length;
+  if(given===3){
+    const p=raw.map(Number);
+    if(!p.every(function(n){return isFinite(n);}))
+      return {error:"That coordinate has something in it that is not a number."};
+    return {pos:p.map(Math.round)};
+  }
+  if(given>0)return {error:"All three of x, y and z, or leave them empty to use the cell on screen."};
+  if(window.CUR_POS&&window.CUR_POS.length===3)return {pos:window.CUR_POS.slice()};
+  return {error:"Type a coordinate above, or search a cell first \\u2014 the viewer has to open somewhere."};
+}
+
+/* Pre-fill from the cell on screen, but only when nothing has been typed, so it never overwrites
+   him. Runs on load and every time the card is opened, because he may search a cell after opening
+   it and the boxes should follow. */
+function tracingFillPos(){
+  const ids=["tracingX","tracingY","tracingZ"];
+  const els=ids.map(function(i){return document.getElementById(i);});
+  if(els.some(function(e){return !e;}))return;
+  if(els.some(function(e){return String(e.value||"").trim()!=="";}))return;
+  if(!(window.CUR_POS&&window.CUR_POS.length===3))return;
+  els.forEach(function(e,i){e.value=window.CUR_POS[i];});
+}
+
+function tracingOpen(){
+  const got=tracingPos();
+  if(got.error){tracingSay(got.error,true);return;}
+  const pos=got.pos;
+  let st;
+  try{st=buildState(pos);}catch(e){tracingSay("Could not build a viewer link: "+String(e&&e.message||e),true);return;}
+  /* The Cortical layers bands are `line` annotations in a local annotation layer, so leaving them
+     on the link he traces over means ringsFromLink() chains them in with his contours into rings
+     that span the dataset. They are also a thick grid over the picture he is trying to draw on. */
+  st.layers=(st.layers||[]).filter(function(l){
+    return !(l&&l.type==="annotation"&&/cortical layers/i.test(String(l.name||"")));});
+  st.layers=st.layers.filter(function(l){return !(l&&l.type==="annotation"&&l.name==="tracing");});
+  /* annotatePoint, not annotateLine: no viewer a link can reach has a polygon tool (measured
+     2026-09-17 -- the MICrONS viewer has four tools and Spelunker's polyline never serialises), and
+     of what is left the point tool is one ctrl+click per vertex against the line tool's two, with
+     the clicks stored in order. core/tracing.js reads either. */
+  st.layers.push({type:"annotation",source:"local://annotations",tool:"annotatePoint",
+                  tab:"annotations",name:"tracing",annotations:[]});
+  st.selectedLayer={layer:"tracing",visible:true};
+  st.layout="xy";   // tracing happens on sections; the 3D pane only takes the width
+  const viewerEl=document.getElementById("viewer");
+  const base=(viewerEl&&viewerEl.value)||"https://spelunker.cave-explorer.org/";
+  window.open(base+"#!"+encodeURIComponent(JSON.stringify(st)),"_blank","noopener");
+  tracingSay("Viewer opened at "+pos.join(", ")+", on a layer called \\u201ctracing\\u201d with the point "
+    +"tool live. Ctrl+click round the cell, one click per vertex; , and . step a section. There is no "
+    +"polygon tool in any viewer a link can reach \\u2014 points are the fast way. Paste the address bar back here.");
+}
+
+/* ── ADDING A TRACING IS SHARING IT ─────────────────────────────────────────────  2026-09-17
+   One button. The tracing is kept in this page -- so the 3D export works signed out and with no
+   backend at all -- and posted to the shared record in the same press.
+
+   SIGNED OUT IT QUEUES, IT DOES NOT REFUSE. Attribution needs a verified Google identity, and
+   stopping there would be the old two-button behaviour wearing one button's clothes. So it is kept
+   with `pending_share` on it, the list says so, and tracingFlush() sends it as soon as a sign-in
+   appears. */
+function tracingKeep(){
+  const t=tracingCurrent();
+  if(!t)return;
+  // Keeping the same tracing twice used to put the cell in the Blender scene twice.
+  const at=TRACINGS_KEPT.findIndex(function(x){return x&&x.id&&x.id===t.id;});
+  const prior=at>=0?TRACINGS_KEPT[at]:null;
+  if(prior&&prior.shared_at)t.shared_at=prior.shared_at;
+  t.pending_share=true;
+  if(at>=0)TRACINGS_KEPT.splice(at,1,t); else TRACINGS_KEPT.push(t);
+  tracingWrite(TRACINGS_KEPT);
+  TRACING_PENDING=null;
+  document.getElementById("tracingFound").style.display="none";
+  document.getElementById("tracingLink").value="";
+  const sent=tracingPublish(t);
+  tracingRenderList();
+  tracingSay(sent
+    ?'\\u201c'+t.name+'\\u201d is in the dataset and in this page\\u2019s 3D export. Anybody can open '
+     +'it from the list at the bottom of this card and add to it \\u2014 that becomes its next '
+     +'version, with their name beside yours, and nothing of this one is deleted.'
+    :'\\u201c'+t.name+'\\u201d is kept here and in your 3D export. It has NOT reached the dataset yet '
+     +'\\u2014 sign in with Google (the account button, top right) and it goes up on its own.');
+  tracingFlushSoon();
+}
+
+/* Returns whether it went. `quiet` is for the automatic flush, which must not fire a sign-in
+   prompt at somebody who did not just press anything. */
+function tracingPublish(t,quiet){
+  if(!t||!t.rings||!t.rings.length)return false;
+  const signedIn=(typeof GOOGLE_VERIFIED!=="undefined"&&GOOGLE_VERIFIED)
+                &&(typeof GOOGLE_CREDENTIAL!=="undefined"&&GOOGLE_CREDENTIAL);
+  if(!signedIn){
+    if(!quiet&&typeof reportGateBlock==="function")reportGateBlock();   // offers the prompt itself
+    return false;
+  }
+  /* ONE POST FOR THE WHOLE TRACING.  2026-09-17
+     The geometry no longer goes into the sheet -- the backend writes it to a JSON file in Drive and
+     keeps one index row -- so a share is one submission carrying every contour, where it used to be
+     one POST per contour. groupId names this act of sharing: it is half of the key the backend
+     versions on, and it is in the file's name. */
+  const gid="trace_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7);
+  const sub=UJ.tracing.toSubmission(t.rings,{structureId:t.id,name:t.name,kind:t.kind||"",
+                                             cellType:t.type,color:t.color,
+                                             nucleusId:t.nucleus_id||"",rootId:t.root_id||""});
+  if(!sub.contours.length)return false;
+  const ok=postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid},sub),
+                      "Tracing added to the dataset \\u2014 thank you.");
+  if(ok===false)return false;
+  t.pending_share=false;
+  t.shared_at=new Date().toISOString();
+  tracingWrite(TRACINGS_KEPT);
+  return true;
+}
+
+var TRACING_FLUSH_TIMER=null;
+function tracingPendingCount(){
+  return (TRACINGS_KEPT||[]).filter(function(t){return t&&t.pending_share;}).length;
+}
+function tracingFlush(){
+  if(!tracingPendingCount())return 0;
+  var n=0;
+  TRACINGS_KEPT.forEach(function(t){ if(t&&t.pending_share&&tracingPublish(t,true))n++; });
+  if(n){ tracingWrite(TRACINGS_KEPT); tracingRenderList();
+         tracingSay(n+" tracing"+(n===1?"":"s")+" went into the dataset now that you are signed in."); }
+  return n;
+}
+/* POLLED, RATHER THAN HOOKED ONTO THE SIGN-IN. A credential arrives in this file from at least
+   three places -- Google One Tap, the account chip's own flow, and a token restored on load -- and
+   none of them is one event a card can listen to. The timer exists only while something is waiting
+   and stops itself the moment nothing is, so signed in with an empty queue it never runs at all. */
+function tracingFlushSoon(){
+  if(TRACING_FLUSH_TIMER)return;
+  TRACING_FLUSH_TIMER=setInterval(function(){
+    if(!tracingPendingCount()){clearInterval(TRACING_FLUSH_TIMER);TRACING_FLUSH_TIMER=null;return;}
+    tracingFlush();
+  },4000);
+}
+/* ── THE SHAPE, WHILE IT IS STILL BEING MADE ────────────────────────────────────  2026-09-17
+   Søren: *"there should also be a window below to show the 3D structure while it is being
+   generated, so the user can get a view of what it looks like. Preferably also with the nucleus and
+   root ID meshes as transparent. Perhaps this should be an option, rather than it loading
+   immediately if it is slow to load."*
+
+   Three things, and they cost wildly different amounts, which is why they are wired differently:
+
+     THE TRACING is lofted by core/traceloft.js -- a millisecond for a forty-section cell -- so it
+     is redrawn after every contour, with no ceremony and no asking.
+
+     THE GHOSTS (the cell's own mesh for the root ID, the nucleus's for the nucleus ID) are
+     megabytes over the network. They are fetched ONCE per (root, nucleus) pair, kept, and reused
+     for every redraw after that; the checkbox turns them off for anyone who does not want to pay
+     for them at all. This is the "perhaps this should be an option" he asked for, and the whole
+     panel is behind a button for the same reason.
+
+   IT IS NOT THE EXPORT'S SURFACE, and the panel says so. trace_mesh.py fills each section under the
+   even-odd rule and marches cubes over the blend, so it treats a contour inside another as a hole
+   and smooths across a skipped section. This lofts. On one closed outline per section -- which is
+   what tracing a cell looks like -- they agree about the silhouette and differ in smoothness. */
+var PAD3D_ON = false, PAD3D_BUSY = false, PAD3D_AT = 0, PAD3D_SOON = null;
+var PAD3D_MESHES = null, PAD3D_KEY = "", PAD3D_NOTE = "";
+/* The camera, kept across redraws. Without this, closing a contour snapped the view back to its
+   starting angle -- which is exactly the moment somebody has just turned the cell to look at the
+   part they are drawing. core/mesh3d.js mutates this object as the pointer drags it, so handing the
+   same one back is all it takes. */
+var PAD3D_VIEW = { yaw: 0.6, pitch: 0.3, dist: 1.9 };
+
+function pad3DHost(){ return document.getElementById("tracePad3DHost"); }
+
+/* The contours in hand: the pad's, or a tracing read from a pasted link if the pad is not the way
+   it was made. */
+function pad3DRings(){
+  if (PAD && PAD.rings && PAD.rings.length) return UJ.tracepad.toRings(PAD);
+  if (TRACING_PENDING && TRACING_PENDING.rings) return TRACING_PENDING.rings;
+  return [];
+}
+
+/* A WebGL context per redraw would be a context leak with a browser-enforced limit -- "too many
+   active WebGL contexts: oldest context will be lost" is a real message, and the oldest context on
+   this page belongs to somebody's cell panel. Asking a canvas for its context again returns the
+   SAME one, so this reaches the outgoing panel's context without the renderer having to hand it
+   out. */
+function pad3DRelease(){
+  const h = pad3DHost(); if (!h) return;
+  const cv = h.querySelector("canvas"); if (!cv) return;
+  try {
+    const gl = cv.getContext("webgl") || cv.getContext("experimental-webgl");
+    const e = gl && gl.getExtension("WEBGL_lose_context");
+    if (e) e.loseContext();
+  } catch (_e){}
+}
+
+function pad3DIds(){
+  const nuc = (document.getElementById("tracingNucId").value || "").trim();
+  const root = (document.getElementById("tracingRootId").value || "").trim();
+  return { nuc: nuc, root: root, key: root + "|" + nuc };
+}
+
+/* Fetched once per pair of ids and kept. Neither failure is fatal: a cell with no mesh and a
+   nucleus with none are both ordinary -- tracing is what you do when the segmentation has missed
+   something -- so each is reported in the note and the rest still draws. */
+async function pad3DGhostMeshes(){
+  const ids = pad3DIds();
+  if (PAD3D_MESHES && PAD3D_KEY === ids.key) return PAD3D_MESHES;
+  const out = [], notes = [];
+  if (ids.root && ids.root !== "0" && typeof MeshDL !== "undefined" && MeshDL.fetchCombinedMesh){
+    try {
+      const m = await MeshDL.fetchCombinedMesh(ids.root, function(f, msg){
+        pad3DNote("fetching the cell’s mesh… " + (msg || Math.round((f || 0) * 100) + "%"));
+      });
+      if (m && m.positions && m.positions.length) out.push({ what: "cell", mesh: m });
+      else notes.push("the cell has no mesh to draw");
+    } catch (e){ notes.push("the cell’s mesh could not be read: " + String(e && e.message || e)); }
+  }
+  if (ids.nuc && UJ.nucmesh){
+    try {
+      if (!UJ.nucmesh.configured()) UJ.nucmesh.configure({ nuc: SRC.nuc });
+      pad3DNote("fetching the nucleus’ mesh…");
+      const n = await UJ.nucmesh.fetchNucleus(ids.nuc);
+      if (n && n.positions.length) out.push({ what: "nucleus", mesh: n });
+      else notes.push("nucleus " + ids.nuc + " has no mesh in the nuclei volume");
+    } catch (e){ notes.push("the nucleus mesh could not be read: " + String(e && e.message || e)); }
+  }
+  PAD3D_MESHES = out; PAD3D_KEY = ids.key; PAD3D_NOTE = notes.join("; ");
+  return out;
+}
+
+function pad3DNote(msg){
+  const h = pad3DHost();
+  if (h) h.innerHTML = '<p class="hint">' + escHtml(msg) + "</p>";
+}
+
+async function pad3DDraw(){
+  if (!PAD3D_ON || PAD3D_BUSY) return;
+  const host = pad3DHost(); if (!host) return;
+  const rings = pad3DRings();
+  if (!rings.length){
+    pad3DNote("Close a contour and the shape appears here.");
+    return;
+  }
+  PAD3D_BUSY = true;
+  try {
+    const res = (window.UJ && UJ.cfg && UJ.cfg.res) || [4, 4, 40];
+    const g = UJ.traceloft.loft(rings, res);
+    let ghosts = [];
+    const wantGhosts = !!(document.getElementById("tracePadGhosts") || {}).checked;
+    if (wantGhosts) ghosts = await pad3DGhostMeshes();
+
+    /* ONE FRAME FOR ALL THREE, centred on the tracing. A cell mesh is tens of micrometres and a
+       tracing is a few, so letting each centre on itself would draw them concentric -- which looks
+       right and is a lie about where the tracing sits in the cell. The span is opened out when
+       there are ghosts so the surroundings are visible rather than filling the view; the tracing is
+       still the subject, and the wheel does the rest. */
+    const first = UJ.mesh3d.prepare(g.positions, g.indices, { unitNm: 1 });
+    if (first.empty){ pad3DNote("Nothing to draw yet."); PAD3D_BUSY = false; return; }
+    const frame = { mid: first.mid, span: first.span * (ghosts.length ? 2.5 : 1) };
+    const geo = UJ.mesh3d.prepare(g.positions, g.indices, { unitNm: 1, frame: frame });
+    const drawn = ghosts.map(function(x){
+      return { geo: UJ.mesh3d.prepare(x.mesh.positions, x.mesh.indices,
+                                      { unitNm: 1000, frame: frame }),
+               /* The cell fainter than the nucleus: it is the larger surface and the one you are
+                  most often looking THROUGH. */
+               alpha: x.what === "cell" ? 0.14 : 0.3,
+               tint: x.what === "cell" ? [0.55, 0.62, 0.78] : [0.85, 0.62, 0.45] };
+    });
+    pad3DRelease();
+    const um = [0, 1, 2].map(function(i){ return (first.hi[i] - first.lo[i]) / 1000; });
+    let lead = "<b>A preview, not the export’s surface.</b> <span class='hint'>The contours "
+      + "lofted section to section — " + g.contours + " contour" + (g.contours === 1 ? "" : "s")
+      + " on " + g.sections + " section" + (g.sections === 1 ? "" : "s") + ", "
+      + um.map(function(v){ return v.toFixed(1); }).join(" × ") + " µm. The Blender export "
+      + "fills each section and marches cubes over the stack, which is smoother and treats a "
+      + "contour drawn inside another as a hole.</span>";
+    if (g.flat)
+      lead += "<br><span class='hint'>One section only, so this is a flat outline. Step with "
+        + "<b>,</b> or <b>.</b> and go round again to give it a shape.</span>";
+    if (drawn.length)
+      lead += "<br><span class='hint'>See-through around it: "
+        + drawn.map(function(d, i){ return ghosts[i].what; }).join(" and ") + ".</span>";
+    if (PAD3D_NOTE && wantGhosts)
+      lead += "<br><span class='hint'>" + escHtml(PAD3D_NOTE) + ".</span>";
+    UJ.mesh3d.show(host, geo, { lead: lead, ghosts: drawn, view: PAD3D_VIEW,
+                                emptyMessage: "Nothing to draw yet." });
+  } catch (e){
+    pad3DNote("Could not build the preview: " + String(e && e.message || e));
+  }
+  PAD3D_BUSY = false;
+}
+
+/* Coalesced. Closing a contour, deleting one and dragging a point all ask for a redraw, and a drag
+   asks on every frame of it; rebuilding the whole loft each time would make the pad stutter on the
+   one gesture that has to stay smooth. */
+function pad3DSoon(){
+  if (!PAD3D_ON) return;
+  if (PAD3D_SOON) return;
+  const wait = Math.max(0, 250 - (Date.now() - PAD3D_AT));
+  PAD3D_SOON = setTimeout(function(){
+    PAD3D_SOON = null; PAD3D_AT = Date.now(); pad3DDraw();
+  }, wait);
+}
+
+/* ── THE DATASET'S TRACINGS, AND ADDING TO ONE ──────────────────────────────────  2026-09-17
+   Søren: *"other people should be able to add to it or edit it."*
+
+   The index is one sheet scan on the backend and opens no Drive files, so listing is cheap enough
+   to do on a button press; only the tracing you choose to open is fetched. Opening one puts its
+   contours in the pad as ordinary contours -- every one of them movable, deletable, extendable,
+   because they are the same kind of thing the pad makes -- and keeps its structureId, so adding it
+   again is the NEXT VERSION of that tracing rather than a rival to it. Nothing is overwritten: the
+   older file and the older row both stay. */
+var TRACING_SHARED = [], PAD_EDIT_ID = "";
+
+async function tracingBrowse(){
+  const host = document.getElementById("tracingShared");
+  if (!host) return;
+  if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT){
+    host.innerHTML = '<p class="hint">This page has no backend configured, so there is nothing to '
+      + "read yet.</p>";
+    return;
+  }
+  host.innerHTML = '<p class="hint">Reading the dataset’s tracings…</p>';
+  try {
+    const r = await fetch(REPORT_ENDPOINT + "?tracings=1");
+    const d = await r.json();
+    TRACING_SHARED = (d && d.tracings) || [];
+    tracingRenderShared();
+  } catch (e){
+    host.innerHTML = '<p class="hint" style="color:var(--bad)">Could not read them: '
+      + escHtml(String(e && e.message || e)) + ". If the backend has not been redeployed since "
+      + "2026-09-17 it does not answer this question yet.</p>";
+  }
+}
+
+function tracingRenderShared(){
+  const host = document.getElementById("tracingShared");
+  if (!host) return;
+  if (!TRACING_SHARED.length){
+    host.innerHTML = '<p class="hint">Nothing has been traced into the dataset yet. Yours would be '
+      + "the first.</p>";
+    return;
+  }
+  /* Newest first: the one somebody is working on now is the one most likely to be wanted. */
+  const list = TRACING_SHARED.slice().sort(function(a, b){
+    return String(b.timestamp || "").localeCompare(String(a.timestamp || ""));
+  });
+  host.innerHTML = '<label>In the dataset — open one to add to it or correct it</label>'
+    + list.map(function(t, i){
+        const who = (t.contributors && t.contributors.length) ? t.contributors.join(", ")
+                                                              : (t.tracedBy || "");
+        return '<div style="display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);'
+          + 'padding:5px 0;font-size:12px;flex-wrap:wrap">'
+          + '<span style="width:11px;height:11px;border-radius:2px;flex:0 0 auto;background:'
+            + escHtml(t.color || "#3a6b5a") + '"></span>'
+          + '<span style="flex:1 1 160px;min-width:0">' + escHtml(t.name || t.structureId)
+            + (t.cellType ? ' <span style="opacity:.7">&middot; ' + escHtml(t.cellType) + '</span>' : "")
+            + '</span>'
+          + '<span style="opacity:.7;flex:0 0 auto">' + (t.contours || 0) + " contour"
+            + ((t.contours === 1) ? "" : "s") + " on " + (t.sections || 0) + " section"
+            + ((t.sections === 1) ? "" : "s") + '</span>'
+          + '<span style="opacity:.7;flex:1 1 140px;min-width:0" title="Everyone who has added a '
+            + 'version of this tracing, in the order they first did.">' + escHtml(who)
+            + ((t.versions > 1) ? " &middot; v" + t.versions : "") + '</span>'
+          + '<button class="idbtn tracingopen" data-sid="' + escHtml(t.structureId) + '" '
+            + 'style="padding:2px 9px;font-size:12px;flex:0 0 auto">Open it in the pad</button>'
+          + (t.fileUrl ? ' <a href="' + escHtml(t.fileUrl) + '" target="_blank" rel="noopener" '
+              + 'style="font-size:12px;opacity:.7" title="The tracing’s own file in Drive">file</a>' : "")
+          + '</div>';
+      }).join("");
+  [].slice.call(host.querySelectorAll(".tracingopen")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingOpenShared(b.dataset.sid, b); });
+  });
+}
+
+async function tracingOpenShared(sid, btn){
+  const label = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "opening…"; }
+  try {
+    const r = await fetch(REPORT_ENDPOINT + "?tracings=1&structureId=" + encodeURIComponent(sid));
+    const d = await r.json();
+    const t = ((d && d.tracings) || [])[0];
+    if (!t) throw new Error("the dataset has no tracing with that id any more");
+    if (t.error) throw new Error(t.error);
+    const st = UJ.tracing.rowsToStructures(t.rows || [])[0];
+    if (!st || !st.rings.length) throw new Error("that tracing came back with no contours on it");
+
+    if (!UJ.emtiles.configured())
+      UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
+    PAD = UJ.tracepad.create();
+    PAD.rings = st.rings.map(function(r){
+      return { z: Math.round(r.z),
+               points: r.points.map(function(p){ return [Math.round(p[0]), Math.round(p[1])]; }) };
+    });
+    PAD.z = PAD.rings[0].z;
+    /* Opened ON the first contour, not at whatever coordinate was in the boxes: the whole point of
+       opening somebody's tracing is to see it. */
+    const p0 = PAD.rings[0].points;
+    let cx = 0, cy = 0;
+    p0.forEach(function(p){ cx += p[0]; cy += p[1]; });
+    PAD_CENTRE = [Math.round(cx / p0.length), Math.round(cy / p0.length), PAD.z];
+    PAD_VIEW = null; PAD_PAINTING = false;
+    document.getElementById("tracePadWrap").style.display = "";
+    padDraw();
+
+    /* The identity travels with it, so adding a version does not quietly drop the cell type or the
+       ids somebody else filled in. */
+    PAD_EDIT_ID = st.structureId;
+    TRACING_PENDING = { rings: UJ.tracepad.toRings(PAD), id: st.structureId };
+    const what = document.getElementById("tracingWhat");
+    if (what){
+      const has = [].slice.call(what.options).some(function(o){ return o.value === st.kind; });
+      what.value = (st.kind && has) ? st.kind : (st.kind ? "__other" : "__cell");
+      document.getElementById("tracingNameRow").style.display =
+        (what.value === "__other") ? "" : "none";
+      if (what.value === "__other") document.getElementById("tracingName").value = st.name || "";
+    }
+    if (st.color) document.getElementById("tracingColor").value = st.color;
+    if (st.nucleusId) document.getElementById("tracingNucId").value = st.nucleusId;
+    if (st.rootId) document.getElementById("tracingRootId").value = st.rootId;
+    const typeSel = document.getElementById("tracingType");
+    if (typeSel && st.cellType){
+      const opt = [].slice.call(typeSel.options).filter(function(o){ return o.value === st.cellType; })[0];
+      if (opt){ typeSel.value = st.cellType; TRACING_TYPE_TOUCHED = true; }
+    }
+    document.getElementById("tracingFound").style.display = "";
+    const who = (t.contributors && t.contributors.length) ? t.contributors.join(", ")
+                                                          : (t.tracedBy || "somebody");
+    tracingSay("“" + (st.name || st.structureId) + "” is in the pad — "
+      + st.rings.length + " contour" + (st.rings.length === 1 ? "" : "s") + " by " + who + ", "
+      + "version " + (t.versions || 1) + ". Every point can be moved, deleted or added to, and "
+      + ", and . step between the sections it was drawn on. Press “Use these contours” and "
+      + "then add it again to make your version the current one — nothing of theirs is deleted.");
+    if (PAD3D_ON){ PAD3D_MESHES = null; pad3DSoon(); }
+  } catch (e){
+    tracingSay("Could not open that tracing: " + String(e && e.message || e), true);
+  }
+  if (btn){ btn.disabled = false; btn.textContent = label; }
+}
+
+/* ── THE PAD ─────────────────────────────────────────────────────────────────────  2026-09-17
    Søren: "A polygon tool is much easier for the user. Can you try to implement it?" There is none
    to borrow -- see src/a_polygon_tool_of_our_own.py for what was measured -- so the section is
    drawn here and the tool put on it. core/tracepad.js holds the state and knows nothing about the
@@ -255,6 +927,9 @@ var PAD_PAINTING = false;
    mean "Undo until it is gone" -- that is the difference between correcting a tracing and starting
    it again. */
 function padRings(){
+  /* The preview follows the contours from here: this is called after every close, every delete and
+     every reload of a section, which is every way the set of rings can change. */
+  pad3DSoon();
   const box = document.getElementById("tracePadRings");
   if (!box || !PAD) return;
   const here = UJ.tracepad.onSection(PAD);
@@ -300,6 +975,10 @@ function padOpen(){
   PAD.z = got.pos[2];
   PAD_CENTRE = got.pos.slice();
   PAD_VIEW = null; PAD_PAINTING = false;
+  /* A FRESH PAD IS A FRESH STRUCTURE. Opening the pad after editing somebody's tracing must not
+     leave its id attached, or the next cell you draw would be filed as the next version of theirs.
+     The ghosts go too: they belong to the ids that were in the boxes. */
+  PAD_EDIT_ID = ""; TRACING_PENDING = null; PAD3D_MESHES = null; PAD3D_KEY = "";
   document.getElementById("tracePadWrap").style.display = "";
   padDraw();
   tracingResolveAt(got.pos);
@@ -446,7 +1125,20 @@ async function tracingResolveAt(pos){
   });
   document.getElementById("tracePadClose").addEventListener("click", function(){
     document.getElementById("tracePadWrap").style.display = "none";
+    /* The panel goes with the pad, and its context is handed back rather than left for the browser
+       to reclaim when it runs out. */
+    pad3DRelease(); PAD3D_ON = false;
+    const h3 = document.getElementById("tracePad3DHost"); if (h3) h3.innerHTML = "";
   });
+  const p3 = document.getElementById("tracePad3D");
+  if (p3) p3.addEventListener("click", function(){
+    PAD3D_ON = !PAD3D_ON;
+    p3.textContent = PAD3D_ON ? "Hide the 3D view" : "Show it in 3D";
+    if (PAD3D_ON){ PAD3D_AT = 0; pad3DDraw(); }
+    else { pad3DRelease(); const h = pad3DHost(); if (h) h.innerHTML = ""; }
+  });
+  const pg = document.getElementById("tracePadGhosts");
+  if (pg) pg.addEventListener("change", function(){ PAD3D_AT = 0; pad3DDraw(); });
   document.getElementById("tracePadUse").addEventListener("click", function(){
     const rings = UJ.tracepad.toRings(PAD);
     const sections = new Set(rings.map(function(r){ return r.z; }));
@@ -455,7 +1147,10 @@ async function tracingResolveAt(pos){
         + "close. Step with , and . and go round again.", true);
       return;
     }
-    TRACING_PENDING = { rings: rings };
+    /* THE ID SURVIVES THE PAD. Editing a tracing opened from the dataset and pressing this must
+       produce the NEXT VERSION of it, not a rival; PAD_EDIT_ID is set by tracingOpenShared() and
+       cleared by padOpen(), so a pad opened fresh carries nothing. */
+    TRACING_PENDING = { rings: rings, id: PAD_EDIT_ID || undefined };
     document.getElementById("tracingFound").style.display = "";
     tracingSay(rings.length + " contour" + (rings.length === 1 ? "" : "s") + " from the pad on "
       + sections.size + " sections. Name it below and keep it.");
@@ -509,7 +1204,8 @@ async function tracingResolveAt(pos){
     if (dragging){
       const wasDrag = moved;
       dragging = null;
-      if (wasDrag){ padPaint(); padSay("Point moved. Right-click a point to delete it, or a line "
+      if (wasDrag){ padPaint(); pad3DSoon();
+        padSay("Point moved. Right-click a point to delete it, or a line "
         + "to put a new point in the middle of it."); return; }
       /* Pressed and released on a vertex without moving: not a drag, and not a new vertex either --
          a click there means the first vertex when one is being drawn, and nothing otherwise. */
@@ -661,7 +1357,12 @@ async function tracingResolveAt(pos){
   if(tPanel)tPanel.addEventListener("toggle",tracingFillPos);
   tracingFillPos();
   document.getElementById("tracingKeep").addEventListener("click",tracingKeep);
-  document.getElementById("tracingShare").addEventListener("click",tracingShare);
+  /* THERE IS NO SHARE BUTTON ANY MORE. Søren, 2026-09-17: "I think sharing should not be an option,
+     the meshes made should always be a part of the dataset." tracingKeep() does both halves. */
+  const browse=document.getElementById("tracingBrowse");
+  if(browse)browse.addEventListener("click",function(){tracingBrowse();});
+  /* Anything left over from a session that ended signed out goes up as soon as one appears. */
+  if(tracingPendingCount())tracingFlushSoon();
 })();'''
 
 
@@ -686,9 +1387,9 @@ s = replace_region(s, '<div class="card" id="tracingCard">',
                       '<div class="tabpanel" data-tabpanel="filter">',
                    CARD + '<div class="tabpanel" data-tabpanel="filter">',
                    "the card itself")
-s = replace_region(s, '/* \u2500\u2500 THE PAD \u2500',
+s = replace_region(s, '/* \u2500\u2500 TRACING A CELL THE SEGMENTATION DOES NOT HAVE',
                       '})();\n\n/* \u2500\u2500 BULK ORGANELLE ANNOTATION',
                    SCRIPT + '\n\n/* \u2500\u2500 BULK ORGANELLE ANNOTATION',
-                   "the pad and the card's wiring")
+                   "the tracing script block, the pad, the preview and the wiring")
 io.open(p, "w", encoding="utf-8").write(s)
 print("\nnow: node tracingcheck.js && node tracepadcheck.js && node tracingpanelcheck.js")

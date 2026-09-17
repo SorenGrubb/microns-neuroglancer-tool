@@ -223,34 +223,59 @@ console.log("\nthe round trip through the sheet");
 
 console.log("\ntwo people, one cell");
 {
-  /* No consensus handling, by instruction -- so the same structureId traced by two people is two
-     tracings. Keyed by id alone, their rings interleaved into one object whose shape depended on
-     who posted last: consensus handling arrived at by accident, and invisible, because the result
-     still meshes. */
+  /* THIS BLOCK ASSERTED THE OPPOSITE FOR ONE DAY, and the reversal is the interesting part.
+     Yesterday's reading of *"I don't think the traced structures should have consensus handling,
+     but it should be marked who traced the structures"* was that a tracing is one person's, so the
+     same structureId from two people had to be two structures. S\u00f8ren, 2026-09-17: *"the meshes made
+     should always be a part of the dataset and everybody should be able to use it. Also, other
+     people should be able to add to it or edit it."* The earlier instruction was about CONSENSUS,
+     not about ownership -- and there is still none here: nothing votes, nothing is averaged, the
+     newest share simply IS the geometry. What had to stop was a second editor forking the object
+     instead of extending it. */
   const rows = [
     { structureId: "s1", name: "astrocyte", z: 500, ringIndex: 0, points: "1,1;9,1;9,9",
       reporterName: "S\u00f8ren Grubb" },
     { structureId: "s1", name: "astrocyte", z: 505, ringIndex: 0, points: "2,2;8,2;8,8",
       reporterName: "S\u00f8ren Grubb" },
-    { structureId: "s1", name: "astrocyte", z: 500, ringIndex: 0, points: "3,3;7,3;7,7",
+    { structureId: "s1", name: "astrocyte", z: 510, ringIndex: 0, points: "3,3;7,3;7,7",
       reporterName: "Somebody Else" }
   ];
   const back = T.rowsToStructures(rows);
-  ok(back.length === 2, "the same cell traced by two people is two structures", back.length);
-  const mine = back.find(s => s.tracedBy === "S\u00f8ren Grubb");
-  const theirs = back.find(s => s.tracedBy === "Somebody Else");
-  ok(!!mine && mine.rings.length === 2 && !!theirs && theirs.rings.length === 1,
-     "...each holding only its own contours",
-     (mine && mine.rings.length) + " and " + (theirs && theirs.rings.length));
-  ok(!!mine && mine.structureId === "s1" && !!theirs && theirs.structureId === "s1",
-     "...and both still say which cell they are of");
+  ok(back.length === 1, "one structureId is ONE structure, whoever drew on it", back.length);
+  ok(back[0].rings.length === 3, "...holding everybody's contours", back[0].rings.length);
+  ok(back[0].tracedBy === "Somebody Else",
+     "...attributed to the latest hand, which is where the newest geometry came from",
+     back[0].tracedBy);
+  ok(back[0].contributors.join(" / ") === "S\u00f8ren Grubb / Somebody Else",
+     "...and nobody's credit is erased by the next person's edit", back[0].contributors.join(", "));
+  ok(back[0].structureId === "s1", "...and it still says which cell it is of");
 
-  /* A structure read once and fed back in must not split again -- rowsToStructures reads
+  /* EVERY contributor reaches the notebook. `traced_by` is the provenance field trace_mesh.py
+     writes into the scene, and a tracing three people extended has three authors. */
+  const tr = T.toTracings(back);
+  ok(tr[0].traced_by === "S\u00f8ren Grubb, Somebody Else",
+     "...and the Blender manifest names all of them", tr[0].traced_by);
+
+  /* A structure read once and fed back in must not split or lose its name -- rowsToStructures reads
      reporterName, toTracings writes traced_by, and a re-read has to agree with the first. */
-  const again = T.rowsToStructures(T.ringsToRows(mine.rings, { structureId: "s1", name: "astrocyte" })
+  const again = T.rowsToStructures(T.ringsToRows(back[0].rings,
+      { structureId: "s1", name: "astrocyte" })
     .map(r => Object.assign({ tracedBy: "S\u00f8ren Grubb" }, r)));
   ok(again.length === 1 && again[0].tracedBy === "S\u00f8ren Grubb",
      "and a round trip through the rows again is stable, on tracedBy as well as reporterName");
+
+  /* A later share that names the cell type fills in what an earlier one left blank, and a blank in
+     a later row never wipes a value an earlier one carried. */
+  const filled = T.rowsToStructures([
+    { structureId: "s2", name: "", z: 1, points: "1,1;2,1;2,2", reporterName: "A" },
+    { structureId: "s2", name: "pericyte", cellType: "Pericyte", nucleusId: "99",
+      z: 2, points: "1,1;2,1;2,2", reporterName: "B" },
+    { structureId: "s2", name: "", cellType: "", z: 3, points: "1,1;2,1;2,2", reporterName: "C" }
+  ]);
+  ok(filled[0].name === "pericyte" && filled[0].cellType === "Pericyte"
+     && filled[0].nucleusId === "99",
+     "a later editor's blank never wipes what an earlier one filled in",
+     JSON.stringify({ n: filled[0].name, t: filled[0].cellType, nu: filled[0].nucleusId }));
 }
 
 console.log("\nrows out of order, which a sheet gives no guarantee against");

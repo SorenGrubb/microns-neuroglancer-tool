@@ -9,8 +9,11 @@
    trace a cell the segmentation does not have, and get it in the .blend — and it is the one thing
    no unit test of either half can see.
 
-   AND IT MUST WORK SIGNED OUT. Sharing a tracing needs a sign-in and a backend redeploy that has
-   not happened; the export needs neither. If "Keep it" ever starts demanding either, this fails.
+   AND IT MUST WORK SIGNED OUT. Since 2026-09-17 there is one button and it shares as well as keeps
+   -- Søren: *"I think sharing should not be an option, the meshes made should always be a part of
+   the dataset"* -- but the LOCAL half still must not wait for a sign-in or a backend, or the export
+   stops working for anyone who has not signed in. Signed out, the tracing is kept and QUEUED; the
+   queue goes out by itself when a sign-in appears, and this drives that.
 
    Run: node tracingpanelcheck.js  */
 const { chromium } = require("playwright");
@@ -786,8 +789,11 @@ function link(annotations){
   ok(/2 contours on 2 sections/.test(kept.list),
      "...and the list says what it holds", kept.list.slice(0, 80));
   ok(kept.cleared, "...and the box is cleared, ready for the next one");
-  ok(/will be in the next Blender download/.test(kept.status),
-     "...and it says where it went", kept.status);
+  ok(/NOT reached the dataset yet/.test(kept.status),
+     "...and it says plainly that it is NOT in the dataset yet, rather than implying it is",
+     kept.status);
+  ok(/waiting for sign-in/.test(kept.list),
+     "...and the tracing itself is marked as waiting, where the tracing is");
 
   console.log("\nand it reaches the notebook the Blender button writes");
   const inNb = await p.evaluate(() => {
@@ -830,7 +836,7 @@ function link(annotations){
   });
   ok(empty, "TRACINGS is an empty list, not a missing name — which is a NameError in Colab");
 
-  console.log("\nsharing needs a sign-in, and says so once");
+  console.log("\nadding it IS sharing it, and signing out only delays it");
   const shared = await p.evaluate(({ url }) => {
     window.__alerts = []; window.__posted = [];
     window.postReport = (x) => { window.__posted.push(x); return true; };
@@ -840,13 +846,18 @@ function link(annotations){
     const w2 = document.getElementById("tracingWhat");
     w2.value = "__other"; w2.dispatchEvent(new Event("change", { bubbles: true }));
     document.getElementById("tracingName").value = "second tracing";
-    document.getElementById("tracingShare").click();
-    const out = { alerts: window.__alerts.length, posted: window.__posted.length };
+    document.getElementById("tracingKeep").click();
+    const mine = TRACINGS_KEPT[TRACINGS_KEPT.length - 1];
+    const out = { alerts: window.__alerts.length, posted: window.__posted.length,
+                  pending: !!mine.pending_share, kept: TRACINGS_KEPT.length,
+                  say: document.getElementById("tracingStatus").textContent };
+    /* SIGNED IN, THE QUEUE GOES BY ITSELF. This is what the interval does every four seconds while
+       anything is waiting; calling it directly is the same code path without the wait. */
     GOOGLE_VERIFIED = true; GOOGLE_CREDENTIAL = "t.t.t";
     GOOGLE_EXP = Math.floor(Date.now() / 1000) + 3600;
-    window.__alerts = [];
-    document.getElementById("tracingShare").click();
+    out.flushed = tracingFlush();
     out.after = window.__posted.length;
+    out.stillPending = tracingPendingCount();
     /* ONE POST FOR THE WHOLE TRACING since 2026-09-17: the geometry goes to a Drive file and the
        sheet keeps one index row, so a share that used to be N round trips is one submission
        carrying every contour. */
@@ -854,36 +865,50 @@ function link(annotations){
                                            sections: x.sections,
                                            zs: (x.contours || []).map(c => c.z).join(","),
                                            pts: (x.contours || []).map(c => (c.points || "").split(";").length).join(",") }));
-    /* A SECOND share of the same tracing. Same structureId, new groupId -- that pair is what the
-       backend keys "this replaces the older version" on, so a re-share after tracing five more
-       sections is a correction rather than a rival tracing of the same cell. */
+    /* Adding the same tracing AGAIN, signed in: same structureId, new groupId -- that pair is what
+       the backend versions on, so coming back after tracing five more sections is a correction
+       rather than a rival tracing of the same cell. */
     window.__posted = [];
-    document.getElementById("tracingShare").click();
+    document.getElementById("tracingLink").value = url;
+    document.getElementById("tracingRead").click();
+    const w3 = document.getElementById("tracingWhat");
+    w3.value = "__other"; w3.dispatchEvent(new Event("change", { bubbles: true }));
+    document.getElementById("tracingName").value = "second tracing";
+    document.getElementById("tracingKeep").click();
     out.again = window.__posted.map(x => ({ sid: x.structureId, gid: x.groupId }));
+    out.sayAgain = document.getElementById("tracingStatus").textContent;
     return out;
   }, { url: link(polygon(2000, 3000, 600, 25, 10, "s1")
         .concat(polygon(2005, 3005, 610, 24, 10, "s2"))) });
-  ok(shared.alerts === 1 && shared.posted === 0,
-     "signed out, ONE warning and nothing posted", shared.alerts + " alerts, " + shared.posted + " posts");
-  ok(shared.after === 1,
-     "signed in, ONE submission for the whole tracing \u2014 not one per contour, which is what "
-     + "filled the sheet", shared.after + " post(s)");
-  ok(shared.rows[0].t === "traced_structure", "...of the traced_structure type");
-  ok(shared.rows[0].zs === "600,610", "...carrying both contours, each on its own section",
-     shared.rows[0].zs);
-  ok(shared.rows[0].sections === 2, "...and saying how many sections that is, for the index row",
-     shared.rows[0].sections);
-  ok(shared.rows[0].pts === "10,10", "...with all ten points of each", shared.rows[0].pts);
-  ok(!!shared.rows[0].sid, "...a structureId naming the cell", shared.rows[0].sid);
-  ok(!!shared.rows[0].gid, "...and a groupId naming this act of sharing \u2014 the pair the backend "
-     + "versions on, and the pair in the Drive file's name", shared.rows[0].gid);
-  ok(shared.again.length === 1 && shared.again[0].sid === shared.rows[0].sid,
-     "sharing it again is one submission again, keeping the structureId \u2014 it is the same cell",
+  ok(shared.posted === 0 && shared.pending,
+     "signed out it is KEPT AND QUEUED, not refused and not posted",
+     shared.posted + " posts, pending " + shared.pending);
+  ok(shared.alerts === 0,
+     "...and nothing pops up at him -- the status line says it, because he did not ask to sign in",
+     shared.alerts + " alerts");
+  /* TWO went out, not one, and that is worth asserting rather than tolerating: the tracing kept in
+     the "signed out" section further up was still owed, and signing in owes it too. A flush that
+     only sent the most recent one would strand work exactly where nobody would look for it. */
+  ok(shared.flushed === 2 && shared.after === 2,
+     "signing in sends EVERYTHING that was waiting, each as one submission",
+     shared.flushed + " flushed, " + shared.after + " post(s)");
+  ok(shared.stillPending === 0, "...and the queue is empty afterwards", shared.stillPending);
+  const row = shared.rows.filter(r => r.n === "second tracing")[0];
+  ok(!!row && row.t === "traced_structure", "...of the traced_structure type");
+  ok(row.zs === "600,610", "...carrying both contours, each on its own section", row.zs);
+  ok(row.sections === 2, "...and saying how many sections that is, for the index row", row.sections);
+  ok(row.pts === "10,10", "...with all ten points of each", row.pts);
+  ok(!!row.sid, "...a structureId naming the cell", row.sid);
+  ok(!!row.gid, "...and a groupId naming this act of sharing — the pair the backend "
+     + "versions on, and the pair in the Drive file's name", row.gid);
+  ok(shared.again.length === 1 && shared.again[0].sid === row.sid,
+     "adding it again is one submission again, keeping the structureId — it is the same cell",
      shared.again.length + " post(s), " + shared.again[0].sid);
-  ok(shared.again[0].gid !== shared.rows[0].gid,
+  ok(shared.again[0].gid !== row.gid,
      "...with a NEW groupId, which is what makes it a new version rather than a duplicate",
      shared.again[0].gid);
-
+  ok(/in the dataset/.test(shared.sayAgain) && !/NOT reached/.test(shared.sayAgain),
+     "...and signed in it says it is in the dataset, not that it is waiting", shared.sayAgain);
   console.log("\nkeeping the same tracing twice");
   {
     const twice = await p.evaluate(({ url }) => {
@@ -928,6 +953,134 @@ function link(annotations){
     ok(twice.ids.every(i => !!i) && new Set(twice.ids).size === twice.ids.length,
        "...and every kept tracing has an id of its own", twice.ids.join(", "));
     ok(twice.stored === twice.after, "...with storage saying the same", twice.stored);
+  }
+
+  /* ── OPENING SOMEBODY ELSE'S TRACING AND ADDING TO IT ──────────────────────────  2026-09-17
+     Søren: *"other people should be able to add to it or edit it."* The whole route, driven in the
+     real page against a stubbed backend: list what is in the dataset, open one, find its contours
+     in the pad as ordinary editable contours, extend it, and post the result AS THE SAME TRACING.
+     The last step is the one with teeth -- a new structureId there would quietly turn every edit
+     into a rival copy, and nothing on screen would say so. */
+  console.log("\nthe dataset's tracings, and adding to one");
+  {
+    const browsed = await p.evaluate(async () => {
+      const INDEX = { tracings: [{ structureId: "hers_1", name: "Nucleus", kind: "__nucleus",
+                                   cellType: "Astrocyte", color: "#aa5522",
+                                   nucleusId: "253863", rootId: "864691135570733037",
+                                   tracedBy: "Somebody Else", startedBy: "Somebody Else",
+                                   contributors: ["Somebody Else"], versions: 2,
+                                   sections: 2, contours: 2, vertices: 8,
+                                   timestamp: "2026-09-17T09:00:00Z",
+                                   fileId: "f1", fileUrl: "https://drive.example/f1" }] };
+      const ROWS = [
+        { structureId: "hers_1", name: "Nucleus", kind: "__nucleus", cellType: "Astrocyte",
+          color: "#aa5522", nucleusId: "253863", rootId: "864691135570733037",
+          z: 700, ringIndex: 0, points: "1000,2000;1040,2000;1040,2040;1000,2040",
+          reporterName: "Somebody Else" },
+        { structureId: "hers_1", name: "Nucleus", kind: "__nucleus", cellType: "Astrocyte",
+          color: "#aa5522", nucleusId: "253863", rootId: "864691135570733037",
+          z: 705, ringIndex: 0, points: "1005,2005;1035,2005;1035,2035;1005,2035",
+          reporterName: "Somebody Else" }
+      ];
+      window.fetch = async (u) => ({
+        ok: true,
+        json: async () => (/structureId=/.test(u)
+          ? { tracings: [Object.assign({}, INDEX.tracings[0], { rows: ROWS })] }
+          : INDEX)
+      });
+      document.getElementById("tracingBrowse").click();
+      await new Promise(r => setTimeout(r, 60));
+      const listed = document.getElementById("tracingShared").textContent;
+      document.querySelector(".tracingopen").click();
+      await new Promise(r => setTimeout(r, 300));
+      const out = { listed: listed,
+                    rings: PAD.rings.length,
+                    zs: PAD.rings.map(r => r.z).join(","),
+                    first: PAD.rings[0].points[0].join(","),
+                    editing: PAD_EDIT_ID,
+                    what: document.getElementById("tracingWhat").value,
+                    type: document.getElementById("tracingType").value,
+                    nuc: document.getElementById("tracingNucId").value,
+                    root: document.getElementById("tracingRootId").value,
+                    centre: PAD_CENTRE.join(",") };
+      /* Extend it: one more contour on a third section, exactly as the pad would leave it. */
+      PAD.z = 710;
+      PAD.rings.push({ z: 710, points: [[1010,2010],[1030,2010],[1030,2030],[1010,2030]] });
+      window.__posted = [];
+      document.getElementById("tracePadUse").click();
+      document.getElementById("tracingKeep").click();
+      out.posted = window.__posted.map(x => ({ sid: x.structureId, n: (x.contours || []).length,
+                                               zs: (x.contours || []).map(c => c.z).join(",") }));
+      /* And a pad opened FRESH afterwards must not still be filing into her tracing. */
+      document.getElementById("tracingX").value = "1000";
+      document.getElementById("tracingY").value = "2000";
+      document.getElementById("tracingZ").value = "900";
+      document.getElementById("tracePadOpen").click();
+      out.afterFresh = PAD_EDIT_ID;
+      return out;
+    });
+    ok(/Somebody Else/.test(browsed.listed) && /v2/.test(browsed.listed),
+       "the list names who has worked on it and which version it is on",
+       browsed.listed.replace(/\s+/g, " ").slice(0, 90));
+    ok(browsed.rings === 2 && browsed.zs === "700,705",
+       "opening one puts its contours in the pad, on the sections they were drawn on", browsed.zs);
+    ok(browsed.first === "1000,2000", "...with the coordinates unchanged", browsed.first);
+    ok(browsed.centre === "1020,2020,700",
+       "...and the pad centred on the contour rather than on whatever was in the boxes",
+       browsed.centre);
+    ok(browsed.editing === "hers_1", "...remembering which tracing is being edited", browsed.editing);
+    ok(browsed.what === "__nucleus" && browsed.type === "Astrocyte",
+       "...and what it is and which cell, so a version does not drop what she filled in",
+       browsed.what + " / " + browsed.type);
+    ok(browsed.nuc === "253863" && browsed.root === "864691135570733037",
+       "...including both ids", browsed.nuc + " / " + browsed.root);
+    ok(browsed.posted.length === 1 && browsed.posted[0].sid === "hers_1",
+       "adding it back is HER tracing's next version, not a rival with a new id",
+       JSON.stringify(browsed.posted[0]));
+    ok(browsed.posted[0].zs === "700,705,710",
+       "...carrying her two contours and the one just added", browsed.posted[0].zs);
+    ok(browsed.afterFresh === "",
+       "and a pad opened fresh afterwards files nothing into her tracing", '"' + browsed.afterFresh + '"');
+  }
+
+  /* ── THE PREVIEW ───────────────────────────────────────────────────────────────  2026-09-17
+     Søren: *"a window below to show the 3D structure while it is being generated."* Headless
+     Chromium may or may not give this page a WebGL context, so what is asserted is everything up to
+     the GPU: the loft runs on the pad's own contours, the panel opens on a press and not before,
+     the note says what it is, and nothing throws. traceloftcheck.js owns the geometry itself. */
+  console.log("\nthe 3D preview");
+  {
+    const prev = await p.evaluate(async () => {
+      document.getElementById("tracingX").value = "1000";
+      document.getElementById("tracingY").value = "2000";
+      document.getElementById("tracingZ").value = "700";
+      document.getElementById("tracePadOpen").click();
+      PAD.rings = [
+        { z: 700, points: [[1000,2000],[1040,2000],[1040,2040],[1000,2040]] },
+        { z: 705, points: [[1005,2005],[1035,2005],[1035,2035],[1005,2035]] }
+      ];
+      const before = document.getElementById("tracePad3DHost").innerHTML;
+      /* The ghosts are megabytes over a network this check has no business using. */
+      document.getElementById("tracePadGhosts").checked = false;
+      document.getElementById("tracePad3D").click();
+      await new Promise(r => setTimeout(r, 400));
+      const host = document.getElementById("tracePad3DHost");
+      const g = UJ.traceloft.loft(UJ.tracepad.toRings(PAD), UJ.cfg.res);
+      return { before: before, after: host.textContent,
+               canvas: !!host.querySelector("canvas"),
+               label: document.getElementById("tracePad3D").textContent,
+               tris: g.indices.length / 3, sections: g.sections };
+    });
+    ok(prev.before === "", "nothing is drawn until it is asked for -- the meshes are not free");
+    ok(prev.tris > 0 && prev.sections === 2,
+       "the pad's own contours loft into a surface", prev.tris + " triangles on " + prev.sections
+       + " sections");
+    ok(/preview, not the export/.test(prev.after),
+       "...and the panel says what it is and is not, next to the picture",
+       prev.after.replace(/\s+/g, " ").slice(0, 90));
+    ok(/lofted section to section/.test(prev.after) && /marches cubes/.test(prev.after),
+       "...naming both surfaces, so nobody reads this one as the one they will download");
+    ok(/Hide the 3D view/.test(prev.label), "...and the button now closes it", prev.label);
   }
 
   console.log("\nremoving one");

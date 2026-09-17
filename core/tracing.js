@@ -343,22 +343,33 @@ UJ.tracing = (function(){
       if (!r) return;
       var id = r.structureId || "";
       if (!id) return;
-      /* KEYED BY TRACING *AND* TRACER.  2026-09-17
-         No consensus handling here, by instruction -- so two people who outline the same cell are
-         two tracings and must stay two tracings. Keying by structureId alone interleaved their
-         rings into a single object whose shape depended on who posted last, which is consensus
-         handling arrived at by accident, and the worst kind: silent, and wrong in a way that looks
-         like a mesh. `reporterName` is what the backend sends back; `tracedBy` is what a structure
-         already read once carries, so a round trip through this function is stable. */
+      /* KEYED BY THE TRACING, AND ONLY BY THE TRACING.  2026-09-17
+         It was keyed by tracing AND tracer for one day, on the reading that two people outlining
+         the same cell are two tracings. Søren settled it the other way the moment he saw it: *"the
+         meshes made should always be a part of the dataset and everybody should be able to use it.
+         Also, other people should be able to add to it or edit it."* A structureId names a piece of
+         the anatomy, not an author's copy of it — so a second person extending it is the same
+         object, later, and keying by author would give them a rival to it instead.
+
+         THIS IS STILL NOT CONSENSUS. Nothing votes and nothing is merged: the newest share of a
+         tracing is its geometry, whoever made it, exactly as the newest version of a document is
+         the document. What accumulates is the credit — `contributors`, everyone who has shared a
+         version, in the order they first did — because the alternative is that the second editor
+         silently erases the first one's name. */
       var who = String(r.reporterName || r.tracedBy || "");
-      var key = id + "|" + who;
-      var s = by[key] || (by[key] = { structureId: id, tracedBy: who, name: r.name || "",
-                                      kind: r.kind || "",
+      var s = by[id] || (by[id] = { structureId: id, tracedBy: who, name: r.name || "",
+                                    kind: r.kind || "",
                                     cellType: r.cellType || "", color: r.color || "",
                                     nucleusId: r.nucleusId || "", rootId: r.rootId || "",
-                                    tracedBy: r.reporterName || r.tracedBy || "", rings: [] });
+                                    contributors: [], rings: [] });
+      if (who && s.contributors.indexOf(who) < 0) s.contributors.push(who);
+      if (who) s.tracedBy = who;          // the latest hand on it, which is what a row's order says
       if (!s.name && r.name) s.name = r.name;
-      if (!s.tracedBy && (r.reporterName || r.tracedBy)) s.tracedBy = r.reporterName || r.tracedBy;
+      /* Metadata follows the geometry: a later share that named the cell type fills in what an
+         earlier one left blank, and never blanks what was there. */
+      ["kind", "cellType", "color", "nucleusId", "rootId"].forEach(function(f){
+        if (!s[f] && r[f]) s[f] = r[f];
+      });
       var pts = decodePoints(r.points);
       if (pts.length >= 3) s.rings.push({ z: Number(r.z), points: pts,
                                           ringIndex: Number(r.ringIndex || 0) });
@@ -377,8 +388,13 @@ UJ.tracing = (function(){
      a structure read back out of the sheet goes straight in with no translation. */
   function toTracings(structures){
     return (structures || []).map(function(s){
+      /* EVERYONE WHO DREW ON IT, not only the last one. A tracing several people have extended has
+         several authors, and `traced_by` is the provenance field in the notebook — a name that
+         quietly became the most recent editor would be a wrong answer to the question it asks. */
+      var who = (s.contributors && s.contributors.length)
+                  ? s.contributors.join(", ") : (s.tracedBy || "");
       var t = { name: s.name || s.structureId || "traced", type: s.cellType || "traced",
-                traced_by: s.tracedBy || "",
+                traced_by: who,
                 rings: (s.rings || []).map(function(r){ return { z: r.z, points: r.points }; }) };
       if (s.color) t.color = s.color;
       if (s.nucleusId) t.nucleus_id = String(s.nucleusId);
