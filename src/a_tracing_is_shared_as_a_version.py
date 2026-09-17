@@ -35,6 +35,12 @@ from whoever posted last. That is consensus handling, arrived at by accident.
 
 Run: python3 src/a_tracing_is_shared_as_a_version.py
      node tracingcheck.js && node tracingpanelcheck.js
+
+
+SUPERSEDED PAIRS REMOVED, 2026-09-17: the edits below marked here were later rewritten by another
+generator, which now owns that text. The reason they were made is still this file's; the
+literal is the other file's, so re-running this one is a no-op rather than a second insert.
+Superseded: "a pending tracing has a stable id"; "keeping twice replaces rather than duplicates"; "a share carries a structureId and a groupId"; "the share message says what a re-share does"
 """
 import io
 import os
@@ -42,89 +48,9 @@ import os
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 TRACING = [
-    ('''      var id = r.structureId || "";
-      if (!id) return;
-      var s = by[id] || (by[id] = { structureId: id, name: r.name || "",''',
-     '''      var id = r.structureId || "";
-      if (!id) return;
-      /* KEYED BY TRACING *AND* TRACER.  2026-09-17
-         No consensus handling here, by instruction -- so two people who outline the same cell are
-         two tracings and must stay two tracings. Keying by structureId alone interleaved their
-         rings into a single object whose shape depended on who posted last, which is consensus
-         handling arrived at by accident, and the worst kind: silent, and wrong in a way that looks
-         like a mesh. `reporterName` is what the backend sends back; `tracedBy` is what a structure
-         already read once carries, so a round trip through this function is stable. */
-      var who = String(r.reporterName || r.tracedBy || "");
-      var key = id + "|" + who;
-      var s = by[key] || (by[key] = { structureId: id, tracedBy: who, name: r.name || "",''',
-     "rowsToStructures keys by tracing and tracer"),
-]
 
-PAGE = [
-    ('''  const nid=(document.getElementById("tracingNucId").value||"").trim();
-  if(nid)t.nucleus_id=nid;
-  return t;
-}''',
-     '''  const nid=(document.getElementById("tracingNucId").value||"").trim();
-  if(nid)t.nucleus_id=nid;
-  /* A STABLE ID, ASSIGNED ONCE.  2026-09-17
-     Keep and Share have to be talking about the same structure, and a second Share after tracing
-     more sections has to be a new VERSION of this cell rather than a rival to it -- that is what
-     the backend's (structureId, reporterEmail, groupId) versioning keys on. Frozen on
-     TRACING_PENDING the first time this function gets as far as a name, so renaming afterwards
-     renames the same structure instead of forking it.
 
-     Reusing a kept tracing's id when the names match is the working pattern: paste a link covering
-     more of the cell you already outlined, same name, share, and the older version is superseded
-     rather than duplicated. */
-  if(!TRACING_PENDING.id){
-    const prior=(TRACINGS_KEPT||[]).filter(function(x){return x&&x.id&&x.name===name;})[0];
-    TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(name);
-  }
-  t.id=TRACING_PENDING.id;
-  return t;
-}''',
-     "a pending tracing has a stable id"),
 
-    ('''function tracingKeep(){
-  const t=tracingCurrent();
-  if(!t)return;
-  TRACINGS_KEPT.push(t);''',
-     '''function tracingKeep(){
-  const t=tracingCurrent();
-  if(!t)return;
-  // Keeping the same tracing twice used to put the cell in the Blender scene twice.
-  const at=TRACINGS_KEPT.findIndex(function(x){return x&&x.id&&x.id===t.id;});
-  if(at>=0)TRACINGS_KEPT.splice(at,1,t); else TRACINGS_KEPT.push(t);''',
-     "keeping twice replaces rather than duplicates"),
-
-    ('''  const rows=UJ.tracing.ringsToRows(t.rings,{name:t.name,cellType:t.type,color:t.color,
-                                             nucleusId:t.nucleus_id||""});
-  let posted=0;
-  rows.forEach(function(r,i){
-    if(postReport(Object.assign({timestamp:new Date().toISOString(),
-                                 subIndex:i+1,subCount:rows.length},r))!==false)posted++;
-  });''',
-     '''  /* One act of sharing, one groupId, N contour rows -- the convention merged_split and
-     organelle_location already use, and the one Code.gs's ?tracings=1 reads to decide which
-     version of a tracing is current. Without it, every re-share would be a duplicate. */
-  const gid="trace_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7);
-  const rows=UJ.tracing.ringsToRows(t.rings,{structureId:t.id,name:t.name,cellType:t.type,
-                                             color:t.color,nucleusId:t.nucleus_id||""});
-  let posted=0;
-  rows.forEach(function(r,i){
-    if(postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid,
-                                 subIndex:i+1,subCount:rows.length},r))!==false)posted++;
-  });''',
-     "a share carries a structureId and a groupId"),
-
-    ('''  tracingSay(posted+" contour"+(posted===1?"":"s")+" shared. If the backend has not been "
-    +"redeployed since 2026-09-16 it will record them as an unknown type \\u2014 the tracing is "
-    +"kept here either way.");''',
-     '''  tracingSay(posted+" contour"+(posted===1?"":"s")+" shared. If the backend has not been "
-    +"redeployed since 2026-09-17 it will refuse them as an unknown type \\u2014 the tracing is "
-    +"kept here either way. Sharing the same name again replaces this version.");''',
-     "the share message says what a re-share does"),
 ]
 
 
@@ -224,6 +150,11 @@ PANELCHECK = [
      "keeping twice is checked in a real page"),
 ]
 
+
+# PAGE: every pair here was superseded by a later generator, which now owns that text.
+# Kept as an empty list so this file still runs as the no-op it has become; the reason for
+# the change is in the docstring above, and the literal is the other generator's.
+PAGE = []
 
 def edit(rel, pairs):
     p = os.path.join(HERE, rel)

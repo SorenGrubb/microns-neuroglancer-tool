@@ -26,6 +26,9 @@ UJ.tracepad = (function(){
   /* How near the first vertex counts as clicking it. Generous, because the alternative -- not
      closing -- costs another lap of the cell, while closing early costs one Undo. */
   var CLOSE_PX = 10;
+  /* How near counts as grabbing a vertex or an edge. Tighter than CLOSE_PX, because grabbing the
+     wrong vertex silently moves part of a contour, while missing one costs a second click. */
+  var GRAB_PX = 8;
 
   function create(z){
     return { z: z || 0, pending: [], rings: [] };
@@ -82,6 +85,125 @@ UJ.tracepad = (function(){
     return pad;
   }
 
+  /* ── EDITING A CONTOUR THAT IS ALREADY CLOSED ──────────────────────────────────  2026-09-17
+     Søren: *"We also need a way to delete segmentations and correct if a line in the polyline is
+     placed wrongly. Also, after the segmentation is done, it should be possible to move the
+     polyline points individually."*
+
+     Until now a closed contour was finished: Undo could throw the whole thing away and that was
+     the only correction there was, so one misplaced vertex out of forty cost the other
+     thirty-nine. Nothing here is a new kind of state -- a ring is still a list of points -- these
+     are the four things you can do to one: find a vertex, move it, delete it, and put a new one in
+     the middle of a segment that bulges the wrong way.
+
+     ALL FOUR WORK ON THE SECTION YOU ARE ON, and on the pending contour as well as the closed
+     ones, because "the one I can see" is the only set a person can mean. A hit on a ring from
+     another section would be invisible, and correcting something you cannot see is worse than not
+     being able to correct it at all. */
+
+  /* `ring` is an index into pad.rings, or -1 for the contour being drawn. */
+  function vertexOf(pad, ring, i){
+    var pts = (ring < 0) ? pad.pending : (pad.rings[ring] && pad.rings[ring].points);
+    return pts ? pts[i] : null;
+  }
+  function pointsOf(pad, ring){
+    return (ring < 0) ? pad.pending : (pad.rings[ring] ? pad.rings[ring].points : null);
+  }
+
+  /* The vertex under the pointer, if any: the NEAREST one within the grab radius, searched over
+     the contour being drawn and every closed contour on this section. Nearest rather than first,
+     because two contours can touch and the one you meant is the one you are closer to. */
+  function hitVertex(pad, x, y, pxPerToolVoxel){
+    var k = pxPerToolVoxel || 1, best = null, bestD = GRAB_PX + 1;
+    function scan(ring, pts){
+      (pts || []).forEach(function(p, i){
+        var d = Math.sqrt(Math.pow((x - p[0]) * k, 2) + Math.pow((y - p[1]) * k, 2));
+        if (d < bestD){ bestD = d; best = { ring: ring, vertex: i, dPx: d }; }
+      });
+    }
+    scan(-1, pad.pending);
+    pad.rings.forEach(function(r, i){ if (r.z === pad.z) scan(i, r.points); });
+    return best;
+  }
+
+  function moveVertex(pad, hit, x, y){
+    if (!hit) return false;
+    var pts = pointsOf(pad, hit.ring);
+    if (!pts || !pts[hit.vertex]) return false;
+    pts[hit.vertex] = [Math.round(x), Math.round(y)];
+    return true;
+  }
+
+  /* Deleting a vertex can end the contour: two points enclose nothing, so a ring that falls under
+     three is removed rather than left as a line that would still mesh into a sliver. Says which
+     happened, so the pad can tell him rather than leave him to notice. */
+  function deleteVertex(pad, hit){
+    if (!hit) return "";
+    var pts = pointsOf(pad, hit.ring);
+    if (!pts || !pts[hit.vertex]) return "";
+    pts.splice(hit.vertex, 1);
+    if (hit.ring >= 0 && pts.length < MIN_VERTICES){
+      pad.rings.splice(hit.ring, 1);
+      return "ring";
+    }
+    return "vertex";
+  }
+
+  function deleteRing(pad, ring){
+    if (ring < 0){ var had = pad.pending.length > 0; pad.pending = []; return had; }
+    if (!pad.rings[ring]) return false;
+    pad.rings.splice(ring, 1);
+    return true;
+  }
+
+  /* The segment under the pointer. "A line in the polyline is placed wrongly" is usually a corner
+     that needs one more point in it, not a vertex in the wrong place -- so this finds the EDGE and
+     insertVertex puts a point on it, between the two it runs between. */
+  function hitEdge(pad, x, y, pxPerToolVoxel){
+    var k = pxPerToolVoxel || 1, best = null, bestD = GRAB_PX + 1;
+    function scan(ring, pts){
+      if (!pts || pts.length < 2) return;
+      /* A closed contour has one more segment than a ring of points: the one back to the start.
+         The contour being drawn does not -- it has not been closed yet. */
+      var n = (ring < 0) ? pts.length - 1 : pts.length;
+      for (var i = 0; i < n; i++){
+        var a = pts[i], b = pts[(i + 1) % pts.length];
+        var d = pointToSegmentPx(x, y, a, b, k);
+        if (d < bestD){ bestD = d; best = { ring: ring, after: i, dPx: d }; }
+      }
+    }
+    scan(-1, pad.pending);
+    pad.rings.forEach(function(r, i){ if (r.z === pad.z) scan(i, r.points); });
+    return best;
+  }
+
+  function pointToSegmentPx(x, y, a, b, k){
+    var vx = b[0] - a[0], vy = b[1] - a[1];
+    var wx = x - a[0], wy = y - a[1];
+    var len2 = vx * vx + vy * vy;
+    var t = len2 ? Math.max(0, Math.min(1, (wx * vx + wy * vy) / len2)) : 0;
+    var dx = (x - (a[0] + t * vx)) * k, dy = (y - (a[1] + t * vy)) * k;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function insertVertex(pad, hit, x, y){
+    if (!hit) return false;
+    var pts = pointsOf(pad, hit.ring);
+    if (!pts) return false;
+    pts.splice(hit.after + 1, 0, [Math.round(x), Math.round(y)]);
+    return true;
+  }
+
+  /* The contours on the section you are on, with their index into pad.rings, for a per-contour
+     delete. Returned rather than rendered: this module has no DOM in it. */
+  function onSection(pad){
+    var out = [];
+    pad.rings.forEach(function(r, i){
+      if (r.z === pad.z) out.push({ ring: i, points: r.points.length });
+    });
+    return out;
+  }
+
   function count(pad){
     var z = {};
     pad.rings.forEach(function(r){ z[r.z] = 1; });
@@ -103,5 +225,9 @@ UJ.tracepad = (function(){
   return { create: create, setZ: setZ, addVertex: addVertex, closeRing: closeRing,
            nearFirst: nearFirst, undo: undo, clearSection: clearSection,
            count: count, toRings: toRings,
-           MIN_VERTICES: MIN_VERTICES, CLOSE_PX: CLOSE_PX };
+           /* editing a contour that is already closed -- 2026-09-17 */
+           hitVertex: hitVertex, moveVertex: moveVertex, deleteVertex: deleteVertex,
+           hitEdge: hitEdge, insertVertex: insertVertex, deleteRing: deleteRing,
+           onSection: onSection, vertexOf: vertexOf, pointsOf: pointsOf,
+           MIN_VERTICES: MIN_VERTICES, CLOSE_PX: CLOSE_PX, GRAB_PX: GRAB_PX };
 })();

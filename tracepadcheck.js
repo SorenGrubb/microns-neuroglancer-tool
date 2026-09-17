@@ -142,6 +142,91 @@ console.log("\nout in the same shape a pasted link gives");
      "and the counter says what the card shows", JSON.stringify(c));
 }
 
+console.log("\nediting a contour that is already closed");
+{
+  /* Søren: "We also need a way to delete segmentations and correct if a line in the polyline is
+     placed wrongly. Also, after the segmentation is done, it should be possible to move the
+     polyline points individually." Until this, a closed contour was finished and Undo threw the
+     whole thing away -- one bad vertex out of forty cost the other thirty-nine. */
+  const p = P.create(500);
+  [[0, 0], [400, 0], [400, 400], [0, 400]].forEach(v => P.addVertex(p, v[0], v[1], PX));
+  P.closeRing(p);
+
+  const hit = P.hitVertex(p, 402, 4, PX);
+  ok(!!hit && hit.ring === 0 && hit.vertex === 1,
+     "a vertex of a CLOSED contour can be found under the pointer",
+     hit && ("ring " + hit.ring + " vertex " + hit.vertex));
+  ok(P.hitVertex(p, 200, 200, PX) === null,
+     "...and the middle of the contour is not a vertex", "nothing to grab there");
+
+  P.moveVertex(p, hit, 450, 30);
+  ok(String(p.rings[0].points[1]) === "450,30", "moving one moves ONLY that one",
+     String(p.rings[0].points[1]));
+  ok(String(p.rings[0].points[0]) === "0,0" && String(p.rings[0].points[2]) === "400,400",
+     "...its neighbours stay put", String(p.rings[0].points[0]) + " / " + String(p.rings[0].points[2]));
+  ok(p.rings[0].points.length === 4, "...and no vertex is gained or lost", p.rings[0].points.length);
+
+  /* A wrongly placed SEGMENT is usually a corner wanting one more point, not a vertex in the
+     wrong place -- so an edge is findable and takes an insertion between its two ends. */
+  const edge = P.hitEdge(p, 200, 402, PX);
+  ok(!!edge && edge.ring === 0 && edge.after === 2,
+     "the segment under the pointer is found, and named by the vertex it follows",
+     edge && ("after vertex " + edge.after));
+  P.insertVertex(p, edge, 200, 420);
+  ok(p.rings[0].points.length === 5 && String(p.rings[0].points[3]) === "200,420",
+     "...and a new vertex lands BETWEEN the two it runs between, not at the end",
+     p.rings[0].points.map(q => q.join(",")).join(" "));
+
+  /* The closing segment of a ring -- last vertex back to first -- is a segment like any other.
+     It is the one an implementation over pts.length-1 silently leaves uneditable. */
+  const closing = P.hitEdge(p, 0, 200, PX);
+  ok(!!closing && closing.after === 4,
+     "the segment that closes the ring is editable too, not just the ones between listed points",
+     closing && ("after vertex " + closing.after));
+
+  ok(P.deleteVertex(p, P.hitVertex(p, 450, 30, PX)) === "vertex" && p.rings[0].points.length === 4,
+     "a vertex can be deleted from a closed contour", p.rings[0].points.length + " left");
+
+  /* Down to two points the ring encloses nothing, and a line that still meshes into a sliver is
+     worse than no ring at all -- so it goes, and it says so. */
+  P.deleteVertex(p, P.hitVertex(p, 0, 0, PX));
+  const last = P.deleteVertex(p, P.hitVertex(p, 400, 400, PX));
+  ok(last === "ring" && p.rings.length === 0,
+     "...and taking it under three removes the contour rather than leaving a line", last);
+}
+
+console.log("\ndeleting one contour, and only that one");
+{
+  const p = P.create(500);
+  const box = (o) => { [[o, o], [o + 100, o], [o + 100, o + 100]].forEach(v => P.addVertex(p, v[0], v[1], PX));
+                       P.closeRing(p); };
+  box(0); box(500);
+  P.setZ(p, 505); box(0);
+  P.setZ(p, 500);
+  const here = P.onSection(p);
+  ok(here.length === 2 && here.every(h => typeof h.ring === "number"),
+     "the contours on THIS section are listed, with their index", JSON.stringify(here));
+  ok(P.deleteRing(p, here[0].ring) === true && p.rings.length === 2,
+     "deleting one takes one", p.rings.length + " left");
+  ok(p.rings.filter(r => r.z === 505).length === 1,
+     "...and the section you are not on is untouched");
+  ok(P.deleteRing(p, 99) === false, "deleting a contour that is not there does nothing, quietly");
+  P.addVertex(p, 5, 5, PX);
+  ok(P.deleteRing(p, -1) === true && p.pending.length === 0,
+     "...and -1 abandons the contour being drawn");
+}
+
+console.log("\nthe grab radius is in pixels too, so it follows the zoom");
+{
+  const p = P.create(0);
+  [[0, 0], [400, 0], [400, 400]].forEach(v => P.addVertex(p, v[0], v[1], PX));
+  P.closeRing(p);
+  ok(!!P.hitVertex(p, 40, 0, 4 / 32), "at 32 nm/px, 40 voxels away still grabs the vertex");
+  ok(P.hitVertex(p, 40, 0, 4 / 8) === null,
+     "...and zoomed in four times it does not, which is what precise editing needs",
+     "GRAB_PX = " + P.GRAB_PX);
+}
+
 console.log("\nclearing one section leaves the others");
 {
   const p = P.create(500);

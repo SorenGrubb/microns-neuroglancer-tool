@@ -123,6 +123,91 @@ function link(annotations){
        JSON.stringify(l.otherWhat));
   }
 
+  console.log("\nthe two id boxes say which is which, even when full");
+  {
+    const lab = await p.evaluate(() => {
+      const labelFor = (id) => {
+        const box = document.getElementById(id).closest("div").parentElement;
+        const l = box.querySelector("label");
+        return l ? l.textContent.trim() : "";
+      };
+      document.getElementById("tracingRootId").value = "864691135570733037";
+      document.getElementById("tracingNucId").value = "";
+      return { nuc: labelFor("tracingNucId"), root: labelFor("tracingRootId"),
+               rootShows: document.getElementById("tracingRootId").value !== "" };
+    });
+    ok(/nucleus id/i.test(lab.nuc), "the nucleus box has a LABEL, not just a placeholder", lab.nuc);
+    ok(/root id/i.test(lab.root),
+       "...and so does the root box \u2014 which is the one that had none, because a filled input "
+       + "hides its placeholder and the only words on the row named the other box", lab.root);
+    ok(lab.rootShows, "...with the root id still in it", "filled");
+  }
+
+  console.log("\nthe cell type is suggested from the id, by the tool's own precedence");
+  {
+    /* A REAL cell out of the page's own arrays, not a stub: the point of the suggestion is that it
+       agrees with what the cell panel and the filter say about the same nucleus, and only the real
+       data can show that. */
+    const t = await p.evaluate(() => {
+      let i = -1;
+      for (let k = 0; k < N && i < 0; k++) if (NT[k] !== 0) i = k;
+      if (i < 0) return { skip: true };
+      const out = { nid: String(NID[i]), expect: CT_NAMES[NT[i] - 1], root: rootId(i) };
+      TRACING_TYPE_TOUCHED = false;
+      document.getElementById("tracingNucId").value = out.nid;
+      document.getElementById("tracingRootId").value = "";
+      tracingSuggestType();
+      out.picked = document.getElementById("tracingType").value;
+      out.say = document.getElementById("tracingTypeSay").innerText;
+
+      /* The same cell, reached by its ROOT id instead. */
+      document.getElementById("tracingType").value = "traced";
+      document.getElementById("tracingNucId").value = "";
+      document.getElementById("tracingRootId").value = out.root || "";
+      tracingSuggestType();
+      out.byRoot = document.getElementById("tracingType").value;
+      out.rootSay = document.getElementById("tracingTypeSay").innerText;
+
+      /* A type chosen by hand is never overwritten. */
+      TRACING_TYPE_TOUCHED = true;
+      document.getElementById("tracingType").value = "traced";
+      tracingSuggestType();
+      out.afterTouch = document.getElementById("tracingType").value;
+      out.touchSay = document.getElementById("tracingTypeSay").innerText;
+
+      /* An id no cell has says so rather than guessing. */
+      TRACING_TYPE_TOUCHED = false;
+      document.getElementById("tracingNucId").value = "999999999";
+      document.getElementById("tracingRootId").value = "";
+      tracingSuggestType();
+      out.unknownSay = document.getElementById("tracingTypeSay").innerText;
+
+      document.getElementById("tracingNucId").value = "";
+      document.getElementById("tracingRootId").value = "";
+      document.getElementById("tracingTypeSay").textContent = "";
+      return out;
+    });
+    /* TWO VOCABULARIES, JOINED BY THE CODE IN PARENTHESES. MICrONS records "6P-CT"; this list
+       carries the identification tree's leaf, "Layer 6 CT pyramidal neuron (6P-CT)". Asserting the
+       raw name would have failed on every neuron in the volume -- asserting the join is the thing
+       that has to keep working. */
+    const joined = (picked, micro) => picked === micro || picked.indexOf("(" + micro + ")") >= 0;
+    ok(!t.skip && joined(t.picked, t.expect),
+       "a nucleus ID selects the leaf that carries the page's own MICrONS code for that cell",
+       t.picked + "  <- " + t.expect + ", nucleus " + t.nid);
+    ok(/nucleus /.test(t.say) && /prediction|verified|community/.test(t.say),
+       "...and says which id it came from AND which of the three sources \u2014 a guess without its "
+       + "provenance is worse than no guess", t.say);
+    ok(joined(t.byRoot, t.expect) && /root id/i.test(t.rootSay),
+       "the same cell reached by its ROOT id gives the same answer",
+       t.byRoot + " \u2014 " + t.rootSay.slice(0, 44));
+    ok(t.afterTouch === "traced" && /is on file as/.test(t.touchSay),
+       "a type chosen by hand is never overwritten \u2014 it is told, not corrected",
+       t.afterTouch + " \u2014 " + t.touchSay.slice(0, 40));
+    ok(/No cell in this dataset/.test(t.unknownSay),
+       "an id no cell has says so, rather than leaving the last suggestion standing", t.unknownSay);
+  }
+
   console.log("\nwhat is already at that coordinate");
   {
     const r = await p.evaluate(async () => {
@@ -250,6 +335,220 @@ function link(annotations){
     ok(String(v.state && v.state.position) === "240640,207872,21360",
        "...centred where he was", String(v.state && v.state.position));
     ok(/^https?:\/\//.test(v.base), "and it opens the viewer chosen at the top of the tab", v.base);
+  }
+
+  console.log("\nthe polygon tool, clicked");
+  {
+    /* The EM fetch is stubbed: what is under test here is the TOOL -- which click drops a vertex,
+       which one closes, what a drag does, where the contours end up. emtilescheck.js drives the
+       real reader over a synthetic volume, and the live bucket was measured by hand. The stub's
+       mapping is the real one's shape: 32 nm/px against the tool's 4 nm voxel is 8 tool voxels a
+       pixel. */
+    await p.evaluate(() => {
+      UJ.emtiles.configure = () => ({});
+      UJ.emtiles.configured = () => true;
+      window.__drawn = 0;
+      UJ.emtiles.drawSection = async (cv, o) => {
+        window.__drawn++;
+        const g = cv.getContext("2d");
+        g.fillStyle = "#444"; g.fillRect(0, 0, cv.width, cv.height);
+        const k = 8;
+        const x0 = o.centre[0] - (cv.width >> 1) * k, y0 = o.centre[1] - (cv.height >> 1) * k;
+        return { mip: 2, mips: 3, nmPerPx: 32, z: o.centre[2], w: cv.width, h: cv.height, chunks: 1,
+                 toolAt: (px, py) => [Math.round(x0 + px * k), Math.round(y0 + py * k), o.centre[2]],
+                 pxAt: (t) => [Math.round((t[0] - x0) / k), Math.round((t[1] - y0) / k)],
+                 pxPerToolVoxel: 1 / k };
+      };
+      ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
+        document.getElementById(id).value = [240640, 207872, 21360][i];
+      });
+      window.CUR_POS = null;
+      document.getElementById("tracePadOpen").click();
+    });
+    await p.waitForTimeout(250);
+    const opened = await p.evaluate(() => ({
+      shown: document.getElementById("tracePadWrap").style.display !== "none",
+      drawn: window.__drawn, z: PAD.z }));
+    ok(opened.shown && opened.drawn === 1, "the pad opens and draws the section once",
+       opened.drawn + " draws");
+    ok(opened.z === 21360, "...on the section in the coordinate boxes", opened.z);
+
+    /* page.mouse does not scroll, and this card is a long way down a very long page: a box
+       read without this is a real rectangle in page coordinates that no click can reach. */
+    await p.locator("#tracePad").scrollIntoViewIfNeeded();
+    await p.waitForTimeout(80);
+    const box = await p.locator("#tracePad").boundingBox();
+    const click = async (x, y) => {
+      await p.mouse.move(box.x + x, box.y + y);
+      await p.mouse.down(); await p.mouse.up();
+      await p.waitForTimeout(20);
+    };
+    await click(120, 120); await click(240, 120); await click(240, 240);
+    const three = await p.evaluate(() => ({ pending: PAD.pending.length, rings: PAD.rings.length,
+                                            first: String(PAD.pending[0] || "") }));
+    ok(three.pending === 3 && three.rings === 0, "three clicks are three vertices, not a contour yet",
+       three.pending + " vertices");
+    ok(/^\d+,\d+$/.test(three.first),
+       "...stored as a TOOL voxel, so panning and zooming cannot move it", three.first);
+
+    /* Back on the first vertex: the click that closes. Two pixels off, because nobody lands on it. */
+    await click(122, 118);
+    const closed = await p.evaluate(() => ({ pending: PAD.pending.length, rings: PAD.rings.length,
+                                             z: PAD.rings[0] && PAD.rings[0].z,
+                                             n: PAD.rings[0] && PAD.rings[0].points.length,
+                                             say: document.getElementById("tracePadSay").innerText }));
+    ok(closed.rings === 1 && closed.pending === 0,
+       "clicking the first vertex again CLOSES the contour \u2014 the gesture the card tells him about",
+       closed.rings + " contour");
+    ok(closed.n === 3, "...with the three vertices, not a fourth where he clicked to close", closed.n);
+    ok(closed.z === 21360, "...on this section", closed.z);
+
+    /* A DRAG PANS and must not leave a vertex behind. */
+    await p.mouse.move(box.x + 300, box.y + 300);
+    await p.mouse.down();
+    await p.mouse.move(box.x + 340, box.y + 330, { steps: 4 });
+    await p.mouse.up();
+    await p.waitForTimeout(150);
+    const panned = await p.evaluate(() => ({ pending: PAD.pending.length, drawn: window.__drawn }));
+    ok(panned.pending === 0, "a drag pans and leaves no vertex behind", panned.pending + " pending");
+    ok(panned.drawn === 2, "...and it redraws the section at the new centre", panned.drawn + " draws");
+
+    /* On a section, and round again. */
+    await p.evaluate(() => document.getElementById("tracePadNext").click());
+    await p.waitForTimeout(200);
+    const stepped = await p.evaluate(() => ({ z: PAD.z, step: document.getElementById("tracePadStep").value }));
+    ok(stepped.z === 21365 && stepped.step === "5", "the step button moves five sections on", stepped.z);
+
+    await click(120, 120); await click(240, 120); await click(240, 240); await click(121, 121);
+    const two = await p.evaluate(() => UJ.tracepad.count(PAD));
+    ok(two.rings === 2 && two.sections === 2, "a second contour, on the second section",
+       JSON.stringify(two));
+
+    /* ── CORRECTING A CONTOUR THAT IS ALREADY CLOSED ────────────────────────────  2026-09-17
+       Søren: "we also need a way to delete segmentations and correct if a line in the polyline is
+       placed wrongly... after the segmentation is done, it should be possible to move the polyline
+       points individually." Driven here through real pointer events, because the half that can go
+       wrong is which gesture the canvas decides a drag was. */
+    const before = await p.evaluate(() => ({
+      pts: PAD.rings[0].points.map(q => q.join(",")).join(" "), rings: PAD.rings.length,
+      drawn: window.__drawn }));
+
+    /* Drag the first vertex of the first contour on this section. */
+    const v0 = await p.evaluate(() => {
+      const r = PAD.rings.filter(x => x.z === PAD.z)[0];
+      const q = PAD_VIEW.pxAt([r.points[0][0], r.points[0][1], PAD.z]);
+      return { x: q[0], y: q[1], was: r.points[0].join(",") };
+    });
+    await p.mouse.move(box.x + v0.x, box.y + v0.y);
+    await p.mouse.down();
+    await p.mouse.move(box.x + v0.x + 40, box.y + v0.y + 24, { steps: 5 });
+    await p.mouse.up();
+    await p.waitForTimeout(80);
+    const moved = await p.evaluate(() => {
+      const r = PAD.rings.filter(x => x.z === PAD.z)[0];
+      return { now: r.points[0].join(","), n: r.points.length, rings: PAD.rings.length,
+               say: document.getElementById("tracePadSay").innerText,
+               drawn: window.__drawn };
+    });
+    ok(moved.now !== v0.was, "a drag that starts ON a vertex moves that vertex",
+       v0.was + " -> " + moved.now);
+    ok(moved.n === 3, "...and adds none", moved.n + " points");
+    ok(moved.rings === before.rings, "...and loses no contour", moved.rings);
+    ok(/Point moved/.test(moved.say), "...and says so", moved.say.slice(0, 40));
+    ok(moved.drawn === before.drawn,
+       "...and does NOT pan: a grab is a grab, not a drag of the field",
+       "still " + moved.drawn + " section draws");
+
+    /* Right-click a segment: a new point in the middle of it, which is what "a line placed
+       wrongly" actually needs. */
+    const mid = await p.evaluate(() => {
+      const r = PAD.rings.filter(x => x.z === PAD.z)[0];
+      const a = r.points[0], b = r.points[1];
+      const q = PAD_VIEW.pxAt([Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2), PAD.z]);
+      return { x: q[0], y: q[1], n: r.points.length };
+    });
+    await p.mouse.move(box.x + mid.x, box.y + mid.y);
+    await p.mouse.down({ button: "right" });
+    await p.mouse.up({ button: "right" });
+    await p.waitForTimeout(60);
+    const inserted = await p.evaluate(() => {
+      const r = PAD.rings.filter(x => x.z === PAD.z)[0];
+      return { n: r.points.length, say: document.getElementById("tracePadSay").innerText };
+    });
+    ok(inserted.n === mid.n + 1, "right-clicking a line puts a point in the middle of it",
+       mid.n + " -> " + inserted.n);
+    ok(/drag it where it belongs/.test(inserted.say), "...and says what to do with it",
+       inserted.say.slice(0, 44));
+
+    /* Right-click a vertex: gone. */
+    const onV = await p.evaluate(() => {
+      const r = PAD.rings.filter(x => x.z === PAD.z)[0];
+      const q = PAD_VIEW.pxAt([r.points[1][0], r.points[1][1], PAD.z]);
+      return { x: q[0], y: q[1], n: r.points.length };
+    });
+    await p.mouse.move(box.x + onV.x, box.y + onV.y);
+    await p.mouse.down({ button: "right" });
+    await p.mouse.up({ button: "right" });
+    await p.waitForTimeout(60);
+    const deleted = await p.evaluate(() => {
+      const r = PAD.rings.filter(x => x.z === PAD.z)[0];
+      return { n: r.points.length, say: document.getElementById("tracePadSay").innerText };
+    });
+    ok(deleted.n === onV.n - 1, "right-clicking a point deletes that point", onV.n + " -> " + deleted.n);
+    ok(/Point deleted/.test(deleted.say), "...and says so", deleted.say.slice(0, 30));
+
+    /* And a contour has its own delete, so "remove this one" is not "Undo until it is gone". */
+    const chips = await p.evaluate(() => {
+      const list = document.getElementById("tracePadRings");
+      return { n: list.querySelectorAll(".padring").length, text: list.innerText.trim(),
+               here: PAD.rings.filter(r => r.z === PAD.z).length };
+    });
+    ok(chips.n === chips.here && chips.n > 0,
+       "each contour on this section is listed with its own delete, and only this section's",
+       chips.n + " chip(s) for " + chips.here + " contour(s): " + chips.text.slice(0, 40));
+    const afterChip = await p.evaluate(() => {
+      const was = PAD.rings.length;
+      document.querySelector("#tracePadRings .padring").click();
+      return { was, now: PAD.rings.length, other: PAD.rings.filter(r => r.z !== PAD.z).length,
+               say: document.getElementById("tracePadSay").innerText };
+    });
+    ok(afterChip.now === afterChip.was - 1, "...and clicking it deletes that contour",
+       afterChip.was + " -> " + afterChip.now);
+    ok(afterChip.other === 1, "...leaving the other section's contour alone", afterChip.other);
+
+    /* Put it back so the rest of the section's assertions still have two sections to work with. */
+    await p.evaluate(() => {
+      [[120, 120], [240, 120], [240, 240]].forEach(q => {
+        const t = PAD_VIEW.toolAt(q[0], q[1]);
+        UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
+      });
+      UJ.tracepad.closeRing(PAD);
+    });
+
+    /* And out, into exactly the place a pasted link lands. */
+    await p.evaluate(() => document.getElementById("tracePadUse").click());
+    const used = await p.evaluate(() => ({
+      rings: TRACING_PENDING ? TRACING_PENDING.rings.length : 0,
+      zs: TRACING_PENDING ? String(TRACING_PENDING.rings.map(r => r.z)) : "",
+      shown: document.getElementById("tracingFound").style.display !== "none",
+      say: document.getElementById("tracingStatus").innerText }));
+    ok(used.rings === 2 && used.zs === "21360,21365",
+       "\u201cUse these contours\u201d hands them to the same place a pasted link does", used.zs);
+    ok(used.shown && /from the pad/.test(used.say),
+       "...the naming fields appear, and it says where they came from", used.say.slice(0, 60));
+
+    /* One section is not a surface -- the same rule the paste path has. */
+    await p.evaluate(() => {
+      PAD.rings = PAD.rings.filter(r => r.z === 21360);
+      document.getElementById("tracePadUse").click();
+    });
+    const flat = await p.evaluate(() => document.getElementById("tracePadSay").innerText);
+    ok(/at least two sections/.test(flat), "one section is refused, as it is on the paste path",
+       flat.slice(0, 50));
+
+    await p.evaluate(() => { document.getElementById("tracePadClose").click();
+                             TRACING_PENDING = null;
+                             document.getElementById("tracingFound").style.display = "none"; });
   }
 
   console.log("\nthe polygon tool, clicked");
@@ -554,6 +853,28 @@ function link(annotations){
       document.getElementById("tracingRead").click();
       const w3 = document.getElementById("tracingWhat");
       w3.value = "__other"; w3.dispatchEvent(new Event("change", { bubbles: true }));
+      document.getElementById("tracingName").value = "astrocyte at the glia limitans";
+      document.getElementById("tracingKeep").click();
+      return { before: before, after: TRACINGS_KEPT.length,
+               ids: TRACINGS_KEPT.map(t => t.id),
+               stored: JSON.parse(localStorage.getItem("ujump_tracings_v1") || "[]").length };
+    }, { url: link(polygon(1000, 2000, 500, 44, 12, "r1")
+          .concat(polygon(1005, 2005, 505, 42, 12, "r2"),
+                  polygon(1010, 2010, 510, 40, 12, "r3"))) });
+    ok(twice.after === twice.before,
+       "keeping a fuller tracing of a cell already kept REPLACES it \u2014 it used to be in the "
+       + "Blender scene twice", twice.before + " -> " + twice.after);
+    ok(twice.ids.every(i => !!i) && new Set(twice.ids).size === twice.ids.length,
+       "...and every kept tracing has an id of its own", twice.ids.join(", "));
+    ok(twice.stored === twice.after, "...with storage saying the same", twice.stored);
+  }
+
+  console.log("\nkeeping the same tracing twice");
+  {
+    const twice = await p.evaluate(({ url }) => {
+      const before = TRACINGS_KEPT.length;
+      document.getElementById("tracingLink").value = url;
+      document.getElementById("tracingRead").click();
       document.getElementById("tracingName").value = "astrocyte at the glia limitans";
       document.getElementById("tracingKeep").click();
       return { before: before, after: TRACINGS_KEPT.length,
