@@ -1694,18 +1694,36 @@ function link(annotations){
         each.dispatchEvent(new Event("change", { bubbles: true }));
         out.seeded = [tracingKindFor(0).name, tracingKindFor(1).name];
 
-        /* Now make the second one something else, the way a person would: select it, change the
-           box. The first must not follow. */
-        document.querySelectorAll("#tracePadInsts .padinst")[1].click();
-        const w = document.getElementById("tracingWhat");
-        w.value = "__nucleus"; w.dispatchEvent(new Event("change", { bubbles: true }));
+        /* ── ONE ROW PER DRAWING NUMBER ──────────────────────────────────────────  2026-09-17
+           Søren: *"The name each one separately I thought would give me an option to name each
+           one, so that there would be one naming for each drawing number."* So the check drives
+           what he expected: the rows are simply THERE, one per structure, and the second one is
+           changed in its own row without visiting the Drawing strip at all. */
+        out.rows = document.querySelectorAll("#tracingEachList .eachwhat").length;
+        out.listShown = document.getElementById("tracingEachList").style.display !== "none";
+        out.sharedHidden = document.getElementById("tracingWhatRow").style.display === "none";
+        out.numbers = [].slice.call(document.querySelectorAll("#tracingEachList .row b"))
+                        .map(e => e.textContent.trim());
+        const row2 = document.querySelector('#tracingEachList .eachwhat[data-inst="1"]');
+        row2.value = "__nucleus"; row2.dispatchEvent(new Event("change", { bubbles: true }));
         out.after = [tracingKindFor(0).name, tracingKindFor(1).name];
         out.chips = [].slice.call(document.querySelectorAll("#tracePadInsts .padinst"))
                       .map(e => e.textContent.replace(/\s+/g, " ").trim());
-
-        /* Going back to the first must bring ITS type back into the box, not leave the second's. */
-        document.querySelectorAll("#tracePadInsts .padinst")[0].click();
-        out.boxOnReturn = document.getElementById("tracingWhat").value;
+        /* Each row keeps showing its own, with nothing selected and nothing clicked. */
+        out.rowValues = [].slice.call(document.querySelectorAll("#tracingEachList .eachwhat"))
+                          .map(e => e.value);
+        /* And "something else" opens a name box on THAT row only. */
+        const row1 = document.querySelector('#tracingEachList .eachwhat[data-inst="0"]');
+        row1.value = "__other"; row1.dispatchEvent(new Event("change", { bubbles: true }));
+        const nm1 = document.querySelector('#tracingEachList .eachname[data-inst="0"]');
+        nm1.value = "Dense body"; nm1.dispatchEvent(new Event("input", { bubbles: true }));
+        out.nameWraps = [].slice.call(document.querySelectorAll("#tracingEachList .eachnamewrap"))
+                          .map(e => e.style.display);
+        out.named = [tracingKindFor(0).name, tracingKindFor(1).name];
+        /* Its own colour, in its own row, without touching the shared picker. */
+        const c2 = document.querySelector('#tracingEachList .eachcol[data-inst="1"]');
+        c2.value = "#ff0088"; c2.dispatchEvent(new Event("input", { bubbles: true }));
+        out.colour = [padInstColour(0), padInstColour(1)];
 
         window.__posted = [];
         window.postReport = (x) => { window.__posted.push(x); return true; };
@@ -1722,14 +1740,27 @@ function link(annotations){
       ok(own.seeded[0] === own.seeded[1] && !!own.seeded[0],
          "turning it on changes nothing: both keep the type they already had",
          own.seeded.join(" / "));
+      ok(own.rows === 2 && own.listShown && own.sharedHidden,
+         "ONE ROW PER DRAWING NUMBER, in place of the single box — what he expected the tick to do",
+         own.rows + " rows, shared box hidden: " + own.sharedHidden);
+      ok(own.numbers.join(" ") === "#1 #2",
+         "...each labelled with its number, in the order they were drawn", own.numbers.join(" "));
       ok(own.after[0] !== own.after[1] && /Nucleus/i.test(own.after[1]),
-         "...and then each one can be its own thing", own.after.join(" / "));
+         "...and changing one row changes only that one, with no trip to the Drawing strip",
+         own.after.join(" / "));
+      ok(own.rowValues[0] !== own.rowValues[1] && own.rowValues[1] === "__nucleus",
+         "...and every row goes on showing its own, all of them visible at once",
+         own.rowValues.join(" / "));
       ok(/Nucleus/i.test(own.chips[1]) && !/Nucleus/i.test(own.chips[0]),
-         "...which the strip says, so you can see which is which without clicking",
+         "...which the strip says too, so the pad and the list agree",
          own.chips.join(" | "));
-      ok(own.boxOnReturn !== "__nucleus",
-         "going back to one brings ITS type into the box rather than leaving the other's",
-         own.boxOnReturn);
+      ok(own.nameWraps[0] === "" && own.nameWraps[1] === "none",
+         "\u201csomething else\u201d opens a name box on that row and no other",
+         JSON.stringify(own.nameWraps));
+      ok(own.named[0] === "Dense body" && /Nucleus/i.test(own.named[1]),
+         "...and what is typed there is what that structure is called", own.named.join(" / "));
+      ok(own.colour[1].toLowerCase() === "#ff0088" && own.colour[0].toLowerCase() !== "#ff0088",
+         "...and a row's colour picker recolours that structure alone", own.colour.join(" / "));
       ok(own.posted.length === 2 && own.posted[0].kind !== own.posted[1].kind,
          "...and they are added as two different things in one press",
          own.posted.map(x => x.kind).join(" / "));
@@ -1988,6 +2019,90 @@ function link(annotations){
     ok(back.cur === 1, "...and the pad is back on the one that was being drawn", back.cur);
   }
 
+
+  /* ── THE CONTOURS, BACK IN A VIEWER, AND BACK AGAIN ──────────────────────────────  2026-09-17
+     Søren: *"We need a way to look at the segmentations in Neuroglancer also."*
+
+     The assertion that matters is the ROUND TRIP. A button that opens a viewer is easy to write and
+     easy to get subtly wrong — a coordinate order swapped, a loop left open, two structures in one
+     layer — and every one of those mistakes looks like a picture. Reading the link back through
+     core/tracing.js, the same parser a person's pasted link goes through, is the only check that
+     the picture is of the right thing. */
+  console.log("\nthe contours, back in a viewer");
+  {
+    const trip = await p.evaluate(() => {
+      const opened = [];
+      const realOpen = window.open;
+      window.open = (u) => { opened.push(u); return null; };
+      const structs = [
+        { name: "Mitochondrion 1", color: "#40e28c", rings: [
+          { z: 700, points: [[1000,2000],[1200,2000],[1200,2200],[1000,2200]] },
+          { z: 705, points: [[1010,2010],[1190,2010],[1190,2190],[1010,2190]] } ] },
+        { name: "Nucleus", color: "#3a72d8", rings: [
+          { z: 700, points: [[3000,4000],[3200,4000],[3100,4200]] } ] }
+      ];
+      tracingViewerOpen(structs);
+      window.open = realOpen;
+      if (!opened.length) return { err: "nothing opened" };
+      const url = opened[0];
+      const st = JSON.parse(decodeURIComponent(url.split("#!")[1]));
+      const anns = (st.layers || []).filter(l => l.type === "annotation" && l.annotations);
+      /* Read it back the way a pasted link is read. */
+      const back = anns.map(l => {
+        const one = { layers: [l] };
+        const r = UJ.tracing.ringsFromLink("https://x/#!" + encodeURIComponent(JSON.stringify(one)));
+        return { name: l.name, colour: l.annotationColor,
+                 ok: r.ok, rings: (r.rings || []).length,
+                 pts: (r.rings || []).map(x => x.points.length).join(","),
+                 zs: (r.rings || []).map(x => x.z).join(",") };
+      });
+      return { url: url.slice(0, 40), layers: anns.map(l => l.name), back: back,
+               colours: anns.map(l => l.annotationColor),
+               types: anns.map(l => (l.annotations[0] || {}).type),
+               pos: st.position && st.position.map(Math.round),
+               selected: st.selectedLayer && st.selectedLayer.layer };
+    });
+    ok(!trip.err, "the button builds a viewer link", trip.err || trip.url + "…");
+    ok(trip.layers.length === 2 && trip.layers[0] === "Mitochondrion 1" && trip.layers[1] === "Nucleus",
+       "ONE ANNOTATION LAYER PER STRUCTURE, named for it", trip.layers.join(" | "));
+    ok(trip.colours.join(",").toLowerCase() === "#40e28c,#3a72d8",
+       "...each in the colour it was drawn in", trip.colours.join(" / "));
+    ok(trip.types.every(t => t === "line"),
+       "...as line annotations, which every viewer can draw", trip.types.join(","));
+    ok(trip.back.every(b => b.ok), "the link reads back through the same parser a paste goes through",
+       trip.back.map(b => b.ok).join(","));
+    ok(trip.back[0].rings === 2 && trip.back[0].pts === "4,4",
+       "...with the first structure's two contours intact, four vertices each",
+       trip.back[0].rings + " rings, " + trip.back[0].pts + " points");
+    ok(trip.back[0].zs === "700,705",
+       "...on the sections they were drawn on", trip.back[0].zs);
+    ok(trip.back[1].rings === 1 && trip.back[1].pts === "3",
+       "...and the second structure is its own, not chained onto the first",
+       trip.back[1].rings + " ring, " + trip.back[1].pts + " points");
+    ok(trip.pos && trip.pos[2] === 700 && Math.abs(trip.pos[0] - 1800) < 900,
+       "the viewer lands in the middle of what it is showing, not on a stale box",
+       JSON.stringify(trip.pos));
+    ok(trip.selected === "Mitochondrion 1", "...with a structure's layer selected", trip.selected);
+  }
+
+  console.log("...and two structures of the same name still get a layer each");
+  {
+    const same = await p.evaluate(() => {
+      const opened = []; const realOpen = window.open;
+      window.open = (u) => { opened.push(u); return null; };
+      tracingViewerOpen([
+        { name: "Mitochondrion", color: "#40e28c",
+          rings: [{ z: 1, points: [[0,0],[10,0],[10,10]] }] },
+        { name: "Mitochondrion", color: "#bfdd78",
+          rings: [{ z: 1, points: [[50,0],[60,0],[60,10]] }] }
+      ]);
+      window.open = realOpen;
+      const st = JSON.parse(decodeURIComponent(opened[0].split("#!")[1]));
+      return (st.layers || []).filter(l => l.annotations).map(l => l.name);
+    });
+    ok(same.length === 2 && same[0] !== same[1],
+       "Neuroglancer keys layers by name, so the second gets its number", same.join(" | "));
+  }
 
   const newErrors = errors.filter(e => !/atob/.test(e));
   ok(newErrors.length === 0, "the page still loads with no new errors",

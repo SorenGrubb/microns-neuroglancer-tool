@@ -272,8 +272,8 @@ CARD = '''<div class="card" id="tracingCard">
 </div>
 <p class="hint" id="tracingStatus"></p>
 <div id="tracingFound" style="display:none;margin-top:8px">
-<label style="margin-top:4px">What did you outline?</label>
-<div class="row" style="gap:8px">
+<label style="margin-top:4px" id="tracingWhatLabel">What did you outline?</label>
+<div class="row" id="tracingWhatRow" style="gap:8px">
 <select id="tracingWhat" style="flex:2 1 auto;min-width:0" title="The same ontology the organelle card and the filter use, so a traced lysosome is the same thing as a reported one. The whole cell and its nucleus are at the top because they are what you outline when the segmentation has missed a cell, and they are not organelles."></select>
 <div class="coord" style="flex:0 0 120px"><input type="color" id="tracingColor" value="#3a6b5a" style="width:100%;height:38px;padding:2px"></div>
 </div>
@@ -281,9 +281,13 @@ CARD = '''<div class="card" id="tracingCard">
      option to identify the organelles identities individually, so standard is that they are all the
      same, but if you click a button you can identify them individually." Hidden until there are two
      to tell apart, because until then it is a question about nothing. -->
-<label id="tracingEachRow" style="font-size:12px;display:none;align-items:center;gap:6px;margin-top:6px" title="Off, everything you draw here is the same type — the usual case, several mitochondria in one cell. On, each one carries its own type: pick a number in the Drawing strip and the box above becomes that one's. They are still one press to add, and they are still numbered within their own type.">
+<label id="tracingEachRow" style="font-size:12px;display:none;align-items:center;gap:6px;margin-top:6px" title="Off, everything you draw here is the same type — the usual case, several mitochondria in one cell. On, the box above is replaced by one row per drawing number, each with its own colour, type and name. They are still one press to add, and they are still numbered within their own type.">
 <input type="checkbox" id="tracingEachOwn"> name each one separately
 </label>
+<!-- ONE ROW PER DRAWING NUMBER.  2026-09-17. Søren: "The name each one separately I thought would
+     give me an option to name each one, so that there would be one naming for each drawing
+     number." See tracingEachRender(). -->
+<div id="tracingEachList" style="display:none;margin-top:4px"></div>
 <div class="row" id="tracingNameRow" style="gap:8px;margin-top:8px;display:none">
 <div class="coord" style="flex:1 1 auto"><input type="text" id="tracingName" placeholder="Name it &mdash; and tell me, so it can go on the list"></div>
 </div>
@@ -318,6 +322,7 @@ CARD = '''<div class="card" id="tracingCard">
      than a refusal. -->
 <div class="row" style="gap:8px;margin-top:10px">
 <button class="idbtn" id="tracingKeep" style="flex:1 1 auto" title="Adds this tracing to the shared dataset, where anyone can use it and anyone can extend it, and keeps it in this page's own 3D export. Needs a Google sign-in to be attributed — without one it waits here until you sign in.">Add it to the dataset &mdash; and to your 3D export</button>
+<button class="idbtn" id="tracingViewer" style="flex:0 0 auto" title="Opens the viewer chosen at the top of the Jump tab with these contours on it — one annotation layer per structure, in its own colour, each contour a closed loop of lines. Edit them there and paste the address bar back into the box above to read them in again.">Look at it in Neuroglancer</button>
 </div>
 </div>
 <div id="tracingList" style="margin-top:12px"></div>
@@ -396,9 +401,18 @@ function tracingRenderList(){
              +'dataset yet. Sign in with Google and it goes up on its own.">waiting for sign-in</span>'
             :'<span style="opacity:.55" title="In the shared dataset — anyone can open it and add '
              +'to it.">in the dataset</span>')
+        +'<button class="idbtn tracingview" data-n="'+i+'" style="padding:2px 9px;font-size:12px" '
+        +'title="Open this tracing in the viewer \u2014 its contours as an annotation layer in its '
+        +'own colour.">Neuroglancer</button>'
         +'<button class="idbtn tracingdrop" data-n="'+i+'" style="padding:2px 9px;font-size:12px">'
         +'Remove</button></div>';
     }).join("");
+  host.querySelectorAll(".tracingview").forEach(function(b){
+    b.addEventListener("click",function(){
+      const t=TRACINGS_KEPT[Number(b.dataset.n)];
+      if(t)tracingViewerOpen([t]);
+    });
+  });
   host.querySelectorAll(".tracingdrop").forEach(function(b){
     b.addEventListener("click",function(){
       TRACINGS_KEPT.splice(Number(b.dataset.n),1);
@@ -441,11 +455,23 @@ function tracingReadLink(){
     return;
   }
   document.getElementById("tracingFound").style.display="";
+  tracingEachRender(true);
 }
 
 /* What the dropdown means, in one place: the value that travels with the tracing and the label
    a person reads. "__cell" and "__nucleus" are this card's own, everything else is the ontology's
    own value, and "__other" is the only one that takes its name from a text box. */
+/* Split out from tracingWhat() (2026-09-17) so the single box and each row of the per-structure
+   list read a dropdown value the SAME way. Two copies of this mapping is how a lysosome traced in
+   one place stops being the same thing as a lysosome traced in the other. */
+function tracingWhatOf(v,typed){
+  if(v==="__cell")return {kind:"cell",name:"Whole cell"};
+  if(v==="__nucleus")return {kind:"nucleus",name:"Nucleus"};
+  if(v==="__other")return {kind:"other",name:String(typed||"").trim()};
+  /* The label from whichever vocabulary this page carries -- see tracingWhat()'s own note. */
+  const k=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined")?ORGANELLE_KIND_BY_VALUE[v]:null;
+  return {kind:v,name:(k&&k.label)||UJ.organelles.labelOf(v)};
+}
 function tracingWhat(){
   const sel=document.getElementById("tracingWhat");
   const v=sel?sel.value:"__other";
@@ -686,6 +712,97 @@ function tracingFillPos(force){
     });
   } catch (e){}
 })();
+
+/* ── THE CONTOURS, BACK IN A VIEWER ─────────────────────────────────────────────  2026-09-17
+   Søren: *"We need a way to look at the segmentations in Neuroglancer also."*
+
+   This card has always read contours OUT of a Neuroglancer link. This is the other direction, and
+   it is what makes a traced structure a thing you can go and LOOK at rather than only a number in
+   a list: ONE ANNOTATION LAYER PER STRUCTURE, named for it and in its own colour, each contour a
+   closed loop of line annotations.
+
+   LINES, NOT POLYGONS, for the same reason tracingOpen() hands out the point tool: no viewer a
+   link can reach has a polygon tool (measured 2026-09-17), and an annotation type a viewer does not
+   know is one it does not draw. Closed loops of lines are also exactly what core/tracing.js reads
+   back — chainLines() joins them end to end within a section — so a tracing opened this way can be
+   edited there and pasted straight back in here. That round trip is the point.
+
+   One layer PER STRUCTURE rather than one for all of them, for two reasons that happen to agree:
+   a layer carries one colour, and the reader chains loose lines within a layer, so two structures
+   sharing one would be read back as one. */
+function tracingRingLines(rings, idPrefix){
+  const out = [];
+  (rings || []).forEach(function(r, ri){
+    const pts = r.points || [];
+    if (pts.length < 3) return;
+    const z = Math.round(r.z);
+    for (let i = 0; i < pts.length; i++){
+      const a = pts[i], b = pts[(i + 1) % pts.length];   // closed: the last vertex joins the first
+      out.push({ type: "line", id: idPrefix + "_" + ri + "_" + i,
+                 pointA: [Math.round(a[0]), Math.round(a[1]), z],
+                 pointB: [Math.round(b[0]), Math.round(b[1]), z] });
+    }
+  });
+  return out;
+}
+/* Where the viewer lands: the middle of what is being shown, not the box at the top of the card,
+   which may still hold the coordinate of a different cell. */
+function tracingCentreOf(structs){
+  let n = 0, sx = 0, sy = 0; const zs = [];
+  structs.forEach(function(t){
+    (t.rings || []).forEach(function(r){
+      zs.push(r.z);
+      (r.points || []).forEach(function(p){ sx += p[0]; sy += p[1]; n++; });
+    });
+  });
+  if (!n) return null;
+  zs.sort(function(a, b){ return a - b; });
+  return [Math.round(sx / n), Math.round(sy / n), Math.round(zs[zs.length >> 1])];
+}
+function tracingViewerOpen(structs, say){
+  structs = (structs || []).filter(function(t){ return t && (t.rings || []).length; });
+  if (!structs.length){ tracingSay("Nothing to look at yet \u2014 no contours.", true); return; }
+  const pos = tracingCentreOf(structs);
+  if (!pos){ tracingSay("Those contours have no coordinates to centre on.", true); return; }
+  let st;
+  try { st = buildState(pos); }
+  catch (e){ tracingSay("Could not build a viewer link: " + String(e && e.message || e), true); return; }
+  /* Same two layers tracingOpen() drops, for the same reasons: the Cortical layers bands are line
+     annotations that would chain into these contours if this link were ever pasted back, and a
+     leftover empty "tracing" layer is a place for a stray click to land. */
+  st.layers = (st.layers || []).filter(function(l){
+    return !(l && l.type === "annotation"
+             && (/cortical layers/i.test(String(l.name || "")) || l.name === "tracing"));
+  });
+  const used = {}; let firstName = "";
+  structs.forEach(function(t, i){
+    /* Neuroglancer keys layers by NAME, so two structures called the same thing would be one layer
+       with one of them in it. The number is already how they are told apart everywhere else. */
+    let nm = String(t.name || "").replace(/[^\w .\u00b5-]+/g, "").trim() || ("structure " + (i + 1));
+    if (used[nm]) nm = nm + " (" + (i + 1) + ")";
+    used[nm] = 1; if (!firstName) firstName = nm;
+    st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
+                     name: nm, annotationColor: t.color || "#40e28c",
+                     annotations: tracingRingLines(t.rings, "t" + i) });
+  });
+  st.selectedLayer = { layer: firstName, visible: true };
+  const viewerEl = document.getElementById("viewer");
+  const base = (viewerEl && viewerEl.value) || "https://spelunker.cave-explorer.org/";
+  const url = base + "#!" + encodeURIComponent(JSON.stringify(st));
+  /* A tracing is tens of vertices a section, so this is comfortable; a hundred sections of freehand
+     is not, and a URL the browser silently truncates would open a viewer missing half the cell
+     without saying so. Better to say so here. */
+  if (url.length > 1500000){
+    tracingSay("Too many vertices to put in a viewer link (" + Math.round(url.length / 1000)
+      + "k characters). Open one structure at a time, or use the Blender export.", true);
+    return;
+  }
+  window.open(url, "_blank", "noopener");
+  const nStr = structs.length + " structure" + (structs.length === 1 ? "" : "s");
+  tracingSay(say || ("Opened in the viewer at " + pos.join(", ") + " \u2014 " + nStr
+    + ", one annotation layer each, in the colours they were drawn in. Edit them there and paste "
+    + "the address bar back into the box above to read them in again."));
+}
 
 function tracingOpen(){
   const got=tracingPos();
@@ -1300,6 +1417,7 @@ function draftResume(){
   if (d.used && PAD.rings.length){
     TRACING_PENDING = { rings: UJ.tracepad.toRings(PAD), id: d.structureId || undefined };
     document.getElementById("tracingFound").style.display = "";
+    tracingEachRender(true);
   }
   draftRender();
   tracingSay("Draft resumed \\u2014 " + PAD.rings.length + " contour"
@@ -1388,6 +1506,12 @@ function tracingRenderShared(){
             + ((t.versions > 1) ? " &middot; v" + t.versions : "") + '</span>'
           + '<button class="idbtn tracingopen" data-sid="' + escHtml(t.structureId) + '" '
             + 'style="padding:2px 9px;font-size:12px;flex:0 0 auto">Open it in the pad</button>'
+          /* Looking is not editing. Somebody who wants to SEE what has been traced on a cell should
+             not have to take it onto their own pad to do it. Same fetch, different destination. */
+          + '<button class="idbtn tracingngl" data-sid="' + escHtml(t.structureId) + '" '
+            + 'style="padding:2px 9px;font-size:12px;flex:0 0 auto" title="Open this tracing in the '
+            + 'viewer, as an annotation layer in its own colour \u2014 without taking it onto your '
+            + 'pad.">Neuroglancer</button>'
           + (t.fileUrl ? ' <a href="' + escHtml(t.fileUrl) + '" target="_blank" rel="noopener" '
               + 'style="font-size:12px;opacity:.7" title="The tracing’s own file in Drive">file</a>' : "")
           + '</div>';
@@ -1395,6 +1519,36 @@ function tracingRenderShared(){
   [].slice.call(host.querySelectorAll(".tracingopen")).forEach(function(b){
     b.addEventListener("click", function(){ tracingOpenShared(b.dataset.sid, b); });
   });
+  [].slice.call(host.querySelectorAll(".tracingngl")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingSharedInViewer(b.dataset.sid, b); });
+  });
+}
+
+/* The same fetch tracingOpenShared() does, ending in a viewer instead of on the pad. Kept separate
+   rather than given a flag: the two do different things with the answer, and the pad version has a
+   second job (it becomes an EDIT of that tracing, carrying its structureId) that looking must not
+   quietly start. */
+async function tracingSharedInViewer(sid, btn){
+  const label = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "opening\u2026"; }
+  try {
+    const r = await fetch(REPORT_ENDPOINT + "?tracings=1&structureId=" + encodeURIComponent(sid));
+    const d = await r.json();
+    const t = ((d && d.tracings) || [])[0];
+    if (!t) throw new Error("the dataset has no tracing with that id any more");
+    if (t.error) throw new Error(t.error);
+    const st = UJ.tracing.rowsToStructures(t.rows || [])[0];
+    if (!st || !st.rings.length) throw new Error("that tracing came back with no contours on it");
+    tracingViewerOpen([{ name: st.name || t.name || sid, color: t.color || st.color || "#40e28c",
+                         rings: st.rings }],
+      "Opened \u201c" + (st.name || t.name || sid) + "\u201d in the viewer \u2014 its contours as "
+      + "an annotation layer in its own colour. Nothing has been taken onto your pad; use "
+      + "\u201cOpen it in the pad\u201d for that.");
+  } catch (e){
+    tracingSay("Could not open that tracing: " + String(e && e.message || e), true);
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = label; }
+  }
 }
 
 async function tracingOpenShared(sid, btn){
@@ -1449,6 +1603,7 @@ async function tracingOpenShared(sid, btn){
       if (opt){ typeSel.value = st.cellType; TRACING_TYPE_TOUCHED = true; }
     }
     document.getElementById("tracingFound").style.display = "";
+    tracingEachRender(true);
     const who = (t.contributors && t.contributors.length) ? t.contributors.join(", ")
                                                           : (t.tracedBy || "somebody");
     tracingSay("“" + (st.name || st.structureId) + "” is in the pad — "
@@ -1515,39 +1670,126 @@ function tracingKindFor(inst){
   }
   return tracingWhat();
 }
-/* The type boxes show the SELECTED structure. Called when a chip is clicked and when the option is
-   switched on. */
-function tracingShowKindOf(inst){
-  if (!tracingEachOwn()) return;
-  const own = PAD_INST_KIND[String(inst || 0)];
-  if (!own) return;
-  const what = document.getElementById("tracingWhat");
-  const nameBox = document.getElementById("tracingName");
-  const row = document.getElementById("tracingNameRow");
-  if (what && own.value){
-    const has = [].slice.call(what.options).some(function(o){ return o.value === own.value; });
-    if (has) what.value = own.value;
-  }
-  if (row) row.style.display = (what && what.value === "__other") ? "" : "none";
-  if (nameBox && what && what.value === "__other") nameBox.value = own.name || "";
+/* ── ONE NAMING PER DRAWING NUMBER ──────────────────────────────────────────────  2026-09-17
+   Søren: *"The name each one separately I thought would give me an option to name each one, so that
+   there would be one naming for each drawing number."*
+
+   Which is what the words say, and it is not what the tick did. It made the SINGLE box above mean
+   "whichever number is selected on the pad": naming three structures was three trips to the Drawing
+   strip, there was no moment when you could see what you had called them, and since the strip lives
+   on the PAD, closing the pad left numbers two and three unreachable — the card then showed one
+   type box, which looked like one naming for everything and quietly was not.
+
+   On, the box is replaced by one ROW PER STRUCTURE: number, colour, type, and a name box when the
+   type is "something else". All of them on screen at once, all of them editable, in the order they
+   were drawn, and they survive the pad being closed because the list is built from the contours
+   rather than from the pad.
+
+   These two used to move a type between the single box and PAD_INST_KIND. The list writes
+   PAD_INST_KIND directly, so there is nothing left to carry, and carrying it would now mean copying
+   a hidden box's stale value onto whichever structure was just selected. Kept as no-ops rather than
+   deleted: the call sites are about the SELECTION changing, which is still a real event, and the
+   next thing to want them is likelier to want this comment than a fresh guess. */
+function tracingShowKindOf(_inst){ /* the row shows it, and never had to be told */ }
+function tracingStoreKindOf(_inst){ /* the row stores it, on change, where it was typed */ }
+/* The structures to list, from the contours rather than from the pad, so the list is right after
+   the pad is closed and for a tracing that arrived on a pasted link. */
+function tracingEachInsts(){
+  const rings = (TRACING_PENDING && TRACING_PENDING.rings)
+             || (PAD && PAD.rings) || [];
+  const seen = {}, out = [];
+  rings.forEach(function(r){ const k = r.inst || 0; if (!seen[k]){ seen[k] = 1; out.push(k); } });
+  if (PAD && !seen[PAD.inst || 0]) out.push(PAD.inst || 0);
+  out.sort(function(a, b){ return a - b; });
+  return out;
 }
-/* And the other direction: what is in the boxes belongs to the structure being drawn. */
-function tracingStoreKindOf(inst){
-  if (!tracingEachOwn() || !PAD) return;
-  const what = document.getElementById("tracingWhat");
-  const w = tracingWhat();
-  PAD_INST_KIND[String(inst || 0)] = { value: what ? what.value : "", kind: w.kind, name: w.name };
-}
-/* Every structure on the pad gets what is in the boxes now. Called when the option is switched on,
-   which is the one moment several structures have to acquire a type they did not have. */
+/* Every structure gets what is in the shared box now. Called when the option is switched on, which
+   is the one moment several structures have to acquire a type they did not have — and "standard is
+   that they are all the same" is exactly what that should look like. */
 function tracingSeedKinds(){
-  if (!PAD) return;
   const what = document.getElementById("tracingWhat");
   const w = tracingWhat();
-  UJ.tracepad.instances(PAD).forEach(function(it){
-    const k = String(it.inst);
+  tracingEachInsts().forEach(function(i){
+    const k = String(i);
     if (!PAD_INST_KIND[k])
       PAD_INST_KIND[k] = { value: what ? what.value : "", kind: w.kind, name: w.name };
+  });
+}
+/* Rebuilt only when the SET of structures changes. padRings() calls this on every close, delete and
+   drag; rebuilding each time would take the caret out of a name box mid-word. A colour change
+   writes through without a rebuild for the same reason. */
+var TRACING_EACH_SIG = null;
+function tracingEachRender(force){
+  const box = document.getElementById("tracingEachList");
+  const one = document.getElementById("tracingWhatRow");
+  const lbl = document.getElementById("tracingWhatLabel");
+  const nameRow = document.getElementById("tracingNameRow");
+  const what = document.getElementById("tracingWhat");
+  if (!box || !one || !what) return;
+  const on = tracingEachOwn();
+  const insts = tracingEachInsts();
+  /* The question is only worth asking once there are two to tell apart -- and once it has been
+     answered yes it stays, or turning it on would hide its own tick. */
+  const row = document.getElementById("tracingEachRow");
+  if (row) row.style.display = (insts.length > 1 || on) ? "flex" : "none";
+  box.style.display = on ? "" : "none";
+  one.style.display = on ? "none" : "flex";
+  if (lbl) lbl.textContent = on ? "What did you outline? One row per number:"
+                                : "What did you outline?";
+  if (!on){
+    TRACING_EACH_SIG = null;
+    if (nameRow) nameRow.style.display = (what.value === "__other") ? "" : "none";
+    return;
+  }
+  if (nameRow) nameRow.style.display = "none";   // each row carries its own
+  const sig = insts.join(",");
+  if (!force && sig === TRACING_EACH_SIG) return;
+  TRACING_EACH_SIG = sig;
+  const opts = what.innerHTML;
+  box.innerHTML = insts.map(function(i){
+    return '<div class="row" style="gap:8px;margin-top:6px;align-items:center;flex-wrap:nowrap">'
+      + '<b style="flex:0 0 26px;font-family:monospace">#' + (i + 1) + '</b>'
+      + '<div class="coord" style="flex:0 0 52px"><input type="color" class="eachcol" data-inst="'
+        + i + '" style="width:100%;height:34px;padding:2px" title="The colour this one is drawn in '
+        + '— on the pad, in the 3D window and in the dataset."></div>'
+      + '<select class="eachwhat" data-inst="' + i + '" style="flex:2 1 auto;min-width:0">'
+        + opts + '</select>'
+      + '<div class="coord eachnamewrap" data-inst="' + i + '" style="flex:1 1 130px;display:none">'
+        + '<input type="text" class="eachname" data-inst="' + i + '" placeholder="Name it"></div>'
+      + '</div>';
+  }).join("");
+  insts.forEach(function(i){
+    const k = String(i);
+    const sel  = box.querySelector('.eachwhat[data-inst="' + i + '"]');
+    const col  = box.querySelector('.eachcol[data-inst="' + i + '"]');
+    const wrap = box.querySelector('.eachnamewrap[data-inst="' + i + '"]');
+    const nm   = box.querySelector('.eachname[data-inst="' + i + '"]');
+    const own  = PAD_INST_KIND[k];
+    col.value = padInstColour(i);
+    const want = (own && own.value) || what.value || "__cell";
+    if ([].slice.call(sel.options).some(function(o){ return o.value === want; })) sel.value = want;
+    if (sel.value === "__other"){ wrap.style.display = ""; nm.value = (own && own.name) || ""; }
+    const store = function(){
+      PAD_INST_KIND[k] = Object.assign({ value: sel.value },
+                                       tracingWhatOf(sel.value, nm.value));
+      padInstances(); pad3DSoon(); draftSoon();
+    };
+    sel.addEventListener("change", function(){
+      wrap.style.display = (sel.value === "__other") ? "" : "none";
+      store();
+      if (sel.value === "__other") nm.focus();
+    });
+    nm.addEventListener("input", store);
+    col.addEventListener("input", function(){
+      PAD_INST_COLOUR[k] = col.value;
+      /* Not a rebuild: everything that shows a colour is asked to repaint instead, so the picker
+         under the pointer stays where it is. */
+      padPaint(); padRings();
+    });
+    /* Seeded, not stored: the row is showing a type, so that IS this structure's type from now on
+       -- but silently, because a render is not an edit and should not schedule a draft save or a
+       preview rebuild for each of five rows. */
+    PAD_INST_KIND[k] = Object.assign({ value: sel.value }, tracingWhatOf(sel.value, nm.value));
   });
 }
 function padInstColour(i){
@@ -1798,6 +2040,7 @@ function padRings(){
   draftSoon();
   padVolume();
   padInstances();
+  tracingEachRender();      // a new structure gets a row; a deleted one loses it
   const box = document.getElementById("tracePadRings");
   if (!box || !PAD) return;
   const here = UJ.tracepad.onSection(PAD);
@@ -2063,6 +2306,7 @@ async function tracingResolveAt(pos){
        cleared by padOpen(), so a pad opened fresh carries nothing. */
     TRACING_PENDING = { rings: rings, id: PAD_EDIT_ID || undefined };
     document.getElementById("tracingFound").style.display = "";
+    tracingEachRender(true);
     tracingVolShow();
     tracingSay(rings.length + " contour" + (rings.length === 1 ? "" : "s") + " from the pad on "
       + sections.size + " sections. Name it below and keep it.");
@@ -2351,9 +2595,10 @@ async function tracingResolveAt(pos){
     what.addEventListener("change",function(){
       document.getElementById("tracingNameRow").style.display=(what.value==="__other")?"":"none";
       if(what.value==="__other")document.getElementById("tracingName").focus();
-      /* With the option on, this box is the SELECTED structure's, so a change is a change to that
-         one -- and the strip has to say so. */
-      if(PAD){tracingStoreKindOf(PAD.inst);padInstances();}
+      /* This box is the SHARED one, and with the list on it is not even on screen -- see
+         tracingEachRender(). The strip still has to redraw, because with the list off every chip
+         shows this type. */
+      padInstances();
     });
   }
   /* The option, and the two directions it creates. Seeding on the way in is what makes turning it
@@ -2361,11 +2606,11 @@ async function tracingResolveAt(pos){
   const each=document.getElementById("tracingEachOwn");
   if(each)each.addEventListener("change",function(){
     if(each.checked)tracingSeedKinds();
+    tracingEachRender(true);
     padInstances();padRings();
-    if(PAD)tracingShowKindOf(PAD.inst);
     padSay(each.checked
-      ?"Each one carries its own type now. Click a number in the Drawing strip and the box above "
-       +"becomes that one's \u2014 they are still added in one press."
+      ?"One row per number now \u2014 each with its own colour, type and name. They all start as "
+       +"what they already were, and they are still added in one press."
       :"Back to one type for all of them.");
   });
   TRACINGS_KEPT=tracingRead();
@@ -2375,6 +2620,31 @@ async function tracingResolveAt(pos){
   });
   const openBtn=document.getElementById("tracingOpen");
   if(openBtn)openBtn.addEventListener("click",tracingOpen);
+  /* The structures as they stand in the naming block -- names, colours and numbers included, since
+     tracingCurrentAll() is what the Add button submits. Looking at what you are ABOUT to add is
+     worth more than looking at it afterwards. */
+  const viewBtn=document.getElementById("tracingViewer");
+  if(viewBtn)viewBtn.addEventListener("click",function(){
+    let all=[];
+    try{all=tracingCurrentAll();}catch(e){all=[];}
+    /* tracingCurrentAll() refuses (and says why) when something has no type yet. Looking is not
+       submitting, so fall back to the raw contours rather than making a person name a structure
+       before they are allowed to see it. */
+    if(!all.length&&TRACING_PENDING&&(TRACING_PENDING.rings||[]).length){
+      const byInst={},order=[];
+      TRACING_PENDING.rings.forEach(function(r){
+        const k=r.inst||0;
+        if(!byInst[k]){byInst[k]=[];order.push(k);}
+        byInst[k].push({z:r.z,points:r.points});
+      });
+      order.sort(function(a,b){return a-b;});
+      all=order.map(function(k){
+        return {name:(tracingKindFor(k).name||("Structure "+(k+1))),
+                color:padInstColour(k),rings:byInst[k]};
+      });
+    }
+    tracingViewerOpen(all);
+  });
   /* The same paste-splitter the main coordinate box has, so "240640, 207872, 21360" copied out of
      Neuroglancer's own readout lands in three fields. */
   const tx=document.getElementById("tracingX");
