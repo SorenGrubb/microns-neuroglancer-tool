@@ -505,6 +505,8 @@ document.addEventListener("DOMContentLoaded", function(){
      say which cell it is in. Loaded here because the bulk organelle panel below uses it; nothing
      else in this file does yet. -->
 <script src="core/segread.js"></script>
+<script src="core/emtiles.js"></script>
+<script src="core/tracepad.js"></script>
 <!-- 2026-09-16: contours out of a pasted Neuroglancer state -- BrainSharer's polygon/volume
      collections, or plain line annotations chained end to end. The other half of trace_mesh.py. -->
 <script src="core/tracing.js"></script>
@@ -733,14 +735,37 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div class="card" id="tracingCard">
 <details id="tracingPanel">
 <summary style="cursor:pointer;font-weight:600">Trace a cell &mdash; outline it, and it joins the 3D export</summary>
-<p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Open a viewer, ring the cell with <b>line</b> annotations on one section &mdash; <b>ctrl+click</b> each end of each segment; a plain click does nothing &mdash; step a section with <b>,</b> and <b>.</b>, and go round again. Then paste the whole address bar back here. Two sections is the minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>
+<p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Open a viewer and ring the cell with <b>point</b> annotations &mdash; <b>ctrl+click</b> once per vertex, going round one way; a plain click does nothing &mdash; then step a section with <b>,</b> or <b>.</b> and go round again. Paste the whole address bar back here. Three points to a section, two sections minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>
 <label style="margin-top:10px">Where to open it <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; voxels, the same as the coordinate box at the top of this tab</span></label>
 <div class="row"><div class="coord"><input type="text" id="tracingX" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="tracingY" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="tracingZ" inputmode="decimal" placeholder="z"></div></div>
 <p class="hint" style="margin-top:4px">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically. Filled in from the cell on screen when you have one.</p>
 <div class="row" style="gap:8px;margin-top:8px">
-<button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate in the boxes above, with an empty annotation layer called &quot;tracing&quot; already selected and the line tool already active.">Open a viewer to trace in</button>
+<button class="idbtn" id="tracePadOpen" style="flex:1 1 auto" title="Draws the EM section here and gives you a real polygon tool: click each vertex, click the first one again to close. No viewer a link can reach has one.">Trace it here &mdash; polygon tool</button>
+<button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate in the boxes above, with an empty annotation layer called &quot;tracing&quot; already selected and the point tool already active.">Open a viewer instead</button>
 </div>
-<p class="hint" style="margin-top:6px">Measured 2026-09-17, in the browser: Spelunker keeps line annotations in the address bar, so they survive the paste. Its <i>polyline</i> tool draws on screen but never reaches the link, and BrainSharer's polygon tool needs an account and ignores a pasted link &mdash; so a ring of lines is the route that actually works.</p>
+<div id="tracePadWrap" style="display:none;margin-top:10px">
+<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+<select id="tracePadMip" style="flex:0 0 auto" title="One canvas pixel is one voxel of this level, so this is the zoom. Only levels that keep 40 nm sections are offered &mdash; coarser ones average several sections into one, and a tracing is section by section. 32 nm/px shows the most tissue but costs three times the chunks, because its chunks are half as wide: measured 2026-09-17, ~30 chunks at 8 and 16 nm against ~90 at 32.">
+<option value="1" selected>16 nm/px &mdash; about 9 &micro;m across</option>
+<option value="0">8 nm/px &mdash; 4.5 &micro;m, full detail</option>
+<option value="2">32 nm/px &mdash; 18 &micro;m, slower to load</option>
+</select>
+<button class="idbtn" id="tracePadPrev" style="flex:0 0 auto" title="Back one step (, key)">&#9664;</button>
+<span class="hint" id="tracePadZ" style="flex:0 0 auto;min-width:130px;text-align:center">&nbsp;</span>
+<button class="idbtn" id="tracePadNext" style="flex:0 0 auto" title="On one step (. key)">&#9654;</button>
+<div class="coord" style="flex:0 0 84px" title="How many sections a step moves. Every fifth section is about half a percent off the real volume."><input type="text" id="tracePadStep" inputmode="numeric" value="5"></div>
+<button class="idbtn" id="tracePadUndo" style="flex:0 0 auto" title="Takes back the last vertex, or the last closed contour if you have not started one">Undo</button>
+</div>
+<div style="position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111">
+<canvas id="tracePad" width="560" height="460" style="display:block;cursor:crosshair;touch-action:none"></canvas>
+</div>
+<p class="hint" id="tracePadSay" style="margin-top:6px">Click each vertex round the cell. The first one is drawn as a ring &mdash; click it again to close the contour. Drag to pan, <b>,</b> and <b>.</b> step a section.</p>
+<div class="row" style="gap:8px;margin-top:6px">
+<button class="idbtn" id="tracePadUse" style="flex:1 1 auto">Use these contours</button>
+<button class="idbtn" id="tracePadClose" style="flex:0 0 auto">Close the pad</button>
+</div>
+</div>
+<p class="hint" style="margin-top:6px"><b>There is no polygon tool.</b> Measured 2026-09-17: the MICrONS viewer offers point, bounding box, line and ellipsoid and nothing else; Spelunker adds a <i>polyline</i> that draws on screen but never reaches the link; BrainSharer's polygon tool needs an account and ignores a pasted link. Points are one click per vertex and come back in the order you clicked them, which is why they are what this asks for &mdash; a ring of <b>line</b> annotations is read too, at two clicks a segment.</p>
 <label style="margin-top:10px">Neuroglancer link</label>
 <textarea id="tracingLink" placeholder="Paste the whole address bar, with your contours on it."></textarea>
 <div class="row" style="gap:8px;margin-top:8px">
@@ -7659,7 +7684,13 @@ function tracingReadLink(){
   if(named)document.getElementById("tracingName").value=named;
   const zs=Array.from(sections).sort(function(a,b){return a-b;});
   const gaps=zs.length>1?Math.round((zs[zs.length-1]-zs[0])/(zs.length-1)):0;
-  tracingSay(rings.length+" contour"+(rings.length===1?"":"s")+" on "+sections.size
+  /* WHICH SHAPE IT READ, in words. The same link is organelle markers to the bulk card and a
+     contour to this one -- the box it is pasted into is what decides -- so saying "from 36 points"
+     rather than just "3 contours" makes pasting the wrong link into the wrong box visible. */
+  const fromWhat={points:"from "+r.seen.points+" points",lines:"from line annotations",
+                  polygons:"from polygons",volume:"from a traced volume"};
+  const src=fromWhat[(r.structures[0]||{}).from||""]||"";
+  tracingSay(rings.length+" contour"+(rings.length===1?"":"s")+(src?" "+src:"")+" on "+sections.size
     +" section"+(sections.size===1?"":"s")+", z "+zs[0]+"\u2013"+zs[zs.length-1]
     +(gaps?" (about every "+gaps+" section"+(gaps===1?"":"s")+")":"")
     +(r.seen.mixedZ?" \u2014 "+r.seen.mixedZ+" contour(s) span more than one section, which is "
@@ -7751,15 +7782,20 @@ function tracingOpen(){
   st.layers=(st.layers||[]).filter(function(l){
     return !(l&&l.type==="annotation"&&/cortical layers/i.test(String(l.name||"")));});
   st.layers=st.layers.filter(function(l){return !(l&&l.type==="annotation"&&l.name==="tracing");});
-  st.layers.push({type:"annotation",source:"local://annotations",tool:"annotateLine",
+  /* annotatePoint, not annotateLine: no viewer a link can reach has a polygon tool (measured
+     2026-09-17 -- the MICrONS viewer has four tools and Spelunker's polyline never serialises), and
+     of what is left the point tool is one ctrl+click per vertex against the line tool's two, with
+     the clicks stored in order. core/tracing.js reads either. */
+  st.layers.push({type:"annotation",source:"local://annotations",tool:"annotatePoint",
                   tab:"annotations",name:"tracing",annotations:[]});
   st.selectedLayer={layer:"tracing",visible:true};
   st.layout="xy";   // tracing happens on sections; the 3D pane only takes the width
   const viewerEl=document.getElementById("viewer");
   const base=(viewerEl&&viewerEl.value)||"https://spelunker.cave-explorer.org/";
   window.open(base+"#!"+encodeURIComponent(JSON.stringify(st)),"_blank","noopener");
-  tracingSay("Viewer opened at "+pos.join(", ")+", on a layer called \u201ctracing\u201d with the line "
-    +"tool live. Ctrl+click each end of a segment; , and . step a section. Paste the address bar back here.");
+  tracingSay("Viewer opened at "+pos.join(", ")+", on a layer called \u201ctracing\u201d with the point "
+    +"tool live. Ctrl+click round the cell, one click per vertex; , and . step a section. There is no "
+    +"polygon tool in any viewer a link can reach \u2014 points are the fast way. Paste the address bar back here.");
 }
 
 function tracingKeep(){
@@ -7800,6 +7836,202 @@ function tracingShare(){
     +"kept here either way. Sharing the same name again replaces this version.");
 }
 
+/* ── THE PAD ─────────────────────────────────────────────────────────────────────  2026-09-17
+   Søren: "A polygon tool is much easier for the user. Can you try to implement it?" There is none
+   to borrow -- see src/a_polygon_tool_of_our_own.py for what was measured -- so the section is
+   drawn here and the tool put on it. core/tracepad.js holds the state and knows nothing about the
+   DOM; this half draws, and turns a click into a tool voxel through the view core/emtiles.js
+   returns. Vertices are stored in TOOL voxels, so changing the zoom or panning never moves one. */
+var PAD = null, PAD_VIEW = null, PAD_BUSY = false, PAD_HOVER = null, PAD_CENTRE = null;
+
+function padSay(msg, bad){
+  const el = document.getElementById("tracePadSay");
+  if (el){ el.textContent = msg; el.style.color = bad ? "var(--bad)" : ""; }
+}
+
+async function padDraw(){
+  if (!PAD_CENTRE) return;
+  const cv = document.getElementById("tracePad");
+  if (PAD_BUSY) return;
+  PAD_BUSY = true;
+  const mip = +document.getElementById("tracePadMip").value;
+  try{
+    /* Fill the card rather than sitting in a black band: the canvas' pixel width IS the number of
+       voxels drawn, so it is set from the space available rather than fixed in the markup. Capped,
+       because every extra 128 pixels is another column of chunks to fetch. */
+    const host = cv.parentElement;
+    const wide = Math.max(320, Math.min(880, (host && host.clientWidth ? host.clientWidth - 2 : 560)));
+    PAD_VIEW = await UJ.emtiles.drawSection(cv, {
+      centre: PAD_CENTRE, mip: mip, w: wide, h: cv.height,
+      onProgress: function(d, n){ if (d < n) padSay("Loading the section\u2026 " + d + "/" + n); }
+    });
+    padPaint();
+    padSay(UJ.tracepad.count(PAD).rings + " contour(s) kept, "
+      + (PAD.pending.length ? PAD.pending.length + " vertices on this one \u2014 click the ring to close it"
+                            : "click each vertex round the cell"));
+  }catch(e){
+    padSay("Could not read the EM there: " + String(e && e.message || e), true);
+  }
+  PAD_BUSY = false;
+  padZLabel();
+}
+
+/* The EM is drawn once per fetch and kept as the canvas' own bitmap; every repaint of the outline
+   redraws it from a copy rather than refetching. */
+var PAD_BASE = null;
+function padPaint(){
+  const cv = document.getElementById("tracePad"), g = cv.getContext("2d");
+  if (!PAD_BASE || PAD_BASE.width !== cv.width || PAD_BASE.height !== cv.height){
+    PAD_BASE = document.createElement("canvas");
+    PAD_BASE.width = cv.width; PAD_BASE.height = cv.height;
+  }
+  if (!PAD_PAINTING){ PAD_BASE.getContext("2d").drawImage(cv, 0, 0); }
+  else { g.drawImage(PAD_BASE, 0, 0); }
+  PAD_PAINTING = true;
+  if (!PAD_VIEW) return;
+  const px = function(t){ return PAD_VIEW.pxAt(t); };
+  /* Contours already closed on THIS section, then the one being drawn. */
+  PAD.rings.forEach(function(r){
+    if (r.z !== PAD.z) return;
+    g.beginPath();
+    r.points.forEach(function(p, i){ const q = px([p[0], p[1], PAD.z]);
+      if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
+    g.closePath();
+    g.strokeStyle = "#40e28c"; g.lineWidth = 2; g.stroke();
+    g.fillStyle = "rgba(64,226,140,.14)"; g.fill();
+  });
+  if (PAD.pending.length){
+    g.beginPath();
+    PAD.pending.forEach(function(p, i){ const q = px([p[0], p[1], PAD.z]);
+      if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
+    g.strokeStyle = "#ffd166"; g.lineWidth = 2; g.stroke();
+    PAD.pending.forEach(function(p, i){
+      const q = px([p[0], p[1], PAD.z]);
+      g.beginPath();
+      if (i === 0){
+        /* THE FIRST VERTEX IS A RING, not a dot, and it lights up when the pointer is on it.
+           It is the thing you have to come back to, so it has to be visible from the first click
+           rather than remembered. */
+        const near = PAD_HOVER && UJ.tracepad.nearFirst(PAD, PAD_HOVER[0], PAD_HOVER[1],
+                                                        PAD_VIEW.pxPerToolVoxel);
+        g.arc(q[0], q[1], near ? 9 : 6, 0, 6.2832);
+        g.strokeStyle = near ? "#ffffff" : "#ffd166";
+        g.lineWidth = near ? 3 : 2; g.stroke();
+      } else {
+        g.arc(q[0], q[1], 2.5, 0, 6.2832);
+        g.fillStyle = "#ffd166"; g.fill();
+      }
+    });
+  }
+}
+var PAD_PAINTING = false;
+
+function padZLabel(){
+  const el = document.getElementById("tracePadZ");
+  if (el) el.textContent = "z " + PAD.z + (PAD_VIEW ? "  \u00b7  " + PAD_VIEW.nmPerPx + " nm/px" : "");
+}
+
+function padStep(dir){
+  const n = Math.max(1, parseInt(document.getElementById("tracePadStep").value, 10) || 5);
+  PAD.pending = [];                        // a half-drawn contour belongs to the section it is on
+  PAD.z += dir * n;
+  PAD_CENTRE = [PAD_CENTRE[0], PAD_CENTRE[1], PAD.z];
+  PAD_PAINTING = false;
+  padDraw();
+}
+
+function padOpen(){
+  const got = tracingPos();
+  if (got.error){ tracingSay(got.error, true); return; }
+  if (!UJ.emtiles.configured())
+    UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
+  PAD = UJ.tracepad.create();
+  PAD.z = got.pos[2];
+  PAD_CENTRE = got.pos.slice();
+  PAD_VIEW = null; PAD_PAINTING = false;
+  document.getElementById("tracePadWrap").style.display = "";
+  padDraw();
+}
+
+(function wirePad(){
+  const cv = document.getElementById("tracePad");
+  if (!cv) return;
+  document.getElementById("tracePadOpen").addEventListener("click", padOpen);
+  document.getElementById("tracePadPrev").addEventListener("click", function(){ padStep(-1); });
+  document.getElementById("tracePadNext").addEventListener("click", function(){ padStep(1); });
+  document.getElementById("tracePadMip").addEventListener("change", function(){
+    PAD_PAINTING = false; padDraw();
+  });
+  document.getElementById("tracePadUndo").addEventListener("click", function(){
+    UJ.tracepad.undo(PAD); padPaint(); padSay("Undone.");
+  });
+  document.getElementById("tracePadClose").addEventListener("click", function(){
+    document.getElementById("tracePadWrap").style.display = "none";
+  });
+  document.getElementById("tracePadUse").addEventListener("click", function(){
+    const rings = UJ.tracepad.toRings(PAD);
+    const sections = new Set(rings.map(function(r){ return r.z; }));
+    if (sections.size < 2){
+      padSay("Outline the cell on at least two sections \u2014 a flat outline has no surface to "
+        + "close. Step with , and . and go round again.", true);
+      return;
+    }
+    TRACING_PENDING = { rings: rings };
+    document.getElementById("tracingFound").style.display = "";
+    tracingSay(rings.length + " contour" + (rings.length === 1 ? "" : "s") + " from the pad on "
+      + sections.size + " sections. Name it below and keep it.");
+    document.getElementById("tracingName").focus();
+  });
+
+  /* A DRAG PANS, A CLICK DROPS A VERTEX. One pointer, no modes: anything that moved more than a
+     few pixels between down and up was a pan, and a pan must not leave a vertex behind. */
+  var down = null, moved = false;
+  cv.addEventListener("pointerdown", function(e){
+    if (!PAD_VIEW) return;
+    down = [e.offsetX, e.offsetY]; moved = false;
+    cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener("pointermove", function(e){
+    PAD_HOVER = PAD_VIEW ? PAD_VIEW.toolAt(e.offsetX, e.offsetY) : null;
+    if (down && (Math.abs(e.offsetX - down[0]) > 3 || Math.abs(e.offsetY - down[1]) > 3)) moved = true;
+    if (!down && PAD_VIEW && PAD.pending.length) padPaint();
+  });
+  cv.addEventListener("pointerup", function(e){
+    if (!PAD_VIEW || !down) return;
+    const wasPan = moved;
+    const from = down; down = null;
+    if (wasPan){
+      const a = PAD_VIEW.toolAt(from[0], from[1]), b = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
+      PAD_CENTRE = [PAD_CENTRE[0] - (b[0] - a[0]), PAD_CENTRE[1] - (b[1] - a[1]), PAD.z];
+      PAD_PAINTING = false;
+      padDraw();
+      return;
+    }
+    const t = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
+    const r = UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
+    padPaint();
+    padSay(r.closed
+      ? UJ.tracepad.count(PAD).rings + " contour(s) \u2014 step a section with , or . and go round again"
+      : (PAD.pending.length === 1
+          ? "First vertex marked. Click round the cell, then click that ring again to close."
+          : PAD.pending.length + " vertices \u2014 click the ring to close"));
+  });
+  cv.addEventListener("dblclick", function(){
+    if (UJ.tracepad.closeRing(PAD)){ padPaint(); padSay("Contour closed."); }
+  });
+  /* , and . step a section, the same keys Neuroglancer uses, but only while the pad is on screen
+     and nothing is being typed into. */
+  document.addEventListener("keydown", function(e){
+    const wrap = document.getElementById("tracePadWrap");
+    if (!wrap || wrap.style.display === "none") return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "")) return;
+    if (e.key === ","){ padStep(-1); e.preventDefault(); }
+    else if (e.key === "."){ padStep(1); e.preventDefault(); }
+    else if (e.key === "Enter"){ if (UJ.tracepad.closeRing(PAD)){ padPaint(); padSay("Contour closed."); } }
+    else if (e.key === "Escape"){ PAD.pending = []; padPaint(); padSay("Contour abandoned."); }
+  });
+})();
+
 (function wireTracing(){
   const sel=document.getElementById("tracingType");
   if(!sel)return;
@@ -7825,6 +8057,12 @@ function tracingShare(){
     if(p.length>=3){e.target.value=p[0];
       document.getElementById("tracingY").value=p[1];
       document.getElementById("tracingZ").value=p[2];}
+  });
+  /* Pre-filled from the cell on screen, so pasting "x, y, z" over them meant clearing them
+     first. Søren: "when you click the first coordinate it should mark it so pasting is easy." */
+  ["tracingX","tracingY","tracingZ"].forEach(function(id){
+    const el=document.getElementById(id);
+    if(el)el.addEventListener("focus",function(){try{el.select();}catch(_e){}});
   });
   const tPanel=document.getElementById("tracingPanel");
   if(tPanel)tPanel.addEventListener("toggle",tracingFillPos);

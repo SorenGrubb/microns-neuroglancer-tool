@@ -408,5 +408,13 @@ UJ.segread = (function(){
            nearestNucleus: nearestNucleus, mapPool: mapPool,
            /* exported for the check, which drives the real decoder over real bytes */
            _decodeAt: decodeAt, _compressedMorton: compressedMorton,
-           _chunkOf: chunkOf, _httpBase: httpBase };
+           _chunkOf: chunkOf, _httpBase: httpBase,
+           /* ── and for core/emtiles.js ──────────────────────────────────────────  2026-09-17
+              The EM volume is in the same bucket, with the same sharding, and its chunks are
+              `raw` uint8 -- so reading one is this file's job already, and emtiles has no fetch
+              of its own. `_chunkBuf` returns the chunk's bytes (gunzipped if the source says so)
+              or null for a chunk that was never written; `_getInfo` is the cached info fetch.
+              Exported rather than copied: a second implementation of compressed Morton codes and
+              delta-encoded minishard offsets is a second place for them to be subtly wrong. */
+           _getInfo: getInfo, _chunkBuf: chunkBuf };
 })();

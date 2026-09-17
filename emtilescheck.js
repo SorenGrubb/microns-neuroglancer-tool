@@ -1,0 +1,239 @@
+/* One section of EM, drawn from chunks that say where they came from.             2026-09-17
+
+   core/emtiles.js turns the tool's coordinate into a picture of a section and hands back the
+   mapping from canvas pixel to tool voxel. Almost everything it can get wrong is invisible on real
+   EM -- a transposed chunk, the wrong z-slice out of a 32-slice block, a window off by one chunk --
+   because the result still looks like tissue. So this drives the REAL module over a synthetic
+   volume whose every voxel encodes where it is:
+
+       value = (x + 2*y + 4*z) mod 251
+
+   and reads the drawn pixels back. A transpose, a wrong slice or a shifted origin all move that
+   number, and each one is asserted by name.
+
+   The scale list is the real one, read live from the source's own info on 2026-09-17:
+
+       8x8x40     size 212992 x 180224 x 13088   offset 13824,13824,14816   chunk 128x128x32
+       16x16x40   size 106496 x  90112 x 13088   offset  6912, 6912,14816   chunk 128x128x32
+       32x32x40   size  53248 x  45056 x 13088   offset  3456, 3456,14816   chunk  64x 64x64
+       64x64x80   <- z halves here, so a "section" stops being one
+
+   Run: node emtilescheck.js */
+const fs = require("fs");
+const vm = require("vm");
+const core = require("./corepath.js");
+
+let fails = 0;
+const ok = (c, what, d) => {
+  console.log((c ? "  ok   " : "  FAIL ") + what + (d !== undefined ? "  <- " + d : ""));
+  if (!c) fails++;
+};
+
+/* The real scale list, trimmed to the levels that matter plus the first one that halves z. */
+const INFO = { type: "image", data_type: "uint8", num_channels: 1, scales: [
+  { key: "8x8x40",      resolution: [8, 8, 40],     size: [212992, 180224, 13088],
+    voxel_offset: [13824, 13824, 14816], chunk_sizes: [[128, 128, 32]], encoding: "raw" },
+  { key: "16x16x40",    resolution: [16, 16, 40],   size: [106496, 90112, 13088],
+    voxel_offset: [6912, 6912, 14816],   chunk_sizes: [[128, 128, 32]], encoding: "raw" },
+  { key: "32x32x40",    resolution: [32, 32, 40],   size: [53248, 45056, 13088],
+    voxel_offset: [3456, 3456, 14816],   chunk_sizes: [[64, 64, 64]],   encoding: "raw" },
+  { key: "64x64x80",    resolution: [64, 64, 80],   size: [26624, 22528, 6544],
+    voxel_offset: [1728, 1728, 7408],    chunk_sizes: [[64, 64, 64]],   encoding: "raw" },
+  { key: "128x128x160", resolution: [128, 128, 160], size: [13312, 11264, 3272],
+    voxel_offset: [864, 864, 3704],      chunk_sizes: [[64, 64, 64]],   encoding: "raw" }
+] };
+
+const VAL = (x, y, z) => (x + 2 * y + 4 * z) % 251;
+
+/* A canvas with nothing in it but the two calls emtiles makes. Deliberately not a real one: what
+   is under test is which byte lands in which pixel, and a real canvas would only hide that. */
+function fakeCanvas(){
+  const cv = { width: 0, height: 0, _img: null };
+  cv.getContext = () => ({
+    createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
+    putImageData: (img) => { cv._img = img; }
+  });
+  cv.px = (x, y) => cv._img.data[(y * cv._img.width + x) * 4];
+  return cv;
+}
+
+const sandbox = { console, JSON, Math, Number, String, Array, Object, isFinite, Date,
+                  Uint8Array, Uint8ClampedArray, Promise };
+sandbox.window = sandbox;
+vm.createContext(sandbox);
+
+/* A stub segread carrying only what emtiles borrows -- and a real mapPool, because the concurrency
+   is the module's own and a serial stand-in would not exercise it. */
+let fetched = [];
+sandbox.UJ = { segread: {
+  _httpBase: (s) => String(s).replace(/^precomputed:\/\//, ""),
+  _getInfo: async () => INFO,
+  _chunkBuf: async (base, scale, at) => {
+    fetched.push(scale.key + ":" + at.c.join(","));
+    const ch = scale.chunk_sizes[0];
+    const a = new Uint8Array(ch[0] * ch[1] * ch[2]);
+    for (let z = 0; z < ch[2]; z++)
+      for (let y = 0; y < ch[1]; y++)
+        for (let x = 0; x < ch[0]; x++)
+          a[z * ch[0] * ch[1] + y * ch[0] + x] =
+            VAL(at.start[0] + x, at.start[1] + y, at.start[2] + z);
+    return a.buffer;
+  },
+  mapPool: async (items, limit, fn) => {
+    const out = new Array(items.length);
+    let i = 0;
+    const worker = async () => { while (i < items.length){ const k = i++; out[k] = await fn(items[k], k); } };
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+    return out;
+  }
+} };
+vm.runInContext(fs.readFileSync(core("emtiles.js"), "utf8"), sandbox);
+const E = sandbox.UJ.emtiles;
+E.configure({ em: "precomputed://https://example/em", res: [4, 4, 40] });
+
+(async () => {
+
+console.log("only the levels that keep a 40 nm section");
+{
+  const usable = E.sectionScales(INFO);
+  ok(usable.length === 3, "three of the five, stopping before z downsamples", usable.length);
+  ok(usable.map(s => s.key).join(" ") === "8x8x40 16x16x40 32x32x40",
+     "...the three whose z resolution is still 40 nm", usable.map(s => s.key).join(" "));
+  const tooCoarse = await E.scaleAt(9);
+  ok(tooCoarse.scale.key === "32x32x40",
+     "asking for a coarser one gives the coarsest USABLE one, not a slab — at 64x64x80 a "
+     + "'section' averages two, and a tracing is section by section", tooCoarse.scale.key);
+}
+
+console.log("\nthe tool's frame is not the volume's, and everything converts through nanometres");
+{
+  /* The tool is 4/4/40 nm; the finest EM is 8/8/40. A factor of two, and invisible on real EM. */
+  ok(String(E._toScale(INFO.scales[0], [240640, 207872, 21360])) === "120320,103936,21360",
+     "tool 4 nm -> mip 0's 8 nm halves x and y and leaves z alone",
+     String(E._toScale(INFO.scales[0], [240640, 207872, 21360])));
+  ok(String(E._toScale(INFO.scales[2], [240640, 207872, 21360])) === "30080,25984,21360",
+     "...and 32 nm divides them by eight", String(E._toScale(INFO.scales[2], [240640, 207872, 21360])));
+  ok(String(E._toTool(INFO.scales[2], [30080, 25984, 21360])) === "240640,207872,21360",
+     "...and back again lands on the voxel it started from");
+  ok(INFO.scales[0].voxel_offset[2] === INFO.scales[2].voxel_offset[2],
+     "z offset is the same at every usable level, so the EM z index IS the tool's z",
+     INFO.scales[0].voxel_offset[2]);
+}
+
+console.log("\none section, drawn");
+{
+  const cv = fakeCanvas();
+  fetched = [];
+  const centre = [240640, 207872, 21360];
+  /* An identity stretch: what is under test is WHICH voxel landed in which pixel, so the
+     display curve must not be in the way. lo 0 / hi 255 makes the drawn byte the raw one. */
+  const view = await E.drawSection(cv, { centre, mip: 2, w: 128, h: 96, lo: 0, hi: 255 });
+  ok(cv.width === 128 && cv.height === 96, "the canvas is the size asked for",
+     cv.width + "x" + cv.height);
+  ok(view.nmPerPx === 32 && view.mip === 2, "...at the level asked for", view.nmPerPx + " nm/px");
+  ok(view.z === 21360, "...on the section asked for", view.z);
+
+  /* THE CENTRE PIXEL. w>>1, h>>1 is where the requested coordinate lands, and its value has to be
+     the synthetic value of that voxel -- not its neighbour, and not a voxel from another slice. */
+  const v = E._toScale(INFO.scales[2], centre);
+  ok(cv.px(64, 48) === VAL(v[0], v[1], v[2]),
+     "the middle pixel is the voxel the caller asked for",
+     cv.px(64, 48) + " vs " + VAL(v[0], v[1], v[2]));
+
+  /* A TRANSPOSE is the classic one, and on real EM it looks perfectly plausible. x and y have
+     different weights in VAL precisely so that swapping them changes the number. */
+  ok(cv.px(65, 48) === VAL(v[0] + 1, v[1], v[2]),
+     "one pixel RIGHT is one voxel further in x", cv.px(65, 48) + " vs " + VAL(v[0] + 1, v[1], v[2]));
+  ok(cv.px(64, 49) === VAL(v[0], v[1] + 1, v[2]),
+     "one pixel DOWN is one voxel further in y — not in x, which is what a transpose gives",
+     cv.px(64, 49) + " vs " + VAL(v[0], v[1] + 1, v[2]));
+
+  /* THE WRONG SLICE OUT OF THE BLOCK. A 32x32x40 chunk is 64 sections deep; taking slice 0 of the
+     block instead of the one asked for gives a picture of a different section that looks fine. */
+  const blockZ = INFO.scales[2].voxel_offset[2]
+    + Math.floor((v[2] - INFO.scales[2].voxel_offset[2]) / 64) * 64;
+  ok(v[2] !== blockZ, "the section asked for is NOT the first of its block, so this can fail",
+     "z " + v[2] + " vs block start " + blockZ);
+  ok(cv.px(64, 48) !== VAL(v[0], v[1], blockZ),
+     "...and the pixel is that section's, not the block's first slice");
+
+  /* THE WINDOW SPANS CHUNKS, which is the only case where the per-chunk offset arithmetic runs. */
+  ok(fetched.length >= 4, "a 128x96 window at 64-voxel chunks spans several", fetched.length
+     + " chunks: " + fetched.slice(0, 4).join(" "));
+  ok(cv.px(0, 0) === VAL(v[0] - 64, v[1] - 48, v[2]),
+     "the top-left pixel belongs to a different chunk and is still the right voxel",
+     cv.px(0, 0) + " vs " + VAL(v[0] - 64, v[1] - 48, v[2]));
+  ok(cv.px(127, 95) === VAL(v[0] + 63, v[1] + 47, v[2]),
+     "...and so does the bottom-right", cv.px(127, 95) + " vs " + VAL(v[0] + 63, v[1] + 47, v[2]));
+}
+
+console.log("\nwhat a window costs at each level, which is why 16 nm is the default");
+{
+  /* Counter-intuitive, and the reason the pad does NOT open at the coarsest level: the 32 nm scale
+     chunks 64 voxels wide against the other two's 128, so the level that shows the most tissue
+     fetches three times as many chunks to show it. Measured live 2026-09-17: a cold chunk is about
+     1.5 s at every level, so chunk COUNT is the whole of the wait. */
+  const cost = [];
+  for (const mip of [0, 1, 2]){
+    const cv = fakeCanvas();
+    fetched = [];
+    const view = await E.drawSection(cv, { centre: [240640, 207872, 21360], mip, w: 560, h: 460 });
+    cost.push({ mip, nm: view.nmPerPx, chunks: view.chunks, asked: fetched.length,
+                um: +(560 * view.nmPerPx / 1000).toFixed(1) });
+  }
+  ok(cost[0].chunks === cost[1].chunks,
+     "8 nm and 16 nm cost the same number of chunks \u2014 same chunk size, four times the tissue",
+     cost[0].chunks + " and " + cost[1].chunks);
+  ok(cost[2].chunks > 2 * cost[1].chunks,
+     "...and 32 nm costs about three times either, for twice the field of view",
+     cost[2].chunks + " chunks for " + cost[2].um + " um");
+  ok(cost[1].um > 8 && cost[1].um < 10,
+     "the default level puts about nine micrometres across the pad, which is a soma",
+     cost[1].um + " um");
+  ok(cost.every(c => c.chunks === c.asked),
+     "and the number the view reports is the number of chunks it really asked for \u2014 which is "
+     + "what the progress line counts", cost.map(c => c.chunks + "/" + c.asked).join(" "));
+}
+
+console.log("\nthe mapping it returns, which is what a click goes through");
+{
+  const cv = fakeCanvas();
+  const centre = [240640, 207872, 21360];
+  const view = await E.drawSection(cv, { centre, mip: 2, w: 200, h: 200 });
+  const back = view.toolAt(100, 100);
+  ok(String(back) === String(centre),
+     "the middle pixel maps back to the coordinate the pad was opened at", String(back));
+  const px = view.pxAt(centre);
+  ok(String(px) === "100,100", "...and that coordinate maps to the middle pixel", String(px));
+  /* A vertex placed anywhere must survive the round trip, or a contour would creep as you pan. */
+  const spot = view.toolAt(37, 164);
+  ok(String(view.pxAt(spot)) === "37,164",
+     "a click anywhere round-trips pixel -> voxel -> pixel", String(view.pxAt(spot)));
+  ok(Math.abs(view.pxPerToolVoxel - 4 / 32) < 1e-9,
+     "and it says how many pixels a tool voxel is, which is what hit-testing the first vertex needs",
+     view.pxPerToolVoxel);
+
+  const fine = await E.drawSection(cv, { centre, mip: 0, w: 200, h: 200 });
+  ok(Math.abs(fine.pxPerToolVoxel - 4 / 8) < 1e-9,
+     "...and it follows the zoom, so the close radius stays the same on screen",
+     fine.pxPerToolVoxel);
+  ok(String(fine.toolAt(100, 100)) === String(centre),
+     "the centre is the centre at every level too", String(fine.toolAt(100, 100)));
+}
+
+console.log("\noutside the volume is grey, not black and not tissue");
+{
+  const cv = fakeCanvas();
+  fetched = [];
+  /* Left of the volume's own x offset: those chunks do not exist. */
+  const view = await E.drawSection(cv, { centre: [8000, 207872, 21360], mip: 2, w: 64, h: 64 });
+  ok(cv.px(0, 0) === 24,
+     "a pixel with no chunk behind it is the fill, which looks like neither data nor a hole",
+     cv.px(0, 0));
+  ok(view.chunks > 0, "...and it still reports how many chunks it went for", view.chunks);
+}
+
+console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
+process.exit(fails ? 1 : 0);
+
+})().catch(e => { console.log("THREW: " + e.stack); process.exit(1); });

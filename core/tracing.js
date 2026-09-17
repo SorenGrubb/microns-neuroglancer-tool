@@ -141,8 +141,8 @@ UJ.tracing = (function(){
     var d = decode(text);
     if (d.error) return { ok: false, error: d.error, structures: [], rings: [] };
     var st = d.state;
-    var seen = { volumes: 0, polygons: 0, lines: 0, unreadable: 0, mixedZ: 0 };
-    var byId = {}, polys = [], vols = [], loose = [], layers = 0;
+    var seen = { volumes: 0, polygons: 0, lines: 0, points: 0, unreadable: 0, mixedZ: 0 };
+    var byId = {}, polys = [], vols = [], loose = [], dots = [], layers = 0;
 
     /* WHICH ANNOTATION LAYERS COUNT, when nobody named one.  2026-09-17
        A pasted µJump link normally carries "Cortical layers" -- the pia/white-matter bands, which
@@ -169,6 +169,14 @@ UJ.tracing = (function(){
         var t = String(a.type || "").toLowerCase();
         if (t === "volume"){ vols.push(a); seen.volumes++; return; }
         if (t === "polygon"){ polys.push(a); seen.polygons++; return; }
+        if (t === "point"){
+          /* ORDER IS THE CONTOUR. Neuroglancer appends a new annotation to this array, so points
+             arrive in the order they were clicked -- measured on ngl.microns-explorer.org,
+             2026-09-17. Going round a cell in one direction therefore needs no chaining at all. */
+          var P = trip(a.point);
+          if (P && !a.parentAnnotationId){ seen.points++; dots.push(P); }
+          return;
+        }
         var A = trip(a.pointA), B = trip(a.pointB);
         if (A && B){ seen.lines++; if (!a.parentAnnotationId) loose.push({ a: A, b: B }); }
       });
@@ -210,24 +218,43 @@ UJ.tracing = (function(){
         addRing(polygonRing(p, byId, seen), orphan);
       });
       if (orphan.length) structures.push({ name: "", rings: orphan, from: "polygons" });
-    } else if (loose.length){
-      /* Lines with no polygon around them: one section at a time, joined end to end. */
-      var byZ = {};
-      loose.forEach(function(L){
-        var z = Math.round((L.a[2] + L.b[2]) / 2);
-        (byZ[z] = byZ[z] || []).push(L);
-      });
-      var rings2 = [];
-      Object.keys(byZ).map(Number).sort(function(x, y){ return x - y; }).forEach(function(z){
-        chainLines(byZ[z], seen).forEach(function(r){ addRing(r, rings2); });
-      });
-      if (rings2.length) structures.push({ name: "", rings: rings2, from: "lines" });
+    } else {
+      /* LINES BEFORE POINTS, AND POINTS ONLY IF THE LINES GAVE NOTHING.  2026-09-17
+         Each order protects the other shape's accident: a stray point left in a line tracing
+         cannot invent a vertex, and a stray line left in a point tracing cannot suppress it
+         (one segment never chains into a ring, so rings2 comes back empty and the points run). */
+      var rings2 = [], from = "lines";
+      if (loose.length){
+        /* Lines with no polygon around them: one section at a time, joined end to end. */
+        var byZ = {};
+        loose.forEach(function(L){
+          var z = Math.round((L.a[2] + L.b[2]) / 2);
+          (byZ[z] = byZ[z] || []).push(L);
+        });
+        Object.keys(byZ).map(Number).sort(function(x, y){ return x - y; }).forEach(function(z){
+          chainLines(byZ[z], seen).forEach(function(r){ addRing(r, rings2); });
+        });
+      }
+      if (!rings2.length && dots.length){
+        /* A ring of points, in the order they were clicked. No viewer a pasted link can reach has
+           a polygon tool -- measured 2026-09-17 -- and the point tool is one click per vertex
+           against the line tool's two, so this is the ordinary way to trace, not a fallback. */
+        from = "points";
+        var pZ = {};
+        dots.forEach(function(P){ var z = Math.round(P[2]); (pZ[z] = pZ[z] || []).push(P); });
+        Object.keys(pZ).map(Number).sort(function(x, y){ return x - y; }).forEach(function(z){
+          addRing(pZ[z], rings2);   // addRing drops anything under 3 points of its own accord
+        });
+      }
+      if (rings2.length) structures.push({ name: "", rings: rings2, from: from });
     }
 
     if (!all.length)
       return { ok: false, structures: [], rings: [], seen: seen,
-               error: "that link has an annotation layer but no closed contours on it — draw "
-                    + "a polygon, or an outline of line annotations, on at least two sections." };
+               error: "that link has an annotation layer but no contours on it — ring the cell "
+                    + "with POINT annotations (ctrl+click each vertex, going round one way), at "
+                    + "least three to a section and on at least two sections. Lines and polygons "
+                    + "are read too." };
     return { ok: true, structures: structures, rings: all, seen: seen };
   }
 

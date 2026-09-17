@@ -124,6 +124,51 @@ console.log("\nloose lines, in a viewer with no polygon tool");
      String(r3.rings.map(x => x.z)));
 }
 
+console.log("\na ring of points, which is the only tool every viewer has");
+{
+  /* Measured 2026-09-17 on ngl.microns-explorer.org: the toolbox is point / bounding box / line /
+     ellipsoid, and nothing else. No polygon anywhere a pasted link can reach. Points come back in
+     the order they were clicked, so a ring drawn one way round needs no chaining. */
+  const pts = (cx, cy, z, r, n) => circle(cx, cy, z, r, n).map((p, i) =>
+    ({ type: "point", id: "p" + z + "_" + i, point: p }));
+  const r = T.ringsFromLink(link(pts(1000, 2000, 500, 40, 14)
+    .concat(pts(1005, 2005, 505, 38, 14), pts(1010, 2010, 510, 30, 14))));
+  ok(r.ok === true && r.rings.length === 3, "three rings of points are three contours",
+     r.rings.length);
+  ok(r.rings.every(x => x.points.length === 14), "...every vertex kept", r.rings[0].points.length);
+  ok(r.structures[0].from === "points", "...and it says it read them as points",
+     r.structures[0].from);
+  ok(String(r.rings[0].points[0]) === String(circle(1000, 2000, 500, 40, 14)[0].slice(0, 2)),
+     "...in the order they were clicked, which is what makes them a ring at all",
+     String(r.rings[0].points[0]));
+
+  const two = T.ringsFromLink(link(pts(1000, 2000, 500, 40, 3).concat(pts(1000, 2000, 505, 40, 2))));
+  ok(two.ok === true && two.rings.length === 1,
+     "a section with two points is not a contour; three is", two.rings.length);
+
+  /* A stray line in a point tracing must not suppress the points: one segment never chains. */
+  const stray = T.ringsFromLink(link(pts(1000, 2000, 500, 40, 8)
+    .concat(pts(1005, 2005, 505, 38, 8),
+            [{ type: "line", id: "oops", pointA: [1, 1, 500], pointB: [9, 9, 500] }])));
+  ok(stray.ok === true && stray.rings.length === 2 && stray.structures[0].from === "points",
+     "a stray line left behind does not suppress a point tracing", stray.rings.length + " rings");
+
+  /* And a stray point in a line tracing must not invent a vertex: lines win when they chain.
+     Built as LOOSE lines (no parentAnnotationId) -- polygonOf's carry one, and a line inside a
+     polygon is that polygon's geometry rather than a contour of its own. */
+  const ringLines = (cx, cy, z, n, tag) => {
+    const q = circle(cx, cy, z, 40, n);
+    return q.map((p, i) => ({ type: "line", id: tag + i, pointA: p, pointB: q[(i + 1) % q.length] }));
+  };
+  const mixed = T.ringsFromLink(link(ringLines(1000, 2000, 500, 10, "ma")
+    .concat(ringLines(1005, 2005, 505, 10, "mb"),
+            [{ type: "point", id: "stray", point: [7000, 7000, 500] }])));
+  ok(mixed.ok === true && (mixed.structures[0] || {}).from === "lines"
+     && mixed.rings.every(x => x.points.every(p => p[0] < 2000)),
+     "a stray point left behind does not get into a line tracing",
+     (mixed.structures[0] || {}).from + ", " + mixed.rings.length + " rings");
+}
+
 console.log("\ntwo contours on one section");
 {
   const a = polygonOf(circle(1000, 2000, 500, 40, 8), "qa");
@@ -282,8 +327,8 @@ console.log("\nwhat it refuses, and what it says");
   ok(!noLayer.ok && /no annotation layer/.test(noLayer.error),
      "a link with no annotation layer says so", noLayer.error);
   const empty = T.ringsFromLink(link([{ type: "point", id: "p", point: [1, 2, 3] }]));
-  ok(!empty.ok && /no closed contours/.test(empty.error),
-     "an annotation layer with only points says what is missing", empty.error);
+  ok(!empty.ok && /no contours on it/.test(empty.error) && /three to a section/.test(empty.error),
+     "one point in an annotation layer says what is missing, and how many it needs", empty.error);
   const named = T.ringsFromLink(link([], "contours"), "somewhere-else");
   ok(!named.ok && /called "somewhere-else"/.test(named.error),
      "and a layer name that matches nothing names itself", named.error);
@@ -305,10 +350,21 @@ console.log("\nthe two link decoders say the same thing");
     ok(a.ok === false && b.ok === false && a.error === b.error,
        'both refuse "' + String(c).slice(0, 18) + '" identically', a.error);
   });
+  /* They used to disagree about ANY link of loose points: markers to one, nothing to the other.
+     Since 2026-09-17 points are how a cell is traced, so the general claim is gone on purpose --
+     the same link is markers in the bulk organelle box and a contour in the tracing box, and the
+     box it is pasted into is what decides. What still separates them is shape: a contour needs
+     three points on one SECTION and at least two sections, which a scattered marker list does not
+     have, and the status line says which shape it read. */
   const pointOnly = link([{ type: "point", id: "p", point: [1, 2, 3] }]);
   ok(O.markersFromLink(pointOnly).ok === true && T.ringsFromLink(pointOnly).ok === false,
-     "...while a link of loose points is a marker list and NOT a contour, as it should be",
-     "the one place they are meant to disagree");
+     "...while ONE loose point is a marker and still not a contour",
+     "three to a section is what a contour needs");
+  const scattered = link([1, 2, 3, 4, 5, 6].map((i) =>
+    ({ type: "point", id: "m" + i, point: [1000 + i * 50, 2000, 500 + i * 10] })));
+  ok(O.markersFromLink(scattered).ok === true && T.ringsFromLink(scattered).ok === false,
+     "...and six markers on six different sections are six markers, not a tracing",
+     "one per section chains into nothing");
   const shared = ["nothing pasted", "that does not look like a Neuroglancer link"];
   shared.forEach(function(msg, i){
     const a = O.markersFromLink(i === 0 ? "" : "not a link");
