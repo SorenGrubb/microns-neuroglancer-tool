@@ -533,7 +533,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 15:11</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 15:55</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -7893,7 +7893,7 @@ function tracingRenderList(){
   host.querySelectorAll(".tracingview").forEach(function(b){
     b.addEventListener("click",function(){
       const t=TRACINGS_KEPT[Number(b.dataset.n)];
-      if(t)tracingViewerOpen([t]);
+      if(t)tracingViewerOpen([t],null,{nuc:t.nucleus_id||"",root:t.root_id||""});
     });
   });
   host.querySelectorAll(".tracingdrop").forEach(function(b){
@@ -8242,7 +8242,55 @@ function tracingCentreOf(structs){
   zs.sort(function(a, b){ return a - b; });
   return [Math.round(sx / n), Math.round(sy / n), Math.round(zs[zs.length >> 1])];
 }
-function tracingViewerOpen(structs, say){
+/* ── THE CELL AND ITS NUCLEUS, IN THE 3D PANE ───────────────────────────────────  2026-09-17
+   Søren: *"I would like that the neuron and its nucleus are showing in the 3D window when opening
+   in Neuroglancer."*
+
+   buildState() already selects segments — but from CUR_ROOT/CUR_NUCID, the globals for whichever
+   cell is on the PANEL, which is not necessarily the cell this tracing belongs to. So the tracing's
+   own ids win here, and the layers are ADDED when the state has none (the segmentation tick can be
+   off, and then there is nothing to select into).
+
+   The cell is drawn see-through for the same reason it is in the pad's own 3D window: the contours
+   are INSIDE it, and an opaque cell mesh hides the one thing this link exists to show. The nucleus
+   is blue, here as everywhere else — blender/colour_policy.py, NUC_COLOR #3a72d8.
+
+   Given NEITHER id, the selections are cleared rather than left alone. buildState would otherwise
+   quietly hand back whatever cell happens to be on screen, and a mesh around somebody's contours
+   that is not the cell they traced is worse than no mesh at all. */
+function tracingShowCellIn(st, root, nuc){
+  st.layers = st.layers || [];
+  const isNuc = function(l){ return /nucle/i.test(String(l.name || "") + " " + String(l.source || "")); };
+  const segLayers = st.layers.filter(function(l){ return l && l.type === "segmentation"; });
+  let nucLayer  = segLayers.filter(isNuc)[0] || null;
+  let cellLayer = segLayers.filter(function(l){ return !isNuc(l); })[0] || null;
+  if (!root && !nuc){
+    segLayers.forEach(function(l){ delete l.segments; });
+    return false;
+  }
+  if (root){
+    if (!cellLayer){
+      cellLayer = { type: "segmentation", source: SRC.seg, tab: "source", name: "segmentation",
+                    notSelectedAlpha: 0.05 };
+      st.layers.push(cellLayer);
+    }
+    cellLayer.segments = [String(root)];
+    cellLayer.objectAlpha = 0.35;
+  } else if (cellLayer){ delete cellLayer.segments; }
+  if (nuc){
+    if (!nucLayer){
+      nucLayer = { type: "segmentation", source: SRC.nuc, tab: "source", name: "nuclei",
+                   notSelectedAlpha: 0.05 };
+      st.layers.push(nucLayer);
+    }
+    nucLayer.segments = [String(nuc)];
+    nucLayer.objectAlpha = 0.6;
+    nucLayer.segmentColors = Object.assign({}, nucLayer.segmentColors || {});
+    nucLayer.segmentColors[String(nuc)] = "#3a72d8";
+  } else if (nucLayer){ delete nucLayer.segments; }
+  return true;
+}
+function tracingViewerOpen(structs, say, ids){
   structs = (structs || []).filter(function(t){ return t && (t.rings || []).length; });
   if (!structs.length){ tracingSay("Nothing to look at yet — no contours.", true); return; }
   const pos = tracingCentreOf(structs);
@@ -8269,6 +8317,11 @@ function tracingViewerOpen(structs, say){
                      annotations: tracingRingLines(t.rings, "t" + i) });
   });
   st.selectedLayer = { layer: firstName, visible: true };
+  const shown = tracingShowCellIn(st, (ids && ids.root) || "", (ids && ids.nuc) || "");
+  /* A 3D pane, or there is nowhere for the meshes to appear. xy-3d rather than 4panel: the contours
+     live on xy sections, and three section panes to one 3D pane spends the width on two views that
+     show the same outline twice. */
+  st.layout = { type: "xy-3d", orthographicProjection: true };
   const viewerEl = document.getElementById("viewer");
   const base = (viewerEl && viewerEl.value) || "https://spelunker.cave-explorer.org/";
   const url = base + "#!" + encodeURIComponent(JSON.stringify(st));
@@ -8282,9 +8335,13 @@ function tracingViewerOpen(structs, say){
   }
   window.open(url, "_blank", "noopener");
   const nStr = structs.length + " structure" + (structs.length === 1 ? "" : "s");
-  tracingSay(say || ("Opened in the viewer at " + pos.join(", ") + " — " + nStr
+  const cellStr = shown
+    ? " The cell is in the 3D pane, see-through, with its nucleus in blue inside it."
+    : " No cell or nucleus ID on this tracing, so the 3D pane is empty — fill one in above and"
+      + " open it again.";
+  tracingSay((say || ("Opened in the viewer at " + pos.join(", ") + " — " + nStr
     + ", one annotation layer each, in the colours they were drawn in. Edit them there and paste "
-    + "the address bar back into the box above to read them in again."));
+    + "the address bar back into the box above to read them in again.")) + cellStr);
 }
 
 function tracingOpen(){
@@ -9026,7 +9083,8 @@ async function tracingSharedInViewer(sid, btn){
                          rings: st.rings }],
       "Opened “" + (st.name || t.name || sid) + "” in the viewer — its contours as "
       + "an annotation layer in its own colour. Nothing has been taken onto your pad; use "
-      + "“Open it in the pad” for that.");
+      + "“Open it in the pad” for that.",
+      { nuc: t.nucleusId || st.nucleusId || "", root: t.rootId || st.rootId || "" });
   } catch (e){
     tracingSay("Could not open that tracing: " + String(e && e.message || e), true);
   } finally {
@@ -9186,16 +9244,32 @@ function tracingEachInsts(){
   out.sort(function(a, b){ return a - b; });
   return out;
 }
-/* Every structure gets what is in the shared box now. Called when the option is switched on, which
-   is the one moment several structures have to acquire a type they did not have — and "standard is
-   that they are all the same" is exactly what that should look like. */
+/* ── THE BOX YOU PICKED IS THE DEFAULT ─────────────────────────────────────────  2026-09-17
+   Søren: *"I would like that if you choose an organelle before pressing Name each one separately,
+   then the chosen organelle would be the default in the separate namings."*
+
+   It used to seed only structures that had NO type yet (`if (!PAD_INST_KIND[k])`), which is right
+   the very first time and wrong every time after: tick on, tick off, choose Lysosome, tick on again
+   — and the rows still said whatever they said the first time, because by then they all had a type.
+   The box is the last thing the person touched, and ignoring it is the one reading nobody expects.
+
+   So the box now wins, WITH ONE EXCEPTION: if the stored types already DISAGREE with each other,
+   somebody has been through the rows and named them individually, and that is work the tick must
+   not quietly undo. All the same (or none) means nothing has been individually decided yet, and the
+   box is the newer instruction. */
 function tracingSeedKinds(){
   const what = document.getElementById("tracingWhat");
   const w = tracingWhat();
-  tracingEachInsts().forEach(function(i){
+  const insts = tracingEachInsts();
+  const named = insts.map(function(i){
+    const o = PAD_INST_KIND[String(i)];
+    return o ? String(o.value || "") : null;
+  }).filter(function(v){ return v !== null; });
+  const differ = named.length > 1 && named.some(function(v){ return v !== named[0]; });
+  insts.forEach(function(i){
     const k = String(i);
-    if (!PAD_INST_KIND[k])
-      PAD_INST_KIND[k] = { value: what ? what.value : "", kind: w.kind, name: w.name };
+    if (differ && PAD_INST_KIND[k]) return;      // individually named already — leave it alone
+    PAD_INST_KIND[k] = { value: what ? what.value : "", kind: w.kind, name: w.name };
   });
 }
 /* Rebuilt only when the SET of structures changes. padRings() calls this on every close, delete and
@@ -10126,7 +10200,9 @@ async function tracingResolveAt(pos){
                 color:padInstColour(k),rings:byInst[k]};
       });
     }
-    tracingViewerOpen(all);
+    tracingViewerOpen(all, null, {
+      nuc: (document.getElementById("tracingNucId").value || "").trim(),
+      root: (document.getElementById("tracingRootId").value || "").trim() });
   });
   /* The same paste-splitter the main coordinate box has, so "240640, 207872, 21360" copied out of
      Neuroglancer's own readout lands in three fields. */

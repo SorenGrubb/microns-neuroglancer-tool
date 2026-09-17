@@ -1690,9 +1690,23 @@ function link(annotations){
 
         /* Turn it on: both keep what they already were. */
         const each = document.getElementById("tracingEachOwn");
-        each.checked = true;
-        each.dispatchEvent(new Event("change", { bubbles: true }));
+        const flip = (v) => { each.checked = v;
+                              each.dispatchEvent(new Event("change", { bubbles: true })); };
+        flip(true);
         out.seeded = [tracingKindFor(0).name, tracingKindFor(1).name];
+
+        /* ── THE BOX YOU PICKED IS THE DEFAULT ───────────────────────────────────  2026-09-17
+           Søren: *"if you choose an organelle before pressing Name each one separately, then the
+           chosen organelle would be the default in the separate namings."* The first tick always
+           did that. The SECOND did not: every structure had a type by then, and the seed only
+           filled in structures that had none, so the box the person had just changed was ignored. */
+        const w0 = document.getElementById("tracingWhat");
+        flip(false);
+        w0.value = "lysosome"; w0.dispatchEvent(new Event("change", { bubbles: true }));
+        out.boxIs = w0.value;
+        flip(true);
+        out.afterSecondTick = [].slice.call(document.querySelectorAll("#tracingEachList .eachwhat"))
+                                .map(e => e.value);
 
         /* ── ONE ROW PER DRAWING NUMBER ──────────────────────────────────────────  2026-09-17
            Søren: *"The name each one separately I thought would give me an option to name each
@@ -1725,6 +1739,13 @@ function link(annotations){
         c2.value = "#ff0088"; c2.dispatchEvent(new Event("input", { bubbles: true }));
         out.colour = [padInstColour(0), padInstColour(1)];
 
+        /* THE EXCEPTION. The rows now disagree — one "something else", one nucleus — so a person
+           has been through them. Toggling the tick off and on again must not hand them both the
+           shared box, or an afternoon of naming goes in one mis-click. */
+        flip(false); flip(true);
+        out.survives = [].slice.call(document.querySelectorAll("#tracingEachList .eachwhat"))
+                         .map(e => e.value);
+
         window.__posted = [];
         window.postReport = (x) => { window.__posted.push(x); return true; };
         document.getElementById("tracePadUse").click();
@@ -1740,6 +1761,9 @@ function link(annotations){
       ok(own.seeded[0] === own.seeded[1] && !!own.seeded[0],
          "turning it on changes nothing: both keep the type they already had",
          own.seeded.join(" / "));
+      ok(own.boxIs === "lysosome" && own.afterSecondTick.join(",") === "lysosome,lysosome",
+         "THE ORGANELLE CHOSEN BEFORE THE TICK IS WHAT THE ROWS START AS, second tick included",
+         own.afterSecondTick.join(" / "));
       ok(own.rows === 2 && own.listShown && own.sharedHidden,
          "ONE ROW PER DRAWING NUMBER, in place of the single box — what he expected the tick to do",
          own.rows + " rows, shared box hidden: " + own.sharedHidden);
@@ -1761,6 +1785,9 @@ function link(annotations){
          "...and what is typed there is what that structure is called", own.named.join(" / "));
       ok(own.colour[1].toLowerCase() === "#ff0088" && own.colour[0].toLowerCase() !== "#ff0088",
          "...and a row's colour picker recolours that structure alone", own.colour.join(" / "));
+      ok(own.survives.join(",") === "__other,__nucleus",
+         "...and once they DO differ, a stray toggle of the tick does not overwrite that work",
+         own.survives.join(" / "));
       ok(own.posted.length === 2 && own.posted[0].kind !== own.posted[1].kind,
          "...and they are added as two different things in one press",
          own.posted.map(x => x.kind).join(" / "));
@@ -2041,7 +2068,7 @@ function link(annotations){
         { name: "Nucleus", color: "#3a72d8", rings: [
           { z: 700, points: [[3000,4000],[3200,4000],[3100,4200]] } ] }
       ];
-      tracingViewerOpen(structs);
+      tracingViewerOpen(structs, null, { root: "864691135499287571", nuc: "264317" });
       window.open = realOpen;
       if (!opened.length) return { err: "nothing opened" };
       const url = opened[0];
@@ -2056,11 +2083,19 @@ function link(annotations){
                  pts: (r.rings || []).map(x => x.points.length).join(","),
                  zs: (r.rings || []).map(x => x.z).join(",") };
       });
+      const segs = (st.layers || []).filter(l => l.type === "segmentation");
+      const nucL = segs.filter(l => /nucle/i.test((l.name || "") + " " + (l.source || "")))[0];
+      const cellL = segs.filter(l => l !== nucL)[0];
       return { url: url.slice(0, 40), layers: anns.map(l => l.name), back: back,
                colours: anns.map(l => l.annotationColor),
                types: anns.map(l => (l.annotations[0] || {}).type),
                pos: st.position && st.position.map(Math.round),
-               selected: st.selectedLayer && st.selectedLayer.layer };
+               selected: st.selectedLayer && st.selectedLayer.layer,
+               layout: st.layout && (st.layout.type || st.layout),
+               cell: cellL && { segs: cellL.segments, alpha: cellL.objectAlpha },
+               nuc: nucL && { segs: nucL.segments, alpha: nucL.objectAlpha,
+                              col: nucL.segmentColors && nucL.segmentColors["264317"] },
+               say: document.getElementById("tracingStatus").textContent };
     });
     ok(!trip.err, "the button builds a viewer link", trip.err || trip.url + "…");
     ok(trip.layers.length === 2 && trip.layers[0] === "Mitochondrion 1" && trip.layers[1] === "Nucleus",
@@ -2083,6 +2118,47 @@ function link(annotations){
        "the viewer lands in the middle of what it is showing, not on a stale box",
        JSON.stringify(trip.pos));
     ok(trip.selected === "Mitochondrion 1", "...with a structure's layer selected", trip.selected);
+
+    /* ── THE NEURON AND ITS NUCLEUS ────────────────────────────────────────────  2026-09-17
+       Søren: *"I would like that the neuron and its nucleus are showing in the 3D window when
+       opening in Neuroglancer."* buildState() selects segments from CUR_ROOT/CUR_NUCID — the cell
+       on the PANEL, which need not be the cell this tracing belongs to — so the tracing's own ids
+       have to win, and the layers have to be added when the state has none. */
+    ok(/3d/.test(String(trip.layout)), "the link opens with a 3D pane to show them in", trip.layout);
+    ok(trip.cell && trip.cell.segs && trip.cell.segs[0] === "864691135499287571",
+       "THE CELL is selected in the segmentation layer, from the tracing's own root ID",
+       trip.cell && JSON.stringify(trip.cell.segs));
+    ok(trip.cell && trip.cell.alpha > 0 && trip.cell.alpha < 1,
+       "...see-through, because the contours are inside it", trip.cell && trip.cell.alpha);
+    ok(trip.nuc && trip.nuc.segs && trip.nuc.segs[0] === "264317",
+       "ITS NUCLEUS is selected in the nuclei layer", trip.nuc && JSON.stringify(trip.nuc.segs));
+    ok(trip.nuc && String(trip.nuc.col).toLowerCase() === "#3a72d8",
+       "...in blue, here as in the Blender export and the pad's own 3D window", trip.nuc && trip.nuc.col);
+    ok(/3D pane/.test(trip.say), "...and the card says so", trip.say.slice(-90));
+  }
+
+  console.log("...and a tracing with no cell on it says so rather than showing somebody else's");
+  {
+    const bare = await p.evaluate(() => {
+      /* The globals buildState() reads are set to a REAL cell, which is the trap: without the
+         clear, the viewer would come back showing that cell around contours it has nothing to do
+         with, and it would look completely convincing. */
+      window.CUR_ROOT = "864691136084075884"; window.CUR_NUCID = "582301";
+      const opened = []; const realOpen = window.open;
+      window.open = (u) => { opened.push(u); return null; };
+      tracingViewerOpen([{ name: "Loose contour", color: "#40e28c",
+                           rings: [{ z: 5, points: [[0,0],[10,0],[10,10]] }] }], null, {});
+      window.open = realOpen;
+      const st = JSON.parse(decodeURIComponent(opened[0].split("#!")[1]));
+      return { segs: (st.layers || []).filter(l => l.type === "segmentation")
+                       .map(l => JSON.stringify(l.segments || null)),
+               say: document.getElementById("tracingStatus").textContent };
+    });
+    ok(bare.segs.every(x => x === "null"),
+       "no root or nucleus ID means no cell selected, not the one that happened to be on screen",
+       bare.segs.join(" | ") || "(no segmentation layers)");
+    ok(/No cell or nucleus ID/.test(bare.say), "...and it says why the 3D pane is empty",
+       bare.say.slice(-80));
   }
 
   console.log("...and two structures of the same name still get a layer each");
