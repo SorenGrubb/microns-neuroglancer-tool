@@ -203,5 +203,131 @@ console.log("\nthe shapes a real tracing actually has");
      "a contour with no perimeter at all is dropped rather than divided by zero");
 }
 
+/* ── HOW MUCH OF IT THERE IS ───────────────────────────────────────────────────────  2026-09-17
+   Søren: *"We need to calculate the organelle volumes also and add the volumes to the data for the
+   cell when submitting."* The estimator is Cavalieri's, and the way to check an estimator is
+   against shapes whose volume is arithmetic -- which is the same discipline blender/tracemeshcheck.py
+   uses on the export's own reconstruction, one layer further down.
+
+   The sphere is the case that matters: it is the only one here whose ends taper the way a cell's
+   do, so it is where the end-slab convention earns its keep or does not. */
+console.log("\nvolume: against shapes whose answer is arithmetic");
+{
+  const R = [4, 4, 40];                                  // µJump's voxel, nm
+  const uM = 1000 / 4;                                   // one µm in x/y tool voxels
+  const uZ = 1000 / 40;                                  // one µm in sections
+
+  /* A cylinder 1 µm across and 2 µm tall, traced on its own flat ends. The trapezoid is EXACT
+     here by construction, and Cavalieri is one slab over -- which is not a bug, it is the
+     convention, and it is the right one for anything that tapers. Said out loud so nobody
+     "fixes" it later against a cylinder. */
+  {
+    const rings = [];
+    for (let z = 0; z <= 2 * uZ; z += 5) rings.push({ z: z, points: circle(0, 0, 0.5 * uM, 200) });
+    const v = L.volume(rings, R);
+    const truth = Math.PI * 0.25 * 2;
+    ok(Math.abs(v.volumeTrapezoidUm3 - truth) / truth < 0.002,
+       "a cylinder traced end to end: the trapezoid is the true volume",
+       v.volumeTrapezoidUm3.toFixed(4) + " vs " + truth.toFixed(4) + " µm³");
+    const slab = 5 * 40 / 1000;
+    ok(Math.abs(v.volumeUm3 - (truth + Math.PI * 0.25 * slab)) / truth < 0.002,
+       "...and Cavalieri is exactly one slab more, because each end owns half a gap beyond itself",
+       v.volumeUm3.toFixed(4) + " µm³");
+    ok(v.gapNm === 200 && v.evenlySpaced,
+       "...and it reports the spacing it was traced at", v.gapNm + " nm");
+  }
+
+  /* A sphere of radius 1 µm, sampled at three spacings. THIS is the number the card quotes. */
+  {
+    const truth = 4 / 3 * Math.PI;
+    const sample = (everyNth) => {
+      const rings = [];
+      for (let k = -Math.floor(uZ / everyNth); k <= Math.floor(uZ / everyNth); k++){
+        const z = k * everyNth;
+        const h = z / uZ;                                  // µm from the equator
+        const r = Math.sqrt(Math.max(0, 1 - h * h));
+        if (r <= 0) continue;
+        rings.push({ z: z, points: circle(0, 0, r * uM, 256) });
+      }
+      return L.volume(rings, R);
+    };
+    const fine = sample(1), five = sample(5), forty = sample(10);
+    const off = v => 100 * (v.volumeUm3 - truth) / truth;
+    ok(Math.abs(off(fine)) < 0.5,
+       "a sphere traced on every section is within half a percent",
+       off(fine).toFixed(2) + "% (" + fine.volumeUm3.toFixed(3) + " vs " + truth.toFixed(3) + " µm³)");
+    ok(Math.abs(off(five)) < 2,
+       "...every fifth section, still within two — which is the sampling the card recommends",
+       off(five).toFixed(2) + "%");
+    ok(Math.abs(off(forty)) > Math.abs(off(five)),
+       "...and coarser sampling is worse, in the direction the card says",
+       "every 10th: " + off(forty).toFixed(1) + "%");
+    ok(five.volumeTrapezoidUm3 < five.volumeUm3,
+       "the trapezoid is always the lower bound: it cannot include what is past the last contour",
+       five.volumeTrapezoidUm3.toFixed(3) + " < " + five.volumeUm3.toFixed(3));
+  }
+
+  /* A HOLE IS A HOLE. The even-odd rule, the same one trace_mesh.py fills with. */
+  {
+    const tube = [];
+    for (let z = 0; z <= 10; z += 5){
+      tube.push({ z: z, points: circle(0, 0, 1.0 * uM, 128) });
+      tube.push({ z: z, points: circle(0, 0, 0.5 * uM, 128) });     // drawn INSIDE the first
+    }
+    const v = L.volume(tube, R);
+    const solid = L.volume(tube.filter((r, i) => i % 2 === 0), R);
+    const ratio = v.volumeUm3 / solid.volumeUm3;
+    ok(Math.abs(ratio - 0.75) < 0.01,
+       "a contour inside another is a HOLE — an annulus is three quarters of the disc",
+       ratio.toFixed(3));
+    /* Two contours SIDE BY SIDE are two objects and add, which is the other half of even-odd. */
+    const two = [];
+    for (let z = 0; z <= 10; z += 5){
+      two.push({ z: z, points: circle(0, 0, 0.5 * uM, 64) });
+      two.push({ z: z, points: circle(5 * uM, 0, 0.5 * uM, 64) });
+    }
+    const v2 = L.volume(two, R);
+    const one = L.volume(two.filter((r, i) => i % 2 === 0), R);
+    ok(Math.abs(v2.volumeUm3 / one.volumeUm3 - 2) < 0.01,
+       "...while two contours side by side are two objects, and add", (v2.volumeUm3 / one.volumeUm3).toFixed(3));
+  }
+
+  /* What it refuses to guess. */
+  {
+    const flat = L.volume([{ z: 3, points: circle(0, 0, uM, 32) }], R);
+    ok(flat.ok === false && /no depth/.test(flat.reason),
+       "one section has no volume, and says so rather than returning zero", flat.reason);
+    ok(Math.abs(flat.areaUm2 - Math.PI) / Math.PI < 0.01,
+       "...but its AREA is real, and is given", flat.areaUm2.toFixed(3) + " µm²");
+    ok(L.volume([], R).ok === false, "and nothing traced is not a volume of nothing");
+  }
+
+  /* The two estimates come from the contours; the loft comes from the same contours by a different
+     route. They are independent arithmetic on one tracing, so they have to agree -- if they ever
+     stop, one of the two is wrong and this says so before a number reaches anybody. */
+  {
+    const rings = [];
+    for (let z = -20; z <= 20; z += 5){
+      const h = z / uZ, r = Math.sqrt(Math.max(0.01, 1 - h * h));
+      rings.push({ z: z, points: circle(0, 0, r * uM, 96) });
+    }
+    const v = L.volume(rings, R);
+    const g = L.loft(rings, R);
+    /* Signed volume of a closed triangle mesh, by the divergence theorem -- the same measure
+       blender/trace_mesh.py's mesh_volume_um3 uses, in nm here. */
+    let vol = 0;
+    for (let t = 0; t + 2 < g.indices.length; t += 3){
+      const a = vert(g, g.indices[t]), b = vert(g, g.indices[t + 1]), c = vert(g, g.indices[t + 2]);
+      vol += (a[0] * (b[1] * c[2] - c[1] * b[2])
+            - a[1] * (b[0] * c[2] - c[0] * b[2])
+            + a[2] * (b[0] * c[1] - c[0] * b[1])) / 6;
+    }
+    const loftUm3 = Math.abs(vol) / 1e9;
+    ok(Math.abs(loftUm3 - v.volumeTrapezoidUm3) / v.volumeTrapezoidUm3 < 0.05,
+       "the lofted surface and the trapezoid agree — two independent sums over one tracing",
+       loftUm3.toFixed(3) + " vs " + v.volumeTrapezoidUm3.toFixed(3) + " µm³");
+  }
+}
+
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
 process.exit(fails ? 1 : 0);

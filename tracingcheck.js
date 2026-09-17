@@ -278,6 +278,61 @@ console.log("\ntwo people, one cell");
      JSON.stringify({ n: filled[0].name, t: filled[0].cellType, nu: filled[0].nucleusId }));
 }
 
+/* ── SEVERAL OF THE SAME THING ─────────────────────────────────────────────────────  2026-09-17
+   Søren: *"the extra added organelles should have different colors... and when publishing they
+   should have different numbers."* The storage half: a submission says which one it is, the palette
+   is the export's own, and a name carries the number only when there is more than one. */
+console.log("\nseveral of the same type");
+{
+  const sub = T.toSubmission([{ z: 0, points: [[0,0],[10,0],[10,10]] }],
+    { structureId: "m3", name: "Mitochondrion 3", kind: "mitochondrion",
+      instanceIndex: 3, instanceOf: "mitochondrion" });
+  ok(sub.instanceIndex === 3 && sub.instanceOf === "mitochondrion",
+     "a submission says which one of several it is, and of what",
+     sub.instanceOf + " " + sub.instanceIndex);
+  const alone = T.toSubmission([{ z: 0, points: [[0,0],[10,0],[10,10]] }], { name: "Nucleus" });
+  ok(alone.instanceIndex === undefined,
+     "...and the only one of its kind carries no number, rather than a 1 nobody asked for");
+
+  ok(T.instanceName("Mitochondrion", 3, true) === "Mitochondrion 3",
+     "the number goes on the NAME, which is what a person reads on the sheet and in Blender");
+  ok(T.instanceName("Nucleus", 1, false) === "Nucleus",
+     '...and one of a kind keeps its plain label — "Nucleus 1" is a strange way to say there '
+     + "is one");
+
+  /* THE PALETTE IS THE EXPORT'S. blender/colour_policy.py reserves hues 335-25 for vessels and
+     200-250 for nuclei so that red MEANS vessel and blue MEANS nucleus; a palette invented here
+     would put a mitochondrion in nucleus blue on the pad and something else in the .blend. */
+  const hue = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    if (!d) return 0;
+    let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h *= 60; return h < 0 ? h + 360 : h;
+  };
+  ok(T.INSTANCE_COLOURS.length >= 10, "there are enough colours to tell a handful apart",
+     T.INSTANCE_COLOURS.length);
+  ok(T.INSTANCE_COLOURS.every(c => { const h = hue(c); return !(h >= 335 || h <= 25); }),
+     "...none of them in the vessels' hues, because red MEANS vessel");
+  ok(T.INSTANCE_COLOURS.every(c => { const h = hue(c); return !(h >= 200 && h <= 250); }),
+     "...and none in the nuclei's, because blue MEANS nucleus");
+  ok(Math.abs(hue(T.instanceColour(0)) - hue(T.instanceColour(1))) > 40,
+     "the first two are far apart in hue, because most tracings are two or three",
+     hue(T.instanceColour(0)).toFixed(0) + "° vs " + hue(T.instanceColour(1)).toFixed(0) + "°");
+  ok(T.instanceColour(0) === T.instanceColour(T.INSTANCE_COLOURS.length),
+     "...and it wraps rather than running out");
+
+  /* Back out: the number survives a round trip, so the cell panel has something to order by. */
+  const back = T.rowsToStructures([
+    { structureId: "m3", name: "Mitochondrion 3", instanceIndex: 3, instanceOf: "mitochondrion",
+      z: 0, points: "0,0;10,0;10,10", reporterName: "Søren Grubb" }]);
+  ok(back[0].instanceIndex === 3 && back[0].instanceOf === "mitochondrion",
+     "...and it comes back out of the rows", back[0].instanceOf + " " + back[0].instanceIndex);
+  ok(T.toTracings(back)[0].instance_index === 3,
+     "...and reaches the Blender manifest, so the outliner says which one it is");
+}
+
 console.log("\nrows out of order, which a sheet gives no guarantee against");
 {
   const rows = [

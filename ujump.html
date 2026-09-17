@@ -533,7 +533,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 10:16</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 12:31</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -761,11 +761,22 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <button class="idbtn" id="tracePadNext" style="flex:0 0 auto" title="On one step (. key)">&#9654;</button>
 <div class="coord" style="flex:0 0 84px" title="How many sections a step moves. Every fifth section is about half a percent off the real volume."><input type="text" id="tracePadStep" inputmode="numeric" value="5"></div>
 <button class="idbtn" id="tracePadUndo" style="flex:0 0 auto" title="Takes back the last vertex, or the last closed contour if you have not started one">Undo</button>
+<label style="font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto" title="Press and draw all the way round the structure, then lift — the way you would with a pen on paper. Made for a pen display or a tablet, and it works with a mouse held down. The stroke is thinned to a contour you can still edit point by point. With this on, a plain drag DRAWS, so shift+drag is how you pan."><input type="checkbox" id="tracePadPen"> draw freehand (pen)</label>
 </div>
 <div style="position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111">
 <canvas id="tracePad" width="560" height="460" style="display:block;cursor:crosshair;touch-action:none"></canvas>
 </div>
+<!-- SEVERAL OF THE SAME THING.  2026-09-17. Søren: "I want the option to draw more than one
+     organelle of the same type, the extra added organelles should have different colors." Under
+     the canvas, beside the contour chips, because it is the same kind of control: what is on this
+     pad, and which of it you are working on. -->
+<div class="row" style="gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap">
+<span class="hint" style="flex:0 0 auto">Drawing:</span>
+<span id="tracePadInsts" style="display:flex;gap:6px;flex-wrap:wrap;flex:1 1 auto"></span>
+<button class="idbtn" id="tracePadNewInst" style="flex:0 0 auto;padding:2px 9px;font-size:12px" title="Start another organelle of the same type. It gets its own colour here and its own number when it is added to the dataset, so several mitochondria in one cell stay apart. Everything else — the type, the cell, the ids — is shared.">+ another one</button>
+</div>
 <div id="tracePadRings" style="margin-top:6px"></div>
+<p class="hint" id="tracePadVol" style="margin-top:4px" title="Cavalieri's estimator: each section's outlined area times the slab of tissue that section stands for. A contour drawn inside another is a hole, the same rule the export fills with. It updates as you draw."></p>
 <p class="hint" id="tracePadSay" style="margin-top:6px">Click each vertex round the cell. The first one is drawn as a ring &mdash; click it again to close the contour. <b>Shift+click</b> moves the field there, shift+drag or a plain drag pans it, and <b>,</b> and <b>.</b> step a section.</p>
 <!-- EVERY GESTURE, IN ONE PLACE.  2026-09-17. Søren: "make a list of all the possible commands with
      an explanation of what they do." The status line above is written over by the next thing that
@@ -775,6 +786,7 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <summary style="cursor:pointer;font-size:12px;color:var(--mut)">Every gesture the pad understands</summary>
 <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px">
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>click</b></td><td style="padding:3px 0">Put a vertex down. The first one is drawn as an open ring.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>draw freehand</b> (the tick box)</td><td style="padding:3px 0">Press, go all the way round the structure, lift &mdash; one stroke, the way a pen works. Made for a pen display (Kamvas, iPad) and fine with a mouse held down. The stroke is thinned to a handful of points you can still drag, delete and add to; a pen switches this on by itself the first time it touches the pad. While it is on, a plain drag DRAWS, so <b>shift+drag</b> is how you pan.</td></tr>
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>click the first ring</b></td><td style="padding:3px 0">Close the contour. Three vertices minimum &mdash; under that a &ldquo;close&rdquo; is a mis-click, and it is ignored.</td></tr>
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Enter</b></td><td style="padding:3px 0">Closes it too, for anyone who expects that.</td></tr>
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Esc</b></td><td style="padding:3px 0">Abandon the contour being drawn. Closed ones are untouched.</td></tr>
@@ -787,7 +799,9 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>,</b> and <b>.</b></td><td style="padding:3px 0">Step a section back and on &mdash; the same two keys Neuroglancer uses. By the number in the step box; every fifth section is about half a percent off the real volume.</td></tr>
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>&#9664;</b> <b>&#9654;</b></td><td style="padding:3px 0">The same, for a mouse. A half-drawn contour belongs to its own section and is dropped when you step.</td></tr>
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Undo</b></td><td style="padding:3px 0">The last vertex mid-contour; the last contour <i>on this section</i> between them. Never one from a section you cannot see.</td></tr>
-<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>the chips</b> (1 &middot; 9 points &times;)</td><td style="padding:3px 0">One per contour on this section. Click one to delete that contour.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>the chips</b> (1 &middot; 9 points &times;)</td><td style="padding:3px 0">One per contour on this section, in the colour of the organelle it belongs to. Click one to delete that contour.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>+ another one</b></td><td style="padding:3px 0">Start a second organelle of the same type in the same cell &mdash; a cell has forty mitochondria, not one. Each gets its own colour here and its own number when added (Mitochondrion 1, 2, 3&hellip;), and they are added as separate structures with separate volumes. Click a colour in the <b>Drawing:</b> strip to go back to one of them.</td></tr>
+<tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>name each one separately</b></td><td style="padding:3px 0">Appears once there are two. Off (the usual case) they are all the same type. On, each carries its own: click a number in the <b>Drawing:</b> strip and the type box becomes that one's &mdash; so one pass over a cell can log a mitochondrion, a lysosome and two vesicles. They are still added in one press, and each is numbered within its own type.</td></tr>
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>the &micro;m dropdown</b></td><td style="padding:3px 0">How much of the section is on the pad. Below 8 nm the voxels are drawn larger rather than finer &mdash; the label says which. The widest view is the slowest to load.</td></tr>
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Show it in 3D</b></td><td style="padding:3px 0">The shape so far, rebuilt after every contour. With the checkbox, the cell&rsquo;s own mesh and the nucleus are drawn see-through around it. Drag to turn, scroll to zoom.</td></tr>
 <tr><td style="padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top"><b>Use these contours</b></td><td style="padding:3px 0">Hand them to the fields below, where you say what it is and add it to the dataset. Two sections minimum &mdash; a flat outline has no surface to close.</td></tr>
@@ -832,6 +846,13 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <select id="tracingWhat" style="flex:2 1 auto;min-width:0" title="The same ontology the organelle card and the filter use, so a traced lysosome is the same thing as a reported one. The whole cell and its nucleus are at the top because they are what you outline when the segmentation has missed a cell, and they are not organelles."></select>
 <div class="coord" style="flex:0 0 120px"><input type="color" id="tracingColor" value="#3a6b5a" style="width:100%;height:38px;padding:2px"></div>
 </div>
+<!-- ONE TYPE FOR ALL OF THEM, UNLESS YOU SAY OTHERWISE.  2026-09-17. Søren: "I would like an
+     option to identify the organelles identities individually, so standard is that they are all the
+     same, but if you click a button you can identify them individually." Hidden until there are two
+     to tell apart, because until then it is a question about nothing. -->
+<label id="tracingEachRow" style="font-size:12px;display:none;align-items:center;gap:6px;margin-top:6px" title="Off, everything you draw here is the same type — the usual case, several mitochondria in one cell. On, each one carries its own type: pick a number in the Drawing strip and the box above becomes that one's. They are still one press to add, and they are still numbered within their own type.">
+<input type="checkbox" id="tracingEachOwn"> name each one separately
+</label>
 <div class="row" id="tracingNameRow" style="gap:8px;margin-top:8px;display:none">
 <div class="coord" style="flex:1 1 auto"><input type="text" id="tracingName" placeholder="Name it &mdash; and tell me, so it can go on the list"></div>
 </div>
@@ -856,6 +877,7 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 </div>
 </div>
 <p class="hint" id="tracingAtSay" style="margin-top:4px"></p>
+<p class="hint" id="tracingVolSay" style="margin-top:4px"></p>
 <!-- ONE BUTTON, BECAUSE SHARING IS NOT A CHOICE.  2026-09-17. Søren: "I think sharing should not
      be an option, the meshes made should always be a part of the dataset and everybody should be
      able to use it." There were two buttons here, Keep and Share, and the second one was the half
@@ -7753,7 +7775,8 @@ function tracingRenderList(){
         +'<span style="flex:1 1 auto">'+escHtml(t.name||"traced")
           +' <span style="opacity:.7">&middot; '+escHtml(t.type||"traced")+'</span></span>'
         +'<span style="opacity:.7">'+(t.rings||[]).length+' contour'
-          +((t.rings||[]).length===1?"":"s")+' on '+sections+' section'+(sections===1?"":"s")+'</span>'
+          +((t.rings||[]).length===1?"":"s")+' on '+sections+' section'+(sections===1?"":"s")
+          +(isFinite(t.volume_um3)?' &middot; '+volFmt(t.volume_um3)+' µm³':'')+'</span>'
         /* A tracing that has not reached the dataset says so HERE, where the tracing is, rather
            than in a status line that the next action overwrites. */
         +(t.pending_share
@@ -7785,6 +7808,7 @@ function tracingReadLink(){
   const sections=new Set(rings.map(function(x){return x.z;}));
   const named=(r.structures.find(function(s){return s.name;})||{}).name||"";
   TRACING_PENDING={rings:rings};
+  tracingVolShow();
   if(named)document.getElementById("tracingName").value=named;
   const zs=Array.from(sections).sort(function(a,b){return a-b;});
   const gaps=zs.length>1?Math.round((zs[zs.length-1]-zs[0])/(zs.length-1)):0;
@@ -7828,37 +7852,130 @@ function tracingWhat(){
   return {kind:v,name:(k&&k.label)||UJ.organelles.labelOf(v)};
 }
 
-function tracingCurrent(){
-  if(!TRACING_PENDING)return null;
-  const w=tracingWhat();
-  const name=w.name;
-  if(!name){tracingSay("Type what it is, or pick it from the list \u2014 the name becomes the "
-    +"object's name in Blender.",true);
-    document.getElementById("tracingName").focus();return null;}
-  const t={name:name,kind:w.kind,type:document.getElementById("tracingType").value||"traced",
-           color:document.getElementById("tracingColor").value||"#3a6b5a",
-           traced_by:(typeof REPORTER_NAME!=="undefined"&&REPORTER_NAME)||"",
-           rings:TRACING_PENDING.rings};
-  const nid=(document.getElementById("tracingNucId").value||"").trim();
-  if(nid)t.nucleus_id=nid;
-  const rid=(document.getElementById("tracingRootId").value||"").trim();
-  if(rid)t.root_id=rid;
-  /* A STABLE ID, ASSIGNED ONCE.  2026-09-17
-     Keep and Share have to be talking about the same structure, and a second Share after tracing
-     more sections has to be a new VERSION of this cell rather than a rival to it -- that is what
-     the backend's (structureId, reporterEmail, groupId) versioning keys on. Frozen on
-     TRACING_PENDING the first time this function gets as far as a name, so renaming afterwards
-     renames the same structure instead of forking it.
+/* ── WHAT IS ON THE PAD, AS TRACINGS ────────────────────────────────────────────  2026-09-17
+   Søren: *"I want the option to draw more than one organelle of the same type... when publishing
+   they should have different numbers."*
 
-     Reusing a kept tracing's id when the names match is the working pattern: paste a link covering
-     more of the cell you already outlined, same name, share, and the older version is superseded
-     rather than duplicated. */
-  if(!TRACING_PENDING.id){
-    const prior=(TRACINGS_KEPT||[]).filter(function(x){return x&&x.id&&x.name===name;})[0];
-    TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(name);
+   One tracing per structure drawn, not one per pad. They share everything that is about the CELL --
+   the type, the nucleus and root ids, the ontology kind -- and differ in the three things that make
+   them separate objects: their contours, their colour, and their number.
+
+   THE NUMBER IS DECIDED FROM THE DATASET, not from this pad. Tracing two more mitochondria into a
+   cell that already has three makes 4 and 5, so tracingNextIndex() reads the index -- the cheap
+   route, one sheet scan and no files -- and counts from there. With no index in hand (not deployed,
+   offline, never browsed) it starts at 1 and says so rather than refusing: a number that turns out
+   to collide is a label to fix, and refusing to record the tracing loses the work.
+
+   THE ID IS NOT THE NUMBER. A structureId ends in the PAD's own index, which never changes while
+   the pad is open and survives a draft; the published number can move if somebody else adds one
+   first. Tying the identity to a label that can shift would turn a re-add into a rival rather than
+   a new version, which is the one failure this feature has been careful about all day. */
+/* The label a name belongs to, with any number taken off the end: "Mitochondrion 3" and
+   "Mitochondrion" are the same series, and the fourth one is 4. */
+function tracingSeriesLabel(name){
+  return String(name || "").replace(/\s+\d+$/, "").trim().toLowerCase();
+}
+function tracingNextIndex(kind, label, nuc, root){
+  var wantK = String(kind || ""), wantL = tracingSeriesLabel(label);
+  var top = 0;
+  (TRACING_SHARED || []).forEach(function(t){
+    if (!t) return;
+    var k = String(t.instanceOf || t.kind || "");
+    /* THE KIND IS THE SERIES, except for the one kind that is not a kind. "Something else" files
+       everything under "other", so two unrelated hand-named structures on one cell would number
+       each other if the kind alone decided it -- a hand-named "Dense body" would come back as
+       "Myelin figure 2". Under `other`, the NAME is the series. */
+    var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
+    var sameCell = (nuc && String(t.nucleusId || "") === String(nuc))
+                || (root && String(t.rootId || "") === String(root));
+    if (same && sameCell && Number(t.instanceIndex) > top) top = Number(t.instanceIndex);
+  });
+  return top + 1;
+}
+
+function tracingCurrentAll(){
+  if(!TRACING_PENDING)return [];
+  const rings=TRACING_PENDING.rings||[];
+  /* The structures on the pad, in the order they were started. A tracing read from a pasted link
+     has no instances at all and comes back as one, which is the ordinary case. */
+  const groups=[];
+  rings.forEach(function(r){
+    const k=r.inst||0;
+    let g=groups.filter(function(x){return x.inst===k;})[0];
+    if(!g){g={inst:k,rings:[]};groups.push(g);}
+    g.rings.push({z:r.z,points:r.points});
+  });
+  groups.sort(function(x,y){return x.inst-y.inst;});
+  if(!groups.length)return [];
+
+  /* WHAT EACH ONE IS. Its own type when they are named separately, the shared box otherwise --
+     see tracingKindFor(). The box is stored back first, because with the option on the box holds
+     the SELECTED structure's type and nothing has told it to save yet. */
+  if(PAD)tracingStoreKindOf(PAD.inst);
+  groups.forEach(function(g){ g.w=tracingKindFor(g.inst); });
+  const unnamed=groups.filter(function(g){return !g.w.name;});
+  if(unnamed.length){
+    tracingSay(unnamed.length===groups.length
+      ?"Type what it is, or pick it from the list — the name becomes the object's name in "
+       +"Blender."
+      :"Number "+(unnamed[0].inst+1)+" has no type yet. Click it in the Drawing strip and say what "
+       +"it is — with separate names on, each one needs its own.",true);
+    document.getElementById("tracingName").focus();
+    return [];
   }
-  t.id=TRACING_PENDING.id;
-  return t;
+
+  const nid=(document.getElementById("tracingNucId").value||"").trim();
+  const rid=(document.getElementById("tracingRootId").value||"").trim();
+  const type=document.getElementById("tracingType").value||"traced";
+
+  /* A SERIES IS A KIND, NOT A PAD. Two mitochondria and a lysosome are Mitochondrion 1,
+     Mitochondrion 2 and Lysosome 1 -- so the numbering is per series, each starting from what the
+     cell already carries of THAT kind. */
+  const seriesKey=function(w){
+    return String(w.kind||"")+"|"+((w.kind==="other")?tracingSeriesLabel(w.name):"");
+  };
+  const first={}, taken={}, count={};
+  groups.forEach(function(g){
+    const k=seriesKey(g.w);
+    count[k]=(count[k]||0)+1;
+    if(first[k]===undefined)first[k]=tracingNextIndex(g.w.kind,g.w.name,nid,rid);
+  });
+
+  if(!TRACING_PENDING.id){
+    const label=groups[0].w.name;
+    const prior=(TRACINGS_KEPT||[]).filter(function(x){return x&&x.id&&x.name===label;})[0];
+    TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(label);
+  }
+
+  return groups.map(function(g){
+    const k=seriesKey(g.w);
+    const n=(taken[k]||0); taken[k]=n+1;
+    const index=first[k]+n;
+    const several=(count[k]>1)||(first[k]>1);
+    const t={name:UJ.tracing.instanceName(g.w.name,index,several),
+             kind:g.w.kind,type:type,
+             color:(typeof padInstColour==="function")?padInstColour(g.inst):"#3a6b5a",
+             traced_by:(typeof REPORTER_NAME!=="undefined"&&REPORTER_NAME)||"",
+             rings:g.rings};
+    if(several){t.instance_index=index;t.instance_of=g.w.kind||"";}
+    /* MEASURED ONCE, HERE, per structure -- so the number stored against each one is the number
+       shown against it on the pad, and two organelles never share a volume. */
+    const vol=tracingVolumeOf(t.rings);
+    if(vol&&vol.ok){
+      t.volume_um3=vol.volumeUm3;
+      t.volume_method="cavalieri";
+      t.volume_trapezoid_um3=vol.volumeTrapezoidUm3;
+      t.section_gap_nm=vol.gapNm;
+      t.area_um2=vol.areaUm2;
+      t.areas=vol.perSection.map(function(q){return {z:q.z,areaUm2:q.areaUm2};});
+    }
+    if(nid)t.nucleus_id=nid;
+    if(rid)t.root_id=rid;
+    /* The pad's own index, not the published number: see the header. The first structure keeps the
+       bare id, so editing a shared tracing and adding it back is still a version of THAT tracing. */
+    t.id=TRACING_PENDING.id+(g.inst?("__i"+g.inst):"");
+    return t;
+  });
 }
 
 /* ── SOMEWHERE TO GO AND DRAW ────────────────────────────────────────────────────  2026-09-17
@@ -7995,31 +8112,43 @@ function tracingOpen(){
    with `pending_share` on it, the list says so, and tracingFlush() sends it as soon as a sign-in
    appears. */
 function tracingKeep(){
-  const t=tracingCurrent();
-  if(!t)return;
-  // Keeping the same tracing twice used to put the cell in the Blender scene twice.
-  const at=TRACINGS_KEPT.findIndex(function(x){return x&&x.id&&x.id===t.id;});
-  const prior=at>=0?TRACINGS_KEPT[at]:null;
-  if(prior&&prior.shared_at)t.shared_at=prior.shared_at;
-  t.pending_share=true;
-  if(at>=0)TRACINGS_KEPT.splice(at,1,t); else TRACINGS_KEPT.push(t);
+  /* ONE PRESS, EVERY STRUCTURE ON THE PAD. Søren, 2026-09-17: several organelles of the same type,
+     each with its own number. They are separate tracings from here on -- separate rows, separate
+     files, separate volumes -- and the only thing this loop shares between them is the press. */
+  const all=tracingCurrentAll();
+  if(!all.length)return;
+  all.forEach(function(t){
+    // Keeping the same tracing twice used to put the cell in the Blender scene twice.
+    const at=TRACINGS_KEPT.findIndex(function(x){return x&&x.id&&x.id===t.id;});
+    const prior=at>=0?TRACINGS_KEPT[at]:null;
+    if(prior&&prior.shared_at)t.shared_at=prior.shared_at;
+    t.pending_share=true;
+    if(at>=0)TRACINGS_KEPT.splice(at,1,t); else TRACINGS_KEPT.push(t);
+  });
   tracingWrite(TRACINGS_KEPT);
   TRACING_PENDING=null;
   document.getElementById("tracingFound").style.display="none";
   document.getElementById("tracingLink").value="";
-  const sent=tracingPublish(t);
+  let sent=0;
+  all.forEach(function(t){ if(tracingPublish(t))sent++; });
   /* IT IS NOT A DRAFT ANY MORE. Kept locally and queued or shared, and either way the way back to
      it is the list -- so a stale draft here would be a second, older copy of the same cell waiting
      to be resumed on top of it. */
   draftClear();
   PAD_EDIT_ID = "";
   tracingRenderList();
-  tracingSay(sent
-    ?'\u201c'+t.name+'\u201d is in the dataset and in this page\u2019s 3D export. Anybody can open '
-     +'it from the list at the bottom of this card and add to it \u2014 that becomes its next '
-     +'version, with their name beside yours, and nothing of this one is deleted.'
-    :'\u201c'+t.name+'\u201d is kept here and in your 3D export. It has NOT reached the dataset yet '
-     +'\u2014 sign in with Google (the account button, top right) and it goes up on its own.');
+  const what=all.length===1
+    ?'“'+all[0].name+'”'
+    :all.length+' structures — '+all.map(function(t){return t.name;}).join(", ");
+  tracingSay(sent===all.length
+    ?what+' '+(all.length===1?'is':'are')+' in the dataset and in this page’s 3D export. '
+     +'Anybody can open '+(all.length===1?'it':'them')+' from the list at the bottom of this card '
+     +'and add to '+(all.length===1?'it':'them')+' — that becomes the next version, with their '
+     +'name beside yours, and nothing of this one is deleted.'
+    :what+' '+(all.length===1?'is':'are')+' kept here and in your 3D export. '
+     +(all.length===1?'It has':'They have')+' NOT reached the dataset yet — sign in with Google '
+     +'(the account button, top right) and '+(all.length===1?'it goes':'they go')+' up on '
+     +(all.length===1?'its':'their')+' own.');
   tracingFlushSoon();
 }
 
@@ -8041,7 +8170,16 @@ function tracingPublish(t,quiet){
   const gid="trace_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7);
   const sub=UJ.tracing.toSubmission(t.rings,{structureId:t.id,name:t.name,kind:t.kind||"",
                                              cellType:t.type,color:t.color,
-                                             nucleusId:t.nucleus_id||"",rootId:t.root_id||""});
+                                             nucleusId:t.nucleus_id||"",rootId:t.root_id||"",
+                                             /* the size goes with it -- Søren, 2026-09-17: "add the
+                                                volumes to the data for the cell when submitting" */
+                                             instanceIndex:t.instance_index,
+                                             instanceOf:t.instance_of,
+                                             volumeUm3:t.volume_um3,
+                                             volumeMethod:t.volume_method,
+                                             volumeTrapezoidUm3:t.volume_trapezoid_um3,
+                                             sectionGapNm:t.section_gap_nm,
+                                             areaUm2:t.area_um2, areas:t.areas});
   if(!sub.contours.length)return false;
   const ok=postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid},sub),
                       "Tracing added to the dataset \u2014 thank you.");
@@ -8199,8 +8337,15 @@ async function pad3DDraw(){
                                       { unitNm: 1000, frame: frame }),
                /* The cell fainter than the nucleus: it is the larger surface and the one you are
                   most often looking THROUGH. */
-               alpha: x.what === "cell" ? 0.14 : 0.3,
-               tint: x.what === "cell" ? [0.55, 0.62, 0.78] : [0.85, 0.62, 0.45] };
+               alpha: x.what === "cell" ? 0.14 : 0.35,
+               /* BLUE MEANS NUCLEUS, here and in the Blender export and in the cell panel --
+                  blender/colour_policy.py, 2026-09-08, quoting Søren: "the nucleus always blue",
+                  NUC_COLOR #3a72d8. The cell around it is a neutral grey ON PURPOSE: the palette in
+                  that policy reserves hues 200-250 for nuclei and 335-25 for vessels, and the
+                  blue-grey this used to be sat at hue 222 -- inside the nucleus band, which is
+                  exactly the confusion the reservation exists to prevent. */
+               tint: x.what === "cell" ? [0.72, 0.72, 0.74]
+                                       : (UJ.mesh3d.NUC_TINT || [0.23, 0.45, 0.85]) };
     });
     pad3DRelease();
     const um = [0, 1, 2].map(function(i){ return (first.hi[i] - first.lo[i]) / 1000; });
@@ -8236,6 +8381,83 @@ function pad3DSoon(){
   PAD3D_SOON = setTimeout(function(){
     PAD3D_SOON = null; PAD3D_AT = Date.now(); pad3DDraw();
   }, wait);
+}
+
+/* ── HOW MUCH OF IT THERE IS ────────────────────────────────────────────────────  2026-09-17
+   Søren: *"We need to calculate the organelle volumes also and add the volumes to the data for the
+   cell when submitting."*
+
+   core/traceloft.js does the arithmetic -- Cavalieri's estimator over the outlined areas, with the
+   even-odd rule so a contour inside another is a hole -- and this half puts the number where it is
+   useful: ON THE PAD WHILE DRAWING, because a volume you only see after submitting cannot tell you
+   that you have traced one section too few; and on the submission, which is what he asked for.
+
+   THE NUMBER STORED IS THE NUMBER HE SAW. It is measured here and passed into the submission rather
+   than recomputed anywhere else, so the figure in the sheet is the one on the screen that persuaded
+   him the tracing was finished. A second, independent computation at submission time could differ
+   from it by a percent and nobody would ever find out which was which.
+
+   IT IS AN ESTIMATE AND THE PANEL SAYS SO, with the sampling it was made at: a sphere traced every
+   fifth section comes back about one percent light (measured in traceloftcheck.js), and a volume
+   quoted without the spacing it was sampled at is a number without an error bar. */
+function tracingVolumeOf(rings){
+  try {
+    if (!window.UJ || !UJ.traceloft || !UJ.traceloft.volume) return null;
+    return UJ.traceloft.volume(rings || [], (UJ.cfg && UJ.cfg.res) || [4, 4, 40]);
+  } catch (e){ return null; }
+}
+/* µm³ at a readable number of digits. An organelle is 0.01 µm³ and a cell is 5,000; one format
+   cannot serve both, and rounding a lysosome to "0.0" would be the tool losing the measurement. */
+function volFmt(v){
+  if (!isFinite(v)) return "?";
+  if (v >= 100) return v.toFixed(0);
+  if (v >= 1) return v.toFixed(2);
+  if (v >= 0.01) return v.toFixed(4);
+  return v.toExponential(2);
+}
+function tracingVolumeSay(v){
+  if (!v) return "";
+  if (!v.ok){
+    return v.areaUm2 !== undefined
+      ? "Outlined area " + volFmt(v.areaUm2) + " µm² on one section — " + v.reason + "."
+      : "";
+  }
+  return "Volume " + volFmt(v.volumeUm3) + " µm³ (Cavalieri, " + v.sections
+    + " section" + (v.sections === 1 ? "" : "s") + " every " + Math.round(v.gapNm) + " nm"
+    + (v.evenlySpaced ? "" : ", unevenly spaced") + "). "
+    + volFmt(v.volumeTrapezoidUm3) + " µm³ between the outermost contours, which is the "
+    + "lower bound — the difference is what lies past them.";
+}
+function padVolume(){
+  const el = document.getElementById("tracePadVol");
+  if (!el || !PAD) return null;
+  const all = UJ.tracepad.toRings(PAD);
+  const insts = UJ.tracepad.instances(PAD).filter(function(it){ return it.contours; });
+  /* ONE LINE EACH once there are several. A single figure over two mitochondria is the volume of
+     no object at all -- it is the sum of two, which is a number nobody asked for and which looks
+     exactly like the answer somebody did ask for. */
+  if (insts.length > 1){
+    el.innerHTML = insts.map(function(it){
+      const v = tracingVolumeOf(all.filter(function(r){ return (r.inst || 0) === it.inst; }));
+      return '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;'
+        + 'margin-right:4px;background:' + escHtml(padInstColour(it.inst)) + '"></span>'
+        + '<b>' + (it.inst + 1) + '</b> — '
+        + escHtml(v ? tracingVolumeSay(v) : "nothing yet");
+    }).join("<br>");
+    return null;
+  }
+  const v = tracingVolumeOf(all);
+  el.textContent = v ? tracingVolumeSay(v) : "";
+  return v;
+}
+/* The same figure beside the button that submits, because that is where it is being decided. A
+   tracing that arrived on a pasted link never passed the pad, so it cannot be padVolume's job. */
+function tracingVolShow(){
+  const el = document.getElementById("tracingVolSay");
+  if (!el) return null;
+  const v = (TRACING_PENDING && TRACING_PENDING.rings) ? tracingVolumeOf(TRACING_PENDING.rings) : null;
+  el.textContent = v ? tracingVolumeSay(v) : "";
+  return v;
 }
 
 /* ── A DRAFT, SO A TRACING CAN BE PUT DOWN AND PICKED UP ────────────────────────  2026-09-17
@@ -8297,7 +8519,13 @@ function draftNow(){
            used: !!(found && found.style.display !== "none"),
            what: val("tracingWhat"), name: val("tracingName"), type: val("tracingType"),
            color: val("tracingColor"), nucId: val("tracingNucId"), rootId: val("tracingRootId"),
-           typeTouched: !!TRACING_TYPE_TOUCHED };
+           typeTouched: !!TRACING_TYPE_TOUCHED,
+           /* SEVERAL STRUCTURES ARE PART OF THE DRAFT TOO. Resuming with the contours back but the
+              colours re-dealt and the types forgotten would be a worse draft than none: the work
+              would look restored and quietly be wrong about what each thing is. */
+           inst: PAD.inst || 0,
+           instColour: PAD_INST_COLOUR, instKind: PAD_INST_KIND,
+           eachOwn: tracingEachOwn() };
 }
 function draftSave(explicit){
   const d = draftNow();
@@ -8375,6 +8603,11 @@ function draftResume(){
   set("tracingWhat", d.what); set("tracingName", d.name); set("tracingType", d.type);
   set("tracingColor", d.color); set("tracingNucId", d.nucId); set("tracingRootId", d.rootId);
   TRACING_TYPE_TOUCHED = !!d.typeTouched;
+  PAD_INST_COLOUR = d.instColour || {};
+  PAD_INST_KIND = d.instKind || {};
+  const eachBox = document.getElementById("tracingEachOwn");
+  if (eachBox) eachBox.checked = !!d.eachOwn;
+  if (d.inst) UJ.tracepad.setInstance(PAD, d.inst);
   const nameRow = document.getElementById("tracingNameRow");
   if (nameRow) nameRow.style.display = (d.what === "__other") ? "" : "none";
   document.getElementById("tracePadWrap").style.display = "";
@@ -8399,7 +8632,24 @@ function draftResume(){
    because they are the same kind of thing the pad makes -- and keeps its structureId, so adding it
    again is the NEXT VERSION of that tracing rather than a rival to it. Nothing is overwritten: the
    older file and the older row both stay. */
-var TRACING_SHARED = [], PAD_EDIT_ID = "";
+var TRACING_SHARED = [], PAD_EDIT_ID = "", TRACING_INDEX_AT = 0;
+
+/* THE INDEX, FETCHED QUIETLY, because the numbering needs it before he presses anything.
+   ?tracings=1 is one sheet scan and opens no Drive files -- that is what the Drive split bought --
+   so this is cheap enough to do when the pad opens, and a minute's cache keeps it to one request
+   per session of work. It fails silently: with no index, tracingNextIndex() starts at 1 and says
+   so, which is a label to fix rather than work lost. */
+function tracingIndexSoon(){
+  if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT) return;
+  if (Date.now() - TRACING_INDEX_AT < 60000) return;
+  TRACING_INDEX_AT = Date.now();
+  try {
+    fetch(REPORT_ENDPOINT + "?tracings=1")
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if (d && d.tracings) TRACING_SHARED = d.tracings; })
+      .catch(function(){});
+  } catch (e){}
+}
 
 async function tracingBrowse(){
   const host = document.getElementById("tracingShared");
@@ -8536,6 +8786,143 @@ async function tracingOpenShared(sid, btn){
    returns. Vertices are stored in TOOL voxels, so changing the zoom or panning never moves one. */
 var PAD = null, PAD_VIEW = null, PAD_BUSY = false, PAD_HOVER = null, PAD_CENTRE = null;
 
+/* ── SEVERAL OF THE SAME THING, EACH ITS OWN COLOUR ─────────────────────────────  2026-09-17
+   Søren: *"I want the option to draw more than one organelle of the same type, the extra added
+   organelles should have different colors, so you can distinguish them, and when publishing they
+   should have different numbers, also when shown on the cell identity page."*
+
+   A cell has forty mitochondria. Until now the pad held one structure and two contours on a section
+   were two blobs OF IT -- right for a cell with a hole in it, wrong for two mitochondria side by
+   side, and there was no way to say which you meant.
+
+   THE COLOURS ARE THE EXPORT'S OWN, from blender/colour_policy.py through UJ.tracing: red means
+   vessel and blue means nucleus, so the palette contains neither, and the same structure is the
+   same colour on the pad and in the .blend. The colour picker still works and now sets the colour
+   of the one being drawn -- it is a choice about THIS structure, not about the tracing. */
+var PAD_INST_COLOUR = {}, PAD_INST_KIND = {};
+
+/* ── ONE TYPE FOR ALL OF THEM, UNLESS YOU SAY OTHERWISE ─────────────────────────  2026-09-17
+   Søren: *"I would like an option to identify the organelles identities individually, so standard
+   is that they are all the same, but if you click a button you can identify them individually."*
+
+   The default is the case that happens: several mitochondria in one cell, one type between them,
+   one dropdown. Turning the option on makes the type box belong to the structure SELECTED in the
+   Drawing strip, so one pass over a cell can log a mitochondrion, a lysosome and two vesicles
+   without leaving the pad.
+
+   NOTHING CHANGES ON THE WAY IN. Switching it on seeds every structure with the type already
+   chosen, so the act of turning it on never alters what anything IS -- it only makes them
+   separately editable. Switching it off goes back to the shared box and leaves what was stored
+   alone, so a mis-click is not a lost afternoon.
+
+   THEY STILL NUMBER WITHIN THEIR OWN TYPE. Two mitochondria and a lysosome on one cell are
+   Mitochondrion 1, Mitochondrion 2 and Lysosome 1 -- a series is a kind, not a pad. */
+function tracingEachOwn(){
+  const box = document.getElementById("tracingEachOwn");
+  return !!(box && box.checked);
+}
+/* What THIS structure is, as {kind, name}: its own when they are named separately and it has one,
+   the shared box otherwise. */
+function tracingKindFor(inst){
+  if (tracingEachOwn()){
+    const own = PAD_INST_KIND[String(inst || 0)];
+    if (own && (own.kind || own.name)) return { kind: own.kind, name: own.name };
+  }
+  return tracingWhat();
+}
+/* The type boxes show the SELECTED structure. Called when a chip is clicked and when the option is
+   switched on. */
+function tracingShowKindOf(inst){
+  if (!tracingEachOwn()) return;
+  const own = PAD_INST_KIND[String(inst || 0)];
+  if (!own) return;
+  const what = document.getElementById("tracingWhat");
+  const nameBox = document.getElementById("tracingName");
+  const row = document.getElementById("tracingNameRow");
+  if (what && own.value){
+    const has = [].slice.call(what.options).some(function(o){ return o.value === own.value; });
+    if (has) what.value = own.value;
+  }
+  if (row) row.style.display = (what && what.value === "__other") ? "" : "none";
+  if (nameBox && what && what.value === "__other") nameBox.value = own.name || "";
+}
+/* And the other direction: what is in the boxes belongs to the structure being drawn. */
+function tracingStoreKindOf(inst){
+  if (!tracingEachOwn() || !PAD) return;
+  const what = document.getElementById("tracingWhat");
+  const w = tracingWhat();
+  PAD_INST_KIND[String(inst || 0)] = { value: what ? what.value : "", kind: w.kind, name: w.name };
+}
+/* Every structure on the pad gets what is in the boxes now. Called when the option is switched on,
+   which is the one moment several structures have to acquire a type they did not have. */
+function tracingSeedKinds(){
+  if (!PAD) return;
+  const what = document.getElementById("tracingWhat");
+  const w = tracingWhat();
+  UJ.tracepad.instances(PAD).forEach(function(it){
+    const k = String(it.inst);
+    if (!PAD_INST_KIND[k])
+      PAD_INST_KIND[k] = { value: what ? what.value : "", kind: w.kind, name: w.name };
+  });
+}
+function padInstColour(i){
+  var k = String(i || 0);
+  if (!PAD_INST_COLOUR[k]) PAD_INST_COLOUR[k] = UJ.tracing.instanceColour(i || 0);
+  return PAD_INST_COLOUR[k];
+}
+/* #rrggbb with an alpha, for the fill under a contour. Written out rather than reached for through
+   a colour library, because this is the only place in the file that needs it. */
+function hexA(hex, a){
+  var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ""));
+  if (!m) return "rgba(64,226,140," + a + ")";
+  return "rgba(" + parseInt(m[1], 16) + "," + parseInt(m[2], 16) + "," + parseInt(m[3], 16)
+       + "," + a + ")";
+}
+/* One chip per structure on the pad, in its own colour, with the one being drawn marked. Clicking
+   a chip goes back to that structure -- which is how you add a section to the second mitochondrion
+   after starting a third. */
+function padInstances(){
+  const box = document.getElementById("tracePadInsts");
+  if (!box || !PAD) return;
+  const list = UJ.tracepad.instances(PAD);
+  /* The option is a question about telling two things apart, so it is not asked until there are
+     two -- and it stays once it has been answered yes, or turning it on would hide its own tick. */
+  const row = document.getElementById("tracingEachRow");
+  if (row) row.style.display = (list.length > 1 || tracingEachOwn()) ? "flex" : "none";
+  box.innerHTML = list.map(function(it){
+    const on = (it.inst === (PAD.inst || 0));
+    return '<button type="button" class="hist-chip padinst" data-inst="' + it.inst + '" '
+      + 'style="display:inline-flex;align-items:center;gap:5px;'
+      + (on ? "outline:2px solid var(--accent);" : "") + '" title="'
+      + (on ? "The one you are drawing now" : "Go back to this one") + ' — '
+      + it.contours + ' contour(s) on ' + it.sections + ' section(s)">'
+      + '<span style="width:9px;height:9px;border-radius:2px;background:'
+      + escHtml(padInstColour(it.inst)) + '"></span>' + (it.inst + 1)
+      /* Its own type on the chip once they can differ -- with the option off the label would be the
+         same word repeated down the strip, which is noise. */
+      + (tracingEachOwn()
+          ? ' <span style="opacity:.75;max-width:90px;overflow:hidden;text-overflow:ellipsis;'
+            + 'white-space:nowrap">' + escHtml(tracingKindFor(it.inst).name || "?") + '</span>'
+          : '')
+      + (it.contours ? '' : ' <span style="opacity:.6">empty</span>') + '</button>';
+  }).join("");
+  [].slice.call(box.querySelectorAll(".padinst")).forEach(function(b){
+    b.addEventListener("click", function(){
+      /* What is in the type boxes belongs to the one being LEFT, and the one being arrived at puts
+         its own there. Storing first is what makes the strip a set of tabs rather than a row of
+         buttons that quietly copy one structure's type onto the next. */
+      tracingStoreKindOf(PAD.inst);
+      UJ.tracepad.setInstance(PAD, +b.dataset.inst);
+      tracingShowKindOf(PAD.inst);
+      const col = document.getElementById("tracingColor");
+      if (col) col.value = padInstColour(PAD.inst);
+      padPaint(); padRings();
+      padSay("Drawing number " + (PAD.inst + 1) + " now — anything you draw joins that one."
+        + (tracingEachOwn() ? " The type box above is its own." : ""));
+    });
+  });
+}
+
 /* ── WHICH MACHINE THIS IS, ASKED ONCE ──────────────────────────────────────────  2026-09-17
    Søren: *"Make sure that all the commands work for mac also."* Nearly all of them already did --
    shift, the arrow keys, comma and full stop, dragging a point, the wheel in the 3D panel are the
@@ -8647,14 +9034,17 @@ function padPaint(){
     r.points.forEach(function(p, i){ const q = px([p[0], p[1], PAD.z]);
       if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
     g.closePath();
-    g.strokeStyle = "#40e28c"; g.lineWidth = 2; g.stroke();
-    g.fillStyle = "rgba(64,226,140,.14)"; g.fill();
+    /* Its own structure's colour, so two mitochondria side by side are two shapes rather than one
+       ambiguous pair of outlines. */
+    const col = padInstColour(r.inst || 0);
+    g.strokeStyle = col; g.lineWidth = 2; g.stroke();
+    g.fillStyle = hexA(col, 0.14); g.fill();
     /* The vertices of a CLOSED contour, because since 2026-09-17 they can be dragged, and a handle
        you cannot see is a handle you do not know you have. */
     r.points.forEach(function(p){
       const q = px([p[0], p[1], PAD.z]);
       g.beginPath(); g.arc(q[0], q[1], 2.5, 0, 6.2832);
-      g.fillStyle = "#40e28c"; g.fill();
+      g.fillStyle = col; g.fill();
     });
   });
   /* The one under the pointer, larger, so it is obvious which one a drag would take. */
@@ -8667,11 +9057,24 @@ function padPaint(){
         g.strokeStyle = "#ffffff"; g.lineWidth = 2; g.stroke(); }
     }
   }
+  /* THE STROKE, WHILE THE PEN IS DOWN. Drawn from the raw samples rather than from the thinned
+     ring, because the thinning happens on lifting: what the hand is doing now is the line the hand
+     is making, and a preview that lagged behind it by a simplification pass would feel wrong in a
+     way that is hard to name and easy to notice. */
+  if (PAD.stroke && PAD.stroke.length > 1){
+    g.beginPath();
+    PAD.stroke.forEach(function(p, i){ const q = px([p[0], p[1], PAD.z]);
+      if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
+    g.strokeStyle = padInstColour(PAD.inst || 0); g.lineWidth = 2; g.stroke();
+  }
   if (PAD.pending.length){
     g.beginPath();
     PAD.pending.forEach(function(p, i){ const q = px([p[0], p[1], PAD.z]);
       if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
-    g.strokeStyle = "#ffd166"; g.lineWidth = 2; g.stroke();
+    /* The contour being clicked is the same colour as the one it will become. It used to be a
+       fixed amber, which was fine when there was only ever one structure and is a lie now. */
+    const pcol = padInstColour(PAD.inst || 0);
+    g.strokeStyle = pcol; g.lineWidth = 2; g.stroke();
     PAD.pending.forEach(function(p, i){
       const q = px([p[0], p[1], PAD.z]);
       g.beginPath();
@@ -8682,11 +9085,11 @@ function padPaint(){
         const near = PAD_HOVER && UJ.tracepad.nearFirst(PAD, PAD_HOVER[0], PAD_HOVER[1],
                                                         PAD_VIEW.pxPerToolVoxel);
         g.arc(q[0], q[1], near ? 9 : 6, 0, 6.2832);
-        g.strokeStyle = near ? "#ffffff" : "#ffd166";
+        g.strokeStyle = near ? "#ffffff" : pcol;
         g.lineWidth = near ? 3 : 2; g.stroke();
       } else {
         g.arc(q[0], q[1], 2.5, 0, 6.2832);
-        g.fillStyle = "#ffd166"; g.fill();
+        g.fillStyle = pcol; g.fill();
       }
     });
   }
@@ -8699,6 +9102,8 @@ function padRings(){
      every delete and every reload of a section, which is every way the set of rings can change. */
   pad3DSoon();
   draftSoon();
+  padVolume();
+  padInstances();
   const box = document.getElementById("tracePadRings");
   if (!box || !PAD) return;
   const here = UJ.tracepad.onSection(PAD);
@@ -8706,8 +9111,10 @@ function padRings(){
   box.innerHTML = '<span class="hint">On this section:</span> '
     + here.map(function(h, n){
         return '<button type="button" class="hist-chip padring" data-ring="' + h.ring + '" '
-          + 'title="Delete this contour">' + (n + 1) + ' \u00b7 ' + h.points
-          + ' points \u00d7</button>';
+          + 'title="Delete this contour \u2014 it belongs to number ' + ((h.inst || 0) + 1) + '">'
+          + '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;'
+          + 'margin-right:4px;background:' + escHtml(padInstColour(h.inst || 0)) + '"></span>'
+          + (n + 1) + ' \u00b7 ' + h.points + ' points \u00d7</button>';
       }).join(" ");
   [].slice.call(box.querySelectorAll(".padring")).forEach(function(b){
     b.addEventListener("click", function(){
@@ -8749,6 +9156,7 @@ function padOpen(){
   PAD_EDIT_ID = ""; TRACING_PENDING = null; PAD3D_MESHES = null; PAD3D_KEY = "";
   /* A kept draft is not thrown away by opening the pad -- but it WILL be replaced once something is
      drawn here, and being told that before it happens is the whole difference. */
+  tracingIndexSoon();          // so "the fourth mitochondrion" knows about the first three
   const kept = draftRead();
   if (kept && kept.rings.length)
     tracingSay("There is an unfinished tracing kept in this browser — " + kept.rings.length
@@ -8906,6 +9314,30 @@ async function tracingResolveAt(pos){
     pad3DRelease(); PAD3D_ON = false;
     const h3 = document.getElementById("tracePad3DHost"); if (h3) h3.innerHTML = "";
   });
+  /* REMEMBERED, because somebody with a pen display has a pen display every day. Per browser, like
+     the theme; it is a preference about the hand doing the drawing, not about the tracing. */
+  const pen = document.getElementById("tracePadPen");
+  if (pen){
+    try { pen.checked = localStorage.getItem("ujump_tracing_pen_v1") === "1"; } catch (_e){}
+    pen.addEventListener("change", function(){
+      try { localStorage.setItem("ujump_tracing_pen_v1", pen.checked ? "1" : "0"); } catch (_e){}
+      padSay(pen.checked
+        ? "Freehand on — press and draw all the way round the structure, then lift. Shift+drag "
+          + "pans while this is on."
+        : "Freehand off — back to a click per vertex, and the first one closes the contour.");
+    });
+  }
+  const ni = document.getElementById("tracePadNewInst");
+  if (ni) ni.addEventListener("click", function(){
+    if (!PAD) return;
+    tracingStoreKindOf(PAD.inst);          // what is in the boxes belongs to the one being left
+    const n = UJ.tracepad.newInstance(PAD);
+    const col = document.getElementById("tracingColor");
+    if (col) col.value = padInstColour(n);
+    padPaint(); padRings();
+    padSay("Number " + (n + 1) + " started, in its own colour. Same type, same cell — it is "
+      + "added as its own structure, with its own number and its own volume.");
+  });
   const pd = document.getElementById("tracePadDraft");
   if (pd) pd.addEventListener("click", function(){ draftSave(true); });
   const p3 = document.getElementById("tracePad3D");
@@ -8931,6 +9363,7 @@ async function tracingResolveAt(pos){
        cleared by padOpen(), so a pad opened fresh carries nothing. */
     TRACING_PENDING = { rings: rings, id: PAD_EDIT_ID || undefined };
     document.getElementById("tracingFound").style.display = "";
+    tracingVolShow();
     tracingSay(rings.length + " contour" + (rings.length === 1 ? "" : "s") + " from the pad on "
       + sections.size + " sections. Name it below and keep it.");
     document.getElementById("tracingName").focus();
@@ -8964,11 +9397,51 @@ async function tracingResolveAt(pos){
       const t = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
       dragging = UJ.tracepad.hitVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
     } else dragging = null;
-    cv.setPointerCapture(e.pointerId);
+    /* ── A PEN DRAWS.  2026-09-17 ──────────────────────────────────────────────────────────────
+       Søren: *"Could we have an option to click and draw the mouse around a structure to mimic
+       using a pen to draw, so that you can use a e.g. Kamvas 13 pad or a Apple pen to draw the
+       polylines?"*
+
+       A stroke starts here and ends on lifting; core/tracepad.js thins it into an ordinary contour,
+       so everything downstream -- editing it, the volume, the preview, the export -- cannot tell it
+       from a clicked one.
+
+       THE PRECEDENCE MATTERS. Grabbing a vertex still wins, so a drawn contour can be corrected
+       point by point exactly like a clicked one; shift still pans, so the field can be moved
+       mid-cell; and the whole-contour remove still wins over both. Only the leftover case -- a
+       plain press on empty canvas -- becomes a stroke.
+
+       A PEN TURNS IT ON BY ITSELF, once, and says so. pointerType is the browser telling us a
+       stylus is on the glass, and somebody who has just put a pen to a Kamvas is not asking to
+       place one vertex. Announced rather than silent, and it is an ordinary tick box afterwards. */
+    if (!drawFreehand() && e.pointerType === "pen"){
+      const box = document.getElementById("tracePadPen");
+      if (box){ box.checked = true;
+        try { localStorage.setItem("ujump_tracing_pen_v1", "1"); } catch (_e){}
+        padSay("Pen detected — freehand drawing is on. Draw all the way round the structure "
+          + "and lift. Untick “draw freehand” to go back to clicking each vertex."); }
+    }
+    if (drawFreehand() && !dragging && !e.shiftKey){
+      const t0 = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
+      UJ.tracepad.startStroke(PAD, t0[0], t0[1]);
+      padPaint();
+    }
+    /* Guarded, the way core/mesh3d.js has always guarded its own: capture throws when the pointer
+       id is not active -- a synthetic event, a pointer the browser has already released -- and an
+       exception thrown HERE would abandon the rest of pointerdown, mid-gesture, for a call whose
+       only job is to keep events coming to this canvas. */
+    try { cv.setPointerCapture(e.pointerId); } catch (_e){}
   });
   cv.addEventListener("pointermove", function(e){
     PAD_HOVER = PAD_VIEW ? PAD_VIEW.toolAt(e.offsetX, e.offsetY) : null;
     if (down && (Math.abs(e.offsetX - down[0]) > 3 || Math.abs(e.offsetY - down[1]) > 3)) moved = true;
+    if (PAD.stroke && PAD_HOVER){
+      /* Sampled no finer than two pixels, whatever the zoom: the tolerances are in tool voxels and
+         the hand is in pixels, so both are converted through the view rather than guessed. */
+      UJ.tracepad.strokePoint(PAD, PAD_HOVER[0], PAD_HOVER[1], padTol(2));
+      padPaint();
+      return;
+    }
     if (dragging && PAD_HOVER){
       UJ.tracepad.moveVertex(PAD, dragging, PAD_HOVER[0], PAD_HOVER[1]);
       padPaint();
@@ -8988,6 +9461,22 @@ async function tracingResolveAt(pos){
     if (!PAD_VIEW || !down) return;
     const wasPan = moved;
     const from = down; down = null;
+    if (PAD.stroke){
+      /* Within about a pixel of where it was drawn. A distance rather than a vertex count, because
+         "within a pixel of the line I drew" is a promise about the picture the tracer is looking
+         at -- see core/tracepad.js's simplify(). */
+      const what = UJ.tracepad.endStroke(PAD, padTol(1.2));
+      PAD_HOVER = null;
+      if (what === "ring"){
+        const n = PAD.rings[PAD.rings.length - 1].points.length;
+        padPaint(); padRings();
+        padSay("Contour drawn — " + n + " points kept from the stroke. Drag any of them to "
+          + "correct it, or step a section with , or . and draw the next one.");
+        return;
+      }
+      /* Too short to be a stroke: it was a click, so treat it as one rather than losing it. */
+      padPaint();
+    }
     if (dragging){
       const wasDrag = moved;
       dragging = null;
@@ -9079,6 +9568,17 @@ async function tracingResolveAt(pos){
   /* Which modifier means "take the whole thing", by platform. Read from the event rather than
      stored, so a page opened on one machine and a keyboard swapped under it still agrees. */
   function padErase(e){ return PAD_MAC ? e.metaKey : e.ctrlKey; }
+  function drawFreehand(){
+    const box = document.getElementById("tracePadPen");
+    return !!(box && box.checked);
+  }
+  /* Pixels to tool voxels, through the view. Every tolerance in the pen path is a distance ON
+     SCREEN -- that is what the hand controls -- and the contour is stored in dataset voxels, so
+     zooming in has to make the thinning finer in voxels to stay the same in pixels. */
+  function padTol(px){
+    const k = (PAD_VIEW && PAD_VIEW.pxPerToolVoxel) || 1;
+    return px / (k || 1);
+  }
   function padEraseAt(e){
     if (!PAD_VIEW || !PAD) return;
     const t = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
@@ -9151,8 +9651,23 @@ async function tracingResolveAt(pos){
     what.addEventListener("change",function(){
       document.getElementById("tracingNameRow").style.display=(what.value==="__other")?"":"none";
       if(what.value==="__other")document.getElementById("tracingName").focus();
+      /* With the option on, this box is the SELECTED structure's, so a change is a change to that
+         one -- and the strip has to say so. */
+      if(PAD){tracingStoreKindOf(PAD.inst);padInstances();}
     });
   }
+  /* The option, and the two directions it creates. Seeding on the way in is what makes turning it
+     on safe: every structure starts as what they all were. */
+  const each=document.getElementById("tracingEachOwn");
+  if(each)each.addEventListener("change",function(){
+    if(each.checked)tracingSeedKinds();
+    padInstances();padRings();
+    if(PAD)tracingShowKindOf(PAD.inst);
+    padSay(each.checked
+      ?"Each one carries its own type now. Click a number in the Drawing strip and the box above "
+       +"becomes that one's — they are still added in one press."
+      :"Back to one type for all of them.");
+  });
   TRACINGS_KEPT=tracingRead();
   tracingRenderList();
   document.getElementById("tracingRead").addEventListener("click",function(){
@@ -9188,9 +9703,21 @@ async function tracingResolveAt(pos){
       const el=document.getElementById(id);
       if(el)el.addEventListener("change",function(){ if(PAD)draftSoon(); });
     });
+  const nameBox=document.getElementById("tracingName");
+  if(nameBox)nameBox.addEventListener("change",function(){
+    if(PAD){tracingStoreKindOf(PAD.inst);padInstances();}
+  });
   draftRender();
   const typeSel=document.getElementById("tracingType");
   if(typeSel)typeSel.addEventListener("change",function(){TRACING_TYPE_TOUCHED=true;});
+  /* The picker is a choice about the structure being drawn, not about the tracing: with several on
+     the pad, "the colour" is not a thing there is one of. */
+  const colSel=document.getElementById("tracingColor");
+  if(colSel)colSel.addEventListener("input",function(){
+    if(!PAD)return;
+    PAD_INST_COLOUR[String(PAD.inst||0)]=colSel.value;
+    padPaint();padRings();
+  });
   const tPanel=document.getElementById("tracingPanel");
   if(tPanel)tPanel.addEventListener("toggle",tracingFillPos);
   tracingFillPos();

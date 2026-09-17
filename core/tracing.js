@@ -281,6 +281,39 @@ UJ.tracing = (function(){
     }).filter(function(p){ return isFinite(p[0]) && isFinite(p[1]); });
   }
 
+  /* ── ONE COLOUR EACH, AND THE SAME ONES THE SCENE USES ─────────────────────────  2026-09-17
+     Søren: *"the extra added organelles should have different colors, so you can distinguish
+     them."*
+
+     This is blender/colour_policy.py's CELL_PALETTE, value for value, and it is copied rather than
+     invented for the reason that file gives: red MEANS vessel (#b03a48) and blue MEANS nucleus
+     (#3a72d8), so the palette reserves hues 335-25 and 200-250 and contains neither. A second
+     palette chosen here would put a mitochondrion in nucleus blue on the pad and something else
+     entirely in the .blend, and the two pictures would disagree about what a colour means.
+
+     IN BISECTION ORDER, also from that file: the first two entries are far apart in hue, and the
+     first four, and so on -- because most tracings are two or three structures, and two neighbouring
+     greens would defeat the point of colouring them at all. */
+  var INSTANCE_COLOURS = [
+    "#40e28c", "#bfdd78", "#9740e2", "#ddc478", "#56e240",
+    "#78dadd", "#e240e2", "#ddab78", "#e2e240", "#a2dd78",
+    "#40e25b", "#78ddc4", "#7140e2", "#c678dd", "#e240b7"
+  ];
+  function instanceColour(i){
+    return INSTANCE_COLOURS[((Math.round(i) || 0) % INSTANCE_COLOURS.length + INSTANCE_COLOURS.length)
+                            % INSTANCE_COLOURS.length];
+  }
+
+  /* What the thing is called once there are several of them. The ontology label stays the `kind`
+     -- that is the join, and it must not gain a number -- so the number goes on the NAME, which is
+     what a person reads on the sheet, in the Blender outliner and on the cell's own panel. One of a
+     kind keeps its plain label: "Nucleus 1" would be a strange way to say there is one. */
+  function instanceName(label, index, several){
+    var n = Math.round(index) || 0;
+    if (!several || n < 1) return String(label || "");
+    return String(label || "") + " " + n;
+  }
+
   function structureId(name, stamp){
     /* Readable, unique per submission, and stable within one: the rows of one tracing have to find
        each other on the way back out, and a reader looking at the sheet should be able to tell
@@ -330,11 +363,43 @@ UJ.tracing = (function(){
       perZ[z]++;
       return c;
     }).filter(function(c){ return c.points; });
-    return { type: "traced_structure", structureId: id,
-             name: meta.name || "", kind: meta.kind || "", cellType: meta.cellType || "",
-             color: meta.color || "", nucleusId: meta.nucleusId || "", rootId: meta.rootId || "",
-             comment: meta.comment || "",
-             sections: Object.keys(perZ).length, contours: contours };
+    var out = { type: "traced_structure", structureId: id,
+                name: meta.name || "", kind: meta.kind || "", cellType: meta.cellType || "",
+                color: meta.color || "", nucleusId: meta.nucleusId || "", rootId: meta.rootId || "",
+                comment: meta.comment || "",
+                sections: Object.keys(perZ).length, contours: contours };
+    /* ── HOW BIG IT IS, CARRIED WITH IT ───────────────────────────────────────────  2026-09-17
+       Søren: *"We need to calculate the organelle volumes also and add the volumes to the data for
+       the cell when submitting."*
+
+       Measured by core/traceloft.js from these same contours and handed in, rather than computed
+       here: this file is the storage shape and knows nothing about geometry, and the page already
+       has the number on screen before anybody presses anything. Passing it through means the number
+       stored is THE NUMBER HE SAW, which is worth more than a second, independent computation that
+       could quietly disagree with the one that persuaded him to submit.
+
+       `areas` is per section and goes to the Drive file only -- a few hundred bytes, and the thing
+       anybody re-analysing a tracing wants first. */
+    /* WHICH ONE OF SEVERAL. `instanceIndex` is the number it is published under -- 1-based, and
+       decided by the page from what the cell already carries, not by counting what is in this
+       submission. `instanceOf` is the kind it is one of, so a reader can group them without parsing
+       the name. Absent on a tracing that is the only one of its kind, which is most of them. */
+    if (meta.instanceIndex){
+      out.instanceIndex = Math.round(meta.instanceIndex);
+      out.instanceOf = meta.instanceOf || meta.kind || "";
+    }
+    if (meta.volumeUm3 !== undefined && meta.volumeUm3 !== null && isFinite(meta.volumeUm3)){
+      out.volumeUm3 = Number(meta.volumeUm3);
+      out.volumeMethod = meta.volumeMethod || "cavalieri";
+      if (isFinite(meta.volumeTrapezoidUm3)) out.volumeTrapezoidUm3 = Number(meta.volumeTrapezoidUm3);
+      if (isFinite(meta.sectionGapNm)) out.sectionGapNm = Number(meta.sectionGapNm);
+      if (isFinite(meta.areaUm2)) out.areaUm2 = Number(meta.areaUm2);
+      if (meta.areas && meta.areas.length)
+        out.areas = meta.areas.map(function(a){
+          return { z: Math.round(a.z), areaUm2: Number(a.areaUm2) || 0 };
+        });
+    }
+    return out;
   }
 
   function rowsToStructures(rows){
@@ -370,6 +435,14 @@ UJ.tracing = (function(){
       ["kind", "cellType", "color", "nucleusId", "rootId"].forEach(function(f){
         if (!s[f] && r[f]) s[f] = r[f];
       });
+      /* The VOLUME follows the newest share rather than the first, because it is a property of the
+         geometry and the newest geometry is the tracing. A version that did not carry one leaves
+         the last known figure alone -- it is still the best answer available. */
+      if (r.volumeUm3 !== undefined && r.volumeUm3 !== "" && isFinite(Number(r.volumeUm3)))
+        s.volumeUm3 = Number(r.volumeUm3);
+      if (r.volumeMethod) s.volumeMethod = r.volumeMethod;
+      if (r.instanceIndex && !s.instanceIndex) s.instanceIndex = Number(r.instanceIndex);
+      if (r.instanceOf && !s.instanceOf) s.instanceOf = r.instanceOf;
       var pts = decodePoints(r.points);
       if (pts.length >= 3) s.rings.push({ z: Number(r.z), points: pts,
                                           ringIndex: Number(r.ringIndex || 0) });
@@ -398,11 +471,21 @@ UJ.tracing = (function(){
                 rings: (s.rings || []).map(function(r){ return { z: r.z, points: r.points }; }) };
       if (s.color) t.color = s.color;
       if (s.nucleusId) t.nucleus_id = String(s.nucleusId);
+      /* The measured volume travels into the notebook too. trace_mesh.py computes its own from the
+         reconstructed surface -- a different estimator over the same contours -- and having both in
+         the scene is how a disagreement between them ever gets noticed. */
+      if (isFinite(s.volumeUm3)) t.volume_um3 = Number(s.volumeUm3);
+      /* The number goes to the scene too, so the outliner says "Mitochondrion 3" rather than three
+         objects with one name between them. */
+      if (s.instanceIndex) t.instance_index = Number(s.instanceIndex);
+      if (s.instanceOf) t.instance_of = String(s.instanceOf);
       return t;
     });
   }
 
   return { ringsFromLink: ringsFromLink, ringsToRows: ringsToRows, toSubmission: toSubmission,
+           INSTANCE_COLOURS: INSTANCE_COLOURS, instanceColour: instanceColour,
+           instanceName: instanceName,
            rowsToStructures: rowsToStructures, toTracings: toTracings,
            structureId: structureId,
            encodePoints: encodePoints, decodePoints: decodePoints };

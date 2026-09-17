@@ -242,5 +242,171 @@ console.log("\nclearing one section leaves the others");
      p.rings.length + " ring at z " + p.rings[0].z);
 }
 
+/* ── DRAWN WITH A PEN, NOT CLICKED ─────────────────────────────────────────────────  2026-09-17
+   Søren: *"Could we have an option to click and draw the mouse around a structure to mimic using a
+   pen to draw, so that you can use a e.g. Kamvas 13 pad or a Apple pen to draw the polylines?"*
+
+   The work is not capturing the stroke, it is THINNING it. A pen going round a soma arrives as
+   hundreds of samples a fraction of a pixel apart; kept, that is a contour with five hundred
+   handles stacked on each other, forty times the storage of a clicked one, and no more accurate --
+   the extra points are the hand's tremor, not the membrane. So what is asserted here is that the
+   thinning keeps the SHAPE while throwing away the sampling rate, and that what comes out is an
+   ordinary contour with nothing new about it. */
+console.log("\ndrawing it with a pen");
+{
+  /* A circle of 400 samples, the way a pen delivers one: far more points than anybody would click,
+     with the same shape. Radius 100 tool voxels. */
+  const dense = [];
+  for (let i = 0; i < 400; i++){
+    const a = 2 * Math.PI * i / 400;
+    dense.push([100 * Math.cos(a), 100 * Math.sin(a)]);
+  }
+  const area = pts => {
+    let s = 0;
+    for (let i = 0; i < pts.length; i++){
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      s += p[0] * q[1] - q[0] * p[1];
+    }
+    return Math.abs(s / 2);
+  };
+
+  const p = P.create(500);
+  P.startStroke(p, dense[0][0], dense[0][1]);
+  dense.slice(1).forEach(q => P.strokePoint(p, q[0], q[1], 0));
+  ok(p.stroke.length === 400, "every sample is captured while the pen is down", p.stroke.length);
+  const what = P.endStroke(p, 1.0);            // a tolerance of one tool voxel
+  ok(what === "ring" && p.rings.length === 1,
+     "lifting the pen closes a contour", p.rings.length + " ring");
+  const ring = p.rings[0].points;
+  ok(ring.length > 8 && ring.length < 80,
+     "...thinned to something a person could edit, not 400 handles on top of each other",
+     "400 samples -> " + ring.length + " vertices");
+  ok(Math.abs(area(ring) - area(dense)) / area(dense) < 0.01,
+     "...with the SHAPE kept: the area is within a percent of what was drawn",
+     (100 * (area(ring) - area(dense)) / area(dense)).toFixed(2) + "%");
+  ok(p.stroke === null, "...and the stroke is gone once it has become a contour");
+  ok(p.rings[0].z === 500, "...on the section it was drawn on", p.rings[0].z);
+
+  /* A TIGHTER TOLERANCE KEEPS MORE. That is the property that makes the tolerance meaningful
+     rather than a magic number: it is a distance, in the units the contour is stored in. */
+  const q = P.create(500);
+  P.startStroke(q, dense[0][0], dense[0][1]);
+  dense.slice(1).forEach(v => P.strokePoint(q, v[0], v[1], 0));
+  P.endStroke(q, 0.05);
+  ok(q.rings[0].points.length > ring.length,
+     "a tolerance ten times tighter keeps more of the stroke",
+     ring.length + " at 1.0, " + q.rings[0].points.length + " at 0.05");
+
+  /* THE CLOSED-CURVE TRAP, asserted rather than trusted. Plain RDP measures the first split against
+     the line from the first sample to the last -- and on a stroke that came back to where it began
+     that "line" is a POINT, so every sample on the far side of the cell is a radius away and gets
+     kept for the wrong reason. Splitting at the farthest sample first is the fix; this is the
+     measurement that says it was needed. */
+  /* THE CLOSED-CURVE CASE, measured rather than assumed. When a stroke ends where it began, plain
+     RDP's first split has no chord to measure against -- perp() falls back to measuring against the
+     point, which works, but means the first split is decided by something other than the tolerance.
+     Cutting at the farthest sample avoids that. The honest size of the difference is ONE vertex,
+     and it is recorded here so nobody later reads the closed version as a rescue from a disaster. */
+  const shut = dense.concat([dense[0]]);          // a pen that came back to where it started
+  ok(P.simplifyClosed(shut, 1.0).length <= P.simplify(shut, 1.0).length,
+     "a stroke that ends where it began thins at least as far as the open algorithm manages",
+     P.simplifyClosed(shut, 1.0).length + " vs " + P.simplify(shut, 1.0).length);
+  ok(Math.abs(area(P.simplifyClosed(shut, 1.0)) - area(dense)) / area(dense) < 0.01,
+     "...and keeps the shape while doing it",
+     (100 * (area(P.simplifyClosed(shut, 1.0)) - area(dense)) / area(dense)).toFixed(2) + "%");
+
+  /* THE CORNERS SURVIVE. Ramer-Douglas-Peucker is chosen over "every Nth point" for exactly this:
+     a square drawn by hand must not come back with rounded corners, and every-Nth cannot promise
+     that at any spacing. */
+  const square = [];
+  for (let i = 0; i < 100; i++) square.push([i, 0]);
+  for (let i = 0; i < 100; i++) square.push([100, i]);
+  for (let i = 0; i < 100; i++) square.push([100 - i, 100]);
+  for (let i = 0; i < 100; i++) square.push([0, 100 - i]);
+  const thin = P.simplify(square, 1.0);
+  ok(thin.length <= 6,
+     "a hand-drawn square thins to its corners and nothing else", thin.length + " vertices");
+  const corners = [[0,0],[100,0],[100,100],[0,100]];
+  ok(corners.every(c => thin.some(t => Math.abs(t[0]-c[0]) < 2 && Math.abs(t[1]-c[1]) < 2)),
+     "...and all four of them are there, which every-Nth-point could not promise",
+     JSON.stringify(thin));
+}
+
+console.log("\nwhat a stroke has to be before it is a contour");
+{
+  const p = P.create(500);
+  P.startStroke(p, 10, 10);
+  P.strokePoint(p, 10, 10, 2);
+  P.strokePoint(p, 11, 10, 2);              // both inside the minimum step
+  ok(p.stroke.length === 1, "a pen held still does not pile up samples", p.stroke.length);
+  ok(P.endStroke(p, 1) === "" && p.rings.length === 0,
+     "...and a tap is not a contour — it is treated as the click it almost certainly was");
+
+  /* A stroke that went somewhere but encloses nothing: three samples in a line. */
+  const q = P.create(500);
+  P.startStroke(q, 0, 0);
+  [[10, 0], [20, 0], [30, 0]].forEach(v => P.strokePoint(q, v[0], v[1], 0));
+  ok(q.endStroke === undefined || P.endStroke(q, 1) === "" || q.rings.length === 0,
+     "a straight line encloses nothing and is refused rather than filed as a sliver",
+     q.rings.length + " rings");
+
+  ok(P.simplify([[0,0],[1,1]], 1).length === 2 && P.simplify([], 1).length === 0,
+     "simplify() survives what it cannot thin");
+}
+
+/* ── SEVERAL OF THE SAME THING ─────────────────────────────────────────────────────  2026-09-17
+   Søren: *"I want the option to draw more than one organelle of the same type, the extra added
+   organelles should have different colors... and when publishing they should have different
+   numbers."* A cell has forty mitochondria, and until this a pad held one structure: two contours
+   on a section were two blobs OF IT, which is right for a cell with a hole in it and wrong for two
+   mitochondria side by side. */
+console.log("\nseveral structures on one pad");
+{
+  const p = P.create(500);
+  [[0, 0], [100, 0], [100, 100]].forEach(v => P.addVertex(p, v[0], v[1], PX));
+  P.closeRing(p);
+  ok(p.rings[0].inst === 0, "the first thing drawn is number one", p.rings[0].inst);
+
+  const second = P.newInstance(p);
+  ok(second === 1 && p.inst === 1, "starting another gives it the next index", second);
+  [[500, 0], [600, 0], [600, 100]].forEach(v => P.addVertex(p, v[0], v[1], PX));
+  P.closeRing(p);
+  ok(p.rings[1].inst === 1, "...and what is drawn now belongs to it", p.rings[1].inst);
+
+  const list = P.instances(p);
+  ok(list.length === 2 && list[0].contours === 1 && list[1].contours === 1,
+     "the pad can say what is on it", JSON.stringify(list.map(i => [i.inst, i.contours])));
+
+  /* Going back to the first and adding a section to it -- which is the whole reason the chips are
+     clickable. */
+  P.setInstance(p, 0);
+  P.setZ(p, 505);
+  [[2, 2], [102, 2], [102, 102]].forEach(v => P.addVertex(p, v[0], v[1], PX));
+  P.closeRing(p);
+  const back = P.instances(p);
+  ok(back[0].contours === 2 && back[0].sections === 2,
+     "going back to an earlier one adds to THAT one",
+     back[0].contours + " contours on " + back[0].sections + " sections");
+  ok(back[1].contours === 1, "...and leaves the other alone", back[1].contours);
+
+  /* THE NEXT INDEX IS ONE PAST THE HIGHEST, NOT THE COUNT. Deleting the middle of three and
+     starting a new one must not hand it the number of one still on the pad. */
+  P.setInstance(p, 1);
+  P.newInstance(p);                                  // 2
+  [[900, 0], [1000, 0], [1000, 100]].forEach(v => P.addVertex(p, v[0], v[1], PX));
+  P.closeRing(p);
+  const two = p.rings.findIndex(r => r.inst === 1);
+  P.deleteRing(p, two);                              // number 2 is gone entirely
+  ok(P.newInstance(p) === 3,
+     "a new one after a deletion takes the next FREE number, not the count", p.inst);
+
+  /* Out, the instance rides with the contour -- which is how the card splits one pad into one
+     submission per structure. */
+  const rings = P.toRings(p);
+  ok(rings.every(r => "inst" in r), "every contour says which structure it belongs to");
+  ok(new Set(rings.map(r => r.inst)).size === 2,
+     "...and the two that are left are two structures", JSON.stringify(rings.map(r => r.inst)));
+}
+
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
 process.exit(fails ? 1 : 0);

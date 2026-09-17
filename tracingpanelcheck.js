@@ -720,6 +720,100 @@ function link(annotations){
          erase.nowhere.say.slice(0, 50));
     }
 
+    /* ── DRAWN, NOT CLICKED ──────────────────────────────────────────────────────  2026-09-17
+       Søren: *"Could we have an option to click and draw the mouse around a structure to mimic
+       using a pen to draw, so that you can use a e.g. Kamvas 13 pad or a Apple pen to draw the
+       polylines?"* Driven with a real pointer going round in a circle, because the thing being
+       tested is a gesture: press, travel, lift. tracepadcheck.js owns the thinning arithmetic. */
+    console.log("  and a stroke is a contour, for a pen or a held-down mouse");
+    {
+      /* The contours already on the pad are put back afterwards: the sections that follow this
+         block count them, and a check that quietly changed the state under the next one would be a
+         worse bug than anything it asserts. */
+      await p.evaluate(() => {
+        window.__keptRings = JSON.stringify(PAD.rings);
+        PAD.rings = []; PAD.pending = [];
+        document.getElementById("tracePadPen").checked = true;
+      });
+      const N = 48, R = 90, cx = 300, cy = 260;
+      await p.mouse.move(box.x + cx + R, box.y + cy);
+      await p.mouse.down();
+      for (let i = 1; i <= N; i++){
+        const a = 2 * Math.PI * i / N;
+        await p.mouse.move(box.x + cx + R * Math.cos(a), box.y + cy + R * Math.sin(a));
+      }
+      await p.mouse.up();
+      await p.waitForTimeout(80);
+      const drew = await p.evaluate(() => ({
+        rings: PAD.rings.length, pending: PAD.pending.length, stroke: PAD.stroke,
+        n: PAD.rings.length ? PAD.rings[PAD.rings.length - 1].points.length : 0,
+        say: document.getElementById("tracePadSay").innerText,
+        chips: document.querySelectorAll("#tracePadRings .padring").length,
+        vol: document.getElementById("tracePadVol").textContent }));
+      ok(drew.rings === 1, "one stroke round the structure is one contour", drew.rings + " ring(s)");
+      ok(drew.n > 6 && drew.n < 40,
+         "...thinned to points a person can still edit, not one per mouse event",
+         N + " pointer moves -> " + drew.n + " vertices");
+      ok(drew.stroke === null && drew.pending === 0,
+         "...and nothing is left half-drawn behind it");
+      ok(/Contour drawn/.test(drew.say) && /Drag any of them/.test(drew.say),
+         "...it says what it did and that the points can still be moved", drew.say.slice(0, 60));
+      ok(drew.chips === 1,
+         "...and it is an ORDINARY contour: it has its own delete chip like any other", drew.chips);
+
+      /* A grabbed vertex still wins over starting a stroke, or a drawn contour could never be
+         corrected by dragging one of its points -- which is most of what correction is. */
+      const vtx = await p.evaluate(() => {
+        const r = PAD.rings[0], q = PAD_VIEW.pxAt([r.points[0][0], r.points[0][1], PAD.z]);
+        return { x: q[0], y: q[1], before: JSON.stringify(r.points[0]), rings: PAD.rings.length };
+      });
+      await p.mouse.move(box.x + vtx.x, box.y + vtx.y);
+      await p.mouse.down();
+      await p.mouse.move(box.x + vtx.x + 25, box.y + vtx.y + 15, { steps: 5 });
+      await p.mouse.up();
+      await p.waitForTimeout(60);
+      const moved2 = await p.evaluate(() => ({
+        rings: PAD.rings.length, now: JSON.stringify(PAD.rings[0].points[0]) }));
+      ok(moved2.rings === vtx.rings && moved2.now !== vtx.before,
+         "dragging one of its points MOVES it rather than starting a new stroke",
+         vtx.before + " -> " + moved2.now);
+
+      /* A pen switches it on by itself. pointerType is the browser saying a stylus is on the glass,
+         and somebody who has just put a pen to a Kamvas is not asking to place one vertex. */
+      const pen = await p.evaluate(async () => {
+        document.getElementById("tracePadPen").checked = false;
+        const cv = document.getElementById("tracePad");
+        const r = cv.getBoundingClientRect();
+        const fire = (type, x, y) => cv.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, cancelable: true, pointerId: 7, pointerType: "pen", isPrimary: true,
+          button: 0, clientX: r.left + x, clientY: r.top + y }));
+        fire("pointerdown", 400, 400);
+        const on = document.getElementById("tracePadPen").checked;
+        const said = document.getElementById("tracePadSay").innerText;
+        fire("pointermove", 430, 400); fire("pointermove", 430, 430);
+        fire("pointermove", 400, 430); fire("pointerup", 400, 430);
+        return { on: on, said: said, rings: PAD.rings.length };
+      });
+      ok(pen.on, "a pen on the glass turns freehand on by itself");
+      ok(/Pen detected/.test(pen.said), "...and says so rather than changing under him",
+         pen.said.slice(0, 50));
+
+      await p.evaluate(() => {
+        document.getElementById("tracePadPen").checked = false;   // back to clicking, for the rest
+        PAD.rings = JSON.parse(window.__keptRings); PAD.pending = []; PAD.stroke = null;
+        padRings();
+        /* AND NO DRAFT LEFT BEHIND. padRings() schedules an autosave a second or so out, which is
+           right in the product and a race in a check: the draft section further down asserts what
+           IT saved, and a save from up here landing in between made this file fail about one run in
+           three. The timer is cancelled and the key cleared, so that section starts from nothing. */
+        if (typeof TRACING_DRAFT_SOON !== "undefined" && TRACING_DRAFT_SOON){
+          clearTimeout(TRACING_DRAFT_SOON); TRACING_DRAFT_SOON = null;
+        }
+        try { localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e){}
+        draftRender();
+      });
+    }
+
     /* Back to one contour on each of the two sections, for what follows. */
     await p.evaluate(() => {
       PAD.pending = [];
@@ -1033,8 +1127,12 @@ function link(annotations){
        carrying every contour. */
     out.rows = window.__posted.map(x => ({ t: x.type, n: x.name, sid: x.structureId, gid: x.groupId,
                                            sections: x.sections,
+                                           vol: x.volumeUm3, method: x.volumeMethod,
+                                           low: x.volumeTrapezoidUm3, gap: x.sectionGapNm,
+                                           areas: (x.areas || []).length,
                                            zs: (x.contours || []).map(c => c.z).join(","),
                                            pts: (x.contours || []).map(c => (c.points || "").split(";").length).join(",") }));
+    out.volSay = document.getElementById("tracingVolSay").textContent;
     /* Adding the same tracing AGAIN, signed in: same structureId, new groupId -- that pair is what
        the backend versions on, so coming back after tracing five more sections is a correction
        rather than a rival tracing of the same cell. */
@@ -1074,6 +1172,20 @@ function link(annotations){
   ok(shared.again.length === 1 && shared.again[0].sid === row.sid,
      "adding it again is one submission again, keeping the structureId — it is the same cell",
      shared.again.length + " post(s), " + shared.again[0].sid);
+  /* Søren: *"add the volumes to the data for the cell when submitting."* Measured on the page by
+     core/traceloft.js, shown before the button is pressed, and carried by the submission -- the
+     number stored is the number he saw. traceloftcheck.js is where the estimator itself is checked
+     against shapes whose volume is arithmetic. */
+  ok(row.vol > 0 && row.method === "cavalieri",
+     "the submission carries the volume, and names the estimator",
+     row.vol + " µm³ by " + row.method);
+  ok(row.low > 0 && row.low < row.vol,
+     "...with the lower bound beside it, which is the error bar on a stack of sections",
+     row.low + " < " + row.vol);
+  ok(row.gap === 400, "...and the spacing it was traced at", row.gap + " nm");
+  ok(row.areas === 2, "...and one area per section, for the file", row.areas + " areas");
+  ok(/Volume/.test(shared.volSay) && /Cavalieri/.test(shared.volSay),
+     "and it was on screen before anything was sent", shared.volSay.slice(0, 70));
   ok(shared.again[0].gid !== row.gid,
      "...with a NEW groupId, which is what makes it a new version rather than a duplicate",
      shared.again[0].gid);
@@ -1339,6 +1451,240 @@ function link(annotations){
      and resuming. Anything less tests a variable, not a draft.
 
      Last, deliberately: it reloads, so everything before it would have to be set up again. */
+  /* ── SEVERAL ORGANELLES OF ONE TYPE ────────────────────────────────────────────  2026-09-17
+     Søren: *"I want the option to draw more than one organelle of the same type, the extra added
+     organelles should have different colors, so you can distinguish them, and when publishing they
+     should have different numbers, also when shown on the cell identity page."*
+
+     A cell has forty mitochondria. All four clauses are asserted here against the real card: they
+     are separate on the pad, they are separate colours, they are separate SUBMISSIONS with separate
+     volumes and numbers, and the numbers continue from what the cell already has rather than
+     restarting at one. */
+  console.log("\nseveral organelles of the same type");
+  {
+    const two = await p.evaluate(async () => {
+      UJ.emtiles.configure = () => ({});
+      UJ.emtiles.configured = () => true;
+      UJ.emtiles.drawSection = async (cv, o) => {
+        const g = cv.getContext("2d");
+        g.fillStyle = "#444"; g.fillRect(0, 0, cv.width, cv.height);
+        const k = 8;
+        const x0 = o.centre[0] - (cv.width >> 1) * k, y0 = o.centre[1] - (cv.height >> 1) * k;
+        return { mip: 2, mips: 3, nmPerPx: 32, z: o.centre[2], w: cv.width, h: cv.height, chunks: 1,
+                 toolAt: (px, py) => [Math.round(x0 + px * k), Math.round(y0 + py * k), o.centre[2]],
+                 pxAt: (t) => [Math.round((t[0] - x0) / k), Math.round((t[1] - y0) / k)],
+                 pxPerToolVoxel: 1 / k };
+      };
+      /* THE CELL ALREADY HAS TWO. The third and fourth mitochondrion must be 3 and 4, not 1 and 2 —
+         which is the whole reason the page reads the index before numbering. */
+      TRACING_SHARED = [
+        { structureId: "m1", name: "Mitochondrion 1", kind: "other",
+          instanceOf: "other", instanceIndex: 1, nucleusId: "253863", contours: 3,
+          sections: 3, volumeUm3: 0.21, color: "#40e28c", tracedBy: "Somebody Else" },
+        { structureId: "m2", name: "Mitochondrion 2", kind: "other",
+          instanceOf: "other", instanceIndex: 2, nucleusId: "253863", contours: 3,
+          sections: 3, volumeUm3: 0.18, color: "#bfdd78", tracedBy: "Somebody Else" },
+        /* A DIFFERENT hand-named structure on the SAME cell. Under "something else" everything
+           carries the kind "other", so numbering by kind alone would make the next mitochondrion
+           the fourth "other" rather than the third mitochondrion. */
+        { structureId: "d1", name: "Dense body 1", kind: "other",
+          instanceOf: "other", instanceIndex: 1, nucleusId: "253863", contours: 2,
+          sections: 2, volumeUm3: 0.03, color: "#9740e2", tracedBy: "Somebody Else" }
+      ];
+      TRACING_INDEX_AT = Date.now();            // and do not go and fetch over the top of it
+
+      ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
+        document.getElementById(id).value = [240640, 207872, 41000][i];
+      });
+      document.getElementById("tracePadOpen").click();
+      await new Promise(r => setTimeout(r, 200));
+      document.getElementById("tracingNucId").value = "253863";
+
+      const draw = (dx) => {
+        [[100 + dx, 100], [200 + dx, 100], [200 + dx, 200]].forEach(q => {
+          const t = PAD_VIEW.toolAt(q[0], q[1]);
+          UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
+        });
+        UJ.tracepad.closeRing(PAD);
+      };
+      draw(0); padStep(1); await new Promise(r => setTimeout(r, 150)); draw(0);
+      const oneColour = padInstColour(0);
+      document.getElementById("tracePadNewInst").click();
+      draw(250); padStep(-1); await new Promise(r => setTimeout(r, 150)); draw(250);
+      padRings();
+      const out = { insts: UJ.tracepad.instances(PAD).length,
+                    chips: document.querySelectorAll("#tracePadInsts .padinst").length,
+                    colours: [padInstColour(0), padInstColour(1)],
+                    oneColour: oneColour,
+                    vol: document.getElementById("tracePadVol").innerHTML,
+                    ringColours: [].slice.call(
+                      document.querySelectorAll("#tracePadRings .padring span"))
+                      .map(e => e.style.background) };
+
+      window.__posted = [];
+      window.postReport = (x) => { window.__posted.push(x); return true; };
+      GOOGLE_VERIFIED = true; GOOGLE_CREDENTIAL = "t.t.t";
+      GOOGLE_EXP = Math.floor(Date.now() / 1000) + 3600;
+      document.getElementById("tracePadUse").click();
+      const w = document.getElementById("tracingWhat");
+      w.value = "__other"; w.dispatchEvent(new Event("change", { bubbles: true }));
+      document.getElementById("tracingName").value = "Mitochondrion";
+      document.getElementById("tracingKeep").click();
+      out.posted = window.__posted.map(x => ({ sid: x.structureId, name: x.name,
+                                               idx: x.instanceIndex, of: x.instanceOf,
+                                               col: x.color, vol: x.volumeUm3,
+                                               zs: (x.contours || []).map(c => c.z).join(",") }));
+      out.kept = TRACINGS_KEPT.slice(-2).map(t => t.name);
+      out.say = document.getElementById("tracingStatus").textContent;
+      return out;
+    });
+    ok(two.insts === 2 && two.chips === 2,
+       "two organelles on one pad, and a chip for each", two.insts + " / " + two.chips + " chips");
+    ok(two.colours[0] !== two.colours[1],
+       "...in different colours, so they can be told apart", two.colours.join(" vs "));
+    ok(two.ringColours.length === 2 && two.ringColours[0] !== two.ringColours[1],
+       "...and the contour chips wear the colour of the one they belong to",
+       two.ringColours.join(" | "));
+    ok(/<br>/.test(two.vol) && (two.vol.match(/Volume/g) || []).length === 2,
+       "...each with its own volume, not one number over both",
+       two.vol.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 80));
+    ok(two.posted.length === 2, "one press adds BOTH, as two submissions", two.posted.length);
+    ok(two.posted[0].sid !== two.posted[1].sid,
+       "...with structureIds of their own — two objects, not two versions of one",
+       two.posted.map(x => x.sid).join(" / "));
+    ok(two.posted[0].idx === 3 && two.posted[1].idx === 4,
+       "...NUMBERED ON FROM WHAT THE CELL ALREADY HAS, not restarted at one",
+       two.posted.map(x => x.idx).join(", "));
+    ok(two.posted[0].name === "Mitochondrion 3" && two.posted[1].name === "Mitochondrion 4",
+       "...and named with the number, which is what a person reads",
+       two.posted.map(x => x.name).join(" / "));
+    ok(two.posted[0].idx !== 2,
+       "...counting the mitochondria on this cell and not the OTHER hand-named structure on it, "
+       + "which shares the kind \u201cother\u201d and nothing else", "not " + 2);
+    ok(two.posted.every(x => x.of === "__other" || x.of),
+       "...saying which kind they are one of, so they can be grouped without parsing a name",
+       two.posted[0].of);
+    ok(two.posted[0].col !== two.posted[1].col,
+       "...each carrying its own colour into the dataset", two.posted.map(x => x.col).join(" / "));
+    ok(two.posted[0].vol > 0 && two.posted[1].vol > 0
+       && two.posted[0].zs === "41000,41005" && two.posted[1].zs === "41000,41005",
+       "...and its own contours and volume", JSON.stringify(two.posted.map(x => x.vol)));
+    ok(/2 structures/.test(two.say), "...and it says both went", two.say.slice(0, 60));
+
+    /* ── AND EACH ONE CAN BE A DIFFERENT THING ──────────────────────────────────  2026-09-17
+       Søren: *"I would like an option to identify the organelles identities individually, so
+       standard is that they are all the same, but if you click a button you can identify them
+       individually."* The default is asserted above -- two structures, one type between them. This
+       is the button, and the property that makes it safe: turning it on changes nothing about what
+       anything IS, it only makes them separately editable. */
+    console.log("  and each one can be a different thing");
+    {
+      const own = await p.evaluate(async () => {
+        PAD.rings = []; PAD.pending = []; PAD_INST_KIND = {};
+        document.getElementById("tracingEachOwn").checked = false;
+        UJ.tracepad.setInstance(PAD, 0);
+        padRings();
+        const draw = (dx) => {
+          [[100 + dx, 100], [200 + dx, 100], [200 + dx, 200]].forEach(q => {
+            const t = PAD_VIEW.toolAt(q[0], q[1]);
+            UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
+          });
+          UJ.tracepad.closeRing(PAD);
+        };
+        const out = {};
+        out.rowHiddenAtOne = document.getElementById("tracingEachRow").style.display;
+        draw(0); padStep(1); await new Promise(r => setTimeout(r, 150)); draw(0);
+        padRings();
+        out.rowStillHidden = document.getElementById("tracingEachRow").style.display;
+        document.getElementById("tracePadNewInst").click();
+        draw(250); padStep(-1); await new Promise(r => setTimeout(r, 150)); draw(250);
+        padRings();
+        out.rowShown = document.getElementById("tracingEachRow").style.display;
+
+        /* Turn it on: both keep what they already were. */
+        const each = document.getElementById("tracingEachOwn");
+        each.checked = true;
+        each.dispatchEvent(new Event("change", { bubbles: true }));
+        out.seeded = [tracingKindFor(0).name, tracingKindFor(1).name];
+
+        /* Now make the second one something else, the way a person would: select it, change the
+           box. The first must not follow. */
+        document.querySelectorAll("#tracePadInsts .padinst")[1].click();
+        const w = document.getElementById("tracingWhat");
+        w.value = "__nucleus"; w.dispatchEvent(new Event("change", { bubbles: true }));
+        out.after = [tracingKindFor(0).name, tracingKindFor(1).name];
+        out.chips = [].slice.call(document.querySelectorAll("#tracePadInsts .padinst"))
+                      .map(e => e.textContent.replace(/\s+/g, " ").trim());
+
+        /* Going back to the first must bring ITS type back into the box, not leave the second's. */
+        document.querySelectorAll("#tracePadInsts .padinst")[0].click();
+        out.boxOnReturn = document.getElementById("tracingWhat").value;
+
+        window.__posted = [];
+        window.postReport = (x) => { window.__posted.push(x); return true; };
+        document.getElementById("tracePadUse").click();
+        document.getElementById("tracingKeep").click();
+        out.posted = window.__posted.map(x => ({ name: x.name, kind: x.kind,
+                                                 idx: x.instanceIndex, of: x.instanceOf }));
+        return out;
+      });
+      ok(own.rowHiddenAtOne === "none" && own.rowStillHidden === "none",
+         "the option is not offered while there is only one thing to name",
+         own.rowStillHidden || "hidden");
+      ok(own.rowShown === "flex", "...and appears as soon as there are two", own.rowShown);
+      ok(own.seeded[0] === own.seeded[1] && !!own.seeded[0],
+         "turning it on changes nothing: both keep the type they already had",
+         own.seeded.join(" / "));
+      ok(own.after[0] !== own.after[1] && /Nucleus/i.test(own.after[1]),
+         "...and then each one can be its own thing", own.after.join(" / "));
+      ok(/Nucleus/i.test(own.chips[1]) && !/Nucleus/i.test(own.chips[0]),
+         "...which the strip says, so you can see which is which without clicking",
+         own.chips.join(" | "));
+      ok(own.boxOnReturn !== "__nucleus",
+         "going back to one brings ITS type into the box rather than leaving the other's",
+         own.boxOnReturn);
+      ok(own.posted.length === 2 && own.posted[0].kind !== own.posted[1].kind,
+         "...and they are added as two different things in one press",
+         own.posted.map(x => x.kind).join(" / "));
+      ok(own.posted[1].name === "Nucleus" || own.posted[1].idx === undefined
+         || own.posted[1].of === "__nucleus",
+         "...each numbered within its OWN type, so the lone nucleus is not \u201cnumber two\u201d",
+         JSON.stringify(own.posted[1]));
+    }
+
+    /* ── AND ON THE CELL IDENTITY PAGE ───────────────────────────────────────────
+       The last clause of the request, and the one that makes the numbers worth having: a number
+       distinguishes things only where they are listed together. */
+    const onCell = await p.evaluate(async () => {
+      document.body.insertAdjacentHTML("beforeend", '<div id="commReports"></div>');
+      window.fetch = async () => ({ ok: true, json: async () => ({ tracings: [
+        { structureId: "m2", name: "Mitochondrion 2", instanceOf: "mitochondrion",
+          instanceIndex: 2, nucleusId: "253863", contours: 3, sections: 3, volumeUm3: 0.18,
+          color: "#bfdd78", contributors: ["Somebody Else"] },
+        { structureId: "m1", name: "Mitochondrion 1", instanceOf: "mitochondrion",
+          instanceIndex: 1, nucleusId: "253863", contours: 3, sections: 3, volumeUm3: 0.21,
+          color: "#40e28c", contributors: ["Søren Grubb"] },
+        { structureId: "other", name: "Lysosome", instanceOf: "lysosome", nucleusId: "999",
+          contours: 2, sections: 2, volumeUm3: 0.02, color: "#9740e2", tracedBy: "Nobody" }
+      ] }) });
+      PANEL_TRACINGS = null; PANEL_TRACINGS_AT = 0;
+      loadTracedStructures("253863", "");
+      await new Promise(r => setTimeout(r, 80));
+      const box = document.getElementById("tracedOnCell");
+      return { html: box ? box.innerHTML : "", text: box ? box.textContent : "" };
+    });
+    ok(/Traced on this cell/.test(onCell.text),
+       "the cell's own panel has a block for what has been traced on it");
+    ok(onCell.text.indexOf("Mitochondrion 1") < onCell.text.indexOf("Mitochondrion 2"),
+       "...listed by number, so 1 and 2 read as a set rather than as two unrelated things");
+    ok(/0\.21/.test(onCell.text) && /0\.18/.test(onCell.text),
+       "...each with its own volume", onCell.text.replace(/\s+/g, " ").slice(0, 110));
+    ok(!/Lysosome/.test(onCell.text),
+       "...and nothing belonging to another cell", "nucleus 999's lysosome is not here");
+    ok(/#40e28c/i.test(onCell.html) && /#bfdd78/i.test(onCell.html),
+       "...in the colours they were drawn in");
+  }
+
   console.log("\na draft, put down and picked up after a reload");
   {
     const stub = () => {
@@ -1389,6 +1735,7 @@ function link(annotations){
       const raw = localStorage.getItem("ujump_tracing_draft_v1");
       return { raw: !!raw, d: raw ? JSON.parse(raw) : null,
                bar: document.getElementById("tracingDraftBar").textContent,
+               vol: document.getElementById("tracePadVol").textContent,
                zs: PAD.rings.map(r => r.z).join(",") };
     }, { src: stub.toString() });
     ok(saved.raw && saved.d.rings.length === 2,
@@ -1400,6 +1747,13 @@ function link(annotations){
        "...and WHICH tracing it is, with what has been filled in",
        saved.d.editId + " / " + saved.d.nucId);
     ok(/Unfinished tracing kept/.test(saved.bar), "...and the card says so", saved.bar.slice(0, 60));
+    /* Søren: *"We need to calculate the organelle volumes also."* ON THE PAD, while drawing -- a
+       volume you only see after submitting cannot tell you that you have traced one section too
+       few. traceloftcheck.js is where the estimator is checked against arithmetic. */
+    ok(/Volume/.test(saved.vol) && /\u00b5m\u00b3/.test(saved.vol),
+       "and the volume is on the pad as it is drawn, not only at the end", saved.vol.slice(0, 70));
+    ok(/every 200 nm/.test(saved.vol),
+       "...with the section spacing it was measured at, which is its error bar");
 
     await p.reload();
     await p.waitForTimeout(4000);

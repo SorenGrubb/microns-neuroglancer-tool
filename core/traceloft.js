@@ -163,7 +163,12 @@ UJ.traceloft = (function(){
       for (i = 0; i < N; i++){
         var a0 = baseA + i, a1 = baseA + (i + 1) % N;
         var b0 = baseB + i, b1 = baseB + (i + 1) % N;
-        idx.push(a0, b0, b1, a0, b1, a1);
+        /* WOUND OUTWARD, to agree with the caps. Nothing on screen depends on it -- the renderer
+           has no culling and its shader is two-sided -- but a surface whose triangles disagree
+           about which side is out has no signed volume, and traceloftcheck.js measures exactly that
+           to cross-check volume() against the loft. Two sums over one tracing that agree are worth
+           more than either of them alone, and they can only agree if this is consistent. */
+        idx.push(a0, b1, b0, a0, a1, b1);
       }
     }
 
@@ -208,8 +213,114 @@ UJ.traceloft = (function(){
              sections: zs.length, contours: contours, capped: capped };
   }
 
-  return { loft: loft, _orient: orient, _resample: resample, _bestOffset: bestOffset,
-           _signedArea: signedArea, _pairUp: pairUp, N: N };
+  /* ── HOW MUCH OF IT THERE IS ────────────────────────────────────────────────────  2026-09-17
+     Søren: *"We need to calculate the organelle volumes also and add the volumes to the data for
+     the cell when submitting."*
+
+     A stack of outlines is exactly what Cavalieri's estimator is for, and it is the standard answer
+     in stereology rather than a convenience: each section's area is multiplied by the slab of tissue
+     that section stands for, and the sum is the volume. No surface has to be built, so this is
+     arithmetic on the contours themselves — it costs nothing, it can be shown while drawing, and it
+     does not depend on the lofting above being right about anything.
+
+     TWO NUMBERS, DELIBERATELY. They differ only in what happens at the two ends of the stack, and
+     the difference IS the uncertainty:
+
+       cavalieri   each section owns a slab of (gap below + gap above)/2, with the end sections
+                   mirrored so they own a full slab. The stack therefore extends half a gap past the
+                   outermost contour at each end, which is right for an object that tapers away
+                   between the last section you traced and the one you did not — a cell, a nucleus,
+                   a mitochondrion. This is the reported volume.
+       trapezoid   the frusta between traced sections and nothing beyond them. It cannot include
+                   what is past the outermost contour, so it is a LOWER BOUND, and it is exact for
+                   a cylinder whose flat ends you traced.
+
+     THE EVEN-ODD RULE, the same one trace_mesh.py fills with: a contour drawn inside another is a
+     HOLE, not a second blob. Depth is counted by testing each ring's first vertex against every
+     other ring on its section, so a ring inside a ring inside a ring is solid again — which is what
+     a vesicle inside a vacuole is.
+
+     AREAS ARE µm², VOLUMES µm³, and the section spacing comes from the resolution the caller hands
+     in. Nothing here knows how big a voxel is. */
+  function ringArea(pts){
+    return Math.abs(signedArea(pts));
+  }
+  /* Ray casting along +x. The ring is closed implicitly, as everywhere else in this feature. */
+  function pointInRing(p, pts){
+    var inside = false, n = pts.length;
+    for (var i = 0, j = n - 1; i < n; j = i++){
+      var a = pts[i], b = pts[j];
+      if ((a[1] > p[1]) !== (b[1] > p[1])
+          && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside;
+    }
+    return inside;
+  }
+  /* The area of one section: rings at even depth add, rings at odd depth subtract. Signed rather
+     than sorted by size, because "inside" is the question and a large ring can sit inside a larger
+     concave one. */
+  function areaOfSection(rings){
+    var out = 0;
+    rings.forEach(function(r, i){
+      if (!r.points || r.points.length < 3) return;
+      var depth = 0;
+      rings.forEach(function(o, j){
+        if (i === j || !o.points || o.points.length < 3) return;
+        if (pointInRing(r.points[0], o.points)) depth++;
+      });
+      out += (depth % 2 ? -1 : 1) * ringArea(r.points);
+    });
+    return Math.max(0, out);
+  }
+
+  function volume(rings, resNm){
+    var res = resNm || [1, 1, 1];
+    var pxArea = res[0] * res[1] / 1e6;          // one voxel of section, in µm²
+    var byZ = {}, zs = [];
+    (rings || []).forEach(function(r){
+      if (!r || !r.points || r.points.length < 3) return;
+      var z = Math.round(r.z);
+      if (!byZ[z]){ byZ[z] = []; zs.push(z); }
+      byZ[z].push(r);
+    });
+    zs.sort(function(a, b){ return a - b; });
+    var per = zs.map(function(z){
+      return { z: z, rings: byZ[z].length, areaUm2: areaOfSection(byZ[z]) * pxArea };
+    });
+    if (!per.length) return { ok: false, reason: "nothing traced", sections: 0, contours: 0 };
+    if (per.length === 1)
+      /* ONE SECTION HAS NO DEPTH, and a volume of zero would be a number somebody could believe.
+         The area is real and is returned; the volume is not knowable and says so. */
+      return { ok: false, reason: "one section has no depth — trace it on at least two",
+               sections: 1, contours: per[0].rings, areaUm2: per[0].areaUm2, perSection: per };
+
+    var gaps = [], i;
+    for (i = 0; i < zs.length - 1; i++) gaps.push((zs[i + 1] - zs[i]) * res[2]);
+    var cav = 0, trap = 0;
+    for (i = 0; i < per.length; i++){
+      var below = gaps[i - 1] === undefined ? gaps[i] : gaps[i - 1];
+      var above = gaps[i] === undefined ? gaps[i - 1] : gaps[i];
+      cav += per[i].areaUm2 * (below + above) / 2 / 1000;      // nm -> µm
+    }
+    for (i = 0; i < gaps.length; i++)
+      trap += (per[i].areaUm2 + per[i + 1].areaUm2) / 2 * gaps[i] / 1000;
+    var sorted = gaps.slice().sort(function(a, b){ return a - b; });
+    return { ok: true, method: "cavalieri",
+             volumeUm3: cav, volumeTrapezoidUm3: trap,
+             sections: per.length,
+             contours: per.reduce(function(a, p){ return a + p.rings; }, 0),
+             perSection: per,
+             areaUm2: per.reduce(function(a, p){ return a + p.areaUm2; }, 0),
+             gapNm: sorted[sorted.length >> 1],
+             spanNm: (zs[zs.length - 1] - zs[0]) * res[2],
+             /* Every gap the same means the sections were stepped evenly, which is the condition
+                the half-a-percent figure on the card was measured under. */
+             evenlySpaced: sorted[0] === sorted[sorted.length - 1] };
+  }
+
+  return { loft: loft, volume: volume,
+           _orient: orient, _resample: resample, _bestOffset: bestOffset,
+           _signedArea: signedArea, _pairUp: pairUp,
+           _ringArea: ringArea, _pointInRing: pointInRing, _areaOfSection: areaOfSection, N: N };
 })();
 if (typeof module !== "undefined" && module.exports)
   module.exports = (typeof window !== "undefined" ? window : global).UJ.traceloft;

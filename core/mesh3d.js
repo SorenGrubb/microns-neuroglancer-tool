@@ -287,6 +287,10 @@ UJ.mesh3d = (function(){
       var d = upload(g.geo);
       return d ? { d: d, tint: g.tint || null, alpha: (g.alpha === undefined ? 0.22 : g.alpha) } : null;
     }).filter(Boolean);
+    /* `o.alpha` is the SUBJECT's opacity, 1 unless a caller says otherwise. The cell panel sets
+       it below 1 when it has a nucleus to show inside the cell. */
+    var ALL = [{ d: MAIN, tint: o.tint || null,
+                 alpha: (o.alpha === undefined ? 1 : o.alpha) }].concat(GHOSTS);
     gl.enable(gl.DEPTH_TEST);
     function drawOne(d, tint, alpha){
       if (!d) return;
@@ -323,23 +327,78 @@ UJ.mesh3d = (function(){
       var mv = mul(translate(0, 0, -view.dist), mul(rotX(view.pitch), mul(rotY(view.yaw), norm)));
       gl.uniformMatrix4fv(uMvp, false, mul(perspective(0.9, w/h, 0.01, 100), mv));
       gl.uniformMatrix4fv(uMv, false, mv);
+      /* SORTED BY OPACITY, NOT BY ROLE.  2026-09-17
+         Until today the subject was always the solid thing and the ghosts were always the
+         see-through ones, so "subject first, ghosts after with depth writes off" was the same
+         sentence twice. Søren then asked for the reverse: *"make the other 3D window transparent
+         cells and show the nucleus when it is available"* -- the NUCLEUS is solid and the CELL is
+         what you see through. Drawing the cell first with depth writes on would have hidden the
+         nucleus inside it completely.
+
+         So: everything opaque, in order, writing depth; then everything transparent over it with
+         depth writes OFF, so the see-through parts neither hide each other nor hide what is inside
+         them. Depth TESTING stays on throughout, which is what keeps "inside" legible. Every
+         earlier caller lands in the first branch exactly as before. */
+      var opaque = [], clear = [];
+      ALL.forEach(function(it){ (it.alpha >= 1 ? opaque : clear).push(it); });
       gl.disable(gl.BLEND); gl.depthMask(true);
-      drawOne(MAIN, o.tint || themeTint(), 1);
-      if (GHOSTS.length){
+      opaque.forEach(function(it){ drawOne(it.d, it.tint || themeTint(), 1); });
+      if (clear.length){
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.depthMask(false);
-        GHOSTS.forEach(function(g){ drawOne(g.d, g.tint || themeTint(), g.alpha); });
+        clear.forEach(function(it){ drawOne(it.d, it.tint || themeTint(), it.alpha); });
         gl.depthMask(true); gl.disable(gl.BLEND);
       }
     }
 
-    var down = null;
+    /* ── ONE FINGER TURNS IT, TWO FINGERS ZOOM ────────────────────────────────────  2026-09-17
+       Søren: *"It works well on mobile phone, however I want to have the option to zoom in or our
+       in the 3D window by using 2 fingers."* A wheel is the only way to zoom this panel had, and a
+       phone has no wheel -- so on a phone the model could be turned and never approached.
+
+       Every pointer down on the canvas is tracked rather than just the first, because that is the
+       only way to know a second one has arrived. With two down the gesture is a PINCH and nothing
+       else: rotation is suspended while it lasts, or the first finger's travel would spin the model
+       during every zoom, which feels like a fault in the model rather than in the gesture. Lifting
+       back to one finger re-anchors the rotation where that finger IS, so the model does not jump
+       by however far the pinch moved it.
+
+       `touch-action:none` on the canvas is what lets any of this happen at all -- without it the
+       browser takes the second finger for its own page zoom and the canvas never sees it.
+
+       The wheel keeps working unchanged, and the two cannot interfere: a trackpad pinch arrives as
+       a wheel event with ctrlKey, not as two pointers. */
+    var down = null, touches = {}, nTouch = 0, pinch = null;
+    function gap(){
+      var ids = Object.keys(touches);
+      if (ids.length < 2) return 0;
+      var a = touches[ids[0]], b = touches[ids[1]];
+      return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
+    }
     canvas.addEventListener("pointerdown", function(e){
-      down = { x:e.clientX, y:e.clientY, yaw:view.yaw, pitch:view.pitch };
+      if (!touches[e.pointerId]) nTouch++;
+      touches[e.pointerId] = { x:e.clientX, y:e.clientY };
+      if (nTouch >= 2){
+        down = null;                       // a pinch is not a drag, however it started
+        pinch = { gap: gap() || 1, dist: view.dist };
+      } else {
+        down = { x:e.clientX, y:e.clientY, yaw:view.yaw, pitch:view.pitch };
+      }
       try { canvas.setPointerCapture(e.pointerId); } catch(_e){}
     });
     canvas.addEventListener("pointermove", function(e){
+      if (touches[e.pointerId]) touches[e.pointerId] = { x:e.clientX, y:e.clientY };
+      if (pinch && nTouch >= 2){
+        var g = gap();
+        if (g > 0){
+          /* Fingers apart is closer, the way every map behaves. Clamped to the same range the
+             wheel is, so neither way of zooming can reach somewhere the other cannot. */
+          view.dist = Math.max(0.6, Math.min(12, pinch.dist * pinch.gap / g));
+          paint();
+        }
+        return;
+      }
       if (!down) return;
       view.yaw = down.yaw + (e.clientX - down.x) * 0.01;
       /* Clamped short of the poles: past them the model appears to spin the wrong way, which
@@ -347,8 +406,18 @@ UJ.mesh3d = (function(){
       view.pitch = Math.max(-1.5, Math.min(1.5, down.pitch + (e.clientY - down.y) * 0.01));
       paint();
     });
-    canvas.addEventListener("pointerup", function(){ down = null; });
-    canvas.addEventListener("pointercancel", function(){ down = null; });
+    function lift(e){
+      if (touches[e.pointerId]){ delete touches[e.pointerId]; nTouch = Math.max(0, nTouch - 1); }
+      if (nTouch < 2) pinch = null;
+      if (nTouch === 1){
+        /* RE-ANCHORED on the finger still down, at the angle the model is at now. Without this the
+           model snaps back by the whole distance the remaining finger travelled during the pinch. */
+        var id = Object.keys(touches)[0], t = touches[id];
+        down = { x:t.x, y:t.y, yaw:view.yaw, pitch:view.pitch };
+      } else if (nTouch === 0) down = null;
+    }
+    canvas.addEventListener("pointerup", lift);
+    canvas.addEventListener("pointercancel", lift);
     canvas.addEventListener("wheel", function(e){
       e.preventDefault();
       view.dist = Math.max(0.6, Math.min(12, view.dist * (e.deltaY > 0 ? 1.12 : 0.89)));
@@ -408,6 +477,25 @@ UJ.mesh3d = (function(){
     return n;
   }
 
+  /* HOW MANY PIXELS ANSWER A QUESTION. probe() above counts distinct colours, which says "did
+     anything get drawn"; this says WHAT. The nucleus being blue is a claim about the picture, and
+     the only honest way to check a claim about a picture is to look at it. Same one-turn rule as
+     probe(): repaint and read in the same turn, because the drawing buffer is not preserved. */
+  function probePixels(pred){
+    if (!LAST) return -1;
+    LAST.paint();
+    var gl = LAST.gl, c = LAST.canvas;
+    var px = new Uint8Array(c.width * c.height * 4);
+    gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    var n = 0, w = c.width;
+    /* x and y as well as the colour, because WHERE a colour is answers a different question from
+       whether it is there: a nucleus re-centred on itself rather than left where it sits in its
+       cell would paint exactly the same pixels, in the middle. */
+    for (var i = 0; i < px.length; i += 4)
+      if (pred(px[i], px[i+1], px[i+2], (i / 4) % w, Math.floor((i / 4) / w))) n++;
+    return n;
+  }
+
   function esc(s){ return String(s == null ? "" : s)
     .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
 
@@ -415,6 +503,14 @@ UJ.mesh3d = (function(){
   function show(host, geo, opts){
     var o = opts || {};
     if (!host) return null;
+    /* THE STYLESHEET IS NOT COSMETIC HERE, which is why show() now asks for it rather than trusting
+       that install() ran. `.m3d-canvas{touch-action:none}` is what lets the canvas see a second
+       finger at all -- without it the browser takes the gesture for its own page zoom, and the
+       pinch added 2026-09-17 simply never fires. install() injects it, and every tool that reaches
+       this panel through a "Show in 3D" button gets it that way; a caller that drives show()
+       directly -- the tracing preview does -- had been relying on some OTHER panel having been
+       installed first. Idempotent: it guards on its own element id. */
+    injectStyle();
     if (!geo || geo.empty){
       host.innerHTML = "<div class='m3d'><div class='m3d-err'>"
         + esc(o.emptyMessage || "No mesh geometry for this cell.") + "</div></div>";
@@ -518,6 +614,36 @@ UJ.mesh3d = (function(){
     return b;
   }
 
+  /* ── THE NUCLEUS, AND THE ONE BLUE IT IS ───────────────────────────────────────  2026-09-17
+     Søren: *"show the nucleus when it is available? Nucleus should always be blue."*
+
+     Not a new decision -- the export has said so since 2026-09-08, and this is the same value:
+     blender/colour_policy.py, NUC_COLOR = "#3a72d8", "red MEANS vessel and blue MEANS nucleus, and
+     the cell palette contains neither". A second blue chosen here would quietly make the page and
+     the .blend disagree about what a colour means, which is worse than either being wrong alone. */
+  var NUC_COLOR = "#3a72d8";
+  var NUC_TINT = [0x3a / 255, 0x72 / 255, 0xd8 / 255];
+  /* How see-through the cell goes WHEN there is a nucleus in it. Low enough to read a nucleus
+     through, high enough that the cell is still a shape rather than a haze. */
+  var CELL_ALPHA_WITH_NUCLEUS = 0.30;
+
+  /* The nucleus mesh for a button's `data-nucid`, or null for every ordinary reason there might not
+     be one: the tool does not write the attribute, the page has not loaded core/nucmesh.js, the
+     volume publishes no meshes, or this nucleus has none. None of those is an error -- they all
+     mean "draw the cell the way it was always drawn". */
+  function nucleusMeshFor(nucId){
+    if (!nucId || nucId === "0") return Promise.resolve(null);
+    if (!(window.UJ && UJ.nucmesh && UJ.nucmesh.fetchNucleus)) return Promise.resolve(null);
+    try {
+      if (!UJ.nucmesh.configured()){
+        var src = (UJ.cfg && UJ.cfg.em && UJ.cfg.em.nucSource) || (UJ.cfg && UJ.cfg.nucSource);
+        if (!src) return Promise.resolve(null);
+        UJ.nucmesh.configure({ nuc: src });
+      }
+      return UJ.nucmesh.fetchNucleus(nucId).catch(function(){ return null; });
+    } catch (e){ return Promise.resolve(null); }
+  }
+
   function install(opts){
     var o = opts || {};
     var fetcher = o.fetch || function(id, onProgress){
@@ -610,8 +736,30 @@ UJ.mesh3d = (function(){
                   return esc(s.rootId || "(unknown)") + " — " + esc(s.message); }).join("; ")
               + "</span>";
           }
-          show(host, geo, { lead: lead,
-                            emptyMessage: "This cell has no mesh geometry to draw." });
+          /* THE NUCLEUS, WHEN THERE IS ONE. Prepared in the CELL'S frame -- see prepare's
+             `frame` option -- because a nucleus centred on itself would sit in the middle of the
+             picture rather than where it is in the cell, which looks right and is a lie. */
+          var nucId = dl.getAttribute("data-nucid") || "";
+          return nucleusMeshFor(nucId).then(function(nm){
+            var opts2 = { lead: lead, emptyMessage: "This cell has no mesh geometry to draw." };
+            if (nm && nm.positions && nm.positions.length){
+              var ng = prepare(nm.positions, nm.indices,
+                               { unitNm: 1000, frame: { mid: geo.mid, span: geo.span } });
+              if (!ng.empty){
+                opts2.ghosts = [{ geo: ng, tint: NUC_TINT, alpha: 1 }];
+                /* The cell goes see-through ONLY now that there is something inside it to see --
+                   the notebook's rule, and for its reason: transparency with nothing behind it
+                   costs contrast and shows nothing. */
+                opts2.alpha = CELL_ALPHA_WITH_NUCLEUS;
+                opts2.lead = (lead ? lead + "<br>" : "")
+                  + "<span class='hint'>Nucleus " + esc(nucId) + " is drawn in "
+                  + "<b style='color:" + NUC_COLOR + "'>blue</b>, and the cell around it is "
+                  + "see-through so you can see it. Blue always means nucleus here and in the "
+                  + "Blender export.</span>";
+              }
+            }
+            show(host, geo, opts2);
+          });
         }).catch(function(e){
           host.innerHTML = "<div class='m3d'><div class='m3d-err'>Could not load the mesh: "
             + esc(e && e.message ? e.message : e) + "</div></div>";
@@ -647,6 +795,7 @@ UJ.mesh3d = (function(){
   }
 
   return { prepare: prepare, draw: draw, show: show, install: install, probe: probe,
+           probePixels: probePixels, NUC_TINT: NUC_TINT, NUC_COLOR: NUC_COLOR,
            pointInGeometry: pointInGeometry, nucleiInside: nucleiInside,
            injectStyle: injectStyle, themeTint: themeTint, themeBg: themeBg };
 })();

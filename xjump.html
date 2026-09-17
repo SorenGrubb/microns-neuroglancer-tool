@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-09 15:59</span></p>
+ctrl-shift-R.">build 2026-09-17 11:00</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -3271,12 +3271,53 @@ UJ.mesh3d = (function(){
                       big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
     }
 
-    var down = null;
+    /* ── ONE FINGER TURNS IT, TWO FINGERS ZOOM ────────────────────────────────────  2026-09-17
+       Søren: *"It works well on mobile phone, however I want to have the option to zoom in or our
+       in the 3D window by using 2 fingers."* A wheel is the only way to zoom this panel had, and a
+       phone has no wheel -- so on a phone the model could be turned and never approached.
+
+       Every pointer down on the canvas is tracked rather than just the first, because that is the
+       only way to know a second one has arrived. With two down the gesture is a PINCH and nothing
+       else: rotation is suspended while it lasts, or the first finger's travel would spin the model
+       during every zoom, which feels like a fault in the model rather than in the gesture. Lifting
+       back to one finger re-anchors the rotation where that finger IS, so the model does not jump
+       by however far the pinch moved it.
+
+       `touch-action:none` on the canvas is what lets any of this happen at all -- without it the
+       browser takes the second finger for its own page zoom and the canvas never sees it.
+
+       The wheel keeps working unchanged, and the two cannot interfere: a trackpad pinch arrives as
+       a wheel event with ctrlKey, not as two pointers. */
+    var down = null, touches = {}, nTouch = 0, pinch = null;
+    function gap(){
+      var ids = Object.keys(touches);
+      if (ids.length < 2) return 0;
+      var a = touches[ids[0]], b = touches[ids[1]];
+      return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
+    }
     canvas.addEventListener("pointerdown", function(e){
-      down = { x:e.clientX, y:e.clientY, yaw:view.yaw, pitch:view.pitch };
+      if (!touches[e.pointerId]) nTouch++;
+      touches[e.pointerId] = { x:e.clientX, y:e.clientY };
+      if (nTouch >= 2){
+        down = null;                       // a pinch is not a drag, however it started
+        pinch = { gap: gap() || 1, dist: view.dist };
+      } else {
+        down = { x:e.clientX, y:e.clientY, yaw:view.yaw, pitch:view.pitch };
+      }
       canvas.setPointerCapture(e.pointerId);
     });
     canvas.addEventListener("pointermove", function(e){
+      if (touches[e.pointerId]) touches[e.pointerId] = { x:e.clientX, y:e.clientY };
+      if (pinch && nTouch >= 2){
+        var g = gap();
+        if (g > 0){
+          /* Fingers apart is closer, the way every map behaves. Clamped to the same range the
+             wheel is, so neither way of zooming can reach somewhere the other cannot. */
+          view.dist = Math.max(0.6, Math.min(12, pinch.dist * pinch.gap / g));
+          paint();
+        }
+        return;
+      }
       if (!down) return;
       view.yaw = down.yaw + (e.clientX - down.x) * 0.01;
       /* Clamped just short of the poles: past them the model appears to spin the wrong way, which
@@ -3284,8 +3325,18 @@ UJ.mesh3d = (function(){
       view.pitch = Math.max(-1.5, Math.min(1.5, down.pitch + (e.clientY - down.y) * 0.01));
       paint();
     });
-    canvas.addEventListener("pointerup", function(){ down = null; });
-    canvas.addEventListener("pointercancel", function(){ down = null; });
+    function lift(e){
+      if (touches[e.pointerId]){ delete touches[e.pointerId]; nTouch = Math.max(0, nTouch - 1); }
+      if (nTouch < 2) pinch = null;
+      if (nTouch === 1){
+        /* RE-ANCHORED on the finger still down, at the angle the model is at now. Without this the
+           model snaps back by the whole distance the remaining finger travelled during the pinch. */
+        var id = Object.keys(touches)[0], t = touches[id];
+        down = { x:t.x, y:t.y, yaw:view.yaw, pitch:view.pitch };
+      } else if (nTouch === 0) down = null;
+    }
+    canvas.addEventListener("pointerup", lift);
+    canvas.addEventListener("pointercancel", lift);
     canvas.addEventListener("wheel", function(e){
       e.preventDefault();
       view.dist = Math.max(0.6, Math.min(12, view.dist * (e.deltaY > 0 ? 1.12 : 0.89)));
