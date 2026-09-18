@@ -327,6 +327,15 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .navctrl{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .navctrl button{flex:none;padding:6px 12px;font-size:12px}
 .rv-panel{margin-top:10px}
+/* 2026-09-18 (Søren: "there should be a grey line below it like the rest") -- each collapsible
+   section in the cell panel carries its own rule ABOVE it (see .neigh), so what separates two of
+   them is the LOWER one's border-top. Connectivity was the one section without one, because it is
+   an <a> toggle rather than an rv-panel -- which is why the block above it looked unfinished. The
+   rule goes here, where it was missing, rather than doubled onto the neighbours above: every
+   section then has exactly one, and the rhythm is unbroken down the panel.
+   :not(:empty) because this div is empty until renderConnectivityToggle fills it, and a border on
+   an empty div is a grey line with nothing under it on every cell that never builds one. */
+#connPanel:not(:empty){margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
 /* 2026-08-10 (Søren: "all the menus that are collapsable should have a little arrow to the left
    of it, like 'Advanced: viewer + custom base state'") -- that one is a PLAIN <details>, so it
    keeps the browser's own default disclosure triangle; every <summary> styled here previously lost
@@ -539,7 +548,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 21:00</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 21:05</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -4835,7 +4844,12 @@ function showNucleus(pos){
      with a type, two ids and a coordinate each is about 120 px that most readers never want.
      The <h4> becomes the <summary> and keeps its styling, so this still reads as the section it
      was rather than as a link; .neigh keeps supplying the rule above it that separates it. */
-  h+='<details class="neigh" style="margin-top:12px"><summary style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);cursor:pointer;margin:0">3 nearest neighbouring cells</summary><div style="margin-top:6px">';
+  /* THE SAME TWO CLASSES THE SECTIONS AROUND IT USE, 2026-09-18 (Søren: "I Don't think the 3
+     nearest neighboring cells should be all caps"). It was hand-styled to keep the look of the <h4>
+     it replaced, which made it shout in a row of sentence-case labels. .rv-panel gives the rotating
+     triangle and the typography, .neigh the rule above and the spacing -- exactly what
+     "Astrocyte-synapse proximity" and "Cell contacts" are built from. */
+  h+='<details class="rv-panel neigh"><summary>3 nearest neighbouring cells</summary><div style="margin-top:6px">';
   for(const nb of ne){const nt=typeInfo(nb.i),rr=rootId(nb.i),nciB=CELLTYPE_INFO[nt.name],nciF=nt.mtype?MTYPE_INFO[nt.mtype]:null;const nOwn=ownOverride(nb.i),nMerged=mergedInfo(nb.i);
     h+='<div class="nrow"><div class="nleft"><span class="dot '+nt.ab+'"></span><div><div class="ntype njump" data-x="'+NX[nb.i]+'" data-y="'+NY[nb.i]+'" data-z="'+NZ[nb.i]+'" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" title="Jump to this cell">'+(nMerged?('<span style="color:#f0883e" title="Merged nucleus segmentation \u2014 '+nMerged.length+' distinct cells identified here: '+nMerged.map(m=>m.type).join(", ")+'">\u26a0 merged nucleus ('+nMerged.length+' cells)</span>'):nOwn?('<span style="color:var(--accent)" title="Verified: '+linkifyAuthors(nOwn.authors).replace(/<[^>]+>/g,"")+'">'+nOwn.type+' &#10003;</span>'):(''+(nciB?'<span title="'+nciB.full+" \u2014 "+nciB.role+'">':'')+longName(nt.name)+(nciB?'</span>':'')))+(nt.cls?' <span class="nsub">'+nt.cls.replace("_"," ")+'</span>':'')+(nt.mtype?' <span class="nsub" title="'+MTYPE_SOURCE_NOTE+(nciF?" \u2014 "+nciF.full+": "+nciF.role:"")+'">'+nt.mtype+'</span>':'')+'</div><div class="nsub">'+(nb.dist/1000).toFixed(2)+' &micro;m &middot; nuc '+idSpan(NID[nb.i])+(rr?' &middot; root '+idSpan(rr):' &middot; no root')+' &middot; voxel ('+coordSpan(NX[nb.i],NY[nb.i],NZ[nb.i])+')'+'</div></div></div>'
       +'</div>';

@@ -223,11 +223,37 @@ const ok = (c, what, d) => {
             & Node.DOCUMENT_POSITION_FOLLOWING) !== 0),
         /* The jump button and the nearest line are asserted in the next block -- they left this
            panel for the card under the coordinate boxes on 2026-09-18. */
-        strayJump: !!jump, strayNearest: !!nearest
+        strayJump: !!jump, strayNearest: !!nearest,
+        tt: det ? getComputedStyle(det.querySelector("summary")).textTransform : "",
+        shouts: det ? getComputedStyle(det.querySelector("summary")).textTransform === "uppercase"
+                    : true,
+        cls: det ? det.className : "",
+        /* The two sections below it are the reference: same classes, therefore same look. */
+        sameAsSiblings: (() => {
+          const sib = panel.querySelector("#cellContactsPanel details, #tripartitePanel details");
+          if (!sib || !det) return false;
+          const a = det.className.split(/\s+/).sort().join(" ");
+          const b2 = sib.className.split(/\s+/).sort().join(" ");
+          return a === b2;
+        })(),
+        connRule: conn ? getComputedStyle(conn).borderTopWidth : "",
+        ruleBelow: !!conn && parseFloat(getComputedStyle(conn).borderTopWidth) > 0
       };
     });
     ok(ord.folded && ord.open === false,
        "the three neighbours are a disclosure, closed", ord.summary);
+    /* 2026-09-18, Søren: "I Don't think the 3 nearest neighboring cells should be all caps. Also,
+       there should be a grey line below it like the rest." Both came from hand-styling this summary
+       to keep the look of the <h4> it replaced, in a row of sentence-case labels. Asserted against
+       the SIBLING sections rather than against literal values: what has to be true is that it looks
+       like them, and a hardcoded font-size would pass while they drifted. */
+    ok(!ord.shouts, "...not shouting at a row of sentence-case labels",
+       "text-transform: " + ord.tt);
+    ok(ord.sameAsSiblings,
+       "...styled by the same two classes the sections around it use", ord.cls);
+    ok(ord.ruleBelow,
+       "...and Connectivity carries the rule that separates it from them, like every other section",
+       ord.connRule);
     ok(ord.rows === 3, "...with the three rows still inside it", ord.rows + " rows");
     ok(ord.beforeConn && ord.afterVote,
        "...sitting between the propose/vote panel and Connectivity");
