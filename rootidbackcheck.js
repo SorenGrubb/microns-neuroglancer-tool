@@ -24,6 +24,19 @@ const ok = (c, what, d) => {
   if (!c) fails++;
 };
 
+/* Bounded, so a page that stops answering is REPORTED rather than timing the suite out. Same helper
+   as volfreezecheck.js, and for the same reason: this file drives a panel whose one historic failure
+   mode was a frozen tab (see the 2026-09-17 note on decorateMeshVolButtons). */
+async function within(ms, promise){
+  let timer;
+  const out = await Promise.race([
+    promise.then(v => ({ ok: true, v }), e => ({ ok: false, e })),
+    new Promise(r => { timer = setTimeout(() => r({ ok: false, timeout: true }), ms); })
+  ]);
+  clearTimeout(timer);
+  return out;
+}
+
 /* His cell, his numbers. Nothing here depends on them being these particular digits, but a check
    that reproduces a bug report should read like the bug report. */
 const NUC = "264317", MAIN = "864691135499287571", PROPOSED = "864691135099837472";
@@ -220,6 +233,94 @@ const NUC = "264317", MAIN = "864691135499287571", PROPOSED = "86469113509983747
     ok(r.open === "block", "...and the propose form is opened for them", r.open);
     ok(/^▼/.test(r.toggle), "...with the toggle agreeing that it is open",
        JSON.stringify(r.toggle.slice(0, 40)));
+  }
+
+  /* ── A PROPOSAL MOVES THE WORLD, SO THE BUTTON IS DECIDED AGAIN ──────────────────  2026-09-17
+     Søren, root 864691134517067096 with 864691136708155314 freshly proposed for the same cell:
+     *"I found that this time it did not offer to recalculate volume after I had submitted a new
+     root ID."*
+
+     "Recalculate" exists because a saved volume can stop being current:
+
+         savedFragCount = known.combinedFrom || known.fragmentCount || 1
+         curFragCount   = 1 + CUR_EXTRA_ROOTS.length
+         stale          = curFragCount > savedFragCount
+
+     Proposing a root ID is the event that makes that true. But decorateMeshVolButtons() is re-run
+     by a MutationObserver that only fires for a mutation touching a .meshvol, and the propose
+     panel's own re-render contains none — so every input to the decision changed and the decision
+     was never taken again. The button stayed hidden, which means "nothing to recalculate".
+
+     Driven on the REAL panel, because the button this is about is found by
+     `#cellPanelCard .meshvol` and a button injected anywhere else is not the one. */
+  console.log("\na landed proposal offers the recalculate again");
+  {
+    const before = await within(20000, p.evaluate(async () => {
+      /* A REAL cell, because the button this is about is the one in the cell panel and is found by
+         `#cellPanelCard .meshvol`; a button injected anywhere else is a different button. */
+      window.fetch = async (u) => ({ ok: true, json: async () =>
+        (/[?&]rootIds=/.test(String(u)) ? { rootIds: [] } : {}) });
+      let i = 0;
+      for (let k = 0; k < NID.length; k++) if (rootId(k)){ i = k; break; }
+      document.getElementById("x").value = String(NX[i]);
+      document.getElementById("y").value = String(NY[i]);
+      document.getElementById("z").value = String(NZ[i]);
+      document.getElementById("go").click();
+      await new Promise(r => setTimeout(r, 1800));
+      const btn = document.querySelector("#cellPanelCard .meshvol");
+      if (!btn) return { err: "no .meshvol in the panel" };
+      const root = btn.dataset.root || "";
+      /* A volume already computed and saved, from ONE root ID — the state his cell was in. */
+      window._computedVolumesMap = window._computedVolumesMap || {};
+      window._computedVolumesMap[root] = { volumeUm3: 74, fragmentCount: 1, combinedFrom: 1,
+                                           cellType: "", timestamp: "2026-09-17T00:00:00Z" };
+      /* A bare assignment, NOT window.CUR_EXTRA_ROOTS: it is a top-level `let` in the page script,
+         so it lives in the global LEXICAL environment and is not a property of window. Setting the
+         window property makes a second, unrelated variable that extraImg65RootIds() never reads —
+         which is how the first run of this section reported an empty list while the count said two. */
+      CUR_EXTRA_ROOTS = [];
+      btn.disabled = false; btn.dataset.volFresh = "";
+      decorateMeshVolButtons();
+      return { root: root, display: btn.style.display, label: btn.textContent,
+               count: UJ.mesh.currentFragmentCount(root) };
+    }));
+    ok(before.ok && !before.v.err, "the panel has its own Compute volume button",
+       before.ok ? (before.v.err || before.v.root) : "no answer");
+    ok(before.ok && before.v.display === "none",
+       "with the volume current, the button is hidden — nothing to recalculate",
+       before.ok && JSON.stringify(before.v.display));
+    ok(before.ok && before.v.count === 1,
+       "...and one root ID is all this cell has so far", before.ok && before.v.count);
+
+    const after = await within(15000, p.evaluate(async (root) => {
+      /* The proposal lands exactly as it does live: the panel re-reads ?rootIds= and fills
+         CUR_EXTRA_ROOTS. Nothing else is touched — no click, no DOM poke at the button. */
+      window.fetch = async (u) => ({ ok: true, json: async () =>
+        (/[?&]rootIds=/.test(String(u))
+          ? { rootIds: [{ rootId: "864691136708155314", segType: "img65",
+                          up: 0, down: 0, net: 0, by: "Søren Grubb" }] }
+          : {}) });
+      loadRootIdPanel(String(CUR_NUCID || "264317"));
+      await new Promise(r => setTimeout(r, 300));
+      const btn = document.querySelector("#cellPanelCard .meshvol");
+      return { extras: (CUR_EXTRA_ROOTS || []).length,
+               count: UJ.mesh.currentFragmentCount(root),
+               display: btn.style.display, label: btn.textContent,
+               title: (btn.title || "").slice(0, 90) };
+    }, before.ok ? before.v.root : ""));
+    ok(after.ok && after.v.extras === 1,
+       "the proposal lands in CUR_EXTRA_ROOTS, the way it does live", after.ok && after.v.extras);
+    ok(after.ok && after.v.count === 2,
+       "...so the cell now has two root IDs to combine against a volume saved from one",
+       after.ok && after.v.count);
+    ok(after.ok && after.v.display !== "none",
+       "THE BUTTON COMES BACK — this is the whole check",
+       after.ok && JSON.stringify(after.v.display));
+    ok(after.ok && /Recalculate/.test(after.v.label),
+       "...and says what it is for now", after.ok && after.v.label);
+    ok(after.ok && /proposed/.test(after.v.title),
+       "...with the reason on it, so it is not a button that just appeared",
+       after.ok && after.v.title);
   }
 
   ok(errors.length === 0, "and still no script errors at the end", errors.slice(0, 3).join(" | "));

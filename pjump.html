@@ -539,7 +539,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 14:47</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 21:34</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -5655,6 +5655,19 @@ function loadRootIdPanel(nid,containerEl){
   const render=(list,failed)=>{
     if(!containerEl){
       CUR_EXTRA_ROOTS=list.map(function(x){return {id:x.rootId,segType:x.segType||"img65"};}).filter(function(o){return o.id;});
+      /* ── THE VOLUME BUTTON IS DECIDED AGAIN ───────────────────────────────────  2026-09-17
+         Søren: "it did not offer to recalculate volume after I had submitted a new root ID."
+
+         This assignment is the whole of "the world moved". currentFragmentCount() counts
+         1 + CUR_EXTRA_ROOTS, decorateMeshVolButtons() compares that against the saved volume's
+         combinedFrom to decide between hidden and "Recalculate" — and nothing called it when this
+         line ran. The MutationObserver that otherwise re-runs it only fires for a mutation touching
+         a .meshvol, and this panel's own re-render contains none, so a proposal landing left every
+         input to that decision changed and the decision itself untouched: the button stayed hidden,
+         which means "nothing to recalculate", which was exactly wrong.
+         Guarded on typeof because #rootIdPanel is shared with call sites on pages that have no
+         such button. */
+      try{if(typeof decorateMeshVolButtons==="function")decorateMeshVolButtons();}catch(_e){}
       try{var _h=document.getElementById("ctHeadline");if(_h&&window.CUR_POS){var _a=_h.querySelector("a[href]");if(_a)_a.href=neuroglancerLinkForPos(window.CUR_POS);}}catch(_e){}
     }
     const isOwner=OWNER_EMAIL&&REPORTER_EMAIL===OWNER_EMAIL;
