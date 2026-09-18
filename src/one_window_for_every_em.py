@@ -62,8 +62,8 @@ const EM_WINDOW={lo:EM_SHADER_CONTROLS.normalized.range[0],hi:EM_SHADER_CONTROLS
       centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height,''',
      '''    PAD_VIEW = await UJ.emtiles.drawSection(cv, {
       centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height,
-      lo: EM_WINDOW.lo, hi: EM_WINDOW.hi,''',
-     "...and so does the tracing pad"),
+      lo: EM_WINDOW.lo, hi: EM_WINDOW.hi, tighten: true,''',
+     "...and so does the tracing pad, and both tighten onto the plane they drew"),
 ]
 
 

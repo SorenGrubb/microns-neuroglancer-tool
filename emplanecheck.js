@@ -253,6 +253,44 @@ const settle = (p, ms) => p.waitForTimeout(ms);
        stale.paints.join(", ") || "no paint from the stale draw");
   }
 
+  console.log("\nthe overlay has its own switch");
+  {
+    /* Søren: "there should also be an option to turn off the segmentation". Two questions, two
+       ticks: the section costs a FETCH, the paint costs a LOOK — a cell filled solid magenta is the
+       right picture for "is this the cell I think it is" and the wrong one for "what is the
+       membrane doing there". So unticking the overlay must still draw the EM. */
+    const off = await p.evaluate(async () => {
+      window.__em.draws = []; window.__em.paints = [];
+      const seg = document.getElementById("emPlaneSeg");
+      seg.checked = false;
+      seg.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise(r => setTimeout(r, 700));
+      return { draws: window.__em.draws.length, paints: window.__em.paints.length,
+               shown: document.getElementById("emPlaneCv").style.display !== "none",
+               said: (document.getElementById("emPlaneSay") || {}).textContent || "",
+               stored: localStorage.getItem("ujump_panel_emseg"),
+               sectionStill: localStorage.getItem("ujump_panel_emplane") };
+    });
+    ok(off.draws === 1 && off.shown,
+       "unticking the overlay still draws the EM — it is the paint that is off, not the section",
+       off.draws + " draw, canvas " + (off.shown ? "shown" : "hidden"));
+    ok(off.paints === 0, "...and nothing is painted over it", off.paints + " paints");
+    ok(/segmentation off/.test(off.said), "...and the caption says which of the two is off", off.said);
+    ok(off.stored === "0" && off.sectionStill !== "0",
+       "...remembered on its OWN key, so turning the overlay off does not turn the section off",
+       "seg=" + off.stored + ", section=" + off.sectionStill);
+
+    const back = await p.evaluate(async () => {
+      window.__em.draws = []; window.__em.paints = [];
+      const seg = document.getElementById("emPlaneSeg");
+      seg.checked = true;
+      seg.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise(r => setTimeout(r, 700));
+      return { paints: window.__em.paints.length };
+    });
+    ok(back.paints === 1, "ticking it again paints", back.paints + " paint");
+  }
+
   console.log("\nand it can be turned off, and stays off");
   {
     const off = await p.evaluate(async () => {

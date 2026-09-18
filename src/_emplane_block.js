@@ -36,7 +36,7 @@
    all -- only its parent's, which is the FUSED detection, and painting that would outline several
    cells as if they were this one. So each panel passes what it actually knows about the cell in
    front of the reader, and a panel that knows nothing draws the plane and says so. */
-var EM_PLANE_KEY="ujump_panel_emplane",EM_PLANE_TOKEN=0,EM_PLANE_WIRED=false,EM_PLANE_LAST=null;
+var EM_PLANE_KEY="ujump_panel_emplane",EM_PLANE_SEG_KEY="ujump_panel_emseg",EM_PLANE_TOKEN=0,EM_PLANE_WIRED=false,EM_PLANE_LAST=null;
 /* 300x162 DRAWN, 260 SHOWN. The picture is fetched and drawn at 300 px wide and displayed in the
    260 px the two diagrams above it are, because "how much tissue" and "how much room" are two
    different questions and only the first one was his: 18-20 um across, in a column whose other
@@ -53,6 +53,14 @@ var EM_PLANE_KEY="ujump_panel_emplane",EM_PLANE_TOKEN=0,EM_PLANE_WIRED=false,EM_
 var EM_PLANE_W=300,EM_PLANE_H=162,EM_PLANE_CSS=260,EM_PLANE_MIP=3;
 function emPlaneOn(){
   try{var v=localStorage.getItem(EM_PLANE_KEY);return v===null?true:v==="1";}catch(_e){return true;}
+}
+/* A SECOND TICK FOR THE OVERLAY, 2026-09-18 (Søren: "there should also be an option to turn off the
+   segmentation"). Separate from the section's own switch and separately remembered, because the two
+   answer different questions: the section costs a fetch, and the paint costs a LOOK -- a cell filled
+   solid magenta is the right picture for "is this the cell I think it is" and the wrong one for
+   "what is the membrane actually doing there". Default on, like the section. */
+function emPlaneSegOn(){
+  try{var v=localStorage.getItem(EM_PLANE_SEG_KEY);return v===null?true:v==="1";}catch(_e){return true;}
 }
 function emPlaneSay(tok,msg,bad){
   var el=document.getElementById("emPlaneSay");
@@ -103,7 +111,15 @@ function emPlaneBox(pos,ids){
     +'seconds; turning it off here is remembered.">'
     +'<input type="checkbox" id="emPlaneOn" style="width:auto;margin:0"'+(on?" checked":"")
     +(missing?" disabled":"")+'> '
-    +'EM section</label> <span id="emPlaneSay" style="color:var(--mut)">'
+    +'EM section</label>'
+    +' <label for="emPlaneSeg" style="display:inline-flex;align-items:center;gap:5px;margin:0 0 0 7px;'
+    +'cursor:pointer;text-transform:none;letter-spacing:0;font-size:inherit;color:inherit" '
+    +'title="Paint this cell\u2019s own segmentation over the section \u2014 the cell in magenta, its '
+    +'nucleus in blue. Turn it off to see the membranes underneath. Remembered separately from the '
+    +'section itself.">'
+    +'<input type="checkbox" id="emPlaneSeg" style="width:auto;margin:0"'
+    +(emPlaneSegOn()?" checked":"")+(missing?" disabled":"")+'> '
+    +'segmentation</label> <span id="emPlaneSay" style="color:var(--mut)">'
     +(missing?escHtml(missing):"")+'</span></div>'
     +'<canvas id="emPlaneCv" width="'+EM_PLANE_W+'" height="'+EM_PLANE_H+'" '
     +'style="width:100%;max-width:'+EM_PLANE_CSS+'px;display:'+(on?"block":"none")+';margin:0 auto;'
@@ -143,6 +159,10 @@ async function drawPanelEmPlane(tok){
          what this page sends Neuroglancer, so the pad, this panel and every link it writes cannot
          drift apart. See src/one_window_for_every_em.py. */
       lo:EM_WINDOW.lo,hi:EM_WINDOW.hi,
+      /* TIGHTEN, because this panel reads the 64 nm level and a window chosen for full-resolution
+         tissue is wider than a downsampled histogram -- which is what "pale/washed out" was. It can
+         only narrow, so this view can never have LESS contrast than the plain window gave it. */
+      tighten:true,
       onProgress:function(d,n){emPlaneSay(tok,"reading the EM… "+d+"/"+n);}});
     if(EM_PLANE_TOKEN!==tok)return;
     /* SHORT ENOUGH TO SIT ON THE CAPTION LINE. Every word here that wraps costs a whole row of
@@ -161,7 +181,12 @@ async function drawPanelEmPlane(tok){
         ?"One plane of the "+view.sectionNm+" nm level, which averages "+view.slab+" of the 40 nm "
          +"sections \u2014 the tracing pad reads true single sections instead. "
         :"One 40 nm section. ")
-      +"The cell\u2019s own segmentation is painted in magenta, its nucleus in blue.";}catch(_t){}
+      +"The cell\u2019s own segmentation is painted in magenta, its nucleus in blue. "
+      +"Contrast "+view.lo+"\u2013"+view.hi
+      +(view.tightened?" (narrowed onto this plane from the "+view.windowAsked[0]+"\u2013"
+                        +view.windowAsked[1]+" Neuroglancer window, because a downsampled level\u2019s "
+                        +"values do not fill it)":" \u2014 the Neuroglancer window")+".";}catch(_t){}
+    if(!emPlaneSegOn()){emPlaneSay(tok,across+" \u00b7 segmentation off");return;}
     var root=String(ids.root||"").trim(),nuc=String(ids.nuc||"").trim();
     if(!root&&!nuc){emPlaneSay(tok,across+" · no IDs to paint here");return;}
     if(!UJ.segpaint){emPlaneSay(tok,across);return;}
@@ -188,8 +213,9 @@ function wireEmPlaneToggle(){
   EM_PLANE_WIRED=true;
   document.addEventListener("change",function(e){
     var t=e.target;
-    if(!t||t.id!=="emPlaneOn")return;
-    try{localStorage.setItem(EM_PLANE_KEY,t.checked?"1":"0");}catch(_e){}
+    if(!t||(t.id!=="emPlaneOn"&&t.id!=="emPlaneSeg"))return;
+    try{localStorage.setItem(t.id==="emPlaneSeg"?EM_PLANE_SEG_KEY:EM_PLANE_KEY,
+                             t.checked?"1":"0");}catch(_e){}
     var box=document.getElementById("emPlaneBox");
     drawPanelEmPlane(box?Number(box.dataset.tok||0):EM_PLANE_TOKEN);
   });

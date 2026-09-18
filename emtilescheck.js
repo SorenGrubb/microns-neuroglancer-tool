@@ -75,8 +75,9 @@ sandbox.UJ = { segread: {
     for (let z = 0; z < ch[2]; z++)
       for (let y = 0; y < ch[1]; y++)
         for (let x = 0; x < ch[0]; x++)
-          a[z * ch[0] * ch[1] + y * ch[0] + x] =
-            VAL(at.start[0] + x, at.start[1] + y, at.start[2] + z);
+          a[z * ch[0] * ch[1] + y * ch[0] + x] = sandbox.VALUE_FN
+            ? sandbox.VALUE_FN(at.start[0] + x, at.start[1] + y, at.start[2] + z)
+            : VAL(at.start[0] + x, at.start[1] + y, at.start[2] + z);
     return a.buffer;
   },
   mapPool: async (items, limit, fn) => {
@@ -300,6 +301,69 @@ console.log("\noutside the volume is grey, not black and not tissue");
      "a pixel with no chunk behind it is the fill, which looks like neither data nor a hole",
      cv.px(0, 0));
   ok(view.chunks > 0, "...and it still reports how many chunks it went for", view.chunks);
+}
+
+
+console.log("\nthe window can tighten onto the data, and never the other way");
+{
+  /* Søren, 2026-09-18: the pad and the panel "look too pale/washed out" beside Neuroglancer at the
+     same 86->172. The arithmetic is Neuroglancer's; what differs is the DATA. A downsampled level
+     has a narrower histogram, so a window chosen for full-resolution tissue is wider than what it
+     is stretching and the stretch does less than it looks like it does.
+
+     So: a synthetic plane whose values all sit in [120,150] -- a narrow band inside [86,172], which
+     is what averaging produces. Without tighten it must come out grey and flat; with it, the same
+     data must span nearly the full range. And a plane that already fills the window must be left
+     exactly alone, or this would be a contrast knob pretending to be a fix. */
+  const canvas = fakeCanvas();
+  sandbox.VALUE_FN = (x, y) => 120 + ((x + y) % 31);          // every value in [120,150]
+  const flat = await E.drawSection(canvas, { centre: [240640, 207872, 21360], mip: 2,
+                                             w: 64, h: 64 });
+  const spread = (cv) => {
+    const d = cv._img.data;
+    let lo = 255, hi = 0;
+    for (let i = 0; i < 64 * 64; i++){ const v = d[i * 4]; if (v < lo) lo = v; if (v > hi) hi = v; }
+    return hi - lo;
+  };
+  const flatSpread = spread(canvas);
+  ok(flat.tightened === false && flat.lo === 86 && flat.hi === 172,
+     "without it, the window is exactly the one asked for", flat.lo + "-" + flat.hi);
+  ok(flatSpread < 110,
+     "...and data that only spans 30 of the window's 86 levels comes out flat, which is the "
+     + "complaint", "spans " + flatSpread + " of 255");
+
+  const canvas2 = fakeCanvas();
+  const tight = await E.drawSection(canvas2, { centre: [240640, 207872, 21360], mip: 2,
+                                               w: 64, h: 64, tighten: true });
+  ok(tight.tightened === true, "with it, the window moved", tight.lo + "-" + tight.hi);
+  ok(tight.lo >= 86 && tight.hi <= 172,
+     "...INWARD only — it can never widen past what was asked for, so it cannot lose contrast",
+     tight.lo + "-" + tight.hi + " inside 86-172");
+  ok(spread(canvas2) > 240,
+     "...and the same 30 levels of data now span the picture", "spans " + spread(canvas2) + " of 255");
+  ok(String(tight.windowAsked) === "86,172",
+     "...while still reporting what it was asked for, so a caption can say both",
+     String(tight.windowAsked));
+
+  /* Data that already fills the window: tightening must be a no-op, or every full-resolution
+     section would quietly get a different contrast than Neuroglancer gives it. */
+  const canvas3 = fakeCanvas();
+  sandbox.VALUE_FN = (x, y) => 60 + ((x * 7 + y * 13) % 180);   // 60..239, wider than the window
+  const full = await E.drawSection(canvas3, { centre: [240640, 207872, 21360], mip: 2,
+                                              w: 64, h: 64, tighten: true });
+  ok(full.tightened === false && full.lo === 86 && full.hi === 172,
+     "data that already fills the window is left alone — Neuroglancer's numbers, unchanged",
+     full.lo + "-" + full.hi);
+
+  /* A nearly-uniform plane (outside the tissue, a blank block) must not be stretched into noise. */
+  const canvas4 = fakeCanvas();
+  sandbox.VALUE_FN = () => 130;
+  const blank = await E.drawSection(canvas4, { centre: [240640, 207872, 21360], mip: 2,
+                                               w: 64, h: 64, tighten: true });
+  ok(blank.tightened === false,
+     "a plane of one value is NOT stretched into pure noise — below 16 levels it keeps the window",
+     blank.lo + "-" + blank.hi);
+  sandbox.VALUE_FN = null;
 }
 
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");

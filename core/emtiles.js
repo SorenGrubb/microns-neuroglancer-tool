@@ -140,7 +140,10 @@ UJ.emtiles = (function(){
         want.push([ix, iy, cz]);
 
     var lo = opts.lo == null ? 86 : opts.lo, hi = opts.hi == null ? 172 : opts.hi;
-    var span = Math.max(1, hi - lo);
+    /* Read first, window second. The raw plane and its histogram are kept so the window can be
+       chosen from the picture rather than assumed before it arrives -- see the tighten block. */
+    var raw = new Uint8Array(vw * vh), seen = new Uint8Array(vw * vh);
+    var hist = new Uint32Array(256), nSeen = 0;
     var ctx = canvas.getContext("2d");
     canvas.width = w; canvas.height = h;
     var img = ctx.createImageData(w, h);
@@ -176,27 +179,75 @@ UJ.emtiles = (function(){
           for (var xx = 0; xx < ch[0]; xx++){
             var px = sx + xx - x0;
             if (px < 0 || px >= vw) continue;
-            var v = (a[row + xx] - lo) * 255 / span;
-            v = v < 0 ? 0 : v > 255 ? 255 : v;
-            /* One voxel, zoom x zoom pixels. Nearest-neighbour on purpose: this is what he is
-               placing vertices on, and a smoothed edge invites a vertex on a boundary that the
-               data does not have. */
-            for (var ry = 0; ry < zoom; ry++){
-              var oy = py * zoom + ry;
-              if (oy >= h) break;
-              for (var rx = 0; rx < zoom; rx++){
-                var ox = px * zoom + rx;
-                if (ox >= w) break;
-                var o = (oy * w + ox) * 4;
-                img.data[o] = img.data[o + 1] = img.data[o + 2] = v;
-              }
-            }
+            /* The RAW value, kept. Windowing used to happen right here, one voxel at a time, which
+               made it impossible to choose the window from the picture -- you cannot look at a
+               histogram you have already thrown away. See the tighten block below. */
+            var o1 = py * vw + px;
+            raw[o1] = a[row + xx];
+            seen[o1] = 1;
+            hist[a[row + xx]]++;
+            nSeen++;
           }
         }
       }
       done++;
       if (opts.onProgress) try { opts.onProgress(done, want.length); } catch (_e){}
     });
+
+    /* ── THE WINDOW MAY TIGHTEN ONTO THE DATA ───────────────────────────────────────  2026-09-18
+       Søren: "The EM section and the trace a cell EM should have a similar contrast as for the
+       Neuroglancer session ... they look too pale/washed out. The Neuroglancer contrast setting
+       that works well is 86->172."
+
+       The arithmetic here IS Neuroglancer's: normalized(range=[86,172]) maps x to (x-86)/86 and
+       clamps, which is what the mapping below does. Same formula, same numbers, paler picture --
+       so the difference is not the window, it is what the window is applied TO. Neuroglancer at a
+       soma-sized zoom renders the finest level it can; this module reads a downsampled one, and
+       averaging pulls a histogram in from both ends. A window chosen to bracket full-resolution
+       tissue is then WIDER than the data it is stretching, and the stretch does less than it looks
+       like it does. Every level below the finest is pale for the same reason, the coarsest most.
+
+       So the window may narrow onto what was actually read -- never widen. lo can only rise and hi
+       can only fall, so this cannot reduce contrast below what the fixed window already gave, and
+       on data that fills [86,172] it does nothing at all. The percentiles are 0.5/99.5 rather than
+       min/max because one fold artefact or one lumen at 255 would otherwise undo the whole thing.
+
+       Opt-in: a caller that wants the literal window it asked for still gets it. */
+    var loUsed = lo, hiUsed = hi;
+    if (opts.tighten && nSeen > 0){
+      var want1 = Math.floor(nSeen * 0.005), want2 = Math.floor(nSeen * 0.995);
+      var acc = 0, pLo = 0, pHi = 255, i1;
+      for (i1 = 0; i1 < 256; i1++){ acc += hist[i1]; if (acc > want1){ pLo = i1; break; } }
+      acc = 0;
+      for (i1 = 0; i1 < 256; i1++){ acc += hist[i1]; if (acc >= want2){ pHi = i1; break; } }
+      var l2 = Math.max(lo, pLo), h2 = Math.min(hi, pHi);
+      /* A plane that is nearly one value -- outside the tissue, a blank block -- would otherwise
+         be stretched into pure noise. Below this width the fixed window is the safer picture. */
+      if (h2 - l2 >= 16){ loUsed = l2; hiUsed = h2; }
+    }
+    var spanUsed = Math.max(1, hiUsed - loUsed);
+
+    for (var py2 = 0; py2 < vh; py2++){
+      for (var px2 = 0; px2 < vw; px2++){
+        var o2 = py2 * vw + px2;
+        if (!seen[o2]) continue;
+        var v = (raw[o2] - loUsed) * 255 / spanUsed;
+        v = v < 0 ? 0 : v > 255 ? 255 : v;
+        /* One voxel, zoom x zoom pixels. Nearest-neighbour on purpose: this is what he is
+           placing vertices on, and a smoothed edge invites a vertex on a boundary that the
+           data does not have. */
+        for (var ry = 0; ry < zoom; ry++){
+          var oy = py2 * zoom + ry;
+          if (oy >= h) break;
+          for (var rx = 0; rx < zoom; rx++){
+            var ox = px2 * zoom + rx;
+            if (ox >= w) break;
+            var o = (oy * w + ox) * 4;
+            img.data[o] = img.data[o + 1] = img.data[o + 2] = v;
+          }
+        }
+      }
+    }
 
     ctx.putImageData(img, 0, 0);
     /* The mapping, returned rather than remembered: canvas pixel -> tool voxel, and the reverse,
@@ -207,6 +258,10 @@ UJ.emtiles = (function(){
          two of them, and a caller that says so in its tooltip is telling the truth about its
          picture. Always present, so nothing has to know whether slabOk was passed. */
       sectionNm: got.sectionNm, slab: got.slab,
+      /* The window this call ACTUALLY used, which is the one asked for unless tighten narrowed it
+         onto the data. Returned so a caption can show it: a picture whose contrast was chosen for
+         it should be able to say what was chosen. */
+      lo: loUsed, hi: hiUsed, windowAsked: [lo, hi], tightened: (loUsed !== lo || hiUsed !== hi),
       /* What the pad actually shows, which is the mip's resolution divided by the magnification --
          the number for a scale bar, and NOT the number to call the data's resolution. */
       effNmPerPx: scale.resolution[0] / zoom,
