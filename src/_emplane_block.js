@@ -194,7 +194,8 @@ async function drawPanelEmPlane(tok){
       UJ.segpaint.configure({seg:SRC.seg,nuc:SRC.nuc,
                              res:(typeof UJ.cfg!=="undefined"&&UJ.cfg)?UJ.cfg.res:[4,4,40]});
     emPlaneSay(tok,across+" · reading the segmentation…");
-    var got=await UJ.segpaint.paint(cv,view,{root:root,nuc:nuc,alpha:0.4});
+    /* EM_SEG_ALPHA, not a number here -- see src/one_window_for_every_em.py. */
+    var got=await UJ.segpaint.paint(cv,view,{root:root,nuc:nuc,alpha:EM_SEG_ALPHA});
     if(EM_PLANE_TOKEN!==tok)return;
     /* "Nothing appeared" has two causes that want different answers, the same two the pad's own
        overlay spells out: the cell is not in this window, or it is not in the segmentation. */

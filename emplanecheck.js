@@ -141,6 +141,61 @@ const settle = (p, ms) => p.waitForTimeout(ms);
        lay.modelH + " vs " + Math.round(2 * lay.shownH));
   }
 
+  console.log("\nthe top view above it is a figure, not a picture with a sentence on top");
+  {
+    /* 2026-09-18, Søren: "have Top view as a title in the diagram and then img35 and img65 written
+       in the diagram ... they should have the same colors as the regions they represent. Then we
+       can remove the top line." He had waved the labels off an hour earlier and came back with the
+       piece that was missing — the TITLE moves in too, so the line above has nothing left on it.
+       Half the idea saved nothing; the whole idea saves a caption that wrapped to two lines. */
+    const fig = await p.evaluate(() => {
+      const box = document.getElementById("emPlaneBox");
+      const col = box.parentElement;
+      const svg = col.querySelector("svg");
+      const texts = [].slice.call(svg.querySelectorAll("text"))
+        /* firstChild, not textContent: each label carries a nested <title> with the long dataset
+           name, so textContent is "Img65Img65 (minnie65)". */
+        .map(t => ({ s: (t.firstChild && t.firstChild.nodeValue) || t.textContent,
+                     full: t.textContent, fill: t.getAttribute("fill") || "",
+                     y: parseFloat(t.getAttribute("y")) }));
+      const rects = [].slice.call(svg.querySelectorAll("rect"))
+        .map(r => ({ stroke: r.getAttribute("stroke"),
+                     y0: parseFloat(r.getAttribute("y")),
+                     y1: parseFloat(r.getAttribute("y")) + parseFloat(r.getAttribute("height")) }));
+      return { texts, rects,
+               vb: svg.getAttribute("viewBox"),
+               /* Anything between the top of the column and the figure would be the line that
+                  was supposed to go. */
+               aboveIt: [].slice.call(col.children).indexOf(svg),
+               colText: (col.textContent || "").slice(0, 40) };
+    });
+    ok(fig.aboveIt === 0, "the figure is the first thing in the column — nothing above it",
+       fig.colText.trim().slice(0, 30));
+    const title = fig.texts.find(t => /Top view/.test(t.s));
+    ok(!!title && title.y <= 15,
+       "...with 'Top view' as a title inside it", title ? title.s : "no title");
+    const l65 = fig.texts.find(t => t.s.trim() === "Img65");
+    const l35 = fig.texts.find(t => t.s.trim() === "Img35");
+    ok(!!l65 && !!l35, "...and both dataset names written in the figure",
+       [l65 && l65.s, l35 && l35.s].filter(Boolean).join(" / "));
+    /* THE COLOURS ARE THE POINT: the dot is already drawn in the colour of the extent it is in, so
+       a name in that same colour is what makes the dot readable without a key. A label in the
+       wrong colour would be worse than no label. */
+    const r65 = fig.rects.find(r => r.stroke === (l65 || {}).fill);
+    const r35 = fig.rects.find(r => r.stroke === (l35 || {}).fill);
+    ok(!!r65 && !!r35 && r65.stroke !== r35.stroke,
+       "...each in the colour of the region it names", (l65 || {}).fill + " / " + (l35 || {}).fill);
+    /* Opposite inside edges, because the two extents overlap and two labels on the same edge would
+       collide inside the overlap for some cells and not others. */
+    ok(!!r65 && Math.abs(l65.y - r65.y1) < 8 && !!r35 && Math.abs(l35.y - r35.y0) < 12,
+       "...on opposite inside edges, so they cannot collide where the extents overlap",
+       "Img65 at its bottom, Img35 at its top");
+    /* The map must not have been squeezed to make room for the title. */
+    const h = Number(String(fig.vb).split(/\s+/)[3]);
+    ok(h === 155, "the viewBox grew by the title band rather than the map shrinking to fit it",
+       "viewBox height " + h);
+  }
+
   console.log("\nit draws this cell, and paints THIS cell's ids");
   {
     const got = await p.evaluate(() => window.__em);
@@ -157,6 +212,12 @@ const settle = (p, ms) => p.waitForTimeout(ms);
     ok(umWide >= 18 && umWide <= 20,
        "...showing 18-20 µm of tissue, the amount he asked for", umWide + " µm");
     ok(got.paints.length === 1, "the segmentation is painted over it", got.paints.length);
+    /* 2026-09-18, Søren: "a bit too bright, can we turn it down by like 20%." 0.4 x 0.8. Asserted
+       as the number because the overlay's job is to say WHERE the segmentation thinks the cell is;
+       at 0.4 it was also deciding what the membranes underneath look like, and that is the tick
+       beside it's job to turn off rather than the paint's job to prevent. */
+    ok(got.paints[0] && Math.abs(got.paints[0].alpha - 0.32) < 1e-9,
+       "...at 0.32, a fifth down from the 0.4 it was", got.paints[0] && got.paints[0].alpha);
     ok(got.paints[0] && got.paints[0].root === shown.root && got.paints[0].nuc === shown.nuc,
        "...with the root and nucleus of the cell on screen",
        got.paints[0] ? got.paints[0].root + " / " + got.paints[0].nuc : "nothing");

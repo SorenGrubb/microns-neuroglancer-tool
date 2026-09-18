@@ -949,7 +949,10 @@ function loadCommunityReports(nid,cellPos){
          only one of them correctly wired -- the same trap already documented for
          organReporterInput vs reporterInput. */
       const already=organelleGroups.length;
-      /* χJUMP'S WORDING, because Søren named it: "Also log an organelle here", with what is
+      /* χJUMP'S WORDING, because Søren named it -- "Also log an organelle here" at the time, and
+         "Log an organelle here" since 2026-09-18, when he asked for the "Also" out: it had been
+         doing the work of joining this to the identification above it, and the two are not a
+         sequence -- logging an organelle is its own thing you can do here. With what is
          already on file beside it. The label used to switch between "Report an organelle" and
          "Suggest a different location" depending on whether anything was logged; the count says
          the same thing and says how much, and one label across the family means somebody who has
@@ -965,7 +968,7 @@ function loadCommunityReports(nid,cellPos){
          count is the useful half, in χJump's own words. */
       const knownTxt=already?"add another, or suggest a different location"
                             :"nothing logged yet";
-      html+=(html?'<br>':'')+'<span class="hint">Also log an organelle here'
+      html+=(html?'<br>':'')+'<span class="hint">Log an organelle here'
         +' <span style="opacity:.75">&mdash; '+knownTxt+'</span> '
         +'<span class="idf-back" id="commOrganelleToggle" style="margin:0">Log one &rarr;</span></span>'
         +'<div id="commOrganelleBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div>';
@@ -1017,7 +1020,7 @@ function loadCommunityReports(nid,cellPos){
    showing its own identity block, and duplicate ids would mean only one of the two ever gets
    wired correctly. */
 function organelleFlagHtml(){
-  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Also log an organelle here <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Log one &rarr;</span></span>'
+  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Log an organelle here <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Log one &rarr;</span></span>'
     +'<div id="organelleInlineBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
 }
 function wireOrganelleFlag(slug){

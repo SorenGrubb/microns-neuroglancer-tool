@@ -1,13 +1,13 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>χJump — assemble cells from fragments</title>
+<title>χJump — assembly harness</title>
 <script>
 /* Applied BEFORE the first paint so a light-mode user does not get a dark flash on every load.
    Tiny and dependency-free: nothing else on the page exists yet. */
 try{var _t=localStorage.getItem("ujump_theme");
     if(_t==="light"||_t==="dark")document.documentElement.setAttribute("data-theme",_t);}catch(e){}
 </script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+
 <style>
 /* THEME. Three blocks, in this order, for the reason the other eight carry the same three:
    :root is dark; the media query supplies light for anyone whose system asks for it but only
@@ -440,7 +440,7 @@ try{var _t=localStorage.getItem("ujump_theme");
       class="mu">&chi;</span><span class="jm">Jump</span></h1></a>
   </div>
   <div class="who">
-    <div id="gameChipSlot"></div><span id="whoami">not signed in</span>
+    
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
             aria-label="Toggle light/dark theme"><span id="themeToggleIcon">🌙</span>
       <span id="themeToggleLabel">Dark</span></button>
@@ -775,7 +775,11 @@ it.">Download the whole list (CSV)</button>
   you open one in the viewer its fragments are merged into a single object using neuroglancer's
   own <code>equivalences</code>, so anybody you send the link to sees one cell rather than forty
   pieces &mdash; without needing this page at all.</p>
-  
+  <div class="callout"><b>This is the harness.</b>
+  <span class="hint">Nothing is saved anywhere &mdash; no sign-in, no backend, no browser storage.
+  Reload and it is gone. It exists so the loop can be tried before a schema is invented for it,
+  which is the right order: a backend written before anyone has used the page is a guess about
+  how people will work.</span></div>
 </div>
 </div><!-- /refs -->
 
@@ -790,7 +794,7 @@ it.">Download the whole list (CSV)</button>
 </div><!-- /dash -->
 </div>
 
-<script>window.XJUMP_LIVE = true;</script>
+<script>window.XJUMP_LIVE = false;</script>
 <script>
 /* The same module the other eight tools carry, on the same localStorage key, so a person who has
    already chosen light in µJump gets light here without choosing again.
@@ -9106,116 +9110,5 @@ UJ.app = (function(){
 })();
 </script>
 <script>UJ.app.init();</script>
-<script>
-/* SIGN-IN, AND THE ACCOUNT CHIP.                                                    2026-09-02
 
-   Søren: "Points system in xJump also look different from uJump, and you can't click it to open
-   the leaderboard and your stats. It should be the same as in uJump."
-
-   So core/gamify.js owns this now, as it does in six other tools, and what is left here is the
-   handful of globals it resolves at CALL time. That resolution order is why they can be declared
-   below the module rather than above it, and why they are plain `function`/`var` declarations
-   rather than `const` -- gamifyInit() runs while this script is still executing, and a `const` in
-   the temporal dead zone would throw where a hoisted declaration does not. core/gamify.js's own
-   header says exactly this about GOOGLE_CLIENT_ID.
-
-   READING IS PUBLIC and happens before any of this: somebody who just wants to see what has been
-   assembled should not have to identify themselves first. Only writing needs a credential, and
-   the write buttons stay live-looking and refuse with a reason rather than sitting disabled with
-   no explanation.
-
-   THE CHIP IS THE SIGN-IN SURFACE. There is no separate button any more: signed out the chip
-   reads "Sign in to track progress" and renders Google's own button under it; signed in it shows
-   your handle, level and points, and opens the profile dashboard -- stats, the per-tool points
-   breakdown, the leaderboard, favourites, and "Download your work". */
-var REPORT_ENDPOINT = UJ.cfg.backend.endpoint;
-var GOOGLE_CLIENT_ID = UJ.cfg.backend.clientId;
-var GOOGLE_VERIFIED = false, GOOGLE_CREDENTIAL = "", REPORTER_NAME = "", REPORTER_EMAIL = "";
-/* Milliseconds, from the credential's own `exp` claim. 0 until somebody signs in. */
-var GOOGLE_EXP = 0;
-
-/* gamify's own five-character escaper. Deliberately a SEPARATE function from the app's esc():
-   this one is a global the module reaches for, the app's lives inside its closure, and making one
-   of them call the other would tie a shared module's behaviour to this page's internals. */
-function escHtml(x){
-  return String(x == null ? "" : x).replace(/[&<>"']/g, function(c){
-    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
-  });
-}
-
-/* What gamify posts through: the display-name change, and adding or removing a favourite. µJump's
-   own types, so doPost routes them on `ds` into χJump's spreadsheet with no new handler -- the
-   same arrangement the organelle reports use.
-
-   RETURNS A BOOLEAN, synchronously, because that is what gamify's call sites test: they use it to
-   decide whether to reload the panel afterwards. The fetch itself is fire-and-forget in
-   `no-cors`, matching µJump, since Apps Script's redirect makes a readable response impossible
-   for a cross-origin POST anyway. */
-function postReport(payload, okMsg){
-  /* The gamify half posts in no-cors and can never read a refusal, so a lapsed token here fails
-     silently -- a favourite that does not stick, a handle that does not change. Checked before
-     the post rather than discovered by its absence. */
-  if (GOOGLE_EXP && Date.now() > GOOGLE_EXP - 60000){
-    if (window.google && google.accounts && google.accounts.id){
-      try { google.accounts.id.prompt(); } catch (e){}
-    }
-    alert("Your Google sign-in has expired — they last about an hour. Sign in again with the "
-        + "account chip at the top of the page, then try again.");
-    return false;
-  }
-  if (!GOOGLE_VERIFIED || !GOOGLE_CREDENTIAL){
-    if (window.google && google.accounts && google.accounts.id){
-      try { google.accounts.id.prompt(); } catch (e){}
-    }
-    alert("Please sign in with Google first — use the account button in the top-right "
-        + "corner, then try again.");
-    return false;
-  }
-  payload.ds = UJ.cfg.backend.ds;
-  payload.volume = UJ.cfg.volume.id;
-  payload.reporterName = REPORTER_NAME || "";
-  payload.reporterEmail = REPORTER_EMAIL || "";
-  payload.credential = GOOGLE_CREDENTIAL;
-  fetch(REPORT_ENDPOINT, { method:"POST", mode:"no-cors",
-                           body: JSON.stringify(payload) }).catch(function(){});
-  return true;
-}
-
-/* A JWT's payload is base64url of UTF-8, and atob() alone gives you the BYTES: "Søren" comes
-   back as "SÃ¸ren", which is this owner's own name mangled on his own page. So the bytes are
-   handed to a UTF-8 decoder rather than treated as characters. base64URL, too -- '-' and '_'
-   are legal in a JWT and are not legal base64, and a name containing one would throw rather
-   than merely look wrong. */
-function jwtBody(jwt){
-  var b = String(jwt).split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-  while (b.length % 4) b += "=";
-  var raw = atob(b), bytes = new Uint8Array(raw.length);
-  for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-  return new TextDecoder("utf-8").decode(bytes);
-}
-
-/* One callback for both halves: the app needs the credential to write cells, and gamify needs to
-   know it can start asking for stats. */
-function handleGoogleCred(resp){
-  if (!resp || !resp.credential) return;
-  GOOGLE_CREDENTIAL = resp.credential;
-  GOOGLE_VERIFIED = true;
-  try {
-    var p = JSON.parse(jwtBody(resp.credential));
-    REPORTER_EMAIL = p.email || "";
-    REPORTER_NAME = p.name || p.email || "";
-    /* WHEN THIS CREDENTIAL DIES. Google's ID tokens last about an hour; the page used to keep
-       using one until the backend refused it, and print the refusal as "unauthenticated". */
-    GOOGLE_EXP = (Number(p.exp) || 0) * 1000;
-  } catch (e){}
-  UJ.app.setCredential(resp.credential, REPORTER_EMAIL, GOOGLE_EXP);
-  var w = document.getElementById("whoami");
-  if (w) w.innerHTML = "signed in as <b>" + escHtml(REPORTER_EMAIL) + "</b>";
-  if (typeof gamifyOnSignIn === "function") gamifyOnSignIn();
-}
-
-/* gamifyInit retries while Google's script is still loading, then renders the chip either way --
-   a chip that says "sign in" is a better failure than no chip at all. */
-if (GOOGLE_CLIENT_ID) gamifyInit(12);
-</script>
 </body></html>

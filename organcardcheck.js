@@ -1,6 +1,9 @@
 /* Can you log an organelle without first identifying the cell?                      2026-09-03
 
    Søren: "I like this 'Also log an organelle here'. I want the same function on the identity cards
+   (The wording lost its "Also" on 2026-09-18, at his request -- the word was joining this to the
+   identification above it, and the two are not a sequence. The quote above is what he said at the
+   time; the assertions below follow the current wording.)
    of all the other tools, so that you don't have to run through the guided identification before
    you can report organelles."
 
@@ -118,7 +121,7 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
     w.loadCommunityReports("864691135", [100, 200, 300]);
     await sleep(60);
     const el = D.getElementById("commReports");
-    ok("the card still offers the organelle form", /Also log an organelle here/.test(el.textContent),
+    ok("the card still offers the organelle form", /Log an organelle here/.test(el.textContent),
        JSON.stringify(el.textContent.slice(0, 70))
        + "  <- this rendered EMPTY before 2026-09-03: the link was inside the block that "
        + "returned early when a cell had no reports");
@@ -229,7 +232,7 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
     w.loadCommunityReports("864691135", [100, 200, 300]);
     await sleep(60);
     const el = D.getElementById("commReports");
-    ok("the same label, whatever is on file", /Also log an organelle here/.test(el.textContent),
+    ok("the same label, whatever is on file", /Log an organelle here/.test(el.textContent),
        "  <- one wording across the family; the count carries the difference, not the label");
     /* NOT the tally again. The summary two lines up has just listed it and every structure is
        drawn underneath with its coordinate, so a third statement of "2x centriole" is the same
@@ -237,7 +240,7 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
        opinion is welcome. */
     ok("...inviting a second opinion rather than repeating the tally",
        /suggest a different location/.test(el.textContent)
-       && !/Also log an organelle here . 2/.test(el.textContent.replace(/\s+/g, " ")),
+       && !/Log an organelle here . 2/.test(el.textContent.replace(/\s+/g, " ")),
        (el.textContent.replace(/\s+/g, " ").match(/Also log[^L]*/) || [""])[0].trim().slice(0, 80));
     ok("...not marked empty", el.getAttribute("data-empty") === "0",
        el.getAttribute("data-empty"));
@@ -264,7 +267,7 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
     w.showCell(0, 0, false);
     await sleep(200);
     const np = D.getElementById("nucpanel");
-    ok("the cell card offers it", /Also log an organelle here/.test(np.textContent),
+    ok("the cell card offers it", /Log an organelle here/.test(np.textContent),
        "  <- mounted under the guided-ID call to action, not inside it");
     /* ITS OWN IDS. #nucpanel and #idfpanel are both in the DOM at once, so the card's toggle and
        the guided result's toggle cannot share an id -- whichever wired last would win and the

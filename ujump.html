@@ -539,7 +539,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 11:46</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 20:45</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -639,9 +639,18 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div class="card">
 <label style="display:none">Input units</label>
 <div class="units" id="units" style="display:none"><button data-u="voxel" class="on">voxels (<span id="unitres"></span>)</button><button data-u="nm">nanometres</button><button data-u="um">micrometres</button></div>
-<label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; jump to it in minnie65, identify the nearest cell &amp; its neighbours, and load the cell + nucleus in 3D</span></label>
-<div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Jump to this coordinate, build the Neuroglancer link and enable identification">&#8594;</button></div>
-<p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.</p>
+<!-- 2026-09-18 (Søren) -- the label used to describe the PIPELINE: jump, find the nearest
+     cell, list its neighbours, load two meshes. All of that is visible the moment it happens, so
+     the label was spending a line on what the page would show anyway. What a label has to answer
+     is why somebody would type here at all. -->
+<label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; paste one from Neuroglancer to see what cell type you are looking at</span></label>
+<div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x" title="Paste a whole coordinate here — “x, y, z” in one go, from Neuroglancer or anywhere else — and it splits itself across the three boxes."></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Jump to this coordinate, build the Neuroglancer link and enable identification">&#8594;</button></div>
+<!-- 2026-09-18 (Søren: "the nearest nucleus line should be just below the coordinate window after
+     looking up a coordinate") -- the receipt for the lookup you just did: which nucleus it landed
+     on and how far the point you pasted was from it. It used to be reported in the middle of the
+     identity panel, under three diagrams. Empty and zero-height until setNearestLine() fills it,
+     so this card is unchanged before anybody types. -->
+<div class="meta" id="nearestLine" style="display:none;margin-top:6px"></div>
 <!-- 2026-08-10 (Søren: "a search function for a root ID or a nucleus ID below the coordinates
      input, which is possible to expand or collapse and is collapsed by default, but the user
      choice is remembered") -- native <details>/<summary> (same element "Recently viewed cells"
@@ -674,16 +683,28 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <button class="idbtn" id="randomCommunityId" style="width:100%;margin-bottom:8px" title="Jump to a random cell that MICrONS never predicted but the community has since identified — useful for reviewing, confirming or challenging other people's calls">Random community-identified cell &mdash; review someone's call</button>
 <div class="row" style="gap:8px">
 <select id="randomTypeSelect" style="flex:1 1 auto"></select>
-<button class="idbtn" id="randomOfType">Random example</button>
+<!-- 2026-09-18 (Søren: "This could be a mouse-over for the random button instead of taking
+     space.") -- the sentence described what pressing THIS button is for, which is what a title on
+     this button is, and it ran to three lines at narrow widths. -->
+<button class="idbtn" id="randomOfType" title="Great for learning what a cell type looks like (a new random example loads each click), or for quickly finding a cell that still needs a first identification.">Random example</button>
 </div>
-<p class="hint">Great for learning what a cell type looks like (a new random example loads each click), or for quickly finding a cell that still needs a first identification.</p>
 </details>
-<div style="margin-top:14px"><label>Layers</label>
-<div class="toggles"><label><input type="checkbox" id="em" checked> EM imagery</label><label><input type="checkbox" id="seg" checked> Segmentation (flat v1300)</label><label><input type="checkbox" id="nuc" checked> Nuclei</label></div>
-<p class="hint">On identify, the cell (root ID) and its nucleus are loaded automatically, so both segmentation layers switch on even if unchecked.</p></div>
+<!-- 2026-09-18 (Søren: "these layer options could go under the advanced viewer, just beneath
+     the viewer") -- these three ticks are set once if ever, and the hint under them says why they
+     barely matter at all: identifying a cell switches both segmentation layers on regardless. A
+     control that explains that it usually does not apply belongs behind the same disclosure as the
+     viewer choice and the custom base state.
+     NO JAVASCRIPT MOVED WITH THEM. The ids are untouched and getElementById reaches inside a
+     CLOSED <details> exactly as it reaches anywhere else -- a collapsed disclosure hides its
+     contents from the eye, not from the DOM -- so every buildState() that reads #em/#seg/#nuc
+     keeps reading the same values with Advanced shut. jumplayoutcheck.js builds a real viewer
+     state with it closed rather than taking that on trust. -->
 <details><summary>Advanced: viewer + custom base state</summary>
 <label style="margin-top:12px">Viewer</label>
 <select id="viewer"><option value="https://ngl.microns-explorer.org/">MICrONS Neuroglancer (has Share button)</option><option value="https://spelunker.cave-explorer.org/">Spelunker / CAVE explorer</option><option value="https://neuroglancer-demo.appspot.com/">Google Neuroglancer (no login)</option><option value="https://neuroglancer.neuvue.io/">neuvue (MICrONS)</option></select>
+<div style="margin-top:14px"><label>Layers</label>
+<div class="toggles"><label><input type="checkbox" id="em" checked> EM imagery</label><label><input type="checkbox" id="seg" checked> Segmentation (flat v1300)</label><label><input type="checkbox" id="nuc" checked> Nuclei</label></div>
+<p class="hint">On identify, the cell (root ID) and its nucleus are loaded automatically, so both segmentation layers switch on even if unchecked.</p></div>
 <label style="margin-top:12px">Use my own Neuroglancer link as the base (optional)</label>
 <textarea id="base" placeholder="Paste a working Neuroglancer URL or JSON state; position and the selected cell/nucleus segments are overwritten."></textarea></details>
 </div>
@@ -2663,6 +2684,7 @@ const SRC={em:"precomputed://https://storage.googleapis.com/iarpa_microns/minnie
    [86,172] instead, stretching that band to the full black-white display range -- applied to
    every EM image layer this file builds (Img65 and Img35 alike). Per Søren. */
 const EM_SHADER_CONTROLS={normalized:{range:[86,172]}};
+/* @emwindow:start */
 /* ── AND THE SAME WINDOW IN THE PAGE'S OWN CANVASES ─────────────────────────────  2026-09-18
    Søren: "The EM section and the trace a cell EM should have a similar contrast as for the
    Neuroglancer session." core/emtiles.js stretches [lo,hi] to black-white with the identical
@@ -2672,6 +2694,15 @@ const EM_SHADER_CONTROLS={normalized:{range:[86,172]}};
    above instead, so the tracing pad, the cell panel and every Neuroglancer link this file writes
    cannot drift apart without being edited together. */
 const EM_WINDOW={lo:EM_SHADER_CONTROLS.normalized.range[0],hi:EM_SHADER_CONTROLS.normalized.range[1]};
+/* ── AND ONE OPACITY FOR THE OVERLAY ───────────────────────────────────────────  2026-09-18
+   Søren: "The segmentation overlay to the EM is a bit too bright, can we turn it down by like
+   20%." 0.4 was the value both the pad and the cell panel were passing, written out twice, which is
+   the same coincidence EM_WINDOW above was introduced to stop. 0.4 x 0.8 = 0.32, and it lives here
+   so the two canvases cannot answer this differently. The overlay exists to say WHERE the
+   segmentation thinks the cell is; at 0.4 it was also deciding what the membranes underneath look
+   like, which is the tick beside it's job to turn off, not the paint's job to prevent. */
+const EM_SEG_ALPHA=0.32;
+/* @emwindow:end */
 const NUC_INFO="https://bossdb-open-data.s3.amazonaws.com/iarpa_microns/minnie/minnie65/nuclei/info";
 const DIM={x:[UJ_RX*1e-9,"m"],y:[UJ_RY*1e-9,"m"],z:[UJ_RZ*1e-9,"m"]};
 /* Distance (nm) past which the nearest MICrONS-detected nucleus is no longer treated as a
@@ -3480,37 +3511,54 @@ function renderTopViewDiagram(vx,vy,vz){
   if(!BB65||!BB35)return "";
   const nx=vx*UJ_RX,nz=vz*UJ_RZ;
   const extents=[
-    {name:"Img65 (minnie65)",color:"#58a6ff",a0:BB65.xmin,a1:BB65.xmax,b0:BB65.zmin,b1:BB65.zmax},
-    {name:"Img35 (minnie35)",color:"#f0883e",a0:BB35.xmin,a1:BB35.xmax,b0:BB35.zmin,b1:BB35.zmax}
+    /* `short` is what is written on the drawing and `bottom` is which inside edge it rides -- see
+       the label block below for why the two extents use different edges. */
+    {name:"Img65 (minnie65)",short:"Img65",bottom:true,color:"#58a6ff",a0:BB65.xmin,a1:BB65.xmax,b0:BB65.zmin,b1:BB65.zmax},
+    {name:"Img35 (minnie35)",short:"Img35",bottom:false,color:"#f0883e",a0:BB35.xmin,a1:BB35.xmax,b0:BB35.zmin,b1:BB35.zmax}
   ];
   const rawA0=Math.min(...extents.map(e=>e.a0)),rawA1=Math.max(...extents.map(e=>e.a1));
   const rawB0=Math.min(...extents.map(e=>e.b0)),rawB1=Math.max(...extents.map(e=>e.b1));
   const marginA=(rawA1-rawA0)*0.06,marginB=(rawB1-rawB0)*0.06;
   const fullA0=rawA0-marginA,fullA1=rawA1+marginA,fullB0=rawB0-marginB,fullB1=rawB1+marginB;
-  const W=260,H=140,pad=6;
+  /* THE FIGURE CARRIES ITS OWN CAPTION, 2026-09-18 (Søren: "have Top view as a title in the diagram
+     and then img35 and img65 written in the diagram ... they should have the same colors as the
+     regions they represent. Then we can remove the top line"). TOP is a title band inside the SVG;
+     the plot band is inset by it, so the map's usable height stays the 128 px it always was and
+     every rectangle and the dot land exactly where they did. Squeezing the map to make room for a
+     title would have moved the one thing in this figure that means something. */
+  const TOP=15;
+  const W=260,H=140+TOP,pad=6;
   const sx=v=>pad+(v-fullA0)/(fullA1-fullA0)*(W-2*pad);
-  const sy=v=>pad+(v-fullB0)/(fullB1-fullB0)*(H-2*pad);
+  const sy=v=>TOP+pad+(v-fullB0)/(fullB1-fullB0)*(H-TOP-2*pad);
   let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:var(--bg);border:1px solid var(--line);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
+  svg+='<text x="'+pad+'" y="11" font-size="9.5" font-family="monospace" style="fill:var(--mut)">Top view (X &rarr;, Z &darr;)</text>';
   for(const e of extents){
     const ex0=sx(e.a0),ex1=sx(e.a1),ey0=sy(e.b0),ey1=sy(e.b1);
-    svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"/>';
+    svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"><title>'+e.name+'</title></rect>';
+    /* OPPOSITE EDGES: the two extents overlap, so two labels on the same edge would collide inside
+       the overlap for some cells and not others. Each in its own rectangle's colour, which is also
+       what lets the dot be read without a key -- the dot is drawn in the colour of the extent it
+       is in. The short name, because this is a label on a 260 px drawing; the long one is in the
+       <title> on both the box and the label. */
+    const ly=e.bottom?(ey1-4):(ey0+9.5);
+    svg+='<text x="'+(ex0+4).toFixed(1)+'" y="'+ly.toFixed(1)+'" font-size="9" font-family="monospace" font-weight="bold" fill="'+e.color+'">'+e.short+'<title>'+e.name+'</title></text>';
   }
   const inside65=nx>=BB65.xmin&&nx<=BB65.xmax&&nz>=BB65.zmin&&nz<=BB65.zmax;
   const inside35=nx>=BB35.xmin&&nx<=BB35.xmax&&nz>=BB35.zmin&&nz<=BB35.zmax;
   const dotColor=inside65?"#58a6ff":(inside35?"#f0883e":"#fff200");
   svg+='<circle cx="'+sx(nx).toFixed(1)+'" cy="'+sy(nz).toFixed(1)+'" r="5" fill="'+dotColor+'" stroke="#0d1117" stroke-width="1"/>';
   svg+='</svg>';
-  const legend=extents.map(e=>'<span style="color:'+e.color+'">&#9633;</span> '+e.name).join('&nbsp;&nbsp;&nbsp;');
-  /* THE NOTE ONLY APPEARS WHEN IT HAS SOMETHING TO SAY, 2026-09-18. "within Img65's imaged
-     extent" was true of very nearly every cell in a minnie65 roster, so it was a line of the panel
-     spent on telling somebody nothing. The other two cases are not: outside Img65 there is no
-     MICrONS segmentation for the point, which is why that panel looks unlike every other one, and
-     outside both there is no imagery at all. The legend above is untouched -- it names the two
-     colours, which the picture cannot do for itself. */
+  /* NOTHING ABOVE THE FIGURE ANY MORE. The title and the two dataset names are inside it, so the
+     line that used to carry them -- and which wrapped to two lines at panel width, 36 px -- has
+     nothing left to say. The title band inside the SVG costs 15 of those 36 back.
+     THE NOTE BELOW ONLY APPEARS WHEN IT HAS SOMETHING TO SAY: "within Img65's imaged extent" was
+     true of very nearly every cell in a minnie65 roster, so it was a line spent telling somebody
+     nothing. The other two cases are not -- outside Img65 there is no MICrONS segmentation for the
+     point, which is why that panel looks unlike every other one, and outside both there is no
+     imagery at all. */
   const where=inside65?"":inside35?"in Img35, outside Img65 — no MICrONS segmentation here"
                                   :"outside both datasets’ imaged extent";
-  return '<div class="hint" style="margin-bottom:3px">Top view (X &rarr;, Z &darr;) &mdash; '+legend+'</div>'+svg
-    +(where?'<p class="hint" style="margin-top:4px">'+where+'</p>':'');
+  return svg+(where?'<p class="hint" style="margin-top:4px">'+where+'</p>':'');
 }
 /* Combines the depth/layer diagram with the top-down dataset-extent diagram side by side, so
    a single coordinate shows both where it sits among cortical layers AND where it sits in the
@@ -3712,7 +3760,8 @@ async function drawPanelEmPlane(tok){
       UJ.segpaint.configure({seg:SRC.seg,nuc:SRC.nuc,
                              res:(typeof UJ.cfg!=="undefined"&&UJ.cfg)?UJ.cfg.res:[4,4,40]});
     emPlaneSay(tok,across+" · reading the segmentation…");
-    var got=await UJ.segpaint.paint(cv,view,{root:root,nuc:nuc,alpha:0.4});
+    /* EM_SEG_ALPHA, not a number here -- see src/one_window_for_every_em.py. */
+    var got=await UJ.segpaint.paint(cv,view,{root:root,nuc:nuc,alpha:EM_SEG_ALPHA});
     if(EM_PLANE_TOKEN!==tok)return;
     /* "Nothing appeared" has two causes that want different answers, the same two the pad's own
        overlay spells out: the cell is not in this window, or it is not in the segmentation. */
@@ -4492,6 +4541,7 @@ function typeInfo(i){const t=NT[i];const mt=mtypeInfo(NX[i],NY[i],NZ[i]);const m
 
 function renderStandalone(st,panel,outOfRegion){
   panel.classList.add("show");
+  setNearestLine("");   /* a verified own point has no MICrONS nucleus detection to be nearest to */
   CUR_IS_NEURON=looksLikeNeuron(st.type);
   let oh='<span class="tag" style="background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)" title="From S\u00f8ren\u2019s own verified cell-type coordinates \u2014 there is no automated MICrONS prediction or segmentation to compare against here.">verified identification</span>';
   oh+='<div class="celltype" id="ctHeadline">'+celltypeLink(st.pos,longName(st.type))+favStarHtml('','',st.pos[0],st.pos[1],st.pos[2])+(st.vloc?' <small style="color:var(--mut)">('+st.vloc+')</small>':'')+'</div>';
@@ -4534,6 +4584,19 @@ function renderStandalone(st,panel,outOfRegion){
 }
 
 let LAST_OOB_QUERY=0; // bumped on every showNucleus() call; see the race-guard in the out-of-region branch below
+/* ── ONE FUNCTION OWNS THE NEAREST-NUCLEUS LINE ─────────────────────────────────  2026-09-18
+   It sits outside #nucpanel now, so it does NOT vanish when the panel is replaced -- and four other
+   render paths can replace that panel with a cell that has no nearest MICrONS nucleus to report (a
+   verified own point, a user-reported cell, a merged sub-cell, the guided-identification flow).
+   Any of them leaving the old text standing would have the card state a nucleus id and a distance
+   for a cell that is no longer on screen, in the tool's own voice, with nothing to mark it stale.
+   So: every path that takes the panel calls this, with a value or with nothing. */
+function setNearestLine(html){
+  const el=document.getElementById("nearestLine");
+  if(!el)return;
+  el.innerHTML=html||"";
+  el.style.display=html?"":"none";
+}
 function showNucleus(pos){
   const[vx,vy,vz]=pos,panel=document.getElementById("nucpanel");
   LAST_OOB_QUERY++;
@@ -4615,6 +4678,9 @@ function showNucleus(pos){
       const ur2=nearestUserReportedCell(vx,vy,vz,5000);
       if(ur2)renderUserReportedCell(ur2,panel);
     });
+    /* No nucleus was detected anywhere near here -- so there is no nearest-nucleus line, and any
+       line left from the previous lookup would be reporting a different cell entirely. */
+    setNearestLine("");
     return;
   }
   const r=nearest(vx,vy,vz),i=r.i,ti=typeInfo(i),root=rootId(i),nid=String(NID[i]);
@@ -4665,7 +4731,17 @@ function showNucleus(pos){
     const unclassified=ti.name==="Unclassified";
     if(!unclassified)window.CUR_MICRONS_NAME=longName(ti.name); // see CUR_MICRONS_NAME's reset comment above -- no real prediction to vote on when unclassified
     h+='<span class="tag '+ti.ab+'" id="ctTag" title="'+BROAD_SOURCE_NOTE+'">'+(ti.cls?ti.cls.replace("_"," "):"nucleus &middot; no prediction")+'</span>';
-    h+='<div class="celltype" id="ctHeadline"'+(unclassified?' data-unclassified="1"':'')+' data-microns-name="'+escHtml(longName(ti.name))+'" title="'+(ciBroad?ciBroad.full+" \u2014 "+ciBroad.role:"")+'">'+celltypeLink(pos,longName(ti.name))+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+' <small>'+(unclassified?"no MICrONS prediction":"MICrONS prediction")+'</small></div>';     h+='<div id="idVotePanel" style="margin:3px 0 2px"></div>';
+    /* 2026-09-18 (Søren: "This is very specific information for advanced users ... Could that be
+       a part of the mouseover for the grey MICrONS prediction next to the name?") -- the Allen
+       m-type used to be a line of its own under the headline. It IS the MICrONS prediction at a
+       finer grain, and this grey label is the thing that says where the name came from, so the
+       finer version of the same prediction belongs in its tooltip. The label already carried its
+       own provenance note there; the subtype joins it. */
+    const mtip=ti.mtype
+      ?"Allen m-type (fine subtype): "+ti.mtype+" \u2014 "+MTYPE_SOURCE_NOTE
+        +(ciFine?" "+ciFine.full+": "+ciFine.role:"")
+      :"";
+    h+='<div class="celltype" id="ctHeadline"'+(unclassified?' data-unclassified="1"':'')+' data-microns-name="'+escHtml(longName(ti.name))+'" title="'+(ciBroad?ciBroad.full+" \u2014 "+ciBroad.role:"")+'">'+celltypeLink(pos,longName(ti.name))+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+' <small'+(mtip?' title="'+mtip+'"':'')+'>'+(unclassified?"no MICrONS prediction":"MICrONS prediction")+'</small></div>';     h+='<div id="idVotePanel" style="margin:3px 0 2px"></div>';
     h+='<div class="meta" id="commReports"></div>';
     if(ti.name==="astrocyte"){
       const af=fineName(window.OWN_FINE,i,window.OWN_FINE_DIST);if(af)h+='<div class="meta" style="margin-top:-6px">'+af+'</div>';
@@ -4676,7 +4752,10 @@ function showNucleus(pos){
          vessel-type info for every other pure-MICrONS-predicted cell (neurons, oligo, pericyte, etc). */
       const mf=fineName(window.OWN_FINE,i,window.OWN_FINE_DIST);if(mf)h+='<div class="meta" style="margin-top:-6px">'+mf+'</div>';
     }
-    if(ti.mtype)h+='<div class="meta" title="'+MTYPE_SOURCE_NOTE+(ciFine?" \u2014 "+ciFine.full+": "+ciFine.role:"")+'">Allen m-type (fine subtype): <b>'+ti.mtype+'</b></div>';
+    /* The visible "Allen m-type (fine subtype)" line is gone -- it is in the grey MICrONS
+       prediction label's tooltip now, a few lines above. The DISAGREEMENT warning below it stays
+       visible on purpose: that one is the page telling you not to trust the headline, and a warning
+       in a tooltip is a warning nobody reads. */
     if(ti.agree&&ti.agree.agree===false)h+='<div class="meta warn" style="color:#f0883e">&#9888; Broad class and fine m-type disagree ('+ti.agree.detail+'). When they differ, the fine m-type is generally the more specific/reliable call &mdash; it uses dendritic morphology or synaptic-target data, while the broad class uses only soma/nucleus shape and is known to sometimes misclassify (e.g. layer 5 inhibitory neurons as excitatory).</div>';
   }
   /* Single "what does the headline actually say" string, mirroring whichever of the three
@@ -4700,7 +4779,19 @@ function showNucleus(pos){
      moves under the step-through card while stepping, so there is exactly one identity/voting/
      correction UI, not two to keep in sync. Nothing needs to happen here any more. */
   h+=renderLocationDiagram(pos,{root:root,nuc:nid});
-  h+='<div class="meta">nearest nucleus at voxel '+coordSpan(NX[i],NY[i],NZ[i])+' &middot; '+(r.dist/1000).toFixed(2)+' &micro;m from query</div>';
+  /* "at voxel" deleted 2026-09-18 (Søren) -- coordSpan renders a chip that is visibly a
+     coordinate, this whole tool works in voxels, and the boxes it came from are labelled x/y/z. */
+  /* THE JUMP IS ON THE LINE THAT NAMES WHAT IT JUMPS TO, 2026-09-18 (Søren: "Jump to this
+     nucleus should be next to the nearest nucleus at this voxel, just after 'from query', but
+     make it look nice.") It used to sit at the very bottom of the panel, under Cell history,
+     which is as far as it is possible to get from the line saying WHICH nucleus it means.
+     It keeps class="jump" because the click handler below binds `.jump`, and overrides the
+     size: a full-size button in a 12 px monospace line would set the line's height and read as
+     a mistake. The override matches the inline "Jump to centriole" button that already lives
+     in a .meta line in renderStandalone -- the pattern for this was already in the file.
+     The whole line now goes UNDER THE COORDINATE BOXES rather than into this panel, so it is
+     wired after panel.innerHTML below (the button's handler is bound there, on the card). */
+  const nearestHtml='nearest nucleus '+coordSpan(NX[i],NY[i],NZ[i])+' &middot; '+(r.dist/1000).toFixed(2)+' &micro;m from query'+'<button class="jump" data-x="'+NX[i]+'" data-y="'+NY[i]+'" data-z="'+NZ[i]+'" style="margin:0 0 0 10px;padding:2px 8px;font-size:11px;vertical-align:middle">Jump to this nucleus &#8599;</button>';
   /* nearest() has no distance cap, so a query point that MICrONS's automatic nucleus detector
      never picked up at all (a real cell it simply missed) still silently returns whatever
      nucleus happens to be closest, however far away -- with nothing telling the user it's
@@ -4738,23 +4829,34 @@ function showNucleus(pos){
   else h+='<div class="idrow"><span class="k">root ID</span><span class="nsub">unsegmented &mdash; no MICrONS root ID</span>'+meshDlButtonHtml("",window.CUR_CELLTYPE_DISPLAY,[NX[i],NY[i],NZ[i]],true,NV[i],nid)+'</div>'+meshVolRowHtml();
   h+='</div>';
   h+='<div id="rootIdPanel" style="margin:6px 0"></div>';
-  h+='<div id="connPanel" style="margin:6px 0"></div>';
-  h+='<div id="tripartitePanel" style="margin:6px 0"></div>';
-  h+='<div id="cellContactsPanel" style="margin:6px 0"></div>';
-  h+='<div id="classHistoryPanel" style="margin:6px 0"></div>';
-  h+='<button class="jump" data-x="'+NX[i]+'" data-y="'+NY[i]+'" data-z="'+NZ[i]+'">Jump to this nucleus &#8599;</button>';
   const ne=kNearest(NX[i],NY[i],NZ[i],3,i);
-  h+='<div class="neigh"><h4>3 nearest neighbouring cells</h4>';
+  /* COLLAPSED, AND NEXT TO THE OTHER THINGS YOU CAN OPEN, 2026-09-18 (Søren: "The nearest
+     neighbors should be just above the connectivity and be collapsed by default.") Three cells
+     with a type, two ids and a coordinate each is about 120 px that most readers never want.
+     The <h4> becomes the <summary> and keeps its styling, so this still reads as the section it
+     was rather than as a link; .neigh keeps supplying the rule above it that separates it. */
+  h+='<details class="neigh" style="margin-top:12px"><summary style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);cursor:pointer;margin:0">3 nearest neighbouring cells</summary><div style="margin-top:6px">';
   for(const nb of ne){const nt=typeInfo(nb.i),rr=rootId(nb.i),nciB=CELLTYPE_INFO[nt.name],nciF=nt.mtype?MTYPE_INFO[nt.mtype]:null;const nOwn=ownOverride(nb.i),nMerged=mergedInfo(nb.i);
     h+='<div class="nrow"><div class="nleft"><span class="dot '+nt.ab+'"></span><div><div class="ntype njump" data-x="'+NX[nb.i]+'" data-y="'+NY[nb.i]+'" data-z="'+NZ[nb.i]+'" style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" title="Jump to this cell">'+(nMerged?('<span style="color:#f0883e" title="Merged nucleus segmentation \u2014 '+nMerged.length+' distinct cells identified here: '+nMerged.map(m=>m.type).join(", ")+'">\u26a0 merged nucleus ('+nMerged.length+' cells)</span>'):nOwn?('<span style="color:var(--accent)" title="Verified: '+linkifyAuthors(nOwn.authors).replace(/<[^>]+>/g,"")+'">'+nOwn.type+' &#10003;</span>'):(''+(nciB?'<span title="'+nciB.full+" \u2014 "+nciB.role+'">':'')+longName(nt.name)+(nciB?'</span>':'')))+(nt.cls?' <span class="nsub">'+nt.cls.replace("_"," ")+'</span>':'')+(nt.mtype?' <span class="nsub" title="'+MTYPE_SOURCE_NOTE+(nciF?" \u2014 "+nciF.full+": "+nciF.role:"")+'">'+nt.mtype+'</span>':'')+'</div><div class="nsub">'+(nb.dist/1000).toFixed(2)+' &micro;m &middot; nuc '+idSpan(NID[nb.i])+(rr?' &middot; root '+idSpan(rr):' &middot; no root')+' &middot; voxel ('+coordSpan(NX[nb.i],NY[nb.i],NZ[nb.i])+')'+'</div></div></div>'
       +'</div>';
   }
-  h+='</div>';
+  h+='</div></details>';
+  h+='<div id="connPanel" style="margin:6px 0"></div>';
+  h+='<div id="tripartitePanel" style="margin:6px 0"></div>';
+  h+='<div id="cellContactsPanel" style="margin:6px 0"></div>';
+  h+='<div id="classHistoryPanel" style="margin:6px 0"></div>';
   h+= ti.cls
     ? '<div class="idcta"><div class="idcta-top"><span>Not sure? Take the guided identification</span><button class="idbtn" id="idfgo">Guided identification &rarr;</button></div>'
     : '<div class="idcta warn"><div class="idcta-top"><span>No MICrONS suggestion for this nucleus.</span><button class="idbtn" id="idfgo">Start guided identification &rarr;</button></div>';
   h+='<div class="idcta-search">'+leafSearchHtml("mainLeaf","Already know it? Jump straight there")+'</div></div>';
   panel.innerHTML=h;
+  /* The line lives on the CARD, not in this panel, so it is written after the panel and its own
+     button is wired here rather than by the panel's .jump/.njump sweep below. */
+  setNearestLine(nearestHtml);
+  const nlBtn=document.querySelector("#nearestLine button.jump");
+  if(nlBtn)nlBtn.addEventListener("click",()=>{
+    jumpToVoxel(+nlBtn.dataset.x,+nlBtn.dataset.y,+nlBtn.dataset.z);
+  });
   panel.querySelectorAll(".jump,.njump").forEach(b=>b.addEventListener("click",()=>{
     /* Only ".njump" (a "3 nearest neighbouring/nearest cells" list entry) sets a Back target --
        ".jump" ("Jump to this nucleus/cell") re-centers on the SAME cell already on screen, so
@@ -7538,6 +7640,7 @@ function oobNeighborRowHtml(c){
    comment: reporterName is normally never sent to the client, but Søren explicitly asked for it
    here as public credit for this report type specifically. */
 function renderUserReportedCell(ur,panel){
+  setNearestLine("");   /* the reporter's own estimated location, not a nucleus detection */
   panel.className="nuc show oob";
   /* Unlike renderStandalone() (always null -- Søren's own dataset has no minnie35 segmentation
      to point to), a community "new cell" report can optionally include a rootId the reporter
@@ -7673,6 +7776,7 @@ function renderUserReportedCell(ur,panel){
    nuclei and what they used to be, eg. unclassified"). */
 function renderMergedSubCell(sub,panel){
   panel.className="nuc show";
+  setNearestLine("");   /* this sub-cell's nucleus is the FUSED detection, not a nearest one */
   CUR_ROOT=sub.subRootId||null;CUR_NUCID=null;CUR_NUC_ROOT=null;
   CUR_IS_NEURON=looksLikeNeuron(sub.identified);
   window.CUR_POS=sub.pos;window.CUR_CELLTYPE_DISPLAY=sub.identified;window.CUR_ID_SOURCE="community";window.CUR_HAS_CELL=true;
@@ -9953,7 +10057,7 @@ async function padSegOverlay(){
       UJ.segpaint.configure({ seg: SRC.seg, nuc: SRC.nuc, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
     const cv = document.getElementById("tracePad");
     padSegSay("Reading the segmentation…");
-    const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, nuc: nuc, alpha: 0.4,
+    const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, nuc: nuc, alpha: EM_SEG_ALPHA,
       onProgress: function(d){ padSegSay("Reading the segmentation… " + d + " chunk(s)"); } });
     /* PER VOLUME, because "nothing appeared" has two causes that need different answers: the cell
        is not in this window, or the cell is not in the segmentation at all -- which is the whole
