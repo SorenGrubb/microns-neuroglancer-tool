@@ -125,6 +125,48 @@ function emPlaneBox(pos,ids){
     +'style="width:100%;max-width:'+EM_PLANE_CSS+'px;display:'+(on?"block":"none")+';margin:0 auto;'
     +'background:var(--bg);border:1px solid var(--line);border-radius:6px"></canvas></div>';
 }
+/* ── A SCALE BAR, INSTEAD OF A SENTENCE ABOUT THE WIDTH ────────────────────────  2026-09-18
+   Søren: "Just add a scalebar instead of writing how wide it is." Which is the right trade twice
+   over: it frees the caption line, and a bar is read against the thing it measures rather than
+   against a number you have to hold in your head while looking at a cell.
+
+   THE LENGTH IS A ROUND NUMBER, NOT A FIXED FRACTION. A bar of "30% of the view" would read 5.76 um
+   here and something else on the next cell, and a scale bar whose label needs two decimals is a
+   scale bar nobody uses. So: the largest of 0.5/1/2/5/10/20/50/100 um that fits in a third of the
+   width. At 64 nm/px across 300 px that is 5 um, 78 px, a bit over a quarter of the picture.
+
+   DRAWN LAST, ALWAYS. core/segpaint.js blends its overlay by reading the whole canvas back with
+   getImageData and writing it again, so a bar painted before it survives but wears the magenta.
+   Every exit from the draw calls this after whatever it did.
+
+   WHITE ON A DARK OUTLINE because EM is grey everywhere and a bar of one colour disappears
+   somewhere on every section. */
+function emPlaneScaleBar(cv, view){
+  if(!cv||!view)return;
+  var nmPerPx=view.effNmPerPx||view.nmPerPx;
+  if(!(nmPerPx>0))return;
+  var NICE=[0.5,1,2,5,10,20,50,100],want=(view.umAcross||0)/3,um=NICE[0],i;
+  for(i=0;i<NICE.length;i++)if(NICE[i]<=want)um=NICE[i];
+  var px=um*1000/nmPerPx;
+  if(!(px>8)||px>cv.width)return;
+  var ctx=cv.getContext("2d");
+  var x=12,y=cv.height-14,h=4;
+  ctx.save();
+  ctx.lineJoin="round";
+  ctx.strokeStyle="rgba(0,0,0,.85)";ctx.lineWidth=3;
+  ctx.strokeRect(x,y,px,h);
+  ctx.fillStyle="#fff";ctx.fillRect(x,y,px,h);
+  var label=(um<1?um:Math.round(um))+" µm";
+  ctx.font="600 13px system-ui, sans-serif";
+  ctx.textAlign="center";ctx.textBaseline="alphabetic";
+  ctx.strokeStyle="rgba(0,0,0,.85)";ctx.lineWidth=3;
+  ctx.strokeText(label,x+px/2,y-5);
+  ctx.fillStyle="#fff";ctx.fillText(label,x+px/2,y-5);
+  ctx.restore();
+  /* So a check can ask what it drew without reading pixels. */
+  try{cv.dataset.scaleUm=String(um);}catch(_e){}
+}
+
 async function drawPanelEmPlane(tok){
   var box=document.getElementById("emPlaneBox");
   if(!box)return;
@@ -175,7 +217,10 @@ async function drawPanelEmPlane(tok){
        It is also the one fact on this line that never changes -- a reader learns it once, and the
        pad paints the same two colours for the same two things. The scale DOES change, cell to
        cell, so the scale is what the caption keeps. */
-    var across="\u00b7 "+view.umAcross.toFixed(1)+"\u00a0\u00b5m across";
+    /* THE WIDTH IS ON THE PICTURE NOW, not in this line -- see emPlaneScaleBar. What is left here
+       is only what a bar cannot say: what is still loading, what is switched off, and what went
+       wrong. On an ordinary cell the line is empty, which is a row of the panel back. */
+    emPlaneScaleBar(cv,view);
     try{cv.title=view.umAcross.toFixed(1)+" \u00b5m across at "+view.nmPerPx+" nm/px, z="+view.z
       +". "+(view.slab>1
         ?"One plane of the "+view.sectionNm+" nm level, which averages "+view.slab+" of the 40 nm "
@@ -186,22 +231,24 @@ async function drawPanelEmPlane(tok){
       +(view.tightened?" (narrowed onto this plane from the "+view.windowAsked[0]+"\u2013"
                         +view.windowAsked[1]+" Neuroglancer window, because a downsampled level\u2019s "
                         +"values do not fill it)":" \u2014 the Neuroglancer window")+".";}catch(_t){}
-    if(!emPlaneSegOn()){emPlaneSay(tok,across+" \u00b7 segmentation off");return;}
+    if(!emPlaneSegOn()){emPlaneSay(tok,"segmentation off");return;}
     var root=String(ids.root||"").trim(),nuc=String(ids.nuc||"").trim();
-    if(!root&&!nuc){emPlaneSay(tok,across+" · no IDs to paint here");return;}
-    if(!UJ.segpaint){emPlaneSay(tok,across);return;}
+    if(!root&&!nuc){emPlaneSay(tok,"no IDs to paint here");return;}
+    if(!UJ.segpaint){emPlaneSay(tok,"");return;}
     if(!UJ.segpaint.configured())
       UJ.segpaint.configure({seg:SRC.seg,nuc:SRC.nuc,
                              res:(typeof UJ.cfg!=="undefined"&&UJ.cfg)?UJ.cfg.res:[4,4,40]});
-    emPlaneSay(tok,across+" · reading the segmentation…");
+    emPlaneSay(tok,"reading the segmentation…");
     /* EM_SEG_ALPHA, not a number here -- see src/one_window_for_every_em.py. */
     var got=await UJ.segpaint.paint(cv,view,{root:root,nuc:nuc,alpha:EM_SEG_ALPHA});
     if(EM_PLANE_TOKEN!==tok)return;
     /* "Nothing appeared" has two causes that want different answers, the same two the pad's own
        overlay spells out: the cell is not in this window, or it is not in the segmentation. */
     if(got&&got.ok&&!got.painted)
-      emPlaneSay(tok,across+" · this cell is not on this plane",true);
-    else emPlaneSay(tok,across);
+      emPlaneSay(tok,"this cell is not on this plane",true);
+    else emPlaneSay(tok,"");
+    /* After the overlay, because segpaint rewrites the whole canvas -- see emPlaneScaleBar. */
+    emPlaneScaleBar(cv,view);
   }catch(e){
     if(EM_PLANE_TOKEN!==tok)return;
     emPlaneSay(tok,"could not read the imagery: "+String(e&&e.message||e),true);

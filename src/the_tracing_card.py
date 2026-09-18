@@ -170,14 +170,14 @@ SCRIPTS = '''<script src="core/segread.js"></script>
 CARD = '''<div class="card" id="tracingCard">
 <details id="tracingPanel">
 <summary style="cursor:pointer;font-weight:600">Trace a cell or organelle &mdash; outline it, and it joins the dataset</summary>
-<p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Open a viewer and ring the cell with <b>point</b> annotations &mdash; <b>ctrl+click</b> once per vertex, going round one way; a plain click does nothing &mdash; then step a section with <b>,</b> or <b>.</b> and go round again. Paste the whole address bar back here. Three points to a section, two sections minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>
+<p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Open a viewer and ring the cell, then step a section with <b>,</b> or <b>.</b> and go round again. Paste the whole address bar back here. In <b>Spelunker</b> the link arms the <b>polyline</b> tool for you &mdash; there is no button for it in the toolbar &mdash; so click each vertex and click the first one again to close the ring. In the MICrONS viewer, which has no polyline, ring the cell with <b>point</b> annotations instead: <b>ctrl+click</b> once per vertex, going round one way; a plain click does nothing. Three vertices to a section, two sections minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>
 <label style="margin-top:10px">Where to open it <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; voxels, the same as the coordinate box at the top of this tab</span></label>
 <div class="row"><div class="coord"><input type="text" id="tracingX" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="tracingY" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="tracingZ" inputmode="decimal" placeholder="z"></div></div>
 <p class="hint" style="margin-top:4px">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically. Filled in from the cell you look up, and kept in step with it until you type a coordinate of your own.</p>
 <p class="hint" id="tracingPosSay" style="margin-top:4px"></p>
 <div class="row" style="gap:8px;margin-top:8px">
 <button class="idbtn" id="tracePadOpen" style="flex:1 1 auto" title="Draws the EM section here and gives you a real polygon tool: click each vertex, click the first one again to close. No viewer a link can reach has one.">Trace it here &mdash; polygon tool</button>
-<button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate in the boxes above, with an empty annotation layer called &quot;tracing&quot; already selected and the point tool already active.">Open a viewer instead</button>
+<button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate in the boxes above, with an empty annotation layer called &quot;tracing&quot; already selected and a drawing tool already active &mdash; the polyline tool in Spelunker, which has no button for it, or the point tool in viewers that lack one.">Open a viewer instead</button>
 </div>
 <div id="tracePadWrap" style="display:none;margin-top:10px">
 <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
@@ -930,20 +930,39 @@ function tracingOpen(){
   st.layers=(st.layers||[]).filter(function(l){
     return !(l&&l.type==="annotation"&&/cortical layers/i.test(String(l.name||"")));});
   st.layers=st.layers.filter(function(l){return !(l&&l.type==="annotation"&&l.name==="tracing");});
-  /* annotatePoint, not annotateLine: no viewer a link can reach has a polygon tool (measured
-     2026-09-17 -- the MICrONS viewer has four tools and Spelunker's polyline never serialises), and
-     of what is left the point tool is one ctrl+click per vertex against the line tool's two, with
-     the clicks stored in order. core/tracing.js reads either. */
-  st.layers.push({type:"annotation",source:"local://annotations",tool:"annotatePoint",
+  /* ── THE TOOL IS ARMED FROM THE LINK, NOT FOUND IN A TOOLBAR ──────────────────  2026-09-18
+     Søren: "I still don't see the polyline tool" -- with a screenshot of Spelunker's annotation tab
+     showing four icons: point, bounding box, line, ellipsoid. There is no polyline BUTTON in that
+     row. But his own pasted state carried `"tool": "annotatePolyline"`, so the tool IS in the build
+     and can be selected; it simply has no icon to click.
+
+     Which is something this link can do for him. A layer's `tool` in the state is the armed tool,
+     so the viewer opens with the polyline live and there is nothing to hunt for -- better than a
+     button would have been.
+
+     PER VIEWER, because only one of them has it. Spelunker emits annotatePolyline (measured from
+     his own state, 2026-09-18); the MICrONS viewer's toolbar is those four and nothing else, so
+     there the point tool stays the answer -- one ctrl+click per vertex against the line tool's two,
+     stored in the order clicked. core/tracing.js reads all three shapes. His viewer choice is read,
+     never overridden, and the toast says which tool he got. */
+  const viewerEl=document.getElementById("viewer");
+  const base=(viewerEl&&viewerEl.value)||"https://spelunker.cave-explorer.org/";
+  const hasPolyline=/cave-explorer|spelunker/i.test(base);
+  st.layers.push({type:"annotation",source:"local://annotations",
+                  tool:hasPolyline?"annotatePolyline":"annotatePoint",
                   tab:"annotations",name:"tracing",annotations:[]});
   st.selectedLayer={layer:"tracing",visible:true};
   st.layout="xy";   // tracing happens on sections; the 3D pane only takes the width
-  const viewerEl=document.getElementById("viewer");
-  const base=(viewerEl&&viewerEl.value)||"https://spelunker.cave-explorer.org/";
   window.open(base+"#!"+encodeURIComponent(JSON.stringify(st)),"_blank","noopener");
-  tracingSay("Viewer opened at "+pos.join(", ")+", on a layer called \\u201ctracing\\u201d with the point "
-    +"tool live. Ctrl+click round the cell, one click per vertex; , and . step a section. There is no "
-    +"polygon tool in any viewer a link can reach \\u2014 points are the fast way. Paste the address bar back here.");
+  tracingSay(hasPolyline
+    ? "Viewer opened at "+pos.join(", ")+", on a layer called \\u201ctracing\\u201d with the POLYLINE "
+      +"tool already live \\u2014 there is no button for it in the toolbar, so the link arms it. Click "
+      +"round the cell, then click the first vertex again to close it; , and . step a section. Paste "
+      +"the address bar back here."
+    : "Viewer opened at "+pos.join(", ")+", on a layer called \\u201ctracing\\u201d with the point "
+      +"tool live. Ctrl+click round the cell, one click per vertex; , and . step a section. This "
+      +"viewer has no polyline tool \\u2014 Spelunker does, and the link arms it there. Paste the "
+      +"address bar back here.");
 }
 
 /* ── ADDING A TRACING IS SHARING IT ─────────────────────────────────────────────  2026-09-17

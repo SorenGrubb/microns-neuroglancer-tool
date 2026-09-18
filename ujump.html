@@ -548,7 +548,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 21:05</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 21:17</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -773,14 +773,14 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div class="card" id="tracingCard">
 <details id="tracingPanel">
 <summary style="cursor:pointer;font-weight:600">Trace a cell or organelle &mdash; outline it, and it joins the dataset</summary>
-<p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Open a viewer and ring the cell with <b>point</b> annotations &mdash; <b>ctrl+click</b> once per vertex, going round one way; a plain click does nothing &mdash; then step a section with <b>,</b> or <b>.</b> and go round again. Paste the whole address bar back here. Three points to a section, two sections minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>
+<p class="hint" style="margin-top:8px">For a cell the segmentation does not have. Open a viewer and ring the cell, then step a section with <b>,</b> or <b>.</b> and go round again. Paste the whole address bar back here. In <b>Spelunker</b> the link arms the <b>polyline</b> tool for you &mdash; there is no button for it in the toolbar &mdash; so click each vertex and click the first one again to close the ring. In the MICrONS viewer, which has no polyline, ring the cell with <b>point</b> annotations instead: <b>ctrl+click</b> once per vertex, going round one way; a plain click does nothing. Three vertices to a section, two sections minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>
 <label style="margin-top:10px">Where to open it <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; voxels, the same as the coordinate box at the top of this tab</span></label>
 <div class="row"><div class="coord"><input type="text" id="tracingX" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="tracingY" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="tracingZ" inputmode="decimal" placeholder="z"></div></div>
 <p class="hint" style="margin-top:4px">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically. Filled in from the cell you look up, and kept in step with it until you type a coordinate of your own.</p>
 <p class="hint" id="tracingPosSay" style="margin-top:4px"></p>
 <div class="row" style="gap:8px;margin-top:8px">
 <button class="idbtn" id="tracePadOpen" style="flex:1 1 auto" title="Draws the EM section here and gives you a real polygon tool: click each vertex, click the first one again to close. No viewer a link can reach has one.">Trace it here &mdash; polygon tool</button>
-<button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate in the boxes above, with an empty annotation layer called &quot;tracing&quot; already selected and the point tool already active.">Open a viewer instead</button>
+<button class="idbtn" id="tracingOpen" style="flex:1 1 auto" title="Opens the viewer chosen at the top of the Jump tab, at the coordinate in the boxes above, with an empty annotation layer called &quot;tracing&quot; already selected and a drawing tool already active &mdash; the polyline tool in Spelunker, which has no button for it, or the point tool in viewers that lack one.">Open a viewer instead</button>
 </div>
 <div id="tracePadWrap" style="display:none;margin-top:10px">
 <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
@@ -3700,6 +3700,48 @@ function emPlaneBox(pos,ids){
     +'style="width:100%;max-width:'+EM_PLANE_CSS+'px;display:'+(on?"block":"none")+';margin:0 auto;'
     +'background:var(--bg);border:1px solid var(--line);border-radius:6px"></canvas></div>';
 }
+/* ── A SCALE BAR, INSTEAD OF A SENTENCE ABOUT THE WIDTH ────────────────────────  2026-09-18
+   Søren: "Just add a scalebar instead of writing how wide it is." Which is the right trade twice
+   over: it frees the caption line, and a bar is read against the thing it measures rather than
+   against a number you have to hold in your head while looking at a cell.
+
+   THE LENGTH IS A ROUND NUMBER, NOT A FIXED FRACTION. A bar of "30% of the view" would read 5.76 um
+   here and something else on the next cell, and a scale bar whose label needs two decimals is a
+   scale bar nobody uses. So: the largest of 0.5/1/2/5/10/20/50/100 um that fits in a third of the
+   width. At 64 nm/px across 300 px that is 5 um, 78 px, a bit over a quarter of the picture.
+
+   DRAWN LAST, ALWAYS. core/segpaint.js blends its overlay by reading the whole canvas back with
+   getImageData and writing it again, so a bar painted before it survives but wears the magenta.
+   Every exit from the draw calls this after whatever it did.
+
+   WHITE ON A DARK OUTLINE because EM is grey everywhere and a bar of one colour disappears
+   somewhere on every section. */
+function emPlaneScaleBar(cv, view){
+  if(!cv||!view)return;
+  var nmPerPx=view.effNmPerPx||view.nmPerPx;
+  if(!(nmPerPx>0))return;
+  var NICE=[0.5,1,2,5,10,20,50,100],want=(view.umAcross||0)/3,um=NICE[0],i;
+  for(i=0;i<NICE.length;i++)if(NICE[i]<=want)um=NICE[i];
+  var px=um*1000/nmPerPx;
+  if(!(px>8)||px>cv.width)return;
+  var ctx=cv.getContext("2d");
+  var x=12,y=cv.height-14,h=4;
+  ctx.save();
+  ctx.lineJoin="round";
+  ctx.strokeStyle="rgba(0,0,0,.85)";ctx.lineWidth=3;
+  ctx.strokeRect(x,y,px,h);
+  ctx.fillStyle="#fff";ctx.fillRect(x,y,px,h);
+  var label=(um<1?um:Math.round(um))+" µm";
+  ctx.font="600 13px system-ui, sans-serif";
+  ctx.textAlign="center";ctx.textBaseline="alphabetic";
+  ctx.strokeStyle="rgba(0,0,0,.85)";ctx.lineWidth=3;
+  ctx.strokeText(label,x+px/2,y-5);
+  ctx.fillStyle="#fff";ctx.fillText(label,x+px/2,y-5);
+  ctx.restore();
+  /* So a check can ask what it drew without reading pixels. */
+  try{cv.dataset.scaleUm=String(um);}catch(_e){}
+}
+
 async function drawPanelEmPlane(tok){
   var box=document.getElementById("emPlaneBox");
   if(!box)return;
@@ -3750,7 +3792,10 @@ async function drawPanelEmPlane(tok){
        It is also the one fact on this line that never changes -- a reader learns it once, and the
        pad paints the same two colours for the same two things. The scale DOES change, cell to
        cell, so the scale is what the caption keeps. */
-    var across="\u00b7 "+view.umAcross.toFixed(1)+"\u00a0\u00b5m across";
+    /* THE WIDTH IS ON THE PICTURE NOW, not in this line -- see emPlaneScaleBar. What is left here
+       is only what a bar cannot say: what is still loading, what is switched off, and what went
+       wrong. On an ordinary cell the line is empty, which is a row of the panel back. */
+    emPlaneScaleBar(cv,view);
     try{cv.title=view.umAcross.toFixed(1)+" \u00b5m across at "+view.nmPerPx+" nm/px, z="+view.z
       +". "+(view.slab>1
         ?"One plane of the "+view.sectionNm+" nm level, which averages "+view.slab+" of the 40 nm "
@@ -3761,22 +3806,24 @@ async function drawPanelEmPlane(tok){
       +(view.tightened?" (narrowed onto this plane from the "+view.windowAsked[0]+"\u2013"
                         +view.windowAsked[1]+" Neuroglancer window, because a downsampled level\u2019s "
                         +"values do not fill it)":" \u2014 the Neuroglancer window")+".";}catch(_t){}
-    if(!emPlaneSegOn()){emPlaneSay(tok,across+" \u00b7 segmentation off");return;}
+    if(!emPlaneSegOn()){emPlaneSay(tok,"segmentation off");return;}
     var root=String(ids.root||"").trim(),nuc=String(ids.nuc||"").trim();
-    if(!root&&!nuc){emPlaneSay(tok,across+" · no IDs to paint here");return;}
-    if(!UJ.segpaint){emPlaneSay(tok,across);return;}
+    if(!root&&!nuc){emPlaneSay(tok,"no IDs to paint here");return;}
+    if(!UJ.segpaint){emPlaneSay(tok,"");return;}
     if(!UJ.segpaint.configured())
       UJ.segpaint.configure({seg:SRC.seg,nuc:SRC.nuc,
                              res:(typeof UJ.cfg!=="undefined"&&UJ.cfg)?UJ.cfg.res:[4,4,40]});
-    emPlaneSay(tok,across+" · reading the segmentation…");
+    emPlaneSay(tok,"reading the segmentation…");
     /* EM_SEG_ALPHA, not a number here -- see src/one_window_for_every_em.py. */
     var got=await UJ.segpaint.paint(cv,view,{root:root,nuc:nuc,alpha:EM_SEG_ALPHA});
     if(EM_PLANE_TOKEN!==tok)return;
     /* "Nothing appeared" has two causes that want different answers, the same two the pad's own
        overlay spells out: the cell is not in this window, or it is not in the segmentation. */
     if(got&&got.ok&&!got.painted)
-      emPlaneSay(tok,across+" · this cell is not on this plane",true);
-    else emPlaneSay(tok,across);
+      emPlaneSay(tok,"this cell is not on this plane",true);
+    else emPlaneSay(tok,"");
+    /* After the overlay, because segpaint rewrites the whole canvas -- see emPlaneScaleBar. */
+    emPlaneScaleBar(cv,view);
   }catch(e){
     if(EM_PLANE_TOKEN!==tok)return;
     emPlaneSay(tok,"could not read the imagery: "+String(e&&e.message||e),true);
@@ -8881,20 +8928,39 @@ function tracingOpen(){
   st.layers=(st.layers||[]).filter(function(l){
     return !(l&&l.type==="annotation"&&/cortical layers/i.test(String(l.name||"")));});
   st.layers=st.layers.filter(function(l){return !(l&&l.type==="annotation"&&l.name==="tracing");});
-  /* annotatePoint, not annotateLine: no viewer a link can reach has a polygon tool (measured
-     2026-09-17 -- the MICrONS viewer has four tools and Spelunker's polyline never serialises), and
-     of what is left the point tool is one ctrl+click per vertex against the line tool's two, with
-     the clicks stored in order. core/tracing.js reads either. */
-  st.layers.push({type:"annotation",source:"local://annotations",tool:"annotatePoint",
+  /* ── THE TOOL IS ARMED FROM THE LINK, NOT FOUND IN A TOOLBAR ──────────────────  2026-09-18
+     Søren: "I still don't see the polyline tool" -- with a screenshot of Spelunker's annotation tab
+     showing four icons: point, bounding box, line, ellipsoid. There is no polyline BUTTON in that
+     row. But his own pasted state carried `"tool": "annotatePolyline"`, so the tool IS in the build
+     and can be selected; it simply has no icon to click.
+
+     Which is something this link can do for him. A layer's `tool` in the state is the armed tool,
+     so the viewer opens with the polyline live and there is nothing to hunt for -- better than a
+     button would have been.
+
+     PER VIEWER, because only one of them has it. Spelunker emits annotatePolyline (measured from
+     his own state, 2026-09-18); the MICrONS viewer's toolbar is those four and nothing else, so
+     there the point tool stays the answer -- one ctrl+click per vertex against the line tool's two,
+     stored in the order clicked. core/tracing.js reads all three shapes. His viewer choice is read,
+     never overridden, and the toast says which tool he got. */
+  const viewerEl=document.getElementById("viewer");
+  const base=(viewerEl&&viewerEl.value)||"https://spelunker.cave-explorer.org/";
+  const hasPolyline=/cave-explorer|spelunker/i.test(base);
+  st.layers.push({type:"annotation",source:"local://annotations",
+                  tool:hasPolyline?"annotatePolyline":"annotatePoint",
                   tab:"annotations",name:"tracing",annotations:[]});
   st.selectedLayer={layer:"tracing",visible:true};
   st.layout="xy";   // tracing happens on sections; the 3D pane only takes the width
-  const viewerEl=document.getElementById("viewer");
-  const base=(viewerEl&&viewerEl.value)||"https://spelunker.cave-explorer.org/";
   window.open(base+"#!"+encodeURIComponent(JSON.stringify(st)),"_blank","noopener");
-  tracingSay("Viewer opened at "+pos.join(", ")+", on a layer called \u201ctracing\u201d with the point "
-    +"tool live. Ctrl+click round the cell, one click per vertex; , and . step a section. There is no "
-    +"polygon tool in any viewer a link can reach \u2014 points are the fast way. Paste the address bar back here.");
+  tracingSay(hasPolyline
+    ? "Viewer opened at "+pos.join(", ")+", on a layer called \u201ctracing\u201d with the POLYLINE "
+      +"tool already live \u2014 there is no button for it in the toolbar, so the link arms it. Click "
+      +"round the cell, then click the first vertex again to close it; , and . step a section. Paste "
+      +"the address bar back here."
+    : "Viewer opened at "+pos.join(", ")+", on a layer called \u201ctracing\u201d with the point "
+      +"tool live. Ctrl+click round the cell, one click per vertex; , and . step a section. This "
+      +"viewer has no polyline tool \u2014 Spelunker does, and the link arms it there. Paste the "
+      +"address bar back here.");
 }
 
 /* ── ADDING A TRACING IS SHARING IT ─────────────────────────────────────────────  2026-09-17
@@ -10071,7 +10137,7 @@ async function padSegOverlay(){
       UJ.segpaint.configure({ seg: SRC.seg, nuc: SRC.nuc, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
     const cv = document.getElementById("tracePad");
     padSegSay("Reading the segmentation…");
-    const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, nuc: nuc, alpha: EM_SEG_ALPHA,
+    const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, nuc: nuc, alpha: 0.4,
       onProgress: function(d){ padSegSay("Reading the segmentation… " + d + " chunk(s)"); } });
     /* PER VOLUME, because "nothing appeared" has two causes that need different answers: the cell
        is not in this window, or the cell is not in the segmentation at all -- which is the whole
@@ -10112,8 +10178,6 @@ async function padDraw(){
     const wide = Math.max(320, Math.min(880, (host && host.clientWidth ? host.clientWidth - 2 : 560)));
     PAD_VIEW = await UJ.emtiles.drawSection(cv, {
       centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height,
-      lo: EM_WINDOW.lo, hi: EM_WINDOW.hi, tighten: true,
-      lo: EM_WINDOW.lo, hi: EM_WINDOW.hi,
       onProgress: function(d, n){ if (d < n) padSay("Loading the section\u2026 " + d + "/" + n); }
     });
     /* ── THE SEGMENTATION GOES ON BEFORE THE CAPTURE ───────────────────────────  2026-09-17

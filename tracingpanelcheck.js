@@ -2419,10 +2419,58 @@ function link(annotations){
   }
 
   const newErrors = errors.filter(e => !/atob/.test(e));
+  console.log("\nthe viewer link arms a drawing tool, since there is no button for one");
+  {
+    /* Søren, 2026-09-18: "I still don't see the polyline tool" — with a screenshot of Spelunker's
+       annotation tab showing four icons and no polyline among them. His own pasted state carried
+       "tool": "annotatePolyline", so the tool is in the build with no icon to click. A layer's `tool`
+       in the state IS the armed tool, so the link can do it for him. Per viewer, because only
+       Spelunker has it. */
+    const armed = await p.evaluate(async (viewers) => {
+      const out = {};
+      const sel = document.getElementById("viewer");
+      const realOpen = window.open;
+      for (const v of viewers){
+        sel.value = v;
+        let url = null;
+        window.open = u => { url = u; return null; };
+        document.getElementById("tracingOpen").click();
+        await new Promise(r => setTimeout(r, 120));
+        window.open = realOpen;
+        if (!url){ out[v] = { none: true }; continue; }
+        const st = JSON.parse(decodeURIComponent(url.split("#!")[1]));
+        const tl = (st.layers || []).find(l => l && l.name === "tracing");
+        out[v] = { tool: tl && tl.tool, tab: tl && tl.tab,
+                   selected: st.selectedLayer && st.selectedLayer.layer,
+                   say: (document.getElementById("tracingStatus") || {}).textContent || "" };
+      }
+      return out;
+    }, ["https://spelunker.cave-explorer.org/", "https://ngl.microns-explorer.org/"]);
+
+    const sp = armed["https://spelunker.cave-explorer.org/"];
+    const ng = armed["https://ngl.microns-explorer.org/"];
+    ok(sp && sp.tool === "annotatePolyline",
+       "Spelunker opens with the POLYLINE tool live — the toolbar has no button for it",
+       sp && sp.tool);
+    ok(sp && sp.selected === "tracing" && sp.tab === "annotations",
+       "...on the tracing layer, with its annotations tab open", sp && sp.selected);
+    ok(sp && /POLYLINE/.test(sp.say) && /close it/.test(sp.say),
+       "...and the page says so, including how to close the ring", (sp && sp.say || "").slice(0, 60));
+    /* THE OTHER VIEWER MUST NOT BE HANDED A TOOL IT HAS NOT GOT. An unknown tool name would leave
+       the layer selected with nothing armed, and the instructions would be for a tool that is not
+       there — worse than the point tool, which that viewer does have. */
+    ok(ng && ng.tool === "annotatePoint",
+       "the MICrONS viewer keeps the point tool, which is what it actually has", ng && ng.tool);
+    ok(ng && /no polyline tool/.test(ng.say) && /Spelunker/.test(ng.say),
+       "...and the page says where the polyline is instead of pretending",
+       (ng && ng.say || "").slice(0, 60));
+  }
+
   ok(newErrors.length === 0, "the page still loads with no new errors",
      newErrors.join(" | ") || "none");
 
   await b.close();
-  console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
+  
+console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.log("THREW: " + e.stack); process.exit(1); });

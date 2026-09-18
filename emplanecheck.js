@@ -207,10 +207,19 @@ const settle = (p, ms) => p.waitForTimeout(ms);
        "...reaching past the section-only levels, which it must ask for explicitly", "slabOk");
     const umWide = await p.evaluate(() => {
       const cv = document.getElementById("emPlaneCv");
-      return Number((/([\d.]+)\s*\u00b5m/.exec(cv.title || "") || [])[1] || 0);
+      return { um: Number((/([\d.]+)\s*\u00b5m/.exec(cv.title || "") || [])[1] || 0),
+               bar: Number(cv.dataset.scaleUm || 0) };
     });
-    ok(umWide >= 18 && umWide <= 20,
-       "...showing 18-20 µm of tissue, the amount he asked for", umWide + " µm");
+    ok(umWide.um >= 18 && umWide.um <= 20,
+       "...showing 18-20 µm of tissue, the amount he asked for", umWide.um + " µm");
+    /* 2026-09-18, Søren: "Just add a scalebar instead of writing how wide it is." A ROUND number,
+       not a fixed fraction of the view: "30% of the width" would read 5.76 µm here and something
+       else on the next cell, and a scale bar whose label needs two decimals is one nobody uses. */
+    ok([0.5, 1, 2, 5, 10, 20, 50, 100].indexOf(umWide.bar) >= 0,
+       "...with a scale bar of a round length drawn on it", umWide.bar + " µm bar");
+    ok(umWide.bar > 0 && umWide.bar <= umWide.um / 3 + 0.001,
+       "...no longer than a third of the view, so it reads as a scale and not a ruler",
+       umWide.bar + " of " + umWide.um + " µm");
     ok(got.paints.length === 1, "the segmentation is painted over it", got.paints.length);
     /* 2026-09-18, Søren: "a bit too bright, can we turn it down by like 20%." 0.4 x 0.8. Asserted
        as the number because the overlay's job is to say WHERE the segmentation thinks the cell is;
@@ -229,10 +238,13 @@ const settle = (p, ms) => p.waitForTimeout(ms);
       return { said: say.textContent, rows: Math.round(line.getBoundingClientRect().height / one),
                title: cv.title || "" };
     });
-    ok(/µm|µm/.test(cap.said || ""), "...and the caption says how much tissue that is", cap.said);
-    /* ONE ROW. Every extra row of this caption is a row of empty background beside the model — the
-       whole reason the section fits under the top view at all is that it costs almost no height. */
-    ok(cap.rows === 1, "...on a single line, because a second one is pure panel height", cap.rows);
+    /* THE CAPTION NO LONGER SAYS THE WIDTH — the bar on the picture does (2026-09-18, Søren:
+       "Just add a scalebar instead of writing how wide it is"). What is left on that line is only
+       what a bar cannot say: still loading, switched off, went wrong. On an ordinary cell it is
+       empty, which is a row of the panel back. */
+    ok(!/µm|\u00b5m/.test(cap.said || ""),
+       "...and the caption has stopped repeating the width in words", JSON.stringify(cap.said));
+    ok(cap.rows === 1, "...still one line, because a second one is pure panel height", cap.rows);
     ok(/magenta/.test(cap.title) && /nm\/px/.test(cap.title),
        "...with the colour key and the resolution on the canvas itself, where they cost nothing",
        cap.title.slice(0, 60) + "…");
@@ -337,6 +349,9 @@ const settle = (p, ms) => p.waitForTimeout(ms);
        off.draws + " draw, canvas " + (off.shown ? "shown" : "hidden"));
     ok(off.paints === 0, "...and nothing is painted over it", off.paints + " paints");
     ok(/segmentation off/.test(off.said), "...and the caption says which of the two is off", off.said);
+    const barStill = await p.evaluate(() =>
+      Number((document.getElementById("emPlaneCv") || { dataset: {} }).dataset.scaleUm || 0));
+    ok(barStill > 0, "...and the scale bar is still on the section", barStill + " µm bar");
     ok(off.stored === "0" && off.sectionStill !== "0",
        "...remembered on its OWN key, so turning the overlay off does not turn the section off",
        "seg=" + off.stored + ", section=" + off.sectionStill);
