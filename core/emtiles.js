@@ -64,11 +64,30 @@ UJ.emtiles = (function(){
     return info.scales.filter(function(s){ return s.resolution[2] === fineZ; });
   }
 
-  async function scaleAt(mip){
+  /* ── slabOk: THE COARSER LEVELS, FOR CALLERS THAT ARE NOT TRACING ──────────────────  2026-09-18
+     The header's refusal to go past 32 nm stands for what this module was written for: a tracing is
+     section by section, and from 64x64x80 a "section" is two sections averaged together, so the z
+     index stops meaning the tool's z. That is a correctness limit for TRACING.
+
+     It is not a limit on looking. The cell-identity panel draws one plane to recognise a cell by,
+     and Søren asked for 18-20 um across it -- which at 32 nm would be a 594x321 window and 60 chunks,
+     for a picture 260 px wide. At 64 nm the same 19.2 um is 15 chunks: exactly what its 8.3 um view
+     cost before, measured against the real chunk grid. The tissue area is fixed and the chunk area
+     is fixed, so a wider view at a finer scale costs strictly more chunks for the same picture; the
+     only cheap way out is to read data that is already downsampled.
+
+     So this is opt-in and says what it gave you: `sectionNm` is the z resolution actually read and
+     `slab` is how many finest-sections that averages. A caller that needs one true section does not
+     pass slabOk and cannot be moved off a section by accident -- which is why this is a parameter
+     and not a wider default. */
+  async function scaleAt(mip, slabOk){
     var info = await UJ.segread._getInfo(CFG.em);
-    var usable = sectionScales(info);
+    var usable = slabOk ? info.scales : sectionScales(info);
     var i = Math.max(0, Math.min(usable.length - 1, mip | 0));
-    return { scale: usable[i], mip: i, count: usable.length };
+    var fineZ = info.scales[0].resolution[2];
+    return { scale: usable[i], mip: i, count: usable.length,
+             sectionNm: usable[i].resolution[2],
+             slab: Math.round(usable[i].resolution[2] / fineZ) };
   }
 
   /* Tool voxel -> this scale's voxel, and back. Kept as two functions rather than one factor
@@ -95,7 +114,7 @@ UJ.emtiles = (function(){
        real scale list, a 560x460 window costs ~30 chunks at 8 or 16 nm and ~90 at 32, because the
        32 nm level's chunks are 64 voxels wide against the other two's 128. The coarsest level shows
        the most tissue and is the most expensive to show it. */
-    var got = await scaleAt(opts.mip == null ? 1 : opts.mip);
+    var got = await scaleAt(opts.mip == null ? 1 : opts.mip, opts.slabOk);
     var scale = got.scale;
     /* MAGNIFICATION, SEPARATE FROM THE MIP.  2026-09-17
        The mip list stops at 8 nm/px, and a lysosome is about 500 nm -- sixty pixels, which is not
@@ -184,6 +203,10 @@ UJ.emtiles = (function(){
        both anchored on the same x0/y0 this call actually drew from. */
     var view = {
       mip: got.mip, mips: got.count, nmPerPx: scale.resolution[0], zoom: zoom,
+      /* What one drawn plane actually IS. slab === 1 is a true section; 2 means the level averages
+         two of them, and a caller that says so in its tooltip is telling the truth about its
+         picture. Always present, so nothing has to know whether slabOk was passed. */
+      sectionNm: got.sectionNm, slab: got.slab,
       /* What the pad actually shows, which is the mip's resolution divided by the magnification --
          the number for a scale bar, and NOT the number to call the data's resolution. */
       effNmPerPx: scale.resolution[0] / zoom,

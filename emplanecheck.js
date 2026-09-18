@@ -34,15 +34,25 @@ const STUB = () => {
     configured: () => true,
     configure: () => {},
     drawSection: async (cv, o) => {
-      window.__em.draws.push({ centre: o.centre.slice(), w: o.w, h: o.h, mip: o.mip });
+      window.__em.draws.push({ centre: o.centre.slice(), w: o.w, h: o.h, mip: o.mip,
+                               slabOk: !!o.slabOk });
       if (o.onProgress) o.onProgress(1, 4);
       if (window.__em.hold)
         await new Promise(r => { window.__em.release = r; });
       const ctx = cv.getContext("2d");
       cv.width = o.w; cv.height = o.h;
       ctx.fillStyle = "#222"; ctx.fillRect(0, 0, o.w, o.h);
-      return { mip: o.mip, nmPerPx: 32, zoom: 1, effNmPerPx: 32,
-               umAcross: o.w * 32 / 1000, z: o.centre[2], w: o.w, h: o.h,
+      /* The REAL scale list, so the numbers this check reads back are the ones the page will show.
+         Index 3 is only reachable with slabOk; without it the module clamps to index 2, and the
+         stub clamps the same way so that a page which forgot slabOk fails here rather than
+         silently drawing a quarter of the tissue. */
+      const SCALES = [[8, 40], [16, 40], [32, 40], [64, 80], [128, 160]];
+      const top = o.slabOk ? SCALES.length - 1 : 2;
+      const i = Math.max(0, Math.min(top, o.mip | 0));
+      const nm = SCALES[i][0], secNm = SCALES[i][1];
+      return { mip: i, nmPerPx: nm, zoom: 1, effNmPerPx: nm,
+               sectionNm: secNm, slab: Math.round(secNm / 40),
+               umAcross: o.w * nm / 1000, z: o.centre[2], w: o.w, h: o.h,
                toolAt: () => o.centre.slice(), pxAt: () => [0, 0], pxPerToolVoxel: 1 };
     }
   };
@@ -102,6 +112,8 @@ const settle = (p, ms) => p.waitForTimeout(ms);
         besideModel: !!model && cols.length === 2,
         modelH: model ? model.viewBox.baseVal.height : 0,
         cvW: cv.width, cvH: cv.height,
+        shownW: Math.round(cv.getBoundingClientRect().width),
+        shownH: Math.round(cv.getBoundingClientRect().height),
         rowFlex: getComputedStyle(row).display
       };
     });
@@ -110,23 +122,40 @@ const settle = (p, ms) => p.waitForTimeout(ms);
        "2 columns, model " + lay.modelH + " tall");
     ok(lay.inSameColumnAsTopView && lay.underTopView,
        "...stacked UNDER the top view, not as a third column that would wrap");
-    ok(lay.cvW === 260 && lay.cvH === 140,
-       "...the same 260 wide as the two diagrams, and half the model's height",
-       lay.cvW + "x" + lay.cvH);
+    /* DRAWN AT 300, SHOWN AT 260. The backing store is wider than the display so the view can
+       cover 19 um of tissue without the canvas becoming wider than the two diagrams it is lined up
+       under — "how much tissue" and "how much room" are different questions (2026-09-18). */
+    ok(lay.cvW === 300 && lay.cvH === 162,
+       "...drawn 300 px wide, for tissue rather than for room", lay.cvW + "x" + lay.cvH);
+    ok(Math.abs(lay.shownW - 260) <= 1,
+       "...and displayed at the same 260 the model and the top view are",
+       lay.shownW + " px on screen");
+    ok(Math.abs(lay.shownH - 140) <= 2,
+       "...keeping the top view's proportion, so the three read as one column",
+       lay.shownH + " px tall");
     /* The space it fills was already empty: one 320-tall model against 140+140 stacked. Asserting
        the arithmetic rather than a screenshot, because "without too much wasted space" is a claim
        about THIS ratio and nothing else about the page. */
-    ok(lay.modelH >= 2 * lay.cvH && lay.modelH <= 2 * lay.cvH + 60,
+    ok(lay.modelH >= 2 * lay.shownH && lay.modelH <= 2 * lay.shownH + 60,
        "...so the panel grows by almost nothing — the stack fits the model's own height",
-       lay.modelH + " vs " + (2 * lay.cvH));
+       lay.modelH + " vs " + Math.round(2 * lay.shownH));
   }
 
   console.log("\nit draws this cell, and paints THIS cell's ids");
   {
     const got = await p.evaluate(() => window.__em);
     ok(got.draws.length === 1, "one section drawn, not one per render", got.draws.length);
-    ok(got.draws[0] && got.draws[0].mip === 2,
-       "...at 32 nm, which is a soma across rather than the inside of a nucleus", "mip 2");
+    /* 18-20 um across, which is what he asked for after seeing 8.3: a soma AND what it sits among,
+       rather than a soma filling the frame. Asserted as the micron figure, not as a mip index --
+       the number is the requirement and the level is just how it is met. */
+    ok(got.draws[0] && got.draws[0].slabOk === true,
+       "...reaching past the section-only levels, which it must ask for explicitly", "slabOk");
+    const umWide = await p.evaluate(() => {
+      const cv = document.getElementById("emPlaneCv");
+      return Number((/([\d.]+)\s*\u00b5m/.exec(cv.title || "") || [])[1] || 0);
+    });
+    ok(umWide >= 18 && umWide <= 20,
+       "...showing 18-20 µm of tissue, the amount he asked for", umWide + " µm");
     ok(got.paints.length === 1, "the segmentation is painted over it", got.paints.length);
     ok(got.paints[0] && got.paints[0].root === shown.root && got.paints[0].nuc === shown.nuc,
        "...with the root and nucleus of the cell on screen",
@@ -146,6 +175,12 @@ const settle = (p, ms) => p.waitForTimeout(ms);
     ok(/magenta/.test(cap.title) && /nm\/px/.test(cap.title),
        "...with the colour key and the resolution on the canvas itself, where they cost nothing",
        cap.title.slice(0, 60) + "…");
+    /* IT SAYS WHAT ONE PLANE IS. At this level the volume averages two 40 nm sections, which is
+       right for recognising a cell and wrong for tracing one — so the picture says so rather than
+       letting a reader assume the pad and the panel show the same thing. */
+    ok(/averages 2 of the 40 nm sections/.test(cap.title) && /tracing pad/.test(cap.title),
+       "...and admits the plane is two sections averaged, not one section",
+       /averages[^.]*\./.exec(cap.title) ? /averages[^.]*\./.exec(cap.title)[0] : cap.title);
   }
 
   console.log("\nevery panel paints what IT knows, not what the globals hold");

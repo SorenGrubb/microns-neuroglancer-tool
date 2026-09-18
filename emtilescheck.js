@@ -103,6 +103,33 @@ console.log("only the levels that keep a 40 nm section");
   ok(tooCoarse.scale.key === "32x32x40",
      "asking for a coarser one gives the coarsest USABLE one, not a slab — at 64x64x80 a "
      + "'section' averages two, and a tracing is section by section", tooCoarse.scale.key);
+  ok(tooCoarse.slab === 1 && tooCoarse.sectionNm === 40,
+     "...and it says so: one finest-section per drawn plane",
+     tooCoarse.sectionNm + " nm, slab " + tooCoarse.slab);
+}
+
+console.log("\n...unless the caller says it is not tracing");
+{
+  /* slabOk, 2026-09-18. The cell-identity panel wants 18-20 um across a 300 px picture, which at
+     32 nm is a 594 px window — sixty chunks for a thumbnail. The coarser levels cost what the
+     current view costs, and an 80 nm slab is a fine thing to RECOGNISE a cell in. It is opt-in
+     because a tracing must never be moved off a true section by accident. */
+  const slab = await E.scaleAt(3, true);
+  ok(slab.scale.key === "64x64x80",
+     "slabOk reaches the level that section-only refuses", slab.scale.key);
+  ok(slab.slab === 2 && slab.sectionNm === 80,
+     "...and says exactly what it gave: two finest-sections averaged into one plane",
+     slab.sectionNm + " nm, slab " + slab.slab);
+  ok(slab.count === 5, "...counting every level, not just the three", slab.count + " levels");
+  const still = await E.scaleAt(3);
+  ok(still.scale.key === "32x32x40" && still.slab === 1,
+     "...while the same call WITHOUT it is unmoved — the pad cannot drift onto a slab",
+     still.scale.key);
+  /* The z index means a different thing at that level, and toScale must follow it. Tool z is
+     40 nm; at 80 nm one plane covers two of them, so the index halves. */
+  ok(String(E._toScale(INFO.scales[3], [0, 0, 21360])) === "0,0,10680",
+     "...and a tool z of 21360 lands on slab 10680, not on section 21360",
+     String(E._toScale(INFO.scales[3], [0, 0, 21360])));
 }
 
 console.log("\nthe tool's frame is not the volume's, and everything converts through nanometres");

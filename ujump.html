@@ -539,7 +539,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 11:14</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 11:31</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -2663,6 +2663,15 @@ const SRC={em:"precomputed://https://storage.googleapis.com/iarpa_microns/minnie
    [86,172] instead, stretching that band to the full black-white display range -- applied to
    every EM image layer this file builds (Img65 and Img35 alike). Per Søren. */
 const EM_SHADER_CONTROLS={normalized:{range:[86,172]}};
+/* ── AND THE SAME WINDOW IN THE PAGE'S OWN CANVASES ─────────────────────────────  2026-09-18
+   Søren: "The EM section and the trace a cell EM should have a similar contrast as for the
+   Neuroglancer session." core/emtiles.js stretches [lo,hi] to black-white with the identical
+   arithmetic Neuroglancer's normalized() control uses, and defaulted to the same 86/172 -- the same
+   two numbers written down twice, in two files with no knowledge of each other. That is agreement
+   by coincidence, and it lasts exactly until somebody retunes one of them. Read from the constant
+   above instead, so the tracing pad, the cell panel and every Neuroglancer link this file writes
+   cannot drift apart without being edited together. */
+const EM_WINDOW={lo:EM_SHADER_CONTROLS.normalized.range[0],hi:EM_SHADER_CONTROLS.normalized.range[1]};
 const NUC_INFO="https://bossdb-open-data.s3.amazonaws.com/iarpa_microns/minnie/minnie65/nuclei/info";
 const DIM={x:[UJ_RX*1e-9,"m"],y:[UJ_RY*1e-9,"m"],z:[UJ_RZ*1e-9,"m"]};
 /* Distance (nm) past which the nearest MICrONS-detected nucleus is no longer treated as a
@@ -3538,7 +3547,20 @@ function renderTopViewDiagram(vx,vy,vz){
    cells as if they were this one. So each panel passes what it actually knows about the cell in
    front of the reader, and a panel that knows nothing draws the plane and says so. */
 var EM_PLANE_KEY="ujump_panel_emplane",EM_PLANE_TOKEN=0,EM_PLANE_WIRED=false,EM_PLANE_LAST=null;
-var EM_PLANE_W=260,EM_PLANE_H=140,EM_PLANE_MIP=2;
+/* 300x162 DRAWN, 260 SHOWN. The picture is fetched and drawn at 300 px wide and displayed in the
+   260 px the two diagrams above it are, because "how much tissue" and "how much room" are two
+   different questions and only the first one was his: 18-20 um across, in a column whose other
+   two panels are 260 wide. Widening the canvas alone would break the alignment those three panels
+   were lined up for; widening all three is a layout change he did not ask for. Drawing 300 data
+   pixels into 260 display pixels costs nothing extra to fetch, and on any 2x screen it is sharper
+   than 260 would have been. The 162 keeps the 260x140 proportion the top view set.
+   MIP 3 IS THE 64 nm LEVEL, reached with slabOk -- see core/emtiles.js’s note on it. 300 px at
+   64 nm is 19.2 um, inside what he asked for -- and MEASURED against the real chunk grid it costs
+   exactly what the 8.3 um view cost: 15 chunks either way, for 2.3x the tissue. The same 19.2 um at
+   32 nm would be a 594x321 window and 60 chunks, for a picture the same size on screen. A view's
+   cost is its tissue area over the chunk area, so the only cheap way to show more of it is to read
+   data that is already downsampled. */
+var EM_PLANE_W=300,EM_PLANE_H=162,EM_PLANE_CSS=260,EM_PLANE_MIP=3;
 function emPlaneOn(){
   try{var v=localStorage.getItem(EM_PLANE_KEY);return v===null?true:v==="1";}catch(_e){return true;}
 }
@@ -3594,7 +3616,7 @@ function emPlaneBox(pos,ids){
     +'EM section</label> <span id="emPlaneSay" style="color:var(--mut)">'
     +(missing?escHtml(missing):"")+'</span></div>'
     +'<canvas id="emPlaneCv" width="'+EM_PLANE_W+'" height="'+EM_PLANE_H+'" '
-    +'style="width:100%;max-width:'+EM_PLANE_W+'px;display:'+(on?"block":"none")+';margin:0 auto;'
+    +'style="width:100%;max-width:'+EM_PLANE_CSS+'px;display:'+(on?"block":"none")+';margin:0 auto;'
     +'background:var(--bg);border:1px solid var(--line);border-radius:6px"></canvas></div>';
 }
 async function drawPanelEmPlane(tok){
@@ -3626,7 +3648,11 @@ async function drawPanelEmPlane(tok){
       UJ.emtiles.configure({em:SRC.em,res:(typeof UJ.cfg!=="undefined"&&UJ.cfg)?UJ.cfg.res:[4,4,40]});
     emPlaneSay(tok,"reading the EM…");
     var view=await UJ.emtiles.drawSection(cv,{centre:pos,w:EM_PLANE_W,h:EM_PLANE_H,
-      mip:EM_PLANE_MIP,zoom:1,
+      mip:EM_PLANE_MIP,zoom:1,slabOk:true,
+      /* ONE WINDOW FOR EVERY EM, 2026-09-18 -- EM_WINDOW is read from EM_SHADER_CONTROLS, which is
+         what this page sends Neuroglancer, so the pad, this panel and every link it writes cannot
+         drift apart. See src/one_window_for_every_em.py. */
+      lo:EM_WINDOW.lo,hi:EM_WINDOW.hi,
       onProgress:function(d,n){emPlaneSay(tok,"reading the EM… "+d+"/"+n);}});
     if(EM_PLANE_TOKEN!==tok)return;
     /* SHORT ENOUGH TO SIT ON THE CAPTION LINE. Every word here that wraps costs a whole row of
@@ -3640,9 +3666,12 @@ async function drawPanelEmPlane(tok){
        pad paints the same two colours for the same two things. The scale DOES change, cell to
        cell, so the scale is what the caption keeps. */
     var across="\u00b7 "+view.umAcross.toFixed(1)+"\u00a0\u00b5m across";
-    try{cv.title="One EM plane at "+view.nmPerPx+" nm/px, "+view.umAcross.toFixed(1)
-      +" \u00b5m across, at z="+view.z+". The cell\u2019s own segmentation is painted in magenta"
-      +", its nucleus in blue.";}catch(_t){}
+    try{cv.title=view.umAcross.toFixed(1)+" \u00b5m across at "+view.nmPerPx+" nm/px, z="+view.z
+      +". "+(view.slab>1
+        ?"One plane of the "+view.sectionNm+" nm level, which averages "+view.slab+" of the 40 nm "
+         +"sections \u2014 the tracing pad reads true single sections instead. "
+        :"One 40 nm section. ")
+      +"The cell\u2019s own segmentation is painted in magenta, its nucleus in blue.";}catch(_t){}
     var root=String(ids.root||"").trim(),nuc=String(ids.nuc||"").trim();
     if(!root&&!nuc){emPlaneSay(tok,across+" · no IDs to paint here");return;}
     if(!UJ.segpaint){emPlaneSay(tok,across);return;}
@@ -9931,6 +9960,7 @@ async function padDraw(){
     const wide = Math.max(320, Math.min(880, (host && host.clientWidth ? host.clientWidth - 2 : 560)));
     PAD_VIEW = await UJ.emtiles.drawSection(cv, {
       centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height,
+      lo: EM_WINDOW.lo, hi: EM_WINDOW.hi,
       onProgress: function(d, n){ if (d < n) padSay("Loading the section\u2026 " + d + "/" + n); }
     });
     /* ── THE SEGMENTATION GOES ON BEFORE THE CAPTURE ───────────────────────────  2026-09-17
