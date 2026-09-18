@@ -199,6 +199,11 @@ CARD = '''<div class="card" id="tracingCard">
      default: it is a second volume to fetch, and a cell the segmentation does not have -- which is
      what this pad was built for -- has nothing to show. -->
 <label style="font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto" title="Paints this cell's own segmentation over the section: the root ID in magenta and the nucleus ID in blue, from the same volumes Neuroglancer paints. It shows where the automatic segmentation thinks the boundary is, so you can see whether you are correcting it, extending it, or drawing something it never saw. Costs a second fetch, so it is off until you ask."><input type="checkbox" id="tracePadSeg"> show the segmentation</label>
+<!-- ITS OWN LINE, NOT THE STATUS LINE.  2026-09-18. Søren: "I got this error message, and the
+     segmentation would not load." The error was about a volume save, and the shared status line is
+     written over by whatever happens next -- so whatever the overlay had said about itself was gone
+     before he could read it. What the segmentation did belongs beside its own tick. -->
+<span class="hint" id="tracePadSegSay" style="flex:1 1 100%"></span>
 </div>
 <div style="position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111">
 <canvas id="tracePad" width="560" height="460" style="display:block;cursor:crosshair;touch-action:none"></canvas>
@@ -1977,32 +1982,48 @@ function padSay(msg, bad){
    mosaic of the whole volume: the root ID in magenta, the nucleus ID in blue, over the section the
    pad has just drawn. Best-effort by design — a cell the segmentation does not have is exactly the
    case this pad exists for, and the tick failing to find anything must not cost the section. */
+function padSegSay(msg, bad){
+  const el = document.getElementById("tracePadSegSay");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.style.color = bad ? "var(--bad)" : "";
+}
 async function padSegOverlay(){
   const box = document.getElementById("tracePadSeg");
-  if (!box || !box.checked || !PAD_VIEW) return null;
+  if (!box || !box.checked){ padSegSay(""); return null; }
+  if (!PAD_VIEW){ padSegSay("No section on the pad yet.", true); return null; }
   const root = (document.getElementById("tracingRootId").value || "").trim();
   const nuc = (document.getElementById("tracingNucId").value || "").trim();
   if (!root && !nuc){
-    padSay("Nothing to paint: fill in the cell's root ID or nucleus ID below the pad first.", true);
+    padSegSay("Nothing to paint \u2014 fill in this cell's root ID or nucleus ID below the pad, "
+      + "then tick this again.", true);
     return null;
   }
   try {
     if (!UJ.segpaint.configured())
       UJ.segpaint.configure({ seg: SRC.seg, nuc: SRC.nuc, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
     const cv = document.getElementById("tracePad");
+    padSegSay("Reading the segmentation\u2026");
     const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, nuc: nuc, alpha: 0.4,
-      onProgress: function(d){ padSay("Painting the segmentation\u2026 " + d + " chunk(s)"); } });
-    /* PAINTED NOTHING IS AN ANSWER, and a different one from failing. This cell may genuinely not
-       be in this window, or not be in the segmentation at all -- which is the whole reason somebody
-       would be tracing it by hand. Saying "0 voxels" is what tells them which. */
+      onProgress: function(d){ padSegSay("Reading the segmentation\u2026 " + d + " chunk(s)"); } });
+    /* PER VOLUME, because "nothing appeared" has two causes that need different answers: the cell
+       is not in this window, or the cell is not in the segmentation at all -- which is the whole
+       reason somebody would be tracing it by hand. One number each says which. */
+    const part = function(what, id, r){
+      if (!id) return null;
+      if (!r) return what + " " + id + ": not read";
+      return what + " " + id + ": " + (r.painted ? r.painted.toLocaleString() + " px" : "nothing here")
+        + " (" + r.chunks + " chunk" + (r.chunks === 1 ? "" : "s") + " at " + r.nmPerVoxel + " nm)";
+    };
+    const said = [part("root", root, got && got.cell), part("nucleus", nuc, got && got.nucleus)]
+                   .filter(Boolean).join(" \u00b7 ");
     if (got && got.ok && !got.painted)
-      padSay("The segmentation has nothing for "
-        + [root && ("root " + root), nuc && ("nucleus " + nuc)].filter(Boolean).join(" or ")
-        + " on this section \u2014 either it is not here, or this cell is not in it. That is what "
-        + "hand tracing is for.", true);
+      padSegSay(said + " \u2014 nothing on this section. Either it is not in this window, or this "
+        + "cell is not in the segmentation, which is what hand tracing is for.", true);
+    else padSegSay(said);
     return got;
   } catch (e){
-    padSay("Could not paint the segmentation: " + String(e && e.message || e)
+    padSegSay("Could not read the segmentation: " + String(e && e.message || e)
       + " \u2014 the section itself is fine.", true);
     return null;
   }
@@ -2421,8 +2442,7 @@ async function tracingResolveAt(pos){
      do. The EM chunks are cached, so this is a repaint, not a refetch. */
   const ps = document.getElementById("tracePadSeg");
   if (ps) ps.addEventListener("change", function(){
-    padSay(ps.checked ? "Painting this cell's segmentation over the section\u2026"
-                      : "Segmentation off \u2014 back to the EM alone.");
+    padSegSay(ps.checked ? "Reading the segmentation\u2026" : "");
     padDraw();
   });
   padHelpKeys();

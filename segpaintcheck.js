@@ -232,6 +232,61 @@ const ok = (c, what, d) => {
        "with neither id it declines and says so rather than fetching", bare.why);
   }
 
+  /* ── WHAT IT DID, WHERE A TOAST CANNOT WIPE IT ───────────────────────────────────  2026-09-18
+     Søren: *"I got this error message, and the segmentation would not load."* The error was about a
+     volume save — an unrelated request — and it landed in the pad's shared status line, which is
+     where the overlay had been saying what it did. So whatever the tick had told him was gone
+     before he could read it, and "would not load" was the only thing left to conclude. The overlay
+     now has a line of its own, and says a number per volume: the difference between "not in this
+     window" and "not in the segmentation at all" is the difference between a wrong coordinate and a
+     cell that has to be traced by hand. */
+  console.log("\nthe overlay says what it did, in its own line");
+  {
+    const say = await p.evaluate(async () => {
+      const el = document.getElementById("tracePadSegSay");
+      const status = document.getElementById("tracePadSay");
+      const box = document.getElementById("tracePadSeg");
+      const out = { own: !!el, separate: !!(el && status && el !== status) };
+      /* No ids: the one case that used to write into the status line and be overwritten. */
+      document.getElementById("tracingRootId").value = "";
+      document.getElementById("tracingNucId").value = "";
+      box.checked = true;
+      window.PAD_VIEW = { w: 8, h: 8, effNmPerPx: 8, z: 0, toolAt: () => [0, 0, 0] };
+      await padSegOverlay();
+      out.noIds = el.textContent;
+      /* Now with an id, against a volume that has nothing there. */
+      UJ.segread._getInfo = async () => ({ data_type: "uint64", scales: [{ resolution: [8, 8, 40],
+        size: [8, 8, 8], key: "8_8_40", chunk_sizes: [[8, 8, 8]], voxel_offset: [0, 0, 0],
+        compressed_segmentation_block_size: [8, 8, 8] }] });
+      UJ.segread._chunkBuf = async () => null;
+      UJ.segpaint.configure({ seg: "https://example/seg", nuc: "https://example/nuclei",
+                              res: [4, 4, 40] });
+      document.getElementById("tracingRootId").value = "864691134517067096";
+      const cv = document.getElementById("tracePad");
+      cv.width = 8; cv.height = 8;
+      await padSegOverlay();
+      out.empty = el.textContent;
+      out.emptyBad = el.style.color;
+      /* And the tick turned off clears its own line rather than leaving a stale sentence. */
+      box.checked = false;
+      await padSegOverlay();
+      out.off = el.textContent;
+      return out;
+    });
+    ok(say.own && say.separate,
+       "the segmentation has a line of its own, not the one every toast writes to");
+    ok(/root ID or nucleus ID/.test(say.noIds),
+       "with no ids it says which box to fill, and stays said", say.noIds.slice(0, 80));
+    ok(/864691134517067096/.test(say.empty) && /nothing here/.test(say.empty),
+       "when the volume has nothing there it says so, per volume, with the id",
+       say.empty.slice(0, 110));
+    ok(/hand tracing/.test(say.empty),
+       "...and names the reason that matters: a cell the segmentation has not got");
+    ok(say.emptyBad !== "", "...marked as the answer it is", say.emptyBad || "(not marked)");
+    ok(say.off === "", "and unticking clears it rather than leaving a stale sentence",
+       JSON.stringify(say.off));
+  }
+
   ok(errors.length === 0, "no script errors", errors.slice(0, 3).join(" | ") || "none");
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall passed");

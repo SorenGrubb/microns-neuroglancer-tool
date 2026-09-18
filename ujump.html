@@ -536,7 +536,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 21:34</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 05:47</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -770,6 +770,11 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
      default: it is a second volume to fetch, and a cell the segmentation does not have -- which is
      what this pad was built for -- has nothing to show. -->
 <label style="font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto" title="Paints this cell's own segmentation over the section: the root ID in magenta and the nucleus ID in blue, from the same volumes Neuroglancer paints. It shows where the automatic segmentation thinks the boundary is, so you can see whether you are correcting it, extending it, or drawing something it never saw. Costs a second fetch, so it is off until you ask."><input type="checkbox" id="tracePadSeg"> show the segmentation</label>
+<!-- ITS OWN LINE, NOT THE STATUS LINE.  2026-09-18. Søren: "I got this error message, and the
+     segmentation would not load." The error was about a volume save, and the shared status line is
+     written over by whatever happens next -- so whatever the overlay had said about itself was gone
+     before he could read it. What the segmentation did belongs beside its own tick. -->
+<span class="hint" id="tracePadSegSay" style="flex:1 1 100%"></span>
 </div>
 <div style="position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111">
 <canvas id="tracePad" width="560" height="460" style="display:block;cursor:crosshair;touch-action:none"></canvas>
@@ -5678,10 +5683,35 @@ var SAVE_LABEL={
 function postAndRead(payload){
   return fetch(REPORT_ENDPOINT,{method:"POST",
       headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)})
-    .then(function(r){ return r.text(); })
-    .then(function(t){
+    /* WHERE IT ENDED UP, not only what it said.  2026-09-18
+       A POST that is answered with a sign-in page has usually been redirected to one, and the final
+       URL is the only thing that can tell "Apps Script returned a page" from "the browser followed
+       it to accounts.google.com". Carried alongside the body rather than looked up afterwards,
+       because by then the response is gone. */
+    .then(function(r){ return r.text().then(function(t){
+      return {t:t,url:String(r.url||""),redirected:!!r.redirected,status:r.status}; }); })
+    .then(function(got){
+      var t=got.t;
       var d=null; try{ d=JSON.parse(t); }catch(_pe){}
       if(d&&(d.ok===true||d.status==="ok"))return {ok:true};
+      /* ── A SIGN-IN PAGE IS NOT AN UNREADABLE REPLY ────────────────────────────  2026-09-18
+         Søren got a toast beginning `<!DOCTYPE html><html lang="da">` with a nonce and Google's own
+         `ppConfig` in it. That is a Google page, in his language, and printing its first 120
+         characters says nothing while reading as a fault in the tool. Apps Script serves it when
+         the deployment's access is not "Anyone", or when it was authorised BEFORE the script asked
+         for a new scope and so needs approving once more by its owner -- which is the state this
+         project has been in since DriveApp was added on 2026-09-17. One remedy, one sentence. */
+      if(!d&&/^\s*(<!doctype|<html)/i.test(String(t||""))){
+        var where=/accounts\.google\.com/i.test(got.url)
+          ? "the request was redirected to Google's sign-in page"
+          : "Apps Script answered with a Google page instead of the report";
+        return {ok:false,needsAuth:true,
+          error:where+" \u2014 so nothing was recorded. The deployment needs authorising again: "
+            +"open the /exec address in a browser tab, approve it once, and try this again. "
+            +"(A deployment authorised before the script asked for Drive access has to be "
+            +"re-approved; that access was added on 2026-09-17.) Check too that Deploy \u2192 "
+            +"Manage deployments has \u201cWho has access: Anyone\u201d."};
+      }
       var err=(d&&d.error)?String(d.error):("the server replied with something unreadable: "
               +String(t||"").slice(0,120));
       /* The one refusal worth rewording. "unauthenticated" is the server's word for a token that
@@ -9475,32 +9505,48 @@ function padSay(msg, bad){
    mosaic of the whole volume: the root ID in magenta, the nucleus ID in blue, over the section the
    pad has just drawn. Best-effort by design — a cell the segmentation does not have is exactly the
    case this pad exists for, and the tick failing to find anything must not cost the section. */
+function padSegSay(msg, bad){
+  const el = document.getElementById("tracePadSegSay");
+  if (!el) return;
+  el.textContent = msg || "";
+  el.style.color = bad ? "var(--bad)" : "";
+}
 async function padSegOverlay(){
   const box = document.getElementById("tracePadSeg");
-  if (!box || !box.checked || !PAD_VIEW) return null;
+  if (!box || !box.checked){ padSegSay(""); return null; }
+  if (!PAD_VIEW){ padSegSay("No section on the pad yet.", true); return null; }
   const root = (document.getElementById("tracingRootId").value || "").trim();
   const nuc = (document.getElementById("tracingNucId").value || "").trim();
   if (!root && !nuc){
-    padSay("Nothing to paint: fill in the cell's root ID or nucleus ID below the pad first.", true);
+    padSegSay("Nothing to paint — fill in this cell's root ID or nucleus ID below the pad, "
+      + "then tick this again.", true);
     return null;
   }
   try {
     if (!UJ.segpaint.configured())
       UJ.segpaint.configure({ seg: SRC.seg, nuc: SRC.nuc, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
     const cv = document.getElementById("tracePad");
+    padSegSay("Reading the segmentation…");
     const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, nuc: nuc, alpha: 0.4,
-      onProgress: function(d){ padSay("Painting the segmentation… " + d + " chunk(s)"); } });
-    /* PAINTED NOTHING IS AN ANSWER, and a different one from failing. This cell may genuinely not
-       be in this window, or not be in the segmentation at all -- which is the whole reason somebody
-       would be tracing it by hand. Saying "0 voxels" is what tells them which. */
+      onProgress: function(d){ padSegSay("Reading the segmentation… " + d + " chunk(s)"); } });
+    /* PER VOLUME, because "nothing appeared" has two causes that need different answers: the cell
+       is not in this window, or the cell is not in the segmentation at all -- which is the whole
+       reason somebody would be tracing it by hand. One number each says which. */
+    const part = function(what, id, r){
+      if (!id) return null;
+      if (!r) return what + " " + id + ": not read";
+      return what + " " + id + ": " + (r.painted ? r.painted.toLocaleString() + " px" : "nothing here")
+        + " (" + r.chunks + " chunk" + (r.chunks === 1 ? "" : "s") + " at " + r.nmPerVoxel + " nm)";
+    };
+    const said = [part("root", root, got && got.cell), part("nucleus", nuc, got && got.nucleus)]
+                   .filter(Boolean).join(" · ");
     if (got && got.ok && !got.painted)
-      padSay("The segmentation has nothing for "
-        + [root && ("root " + root), nuc && ("nucleus " + nuc)].filter(Boolean).join(" or ")
-        + " on this section — either it is not here, or this cell is not in it. That is what "
-        + "hand tracing is for.", true);
+      padSegSay(said + " — nothing on this section. Either it is not in this window, or this "
+        + "cell is not in the segmentation, which is what hand tracing is for.", true);
+    else padSegSay(said);
     return got;
   } catch (e){
-    padSay("Could not paint the segmentation: " + String(e && e.message || e)
+    padSegSay("Could not read the segmentation: " + String(e && e.message || e)
       + " — the section itself is fine.", true);
     return null;
   }
@@ -9919,8 +9965,7 @@ async function tracingResolveAt(pos){
      do. The EM chunks are cached, so this is a repaint, not a refetch. */
   const ps = document.getElementById("tracePadSeg");
   if (ps) ps.addEventListener("change", function(){
-    padSay(ps.checked ? "Painting this cell's segmentation over the section…"
-                      : "Segmentation off — back to the EM alone.");
+    padSegSay(ps.checked ? "Reading the segmentation…" : "");
     padDraw();
   });
   padHelpKeys();

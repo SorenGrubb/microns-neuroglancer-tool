@@ -559,7 +559,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-17 21:34</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 05:47</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -5544,10 +5544,35 @@ var SAVE_LABEL={
 function postAndRead(payload){
   return fetch(REPORT_ENDPOINT,{method:"POST",
       headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify(payload)})
-    .then(function(r){ return r.text(); })
-    .then(function(t){
+    /* WHERE IT ENDED UP, not only what it said.  2026-09-18
+       A POST that is answered with a sign-in page has usually been redirected to one, and the final
+       URL is the only thing that can tell "Apps Script returned a page" from "the browser followed
+       it to accounts.google.com". Carried alongside the body rather than looked up afterwards,
+       because by then the response is gone. */
+    .then(function(r){ return r.text().then(function(t){
+      return {t:t,url:String(r.url||""),redirected:!!r.redirected,status:r.status}; }); })
+    .then(function(got){
+      var t=got.t;
       var d=null; try{ d=JSON.parse(t); }catch(_pe){}
       if(d&&(d.ok===true||d.status==="ok"))return {ok:true};
+      /* ── A SIGN-IN PAGE IS NOT AN UNREADABLE REPLY ────────────────────────────  2026-09-18
+         Søren got a toast beginning `<!DOCTYPE html><html lang="da">` with a nonce and Google's own
+         `ppConfig` in it. That is a Google page, in his language, and printing its first 120
+         characters says nothing while reading as a fault in the tool. Apps Script serves it when
+         the deployment's access is not "Anyone", or when it was authorised BEFORE the script asked
+         for a new scope and so needs approving once more by its owner -- which is the state this
+         project has been in since DriveApp was added on 2026-09-17. One remedy, one sentence. */
+      if(!d&&/^\s*(<!doctype|<html)/i.test(String(t||""))){
+        var where=/accounts\.google\.com/i.test(got.url)
+          ? "the request was redirected to Google's sign-in page"
+          : "Apps Script answered with a Google page instead of the report";
+        return {ok:false,needsAuth:true,
+          error:where+" \u2014 so nothing was recorded. The deployment needs authorising again: "
+            +"open the /exec address in a browser tab, approve it once, and try this again. "
+            +"(A deployment authorised before the script asked for Drive access has to be "
+            +"re-approved; that access was added on 2026-09-17.) Check too that Deploy \u2192 "
+            +"Manage deployments has \u201cWho has access: Anyone\u201d."};
+      }
       var err=(d&&d.error)?String(d.error):("the server replied with something unreadable: "
               +String(t||"").slice(0,120));
       /* The one refusal worth rewording. "unauthenticated" is the server's word for a token that
