@@ -49,7 +49,22 @@ SUPERSEDED PAIRS REMOVED, 2026-09-17: the edits below marked here were later rew
 generator, which now owns that text. The reason they were made is still this file's; the
 literal is the other file's, so re-running this one is a no-op rather than a second insert.
 Superseded: "the viewer button is driven in a real page"; "the button is wired"; "the card says how to trace, and offers a viewer"; "tracingOpen builds a viewer link with an empty tracing layer"
+
+
+HANDED OVER, 2026-09-17: this file's edits to ujump.html now live in src/the_tracing_card.py,
+which owns the card and the pad whole. The reasoning above is why the card is the way it is and
+is still the record; the literal is there. Anything this file still edits (a core module, a
+check) it still owns.
 """
+# ── RETRACTED IN PART, 2026-09-18 ────────────────────────────────────────────────────────────
+# The claim below that Spelunker's polyline "never reaches the link" is WRONG. Søren pasted the
+# state on 2026-09-18 and the polyline is in it -- one annotation, `points` in order, closed, in
+# tool voxels. core/tracing.js reads it now; see src/the_polyline_did_reach_the_link.py, which
+# also rewrote the card. Everything else here still stands: a ring of points and a ring of lines
+# are both read, and the MICrONS viewer still has no shape tool at all. Left in place rather than
+# quietly edited, because a generator that once wrote a false sentence into the page is part of
+# how that sentence got there.
+
 import io
 import os
 
@@ -96,7 +111,7 @@ def edit(rel, pairs):
 
 
 edit("core/tracing.js", TRACING)
-edit("ujump.html", HTML + JS)
+# ujump.html is src/the_tracing_card.py's now -- see the note at the end of the docstring.
 edit("tracingcheck.js", CHECK)
 edit("tracingpanelcheck.js", PANELCHECK)
 print("\nnow: node tracingcheck.js && node tracingpanelcheck.js")

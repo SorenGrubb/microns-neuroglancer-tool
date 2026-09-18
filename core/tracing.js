@@ -79,6 +79,19 @@ UJ.tracing = (function(){
     return out;
   }
 
+  /* ── 0. polylines, as Spelunker writes them ────────────────────────────────────────  2026-09-18
+     The whole contour in one `points` array, in order. ringFrom drops the closing repeat and any
+     duplicate neighbours, so there is nothing else to do -- which is what makes this the cheapest
+     shape to accept and, in hindsight, the most expensive thing to have got wrong. */
+  function polylineRing(pl, seen){
+    var pts = [], src = pl.points || [], i, P;
+    for (i = 0; i < src.length; i++){
+      P = trip(src[i]);
+      if (P) pts.push(P); else seen.unreadable++;
+    }
+    return ringFrom(pts);
+  }
+
   /* ── 1. polygons, as BrainSharer writes them ───────────────────────────────────────────────── */
   function polygonRing(poly, byId, seen){
     var ids = poly.childAnnotationIds || [];
@@ -141,8 +154,9 @@ UJ.tracing = (function(){
     var d = decode(text);
     if (d.error) return { ok: false, error: d.error, structures: [], rings: [] };
     var st = d.state;
-    var seen = { volumes: 0, polygons: 0, lines: 0, points: 0, unreadable: 0, mixedZ: 0 };
-    var byId = {}, polys = [], vols = [], loose = [], dots = [], layers = 0;
+    var seen = { volumes: 0, polygons: 0, polylines: 0, lines: 0, points: 0, unreadable: 0,
+                 mixedZ: 0 };
+    var byId = {}, polys = [], plines = [], vols = [], loose = [], dots = [], layers = 0;
 
     /* WHICH ANNOTATION LAYERS COUNT, when nobody named one.  2026-09-17
        A pasted µJump link normally carries "Cortical layers" -- the pia/white-matter bands, which
@@ -169,6 +183,14 @@ UJ.tracing = (function(){
         var t = String(a.type || "").toLowerCase();
         if (t === "volume"){ vols.push(a); seen.volumes++; return; }
         if (t === "polygon"){ polys.push(a); seen.polygons++; return; }
+        /* ── POLYLINE, WHICH SPELUNKER DOES PUT IN THE LINK ────────────────────  2026-09-18
+           Recorded here on 2026-09-17 as drawing on screen and never reaching the state. That was
+           wrong -- Søren pasted the state and it is there, and in the best shape of anything this
+           function reads: one annotation per contour, `points` in order, in the tool's own 4/4/40
+           voxels, closed (last point repeats the first, which ringFrom already strips), all on one
+           z. A polyline in progress is NOT in the state, which is the likeliest way a measurement
+           taken with the tool still armed came back empty. */
+        if (t === "polyline"){ plines.push(a); seen.polylines++; return; }
         if (t === "point"){
           /* ORDER IS THE CONTOUR. Neuroglancer appends a new annotation to this array, so points
              arrive in the order they were clicked -- measured on ngl.microns-explorer.org,
@@ -196,7 +218,7 @@ UJ.tracing = (function(){
       into.push(r); all.push(r);
     }
 
-    if (polys.length){
+    if (polys.length || plines.length){
       /* A Volume names which polygons are one structure. Without one, every polygon in the layer
          is taken as the same structure -- which is what a person drawing one cell in one layer
          means, and the alternative (a structure per contour) is never what anybody wants. */
@@ -217,7 +239,14 @@ UJ.tracing = (function(){
         if (claimed[p.id]) return;
         addRing(polygonRing(p, byId, seen), orphan);
       });
-      if (orphan.length) structures.push({ name: "", rings: orphan, from: "polygons" });
+      /* Polylines join the same structure as any loose polygons: somebody drawing one cell in one
+         layer means one cell, and a structure per contour is never what anybody wants. They are
+         never inside a Volume -- nothing that writes Volumes writes polylines -- so they are all
+         orphans by definition. */
+      plines.forEach(function(p){ addRing(polylineRing(p, seen), orphan); });
+      if (orphan.length)
+        structures.push({ name: "", rings: orphan,
+                          from: plines.length ? (polys.length ? "shapes" : "polylines") : "polygons" });
     } else {
       /* LINES BEFORE POINTS, AND POINTS ONLY IF THE LINES GAVE NOTHING.  2026-09-17
          Each order protects the other shape's accident: a stray point left in a line tracing

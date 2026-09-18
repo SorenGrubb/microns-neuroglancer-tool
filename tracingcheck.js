@@ -59,7 +59,73 @@ function polygonOf(points, id){
                    childAnnotationIds: lines.map(l => l.id) }, lines };
 }
 
-console.log("a polygon, as BrainSharer writes one");
+/* A POLYLINE, AS SPELUNKER ACTUALLY WRITES ONE.                                     2026-09-18
+   Not invented: this is the shape Søren pasted out of Spelunker, with his own numbers. One
+   annotation, `points` in order, in the tool's 4/4/40 voxels, CLOSED -- the last point repeats the
+   first. It matters that the fixture is the real thing, because the claim being corrected here is a
+   claim about what that viewer emits, and a fixture I made up could agree with a reader I also made
+   up while both disagreed with the viewer. */
+const SPELUNKER_POLYLINE = {
+  points: [[171061.96875, 139285.984375, 23865],
+           [170833.96875, 140035.984375, 23865],
+           [171292.96875, 140569.984375, 23865],
+           [171697.96875, 140452.984375, 23865],
+           [172063.96875, 139777.984375, 23865],
+           [171748.96875, 139309.984375, 23865],
+           [171226.96875, 139240.984375, 23865],
+           [171061.96875, 139285.984375, 23865]],
+  type: "polyline",
+  id: "2eb771b002c65ba2629ca7ec9904a638e0662915"
+};
+
+console.log("a polyline out of Spelunker, exactly as it arrives");
+{
+  const r = T.ringsFromLink(link([SPELUNKER_POLYLINE]));
+  ok(r.ok, "the link reads", r.error || "ok");
+  ok(r.seen.polylines === 1, "...as one polyline", r.seen.polylines);
+  ok(r.structures.length === 1 && r.structures[0].rings.length === 1,
+     "...one structure, one contour",
+     r.structures.length + " structure(s), "
+     + (r.structures[0] ? r.structures[0].rings.length : 0) + " ring(s)");
+  const ring = r.structures[0].rings[0];
+  /* EIGHT POINTS IN, SEVEN OUT. The closing repeat is dropped -- a ring is stored open here and
+     every consumer closes it itself, so keeping the repeat would give two lengths for one contour
+     and a zero-length edge in the mesh. */
+  ok(ring.points.length === 7,
+     "the closing repeat is dropped: 8 points in, 7 kept", ring.points.length);
+  ok(ring.z === 23865, "...on the section it was drawn on", ring.z);
+  ok(ring.points[0][0] === 171061.96875 && ring.points[0][1] === 139285.984375,
+     "...starting at the first vertex, unrounded", ring.points[0].join(", "));
+  ok(r.seen.mixedZ === 0, "...and nothing about it looks like two sections", r.seen.mixedZ);
+}
+
+console.log("\nand a polyline behaves like the other shapes");
+{
+  /* Two contours on two sections, which is what a tracing is. */
+  const a = { type: "polyline", id: "pa", points: circle(1000, 2000, 100, 80, 10) };
+  const b = { type: "polyline", id: "pb", points: circle(1010, 2005, 105, 76, 10) };
+  const r = T.ringsFromLink(link([a, b]));
+  ok(r.structures.length === 1 && r.structures[0].rings.length === 2,
+     "two polylines in one layer are two contours of ONE structure",
+     r.structures.length + " structure(s)");
+  const zs = r.structures[0].rings.map(x => x.z).sort((m, n) => m - n);
+  ok(zs.join(",") === "100,105", "...one per section", zs.join(", "));
+  /* An UNCLOSED polyline is still a contour: a ring is closed by whoever draws it, and somebody
+     who stops one vertex short means the same shape. */
+  const open = { type: "polyline", id: "po", points: circle(1000, 2000, 100, 80, 6) };
+  const r2 = T.ringsFromLink(link([open]));
+  ok(r2.structures.length === 1 && r2.structures[0].rings[0].points.length === 6,
+     "...and one left unclosed is read as the ring it is",
+     r2.structures[0] ? r2.structures[0].rings[0].points.length + " points" : "nothing");
+  /* A stray point in the same layer must not become a phantom contour once a shape is present. */
+  const r3 = T.ringsFromLink(link([SPELUNKER_POLYLINE,
+                                   { type: "point", id: "stray", point: [1, 2, 23865] }]));
+  ok(r3.structures.length === 1 && r3.structures[0].rings.length === 1,
+     "a stray point beside a polyline does not invent a second contour",
+     r3.structures[0].rings.length + " ring(s)");
+}
+
+console.log("\na polygon, as BrainSharer writes one");
 {
   const p = polygonOf(circle(1000, 2000, 500, 40, 12));
   const r = T.ringsFromLink(link([p.poly].concat(p.lines)));

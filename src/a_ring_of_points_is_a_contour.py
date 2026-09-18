@@ -44,7 +44,22 @@ the status line now says which shape it read — "from 36 points", "from line an
 
 Run: python3 src/a_ring_of_points_is_a_contour.py
      node tracingcheck.js && node tracingpanelcheck.js
+
+
+HANDED OVER, 2026-09-17: this file's edits to ujump.html now live in src/the_tracing_card.py,
+which owns the card and the pad whole. The reasoning above is why the card is the way it is and
+is still the record; the literal is there. Anything this file still edits (a core module, a
+check) it still owns.
 """
+# ── RETRACTED IN PART, 2026-09-18 ────────────────────────────────────────────────────────────
+# The claim below that Spelunker's polyline "never reaches the link" is WRONG. Søren pasted the
+# state on 2026-09-18 and the polyline is in it -- one annotation, `points` in order, closed, in
+# tool voxels. core/tracing.js reads it now; see src/the_polyline_did_reach_the_link.py, which
+# also rewrote the card. Everything else here still stands: a ring of points and a ring of lines
+# are both read, and the MICrONS viewer still has no shape tool at all. Left in place rather than
+# quietly edited, because a generator that once wrote a false sentence into the page is part of
+# how that sentence got there.
+
 import io
 import os
 
@@ -133,6 +148,10 @@ PAGE = [
     ('''<p class="hint" style="margin-top:6px">Measured 2026-09-17, in the browser: Spelunker keeps line annotations in the address bar, so they survive the paste. Its <i>polyline</i> tool draws on screen but never reaches the link, and BrainSharer's polygon tool needs an account and ignores a pasted link &mdash; so a ring of lines is the route that actually works.</p>''',
      '''<p class="hint" style="margin-top:6px"><b>There is no polygon tool.</b> Measured 2026-09-17: the MICrONS viewer offers point, bounding box, line and ellipsoid and nothing else; Spelunker adds a <i>polyline</i> that draws on screen but never reaches the link; BrainSharer's polygon tool needs an account and ignores a pasted link. Points are one click per vertex and come back in the order you clicked them, which is why they are what this asks for &mdash; a ring of <b>line</b> annotations is read too, at two clicks a segment.</p>''',
      "the card says why there is no polygon tool"),
+    # ^ SUPERSEDED: src/the_polyline_did_reach_the_link.py replaced that paragraph on 2026-09-18.
+    #   The edit() below skips a pair whose OLD text is gone, so re-running this file is a no-op on
+    #   that paragraph rather than a reversion -- which is what it has to be, since the newer text
+    #   is the true one.
 
     ('''  st.layers.push({type:"annotation",source:"local://annotations",tool:"annotateLine",
                   tab:"annotations",name:"tracing",annotations:[]});''',
@@ -314,7 +333,7 @@ def edit(rel, pairs):
 
 
 edit("core/tracing.js", TRACING)
-edit("ujump.html", PAGE)
+# ujump.html is src/the_tracing_card.py's now -- see the note at the end of the docstring.
 edit("tracingcheck.js", CHECK)
 edit("tracingpanelcheck.js", PANELCHECK)
 print("\nnow: node tracingcheck.js && node tracingpanelcheck.js")
