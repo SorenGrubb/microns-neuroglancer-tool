@@ -559,7 +559,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 10:36</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 11:14</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3532,6 +3532,77 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
   for(let ti=0;ti<CT_NAMES.length;ti++){const n=CT_NAMES[ti];if(isGenericExcInh(n))continue;if(!IDX_BY_TYPE[n]||!IDX_BY_TYPE[n].length)continue;addPool(longName(n),catFor(n,CT_CLASS[ti]),{src:"m",key:n});}
   for(const n of Object.keys(OWN_POS_BY_TYPE)){if(isGenericExcInh(n))continue;if(!OWN_POS_BY_TYPE[n]||!OWN_POS_BY_TYPE[n].length)continue;addPool(longName(n),catFor(n,null),{src:"o",key:n});}
   var RECLASS_OUT={};
+  /* ── THE LIST APPEARS BEFORE THE BACKEND ANSWERS ────────────────────────────────  2026-09-18
+     Søren: "Sometimes it takes minutes to load the cell list." Measured with the backend held open
+     rather than refused -- which is what a slow Apps Script does to a browser -- the control had
+     ZERO options for as long as it was held.
+
+     Everything below this point that matters to a person browsing is already in the page: the
+     MICrONS predictions and the own-verified cells, which are all but a couple of the entries this
+     list ever shows. What follows are two awaits on whole-sheet reads, and the single innerHTML
+     assignment used to sit after both of them -- so an empty <select>, which reads as broken rather
+     than as loading, was the first thing a visitor met.
+
+     So the render is a function now, and it is called at both moments it has something true to say:
+     here, with what the page knows on its own, and again below with the community's corrections
+     folded in. The corrections are not optional -- they move cells between pools and add types
+     MICrONS never predicted -- they are just not worth an empty control to wait for.
+
+     THIS ONLY WORKS BECAUSE THE PICKER KEEPS ITS SELECTION (see the `wasType` read one statement
+     before the assignment, added this morning). Repainting a <select> discards its options; without
+     that read, the second paint would silently move somebody off the type they had just chosen --
+     which is the exact bug that was fixed hours ago, re-introduced by the fix for this one. */
+  const paintTypeSelect=function(){
+    /* Rebuilt from scratch each time: `groups` accumulates, and a second paint over the top of the
+       first one's groups would list every pool twice. */
+    for(const gk in groups)delete groups[gk];
+  for(const k in RP){const p=RP[k];(groups[p.cat]=groups[p.cat]||[]).push(p);}
+  /* "Blood cells" sits after the vessel wall and before the perivascular space, following the
+     tree's own route: lumen (q2 -> l1/l2) -> wall (w1/w2) -> perivascular space (p1). */
+  const CAT_SEQ=["Excitatory neurons","Inhibitory neurons","Neurons","Glia","Vascular cells","Blood cells","Immune & perivascular cells","Leptomeninges","Other"];
+  /* Per-pick example count, shared by the optgroup label counter just below and the weighted
+     random draw in randomOfTypeBtn's click handler further down -- kept as one function so the
+     two never silently drift out of sync when a new pick source (like "ms") is added. */
+  function pickCount(pk){
+    if(pk.src==="c")return pk.cells.length;
+    if(pk.src==="ms")return pk.positions.length;
+    if(pk.src==="m")return (IDX_BY_TYPE[pk.key]||[]).length;
+    return (OWN_POS_BY_TYPE[pk.key]||[]).length;
+  }
+  window.__pickCount=pickCount;
+  let opts="";
+  for(const cat of CAT_SEQ){
+    if(!groups[cat]||!groups[cat].length)continue;
+    const items=groups[cat].slice().sort((a,b)=>a.label.localeCompare(b.label));
+    /* c===0 covers both a never-seen leaf and a real pool emptied by RECLASS_OUT -- either way
+       there is nothing to jump to, so the option is disabled rather than selectable-and-alerting.
+       The label goes through escHtml because a community-reported identity string (typed by a
+       stranger into the report form, arriving via getCommunityConsensus above) can become a pool
+       label; every other field around it is dataset-generated. */
+    opts+='<optgroup label="'+cat+'">'+items.map(p=>{let c=0;p.picks.forEach(pk=>c+=pickCount(pk));c-=(RECLASS_OUT[p.k]||0);if(c<0)c=0;
+      const lab=(typeof escHtml==="function")?escHtml(p.label):p.label;
+      return '<option value="'+p.k+'"'+(c?"":' disabled title="No cell of this type has been identified in this dataset yet — identify one and it appears here."')+'>'+lab+' ('+c+')</option>';}).join("")+'</optgroup>';
+  }
+  /* THE CHOSEN TYPE SURVIVES THE REBUILD, 2026-09-18 (Søren: "When having pressed random cell, it
+     switches back to l2/3 pyramidal neuron. It should stay on the selected cell type.").
+     Assigning innerHTML to a <select> discards every option, so the browser falls back to the
+     first one -- "L2/3 pyramidal neuron (23P)" in minnie65. Read HERE, one statement before the
+     assignment, rather than at the top of the enclosing function or in a caller: this paint runs
+     TWICE per call -- once from what the page knows, once when two whole-sheet reads come back --
+     and the person can have chosen a type in between. That gap is also why the bug only surfaced
+     when it did: the second paint lands seconds late on a cold cache, long after the control is
+     reachable, which makes the reset look like the "Random example" click did it. A previously chosen type
+     that no longer exists (its pool emptied) simply isn't found, and the first option stands. */
+  const wasType=randomTypeSelect.value;
+  randomTypeSelect.innerHTML=opts;
+  if(wasType){
+    for(let oi=0;oi<randomTypeSelect.options.length;oi++){
+      if(randomTypeSelect.options[oi].value===wasType){randomTypeSelect.selectedIndex=oi;break;}
+    }
+  }
+  window.RAND_POOLS=RP;
+  };
+  paintTypeSelect();
   try{
     // Resolve a type name to an already-built base pool by its (case-insensitive) label, so a
     // community identity merges into the same group even when its casing / CATEGORY_OF keying
@@ -3650,51 +3721,7 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
       });
     }
   }catch(_lz){}
-  for(const k in RP){const p=RP[k];(groups[p.cat]=groups[p.cat]||[]).push(p);}
-  /* "Blood cells" sits after the vessel wall and before the perivascular space, following the
-     tree's own route: lumen (q2 -> l1/l2) -> wall (w1/w2) -> perivascular space (p1). */
-  const CAT_SEQ=["Excitatory neurons","Inhibitory neurons","Neurons","Glia","Vascular cells","Blood cells","Immune & perivascular cells","Leptomeninges","Other"];
-  /* Per-pick example count, shared by the optgroup label counter just below and the weighted
-     random draw in randomOfTypeBtn's click handler further down -- kept as one function so the
-     two never silently drift out of sync when a new pick source (like "ms") is added. */
-  function pickCount(pk){
-    if(pk.src==="c")return pk.cells.length;
-    if(pk.src==="ms")return pk.positions.length;
-    if(pk.src==="m")return (IDX_BY_TYPE[pk.key]||[]).length;
-    return (OWN_POS_BY_TYPE[pk.key]||[]).length;
-  }
-  window.__pickCount=pickCount;
-  let opts="";
-  for(const cat of CAT_SEQ){
-    if(!groups[cat]||!groups[cat].length)continue;
-    const items=groups[cat].slice().sort((a,b)=>a.label.localeCompare(b.label));
-    /* c===0 covers both a never-seen leaf and a real pool emptied by RECLASS_OUT -- either way
-       there is nothing to jump to, so the option is disabled rather than selectable-and-alerting.
-       The label goes through escHtml because a community-reported identity string (typed by a
-       stranger into the report form, arriving via getCommunityConsensus above) can become a pool
-       label; every other field around it is dataset-generated. */
-    opts+='<optgroup label="'+cat+'">'+items.map(p=>{let c=0;p.picks.forEach(pk=>c+=pickCount(pk));c-=(RECLASS_OUT[p.k]||0);if(c<0)c=0;
-      const lab=(typeof escHtml==="function")?escHtml(p.label):p.label;
-      return '<option value="'+p.k+'"'+(c?"":' disabled title="No cell of this type has been identified in this dataset yet — identify one and it appears here."')+'>'+lab+' ('+c+')</option>';}).join("")+'</optgroup>';
-  }
-  /* THE CHOSEN TYPE SURVIVES THE REBUILD, 2026-09-18 (Søren: "When having pressed random cell, it
-     switches back to l2/3 pyramidal neuron. It should stay on the selected cell type.").
-     Assigning innerHTML to a <select> discards every option, so the browser falls back to the
-     first one -- "L2/3 pyramidal neuron (23P)" in minnie65. Read HERE, one statement before the
-     assignment, rather than at the top of this function or in a caller: this function awaits two
-     whole-sheet backend reads before it gets this far, and the person can have chosen a type while
-     those were in flight. That gap is also why the bug only surfaced now -- the two fire-and-forget
-     calls at page load resolve seconds late on a cold cache, long after the control is reachable,
-     which makes the reset look like the "Random example" click did it. A previously chosen type
-     that no longer exists (its pool emptied) simply isn't found, and the first option stands. */
-  const wasType=randomTypeSelect.value;
-  randomTypeSelect.innerHTML=opts;
-  if(wasType){
-    for(let oi=0;oi<randomTypeSelect.options.length;oi++){
-      if(randomTypeSelect.options[oi].value===wasType){randomTypeSelect.selectedIndex=oi;break;}
-    }
-  }
-  window.RAND_POOLS=RP;
+  paintTypeSelect();
 }
 const randomUnclassifiedBtn=document.getElementById("randomUnclassified");
 if(randomUnclassifiedBtn)randomUnclassifiedBtn.addEventListener("click",()=>{
