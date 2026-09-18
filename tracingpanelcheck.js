@@ -1813,13 +1813,19 @@ function link(annotations){
           contours: 2, sections: 2, volumeUm3: 0.02, color: "#9740e2", tracedBy: "Nobody" }
       ] }) });
       PANEL_TRACINGS = null; PANEL_TRACINGS_AT = 0;
+      PANEL_ORGAN_ANNS = []; PANEL_ORGAN_NID = "253863"; PANEL_ORGAN_RINGS = {};
+      window.__organOpen = true;
       loadTracedStructures("253863", "");
-      await new Promise(r => setTimeout(r, 80));
-      const box = document.getElementById("tracedOnCell");
+      await new Promise(r => setTimeout(r, 120));
+      /* SINCE 2026-09-18 organelles live in the Organelles section, beside the logged points they
+         pair with, rather than in the "Traced on this cell" block -- the same object twice on one
+         panel is what that section exists to end. The numbering is what is under test here and it
+         is unchanged; only which block reads it out has moved. */
+      const box = document.getElementById("cellOrganelles");
       return { html: box ? box.innerHTML : "", text: box ? box.textContent : "" };
     });
-    ok(/Traced on this cell/.test(onCell.text),
-       "the cell's own panel has a block for what has been traced on it");
+    ok(/Organelles/.test(onCell.text),
+       "the cell's own panel has a block for the organelles traced on it");
     ok(onCell.text.indexOf("Mitochondrion 1") < onCell.text.indexOf("Mitochondrion 2"),
        "...listed by number, so 1 and 2 read as a set rather than as two unrelated things");
     ok(/0\.21/.test(onCell.text) && /0\.18/.test(onCell.text),
@@ -1852,8 +1858,21 @@ function link(annotations){
       ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
         document.getElementById(id).value = [240640, 207872, 33000][i];
       });
+      /* WAITS FOR THE PAD, NOT FOR A STOPWATCH.  2026-09-18
+         padDraw() refuses to start while one is already running (PAD_BUSY), so a fixed wait that is
+         a little too short does not merely draw early -- it makes the NEXT padStep a no-op, and the
+         contour meant for the second section lands on the first. That is a race that passes until
+         the run ahead of this section gets slower, and it is what made this section start failing
+         with nothing wrong in it. */
+      const ready = async () => {
+        for (let i = 0; i < 100; i++){
+          if (PAD_VIEW && !PAD_BUSY) return true;
+          await new Promise(r => setTimeout(r, 50));
+        }
+        return false;
+      };
       document.getElementById("tracePadOpen").click();
-      await new Promise(r => setTimeout(r, 200));
+      await ready();
       /* Two sections, and a half-drawn contour on the second -- a draft that dropped the contour in
          progress would lose the work of whoever was interrupted mid-cell, which is most of them. */
       [[100, 100], [200, 100], [200, 200]].forEach(q => {
@@ -1862,7 +1881,7 @@ function link(annotations){
       });
       UJ.tracepad.closeRing(PAD);
       padStep(1);
-      await new Promise(r => setTimeout(r, 200));
+      await ready();
       [[110, 110], [210, 110], [210, 210]].forEach(q => {
         const t = PAD_VIEW.toolAt(q[0], q[1]);
         UJ.tracepad.addVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
@@ -1874,10 +1893,23 @@ function link(annotations){
       document.getElementById("tracingNucId").value = "253863";
       document.getElementById("tracingRootId").value = "864691135570733037";
       PAD_EDIT_ID = "hers_1";                       // as if this were an edit of a shared tracing
-      /* The autosave is coalesced to about a second; wait for it rather than pressing the button,
-         because the point is that nobody has to press the button. */
-      await new Promise(r => setTimeout(r, 1600));
-      const raw = localStorage.getItem("ujump_tracing_draft_v1");
+      /* The autosave is coalesced to about a second; wait for IT rather than for a stopwatch,
+         because the point is that nobody has to press the button -- and because a fixed wait is a
+         race that passes until the run ahead of it gets slower, which is how this section started
+         failing on 2026-09-18 with nothing wrong in it. */
+      /* Waits for the autosave to SETTLE, not merely to happen: it fires after every contour, so
+         the first value it writes is a half-drawn draft and reading that would assert against a
+         state nobody is in. Two identical reads a few hundred ms apart is what "caught up" means,
+         and it is not a stopwatch -- a fixed wait is a race that passes until the run ahead of it
+         gets slower, which is how this section started failing on 2026-09-18 with nothing wrong
+         in it. */
+      let raw = null, prev = null, same = 0;
+      for (let i = 0; i < 80; i++){
+        await new Promise(r => setTimeout(r, 100));
+        raw = localStorage.getItem("ujump_tracing_draft_v1");
+        if (raw && raw === prev){ if (++same >= 4) break; } else same = 0;
+        prev = raw;
+      }
       return { raw: !!raw, d: raw ? JSON.parse(raw) : null,
                bar: document.getElementById("tracingDraftBar").textContent,
                vol: document.getElementById("tracePadVol").textContent,
@@ -1901,12 +1933,20 @@ function link(annotations){
        "...with the section spacing it was measured at, which is its error bar");
 
     await p.reload();
-    await p.waitForTimeout(4000);
-    const back = await p.evaluate(() => ({
-      bar: document.getElementById("tracingDraftBar").textContent,
-      shown: document.getElementById("tracingDraftBar").style.display !== "none",
-      resume: !!document.getElementById("draftResume"),
-      padShut: document.getElementById("tracePadWrap").style.display === "none" }));
+    /* Polled, not timed: the page grew another module today and will grow more, and "4 seconds is
+       enough to boot" is a race with the future. The bar appearing IS the page having booted far
+       enough for this section to ask anything. */
+    /* READ IN THE SAME BREATH AS THE WAIT. Waiting for the bar and then asking about it in a
+       second round trip is two moments, and the answer belongs to the first one: the page goes on
+       working while the question is in flight. One handle, one moment. */
+    const back = await p.waitForFunction(() => {
+      var b = document.getElementById("tracingDraftBar");
+      if (!(b && b.style.display !== "none" && /Unfinished/.test(b.textContent))) return null;
+      return { bar: b.textContent, shown: true,
+               resume: !!document.getElementById("draftResume"),
+               padShut: document.getElementById("tracePadWrap").style.display === "none" };
+    }, { timeout: 30000 }).then(h => h.jsonValue())
+      .catch(() => ({ bar: "", shown: false, resume: false, padShut: false }));
     ok(back.shown && back.resume && /Unfinished tracing kept/.test(back.bar),
        "AFTER A RELOAD the card still offers it", back.bar.slice(0, 70));
     ok(back.padShut, "...without reopening the pad by itself");
@@ -2014,7 +2054,10 @@ function link(annotations){
        "the two structures have different colours to begin with", drew.colours.join(" / "));
 
     await p.reload();
-    await p.waitForTimeout(4000);
+    await p.waitForFunction(() => {
+      var b = document.getElementById("tracingDraftBar");
+      return !!(b && b.style.display !== "none" && /Unfinished/.test(b.textContent));
+    }, { timeout: 30000 }).catch(() => {});
     const back = await p.evaluate(async ({ src }) => {
       eval("(" + src + ")()");
       document.getElementById("tracingPanel").open = true;
@@ -2178,6 +2221,201 @@ function link(annotations){
     });
     ok(same.length === 2 && same[0] !== same[1],
        "Neuroglancer keys layers by name, so the second gets its number", same.join(" | "));
+  }
+
+  /* ── THE ORGANELLES SECTION: WHERE IT IS AND WHAT SHAPE IT IS, TOGETHER ──────────  2026-09-18
+     Søren: *"I would like that the organelles are featured in the cell identity as an expandable
+     section where the annotations are coupled with the segmentations where the annotation
+     coordinate is within the 3D volume of the segmentation."*
+
+     organellelinkcheck.js owns the geometry. This owns the panel: that the two fetches meet, that
+     the contours are fetched on opening and not before, and that each of the three kinds of row
+     says the right thing. */
+  console.log("\nthe organelles section on the cell panel");
+  {
+    const box = (cx, cy, s, z) => ({ z, points: [[cx-s, cy-s], [cx+s, cy-s], [cx+s, cy+s], [cx-s, cy+s]] });
+    const sect = await p.evaluate(async ({ ringsA }) => {
+      document.body.insertAdjacentHTML("beforeend", '<div id="commReports"></div>');
+      const asked = [];
+      window.fetch = async (u) => {
+        const s = String(u); asked.push(s);
+        if (/structureId=/.test(s))
+          return { ok: true, json: async () => ({ tracings: [{ structureId: "m1",
+            rows: ringsA.map((r, i) => ({ structureId: "m1", name: "Mitochondrion 1",
+              kind: "mitochondrion", nucleusId: "253863", z: r.z, ringIndex: i,
+              points: r.points.map(p => p.join(",")).join(";") })) }] }) };
+        if (/tracings=1/.test(s)) return { ok: true, json: async () => ({ tracings: [
+          { structureId: "m1", name: "Mitochondrion 1", instanceOf: "mitochondrion",
+            nucleusId: "253863", contours: 2, sections: 2, volumeUm3: 0.21, color: "#40e28c",
+            contributors: ["Søren Grubb"] },
+          { structureId: "c1", name: "Whole cell", instanceOf: "cell", nucleusId: "253863",
+            contours: 4, sections: 4, volumeUm3: 900, color: "#888888" } ] }) };
+        return { ok: true, json: async () => ({}) };
+      };
+      PANEL_TRACINGS = null; PANEL_TRACINGS_AT = 0; PANEL_ORGAN_RINGS = {};
+      window.__organOpen = false;
+      /* The annotations arrive with the community reports; two inside the outline and one nowhere
+         near it, which is the whole question. */
+      PANEL_ORGAN_ANNS = [
+        { kind: "mitochondrion", pointA: "1000,2000,100", by: "Søren Grubb" },
+        { kind: "mitochondrion", pointA: "1010,2010,105", by: "Somebody Else" },
+        { kind: "lysosome", pointA: "9000,9000,100", by: "Somebody Else" }
+      ];
+      PANEL_ORGAN_NID = "253863";
+      loadTracedStructures("253863", "");
+      await new Promise(r => setTimeout(r, 120));
+      const host = document.getElementById("cellOrganelles");
+      const before = { html: host ? host.innerHTML : "", asked: asked.slice(),
+                       traced: (document.getElementById("tracedOnCell") || {}).textContent || "" };
+      /* Opening it is what fetches the contours. */
+      const det = document.getElementById("cellOrganDetails");
+      det.open = true; det.dispatchEvent(new Event("toggle"));
+      await new Promise(r => setTimeout(r, 250));
+      return { before,
+               summary: document.querySelector("#cellOrganDetails summary").textContent,
+               text: host.textContent.replace(/\s+/g, " "),
+               rows: host.querySelectorAll(".organrow").length,
+               traceBtns: host.querySelectorAll(".organtrace").length,
+               asked: asked.filter(a => /structureId=/.test(a)).length };
+    }, { ringsA: [box(1000, 2000, 100, 100), box(1000, 2000, 100, 105)] });
+
+    ok(!/structureId=/.test(sect.before.asked.join(" ")),
+       "closed, it costs no Drive read — the index alone draws the list",
+       sect.before.asked.length + " call(s), none for contours");
+    ok(/Organelles/.test(sect.before.html), "...and the section is there, collapsed");
+    ok(sect.asked === 1,
+       "opening it reads the contours of this cell's organelles, and only the organelles",
+       sect.asked + " (the whole-cell tracing is not one)");
+    ok(!/Mitochondrion 1/.test(sect.before.traced),
+       "an organelle is no longer listed twice — it has left the “Traced on this cell” block",
+       JSON.stringify(sect.before.traced.slice(0, 40)));
+    ok(/Whole cell/.test(sect.before.traced),
+       "...while the cell itself stays there, because it is the cell, not something inside it");
+    ok(/1 outlined, 3 logged, 1 paired/.test(sect.summary),
+       "the summary counts what is in it — organelles only, the cell is not one", sect.summary);
+    ok(/the traced centre replaces 2 logged point/.test(sect.text),
+       "THE OUTLINE'S CENTRE REPLACES THE POINTS INSIDE IT — his rule, on screen",
+       (sect.text.match(/the traced centre replaces[^\u2014]*/) || [""])[0].slice(0, 80));
+    ok(/Søren Grubb/.test(sect.text) && /Somebody Else/.test(sect.text),
+       "...with both of them still named, because an observation is not ours to erase");
+    ok(/centre \(1000, 2000, 10[23]\)/.test(sect.text),
+       "...and the coordinate it gives instead is the outline's own centre",
+       (sect.text.match(/centre \([^)]*\)/) || [""])[0]);
+    ok(/Lysosome/.test(sect.text) && /logged, not outlined/.test(sect.text),
+       "an annotation with no outline is listed as that");
+    ok(sect.traceBtns === 1, "...with the offer to draw one", sect.traceBtns + " button");
+    ok(sect.rows === 2, "every annotation and every outline, exactly once", sect.rows + " rows");
+  }
+
+  console.log("...and “Segment it” opens the pad on that organelle");
+  {
+    const opened = await p.evaluate(async () => {
+      const btn = document.querySelector("#cellOrganelles .organtrace");
+      window.CUR_NUCID = "253863"; window.CUR_ROOT = "864691135570733037";
+      btn.click();
+      await new Promise(r => setTimeout(r, 300));
+      return { x: document.getElementById("tracingX").value,
+               y: document.getElementById("tracingY").value,
+               z: document.getElementById("tracingZ").value,
+               what: document.getElementById("tracingWhat").value,
+               nuc: document.getElementById("tracingNucId").value,
+               open: document.getElementById("tracingPanel").open,
+               say: document.getElementById("tracingStatus").textContent };
+    });
+    ok(opened.open && opened.x === "9000" && opened.y === "9000" && opened.z === "100",
+       "the pad opens AT the annotation, not near it",
+       [opened.x, opened.y, opened.z].join(", "));
+    ok(opened.what === "lysosome",
+       "...with the organelle it is already known to be", opened.what);
+    ok(opened.nuc === "253863",
+       "...and filed against the same cell, or pairing it back would be a coincidence", opened.nuc);
+    ok(/centre becomes/.test(opened.say), "...and says what the outline will be worth",
+       opened.say.slice(-70));
+  }
+
+  /* ── AN OUTLINE REGISTERS ITS OWN CENTRE ─────────────────────────────────────────  2026-09-18
+     Søren: *"When drawing a segmentation of an organelle that does not have an annotation, the
+     volumetric center of the segmentation should be registered as an annotation."* — silently, and
+     *"more precise than the manually annotated, so it should replace it."*
+
+     Driven through the REAL tracingPublish, because the thing that can be wrong is not the
+     arithmetic (organellelinkcheck.js owns that) but WHEN it fires: after the outline and not
+     before, once and not twice, for an organelle and not for the cell. */
+  console.log("\nan outline registers its own centre");
+  {
+    const reg = await p.evaluate(async () => {
+      const posts = [], quiet = [];
+      window.postReport = (x) => { posts.push(x); return true; };
+      window.noteSaveResult = (x) => { quiet.push(x); return Promise.resolve(); };
+      /* BARE ASSIGNMENTS, not window.X. These are top-level `let`s in the page script, so they live
+         in the global LEXICAL environment and are not properties of window -- setting the property
+         makes a second variable that `typeof GOOGLE_VERIFIED !== "undefined" && GOOGLE_VERIFIED`
+         never reads. The same trap that made rootidbackcheck report an empty CUR_EXTRA_ROOTS while
+         the count said two. */
+      try { GOOGLE_VERIFIED = true; } catch (e) { window.GOOGLE_VERIFIED = true; }
+      try { GOOGLE_CREDENTIAL = "test"; } catch (e) { window.GOOGLE_CREDENTIAL = "test"; }
+      try { REPORTER_NAME = "Søren Grubb"; } catch (e) { window.REPORTER_NAME = "Søren Grubb"; }
+      const box = (cx, cy, s, z) => ({ z, points: [[cx-s,cy-s],[cx+s,cy-s],[cx+s,cy+s],[cx-s,cy+s]] });
+      const mito = { id: "m1", name: "Mitochondrion 1", kind: "mitochondrion", type: "Astrocyte",
+                     color: "#40e28c", nucleus_id: "253863", root_id: "8646911355",
+                     volume_um3: 0.21,
+                     rings: [box(1000, 2000, 100, 100), box(1000, 2000, 100, 110)] };
+      const cell = { id: "c1", name: "Whole cell", kind: "cell", type: "Astrocyte",
+                     color: "#888888", nucleus_id: "253863", root_id: "8646911355",
+                     rings: [box(0, 0, 900, 100), box(0, 0, 900, 110)] };
+      const orphan = { id: "o1", name: "Lysosome 1", kind: "lysosome", type: "Astrocyte",
+                       color: "#9740e2", nucleus_id: "", root_id: "",
+                       rings: [box(5000, 5000, 50, 40), box(5000, 5000, 50, 45)] };
+      tracingPublish(mito); tracingPublish(cell); tracingPublish(orphan);
+      /* A queued tracing that goes out later must register its centre then, and only then. */
+      const again = { id: "m1", name: "Mitochondrion 1", kind: "mitochondrion", type: "Astrocyte",
+                      color: "#40e28c", nucleus_id: "253863", root_id: "8646911355",
+                      volume_um3: 0.21, centre_registered: true,
+                      rings: [box(1000, 2000, 100, 100), box(1000, 2000, 100, 110)] };
+      tracingPublish(again);
+      return { traced: posts.length, quiet: quiet.slice(),
+               kinds: posts.map(x => x.kind), reg: mito.centre_registered };
+    });
+    ok(reg.traced === 4, "four outlines went into the dataset", reg.traced);
+    ok(reg.quiet.length === 1,
+       "ONE centre registered — for the organelle, not the cell, and not twice for the same outline",
+       reg.quiet.length + " of 4");
+    const a = reg.quiet[0] || {};
+    ok(a.type === "organelle_location",
+       "...as an ordinary annotation, so everything that reads annotations sees it", a.type);
+    ok(a.pointA === "1000,2000,105",
+       "...at the outline's own volumetric centre", a.pointA);
+    ok(a.kind === "mitochondrion" && a.nucleusId === "253863",
+       "...of the right organelle, on the right cell", a.kind + " / " + a.nucleusId);
+    ok(a.source === "segmentation" && a.fromStructureId === "m1",
+       "...saying where it came from, in columns", a.source + " / " + a.fromStructureId);
+    ok(/Volumetric centre/.test(a.comment) && /rather than placed by hand/.test(a.comment),
+       "...and in words, so the row explains itself in the sheet", a.comment.slice(0, 70));
+    ok(a.reporterName === "Søren Grubb",
+       "...attributed to whoever drew it", a.reporterName);
+    ok(reg.reg === true, "the tracing remembers that its centre went, so a reshare adds no second");
+    /* SILENTLY. postReport toasts on success; noteSaveResult does not, and says what the server
+       said when it refuses. Three organelles in one press must not be three toasts. */
+    ok(!reg.quiet.some(x => x === undefined) && reg.quiet.length === 1,
+       "and it went the silent way — no toast of its own beside the tracing's");
+  }
+
+  console.log("...and a centroid that lands off its own object says so");
+  {
+    const off = await p.evaluate(async () => {
+      const quiet = [];
+      window.postReport = () => true;
+      window.noteSaveResult = (x) => { quiet.push(x); return Promise.resolve(); };
+      const box = (cx, cy, s, z) => ({ z, points: [[cx-s,cy-s],[cx+s,cy-s],[cx+s,cy+s],[cx-s,cy+s]] });
+      /* A C-shape: the middle section displaced far to one side, so the centroid falls in the gap. */
+      tracingPublish({ id: "c2", name: "Nucleoplasmic reticulum 1", kind: "nucleoplasmic_reticulum",
+                       type: "Astrocyte", nucleus_id: "253863", root_id: "",
+                       rings: [box(0, 0, 50, 0), box(2000, 0, 50, 10), box(0, 0, 50, 20)] });
+      return quiet[0] || {};
+    });
+    ok(/centroid lies outside the outline/.test(off.comment || ""),
+       "it marks where the organelle is, and says it is not a point ON it",
+       (off.comment || "").slice(-90));
   }
 
   const newErrors = errors.filter(e => !/atob/.test(e));

@@ -506,8 +506,11 @@ document.addEventListener("DOMContentLoaded", function(){
      else in this file does yet. -->
 <script src="core/segread.js"></script>
 <script src="core/segpaint.js"></script>
+<script src="core/organellelink.js"></script>
 <script src="core/emtiles.js"></script>
 <script src="core/tracepad.js"></script>
+<script src="core/traceloft.js"></script>
+<script src="core/nucmesh.js"></script>
 <script src="core/traceloft.js"></script>
 <script src="core/nucmesh.js"></script>
 <script src="core/traceloft.js"></script>
@@ -536,7 +539,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 05:47</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 10:36</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1058,6 +1061,17 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div style="margin-top:14px">
 <label style="font-size:12px" title="Draws organelle/extracellular-structure point annotations for the cells matched above — one independently-toggleable layer per kind you check here, colour-coded per kind, organized by topic. Sourced from the community 'report an organelle' data; centriole and primary cilium also draw from Søren's own-verified dataset. No point for a given cell just means nobody has logged one there yet, not a confirmed biological absence. The two vector checkboxes (under Centriole &amp; cilium) draw an additional 3D arrow on top of the plain points — check a point checkbox on its own to show the organelle's location without the vector.">Organelles and extracellular structures</label>
 <div id="filterOrganellesBox" style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px"></div>
+<!-- THE OTHER HALF OF AN ORGANELLE.  2026-09-18. Søren: "In the filter and show, it should also be
+     possible to select include organelles segmentations of a specific kind or all organelle
+     segmentations for the filtered cells." The boxes above draw where organelles were LOGGED; this
+     draws what has been OUTLINED, which is the same organelles with a shape and a volume. -->
+<div class="row" style="gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+<label style="font-size:12px;flex:0 0 auto;text-transform:none;letter-spacing:normal" for="filterOrganSeg" title="Hand-traced organelle outlines for the matched cells, drawn into the 3D view as contours &mdash; one layer per kind, in the colour each was drawn in. The outlines live in Drive and are read one file each, so this costs a moment per outline and is capped; the points above cost nothing extra.">Traced organelle outlines</label>
+<select id="filterOrganSeg" style="flex:1 1 200px;min-width:0">
+<option value="">None &mdash; points only</option>
+<option value="__all">All outlined organelles</option>
+</select>
+</div>
 </div>
 </div>
 </details>
@@ -3832,7 +3846,23 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
       const lab=(typeof escHtml==="function")?escHtml(p.label):p.label;
       return '<option value="'+p.k+'"'+(c?"":' disabled title="No cell of this type has been identified in this dataset yet — identify one and it appears here."')+'>'+lab+' ('+c+')</option>';}).join("")+'</optgroup>';
   }
+  /* THE CHOSEN TYPE SURVIVES THE REBUILD, 2026-09-18 (Søren: "When having pressed random cell, it
+     switches back to l2/3 pyramidal neuron. It should stay on the selected cell type.").
+     Assigning innerHTML to a <select> discards every option, so the browser falls back to the
+     first one -- "L2/3 pyramidal neuron (23P)" in minnie65. Read HERE, one statement before the
+     assignment, rather than at the top of this function or in a caller: this function awaits two
+     whole-sheet backend reads before it gets this far, and the person can have chosen a type while
+     those were in flight. That gap is also why the bug only surfaced now -- the two fire-and-forget
+     calls at page load resolve seconds late on a cold cache, long after the control is reachable,
+     which makes the reset look like the "Random example" click did it. A previously chosen type
+     that no longer exists (its pool emptied) simply isn't found, and the first option stands. */
+  const wasType=randomTypeSelect.value;
   randomTypeSelect.innerHTML=opts;
+  if(wasType){
+    for(let oi=0;oi<randomTypeSelect.options.length;oi++){
+      if(randomTypeSelect.options[oi].value===wasType){randomTypeSelect.selectedIndex=oi;break;}
+    }
+  }
   window.RAND_POOLS=RP;
 }
 const randomUnclassifiedBtn=document.getElementById("randomUnclassified");
@@ -5675,6 +5705,10 @@ document.addEventListener("DOMContentLoaded",function(){
    arrived and was refused (say what the server said, because that sentence is actionable -- it is
    usually "re-paste Code.gs and Deploy → New version"). */
 var SAVE_LABEL={
+  /* An outline's own centre, posted silently beside it -- see tracingRegisterCentre(). Named here
+     because a refusal is the one thing it ever says out loud, and "That measurement was not saved"
+     would leave somebody hunting for which. */
+  organelle_location:"The outlined organelle\u2019s centre",
   save_computed_volume:"The computed volume",
   connectivity_sample:"The connectivity sample",
   cell_contacts_batch:"The contacts run",
@@ -8395,6 +8429,51 @@ function tracingViewerOpen(structs, say, ids){
     + "the address bar back into the box above to read them in again.")) + cellStr);
 }
 
+/* ── SEGMENT THIS ONE ───────────────────────────────────────────────────────────  2026-09-18
+   Søren: *"Where there is an annotation without a segmentation, there should be an option to start
+   segmenting it."*
+
+   The cell panel's Organelles section has the button; this is what it opens. The coordinate and the
+   organelle both come from the annotation, so the pad opens ON the thing rather than near it and
+   the type box already says what it is -- which is also what makes the outline pair back to that
+   same annotation when it is added, and supersede it.
+
+   Called by name from core/panel.js, guarded there: this card is not on every page that panel
+   serves. */
+function openTracingAt(pt, kind){
+  try {
+    var panel = document.getElementById("tracingPanel");
+    if (panel) panel.open = true;
+    var card = document.getElementById("tracingCard");
+    if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    ["tracingX", "tracingY", "tracingZ"].forEach(function(id, i){
+      var e = document.getElementById(id);
+      if (e && pt && isFinite(pt[i])) e.value = Math.round(pt[i]);
+    });
+    /* The type, when the page's dropdown has it. An organelle kind this page does not know is not
+       an error -- the boxes are still filled and the person picks. */
+    var what = document.getElementById("tracingWhat");
+    if (what && kind){
+      var has = [].slice.call(what.options).some(function(o){ return o.value === kind; });
+      if (has){
+        what.value = kind;
+        what.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+    /* The ids of the cell it belongs to, so the outline is filed against the same cell the
+       annotation was -- otherwise pairing them afterwards would be a coincidence. */
+    var fill = function(id, v){ var e = document.getElementById(id); if (e && v) e.value = v; };
+    fill("tracingNucId", (typeof CUR_NUCID !== "undefined" && CUR_NUCID) || "");
+    fill("tracingRootId", (typeof CUR_ROOT !== "undefined" && CUR_ROOT) || "");
+    padOpen();
+    tracingSay("Tracing " + (kind ? tracingWhatOf(kind, "").name : "this organelle") + " at "
+      + (pt || []).join(", ") + " — outline it on at least two sections. Its centre becomes "
+      + "the cell's coordinate for it, more precise than the logged point.");
+  } catch (e){
+    tracingSay("Could not open the pad there: " + String(e && e.message || e), true);
+  }
+}
+
 function tracingOpen(){
   const got=tracingPos();
   if(got.error){tracingSay(got.error,true);return;}
@@ -8474,6 +8553,72 @@ function tracingKeep(){
 
 /* Returns whether it went. `quiet` is for the automatic flush, which must not fire a sign-in
    prompt at somebody who did not just press anything. */
+/* ── AN OUTLINE REGISTERS ITS OWN CENTRE ────────────────────────────────────────  2026-09-18
+   Søren: *"When drawing a segmentation of an organelle that does not have an annotation, the
+   volumetric center of the segmentation should be registered as an annotation."*
+
+   An ordinary `organelle_location` row, so everything that reads annotations -- the per-cell
+   summary, the counts beside the filter, the Master cell list -- sees it without knowing anything
+   new. An organelle that has been outlined stops being invisible to half the tool.
+
+   It goes out SILENTLY (his word): noteSaveResult says nothing when it worked and says what the
+   server said when it did not, so three organelles in one press cost no extra toasts and a
+   deployment that refuses the write still gets to say so. The tracing's own toast announces the
+   press already.
+
+   ONLY AN ORGANELLE. A traced cell or nucleus is the cell, not something inside it, and the
+   organelle annotations are a list of things inside cells.
+
+   AND ONLY FOR A CELL. An annotation is filed against a nucleus or a root ID; a tracing with
+   neither has nowhere to be an annotation OF, and inventing a home for it would put it on whatever
+   cell happened to be on screen. */
+function tracingRegisterCentre(t){
+  try {
+    if (!t || !t.rings || !t.rings.length) return false;
+    const kind = String(t.kind || "").toLowerCase();
+    if (!kind || kind === "cell" || kind === "nucleus") return false;
+    if (!window.UJ || !UJ.organellelink) return false;
+    const nid = String(t.nucleus_id || ""), rid = String(t.root_id || "");
+    if (!nid && !rid) return false;
+    const c = UJ.organellelink.centre(t.rings);
+    if (!c || !c.point) return false;
+    const at = c.point.join(",");
+    /* The row explains itself in the sheet before any column is read. */
+    const say = "Volumetric centre of the outlined “" + (t.name || kind) + "”"
+      + (isFinite(t.volume_um3) ? " (" + (t.volume_um3 >= 1 ? t.volume_um3.toFixed(2)
+          : t.volume_um3.toFixed(4)) + " µm³, " + c.sections + " sections)" : "")
+      + ", registered from the segmentation rather than placed by hand."
+      /* A centroid can fall outside a curved object. It is still where the organelle is; it is not
+         a point ON it, and the difference is worth one clause. */
+      + (c.inside ? "" : " The centroid lies outside the outline — a curved shape — so "
+                       + "this marks where it is rather than a point on it.");
+    const payload = { type: "organelle_location",
+      timestamp: new Date().toISOString(),
+      nucleusId: nid, rootId: rid, coord: at,
+      groupId: "centre_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7),
+      subIndex: 1, subCount: 1,
+      kind: kind, pointA: at, pointB: "",
+      identified: t.type || "", path: "", comment: say,
+      /* WHERE IT CAME FROM, in columns as well as in words. ensureHeaderColumn on the backend adds
+         both by itself, which is how every optional field on that sheet has arrived; a deployment
+         older than today simply ignores them and the row is still a correct annotation. */
+      source: "segmentation", fromStructureId: t.id || "",
+      reporterName: (typeof REPORTER_NAME !== "undefined" && REPORTER_NAME) || "",
+      reporterEmail: (typeof REPORTER_EMAIL !== "undefined" && REPORTER_EMAIL) || "",
+      credential: (typeof GOOGLE_CREDENTIAL !== "undefined" && GOOGLE_CREDENTIAL) || "" };
+    if (typeof noteSaveResult === "function") noteSaveResult(payload);
+    else if (typeof postAndRead === "function") postAndRead(payload);
+    else return false;
+    /* The panel caches the annotations for a minute; this one should be in the next draw of the
+       section it belongs to rather than a minute later. */
+    try { if (typeof PANEL_TRACINGS !== "undefined") PANEL_TRACINGS_AT = 0; } catch (_e){}
+    return true;
+  } catch (e){
+    console.warn("[uJump tracing] could not register the centre:", e && e.message);
+    return false;
+  }
+}
+
 function tracingPublish(t,quiet){
   if(!t||!t.rings||!t.rings.length)return false;
   const signedIn=(typeof GOOGLE_VERIFIED!=="undefined"&&GOOGLE_VERIFIED)
@@ -8506,6 +8651,10 @@ function tracingPublish(t,quiet){
   if(ok===false)return false;
   t.pending_share=false;
   t.shared_at=new Date().toISOString();
+  /* AFTER the tracing, and only if the tracing went: an annotation pointing at an outline that was
+     refused would be a coordinate with nothing behind it. Once per tracing, not once per press, so
+     a queued one registers its centre when it finally goes out too. */
+  if(!t.centre_registered&&tracingRegisterCentre(t))t.centre_registered=true;
   tracingWrite(TRACINGS_KEPT);
   return true;
 }
@@ -12829,17 +12978,16 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
        rebuildTypePools() runs at load, this fetch resolves after it, and IDX_BY_TYPE would
        otherwise keep its pre-community contents -- so "Glia (49)" would go on offering the cells
        somebody has since named Astrocyte. The dropdown is rebuilt from the pools, so its counts
-       follow; its SELECTION is carried across by hand, since rebuilding an option list drops it
-       and silently resetting the type somebody just chose is worse than a stale count. */
+       follow; its SELECTION is kept by populateRandomTypeSelect itself.
+       THE HAND-CARRY THAT USED TO BE HERE IS GONE, 2026-09-18. It read the value BEFORE calling,
+       then wrote it back after the promise resolved -- which protected this one path and, once the
+       rebuild learnt to keep its own selection, actively broke it: two whole-sheet reads happen in
+       between, and forcing back a pre-await value overwrites a type the person chose while they
+       were in flight. That is the same wrong answer, arriving by the same route, one layer up. */
     try{
       if(typeof rebuildTypePools==="function")rebuildTypePools();
-      const rts=document.getElementById("randomTypeSelect");
-      const wasType=rts?rts.value:"";
       if(typeof populateRandomTypeSelect==="function"){
-        Promise.resolve(populateRandomTypeSelect()).then(function(){
-          const el=document.getElementById("randomTypeSelect");
-          if(el&&wasType&&el.querySelector('option[value="'+wasType.replace(/"/g,'\\"')+'"]'))el.value=wasType;
-        }).catch(function(){});
+        Promise.resolve(populateRandomTypeSelect()).catch(function(){});
       }
     }catch(_e3){}
   }
@@ -15117,6 +15265,149 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      be risky. 1.95 MB (2,044,723 characters) is deliberately close to Chrome's documented ~2 MB
      practical URL limit, per Søren's preference -- not a guarantee of failure above it, nor of
      success below it, so the warning lets the user decide rather than silently blocking them. */
+  /* ── THE FILTERED CELLS BRING THEIR OUTLINES ──────────────────────────────────  2026-09-18
+     Søren: "it should also be possible to select include organelles segmentations of a specific
+     kind or all organelle segmentations for the filtered cells."
+
+     Modelled on buildVascTraceLayers, which this handler already awaits and pushes onto the state:
+     a list of ready-made annotation layers, or [] when nothing is asked for or nothing can be read.
+     Nothing about which cells matched, or about the Excel export, is touched by it.
+
+     ONE LAYER PER KIND. A filter can match hundreds of cells; a layer per outline would be a layer
+     list nobody can use and a URL nobody can open. Per kind is what the organelle POINTS already do
+     in this view, so the two halves of one organelle arrive as two layers you turn on together. */
+  /* ── THE PICKER LISTS WHAT EXISTS ─────────────────────────────────────────────  2026-09-18
+     "a specific kind" has to be a list of kinds, and a list invented from the ontology would offer
+     sixty-one options of which two have ever been drawn. So it is filled from the index the moment
+     somebody reaches for it -- once, lazily, because a filter card that fetches on load costs every
+     visitor a request for a control most of them never touch.
+
+     THE NUMBER IS OUTLINES IN THE DATASET, and the label says so. The counts beside the organelle
+     POINT checkboxes above are cells-carrying-the-structure over cells examined (see
+     core/organellefilter.js, and the day that number was misread), and quietly putting a different
+     unit in the same panel would be the same mistake from the other side. */
+  var FILTER_ORGAN_SEG_FILLED=false;
+  async function fillOrganSegKinds(){
+    if(FILTER_ORGAN_SEG_FILLED)return;
+    const sel=document.getElementById("filterOrganSeg");
+    if(!sel||!REPORT_ENDPOINT)return;
+    FILTER_ORGAN_SEG_FILLED=true;
+    try{
+      const r=await fetch(REPORT_ENDPOINT+"?tracings=1");
+      const d=await r.json();
+      const n={};
+      ((d&&d.tracings)||[]).forEach(function(t){
+        const k=String((t&&(t.instanceOf||t.kind))||"").toLowerCase();
+        if(!k||k==="cell"||k==="nucleus")return;
+        n[k]=(n[k]||0)+1;
+      });
+      const kinds=Object.keys(n).sort();
+      if(!kinds.length){
+        sel.options[1].textContent="All outlined organelles — none traced yet";
+        return;
+      }
+      sel.options[1].textContent="All outlined organelles ("+kinds.reduce(function(a,k){return a+n[k];},0)+")";
+      kinds.forEach(function(k){
+        const label=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined"&&ORGANELLE_KIND_BY_VALUE[k])
+                   ?(ORGANELLE_KIND_BY_VALUE[k].short||ORGANELLE_KIND_BY_VALUE[k].label||k):k;
+        const o=document.createElement("option");
+        o.value=k;
+        o.textContent=label.charAt(0).toUpperCase()+label.slice(1)+" ("+n[k]+" outlined)";
+        sel.appendChild(o);
+      });
+    }catch(e){
+      FILTER_ORGAN_SEG_FILLED=false;      // a hiccup is not an answer; let the next reach try again
+      console.warn("[uJump filter] could not list traced organelle kinds",e);
+    }
+  }
+  (function(){
+    const sel=document.getElementById("filterOrganSeg");
+    if(!sel)return;
+    ["focus","mousedown"].forEach(function(ev){ sel.addEventListener(ev,fillOrganSegKinds); });
+  })();
+  const FILTER_TRACE_CAP=150;
+  async function buildTracedOrganelleLayers(matches,want,say){
+    if(!want||!REPORT_ENDPOINT)return [];
+    /* The cells that matched, by both ids -- a tracing is filed against whichever the tracer had. */
+    const nucSet=new Set(),rootSet=new Set();
+    (matches||[]).forEach(function(m){
+      const nid=rowNucId(m.row);if(nid)nucSet.add(String(nid));
+      const rid=rowRootId(m.row);if(rid)rootSet.add(String(rid));
+    });
+    if(!nucSet.size&&!rootSet.size)return [];
+    let index=[];
+    try{
+      say&&say("Looking up traced outlines\u2026");
+      const r=await fetch(REPORT_ENDPOINT+"?tracings=1");
+      const d=await r.json();
+      index=(d&&d.tracings)||[];
+    }catch(e){console.warn("[uJump filter] tracings index unavailable",e);return [];}
+    const isOrganelle=function(t){
+      const k=String((t&&(t.instanceOf||t.kind))||"").toLowerCase();
+      return !!k&&k!=="cell"&&k!=="nucleus";
+    };
+    let mine=index.filter(function(t){
+      if(!t||!t.structureId||!isOrganelle(t))return false;
+      if(want!=="__all"&&String(t.instanceOf||t.kind||"").toLowerCase()!==String(want).toLowerCase())
+        return false;
+      return nucSet.has(String(t.nucleusId||""))||rootSet.has(String(t.rootId||""));
+    });
+    if(!mine.length)return [];
+    /* THE CAP IS SAID, NOT SILENT. One Drive read per outline is right for a cell and wrong for a
+       filter that matched three hundred, and a view that quietly drew the first hundred and fifty
+       would be a lie about what the dataset holds. */
+    let capped=0;
+    if(mine.length>FILTER_TRACE_CAP){capped=mine.length-FILTER_TRACE_CAP;mine=mine.slice(0,FILTER_TRACE_CAP);}
+    const got=[];
+    for(let i=0;i<mine.length;i++){
+      say&&say("Reading outline "+(i+1)+"/"+mine.length+"\u2026");
+      try{
+        const r=await fetch(REPORT_ENDPOINT+"?tracings=1&structureId="+encodeURIComponent(mine[i].structureId));
+        const d=await r.json();
+        const one=((d&&d.tracings)||[])[0];
+        const st=(one&&!one.error)?(UJ.tracing.rowsToStructures(one.rows||[])[0]||null):null;
+        if(st&&st.rings&&st.rings.length)got.push({t:mine[i],rings:st.rings});
+      }catch(_e){/* one unreadable outline is not the view's problem */}
+    }
+    if(!got.length)return [];
+    /* Grouped by kind, each kind's outlines in one layer, in the colour that kind was drawn in. */
+    const byKind={};
+    got.forEach(function(g){
+      const k=String(g.t.instanceOf||g.t.kind||"organelle").toLowerCase();
+      (byKind[k]=byKind[k]||[]).push(g);
+    });
+    const layers=[];
+    Object.keys(byKind).sort().forEach(function(k){
+      const anns=[];
+      byKind[k].forEach(function(g,gi){
+        /* The same closed loops of lines tracingViewerOpen writes for one cell -- see its header
+           for why lines and not polygons. */
+        (g.rings||[]).forEach(function(r,ri){
+          const pts=r.points||[];
+          if(pts.length<3)return;
+          const z=Math.round(r.z);
+          for(let i=0;i<pts.length;i++){
+            const a=pts[i],b=pts[(i+1)%pts.length];
+            anns.push({type:"line",id:"to"+gi+"_"+ri+"_"+i,
+                       pointA:[Math.round(a[0]),Math.round(a[1]),z],
+                       pointB:[Math.round(b[0]),Math.round(b[1]),z]});
+          }
+        });
+      });
+      if(!anns.length)return;
+      const label=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined"&&ORGANELLE_KIND_BY_VALUE[k])
+                 ?(ORGANELLE_KIND_BY_VALUE[k].short||ORGANELLE_KIND_BY_VALUE[k].label||k):k;
+      layers.push({type:"annotation",source:"local://annotations",tab:"annotations",
+                   name:"traced "+label+" ("+byKind[k].length+")",
+                   annotationColor:byKind[k][0].t.color||"#40e28c",
+                   annotations:anns});
+    });
+    if(capped&&typeof showSubmitToast==="function")
+      showSubmitToast(false,"Drew "+got.length+" traced outline"+(got.length===1?"":"s")
+        +" and left "+capped+" out \u2014 the view reads one file per outline, so it stops at "
+        +FILTER_TRACE_CAP+". Narrow the filter, or pick one kind rather than all.");
+    return layers;
+  }
   const VASC_URL_WARN_LENGTH=Math.round(1.95*1024*1024);
   if(viewAllBtn)viewAllBtn.addEventListener("click",async()=>{
     if(!lastResult||!lastResult.matches.length)return;
@@ -15139,6 +15430,12 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     const centVecOn=document.getElementById("filterCentVec")&&document.getElementById("filterCentVec").checked;
     const cilVecOn=document.getElementById("filterCilVec")&&document.getElementById("filterCilVec").checked;
     if(centVecOn||cilVecOn||orgPointKinds.length){viewAllBtn.textContent="Fetching organelle reports…";window.ORG_MAP=await fetchAllOrganelles();}else{window.ORG_MAP={};}
+    /* The outlines, if any kind was asked for. Same shape as the vasculature tracings above: a
+       list of ready-made layers, pushed onto the state after it is built, so nothing about which
+       cells matched or what the Excel holds can be touched by it. */
+    const organSegSel=document.getElementById("filterOrganSeg");
+    const organSegLayers=await buildTracedOrganelleLayers(lastResult.matches,
+      organSegSel&&organSegSel.value,function(msg){viewAllBtn.textContent=msg;});
     viewAllBtn.textContent="Fetching proposed segmentation IDs…";
     window.ALL_ROOTID_PROPOSALS=await fetchAllRootIdProposals();
     viewAllBtn.textContent="Building view…";
@@ -15146,6 +15443,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     viewAllBtn.disabled=false;viewAllBtn.textContent=orig;
     if(!state)return;
     if(vascTraceLayers.length)state.layers.push(...vascTraceLayers);
+    if(organSegLayers.length)state.layers.push(...organSegLayers);
     const url=document.getElementById("viewer").value+"#!"+encodeURIComponent(JSON.stringify(state));
     if(url.length>VASC_URL_WARN_LENGTH){
       const mb=(url.length/1024/1024).toFixed(1);

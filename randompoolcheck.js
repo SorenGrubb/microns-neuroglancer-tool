@@ -66,7 +66,19 @@ for (const page of PAGES){
      "the community fetch rebuilds the pools");
   ok(/ALL_IDENTITIES=null;[\s\S]{0,2500}?populateRandomTypeSelect\(\)/.test(src),
      "...and the dropdown, so its counts follow");
-  ok(/wasType&&el\.querySelector/.test(src), "...without dropping the chosen type");
+  /* ...without dropping the chosen type. This used to assert a hand-carry at THIS call site, which
+     read the value before calling and wrote it back after. That was right while nothing else did
+     it, and wrong from 2026-09-18: populateRandomTypeSelect awaits two whole-sheet reads, so a
+     pre-await value forced back afterwards overwrites a type the person chose while they were in
+     flight — the very bug, one layer up. The keeping now lives in the one function that owns the
+     assignment, one statement before it, which is the only position that survives the await.
+     Asserted as adjacency rather than mere presence: `const wasType` somewhere in the file would
+     pass while the read sat at the top of the function and lost the race. Behaviour is checked by
+     randomtypecheck.js, which drives the race itself; this is the structural half. */
+  ok(/const wasType=randomTypeSelect\.value;\s*\n\s*randomTypeSelect\.innerHTML=opts;/.test(src),
+     "...without dropping the chosen type — read one statement before the rebuild");
+  ok(!/wasType&&el\.querySelector/.test(src),
+     "...and the old hand-carry, which would force a stale value back over it, is gone");
 }
 
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");

@@ -539,7 +539,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 05:47</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-18 10:36</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3631,7 +3631,23 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
       const lab=(typeof escHtml==="function")?escHtml(p.label):p.label;
       return '<option value="'+p.k+'"'+(c?"":' disabled title="No cell of this type has been identified in this dataset yet — identify one and it appears here."')+'>'+lab+' ('+c+')</option>';}).join("")+'</optgroup>';
   }
+  /* THE CHOSEN TYPE SURVIVES THE REBUILD, 2026-09-18 (Søren: "When having pressed random cell, it
+     switches back to l2/3 pyramidal neuron. It should stay on the selected cell type.").
+     Assigning innerHTML to a <select> discards every option, so the browser falls back to the
+     first one -- "L2/3 pyramidal neuron (23P)" in minnie65. Read HERE, one statement before the
+     assignment, rather than at the top of this function or in a caller: this function awaits two
+     whole-sheet backend reads before it gets this far, and the person can have chosen a type while
+     those were in flight. That gap is also why the bug only surfaced now -- the two fire-and-forget
+     calls at page load resolve seconds late on a cold cache, long after the control is reachable,
+     which makes the reset look like the "Random example" click did it. A previously chosen type
+     that no longer exists (its pool emptied) simply isn't found, and the first option stands. */
+  const wasType=randomTypeSelect.value;
   randomTypeSelect.innerHTML=opts;
+  if(wasType){
+    for(let oi=0;oi<randomTypeSelect.options.length;oi++){
+      if(randomTypeSelect.options[oi].value===wasType){randomTypeSelect.selectedIndex=oi;break;}
+    }
+  }
   window.RAND_POOLS=RP;
 }
 const randomUnclassifiedBtn=document.getElementById("randomUnclassified");
@@ -9664,17 +9680,16 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
        rebuildTypePools() runs at load, this fetch resolves after it, and IDX_BY_TYPE would
        otherwise keep its pre-community contents -- so "Glia (49)" would go on offering the cells
        somebody has since named Astrocyte. The dropdown is rebuilt from the pools, so its counts
-       follow; its SELECTION is carried across by hand, since rebuilding an option list drops it
-       and silently resetting the type somebody just chose is worse than a stale count. */
+       follow; its SELECTION is kept by populateRandomTypeSelect itself.
+       THE HAND-CARRY THAT USED TO BE HERE IS GONE, 2026-09-18. It read the value BEFORE calling,
+       then wrote it back after the promise resolved -- which protected this one path and, once the
+       rebuild learnt to keep its own selection, actively broke it: two whole-sheet reads happen in
+       between, and forcing back a pre-await value overwrites a type the person chose while they
+       were in flight. That is the same wrong answer, arriving by the same route, one layer up. */
     try{
       if(typeof rebuildTypePools==="function")rebuildTypePools();
-      const rts=document.getElementById("randomTypeSelect");
-      const wasType=rts?rts.value:"";
       if(typeof populateRandomTypeSelect==="function"){
-        Promise.resolve(populateRandomTypeSelect()).then(function(){
-          const el=document.getElementById("randomTypeSelect");
-          if(el&&wasType&&el.querySelector('option[value="'+wasType.replace(/"/g,'\\"')+'"]'))el.value=wasType;
-        }).catch(function(){});
+        Promise.resolve(populateRandomTypeSelect()).catch(function(){});
       }
     }catch(_e3){}
   }

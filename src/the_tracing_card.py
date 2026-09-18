@@ -161,6 +161,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SCRIPTS = '''<script src="core/segread.js"></script>
 <script src="core/segpaint.js"></script>
+<script src="core/organellelink.js"></script>
 <script src="core/emtiles.js"></script>
 <script src="core/tracepad.js"></script>
 <script src="core/traceloft.js"></script>
@@ -872,6 +873,51 @@ function tracingViewerOpen(structs, say, ids){
     + "the address bar back into the box above to read them in again.")) + cellStr);
 }
 
+/* ── SEGMENT THIS ONE ───────────────────────────────────────────────────────────  2026-09-18
+   Søren: *"Where there is an annotation without a segmentation, there should be an option to start
+   segmenting it."*
+
+   The cell panel's Organelles section has the button; this is what it opens. The coordinate and the
+   organelle both come from the annotation, so the pad opens ON the thing rather than near it and
+   the type box already says what it is -- which is also what makes the outline pair back to that
+   same annotation when it is added, and supersede it.
+
+   Called by name from core/panel.js, guarded there: this card is not on every page that panel
+   serves. */
+function openTracingAt(pt, kind){
+  try {
+    var panel = document.getElementById("tracingPanel");
+    if (panel) panel.open = true;
+    var card = document.getElementById("tracingCard");
+    if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    ["tracingX", "tracingY", "tracingZ"].forEach(function(id, i){
+      var e = document.getElementById(id);
+      if (e && pt && isFinite(pt[i])) e.value = Math.round(pt[i]);
+    });
+    /* The type, when the page's dropdown has it. An organelle kind this page does not know is not
+       an error -- the boxes are still filled and the person picks. */
+    var what = document.getElementById("tracingWhat");
+    if (what && kind){
+      var has = [].slice.call(what.options).some(function(o){ return o.value === kind; });
+      if (has){
+        what.value = kind;
+        what.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+    /* The ids of the cell it belongs to, so the outline is filed against the same cell the
+       annotation was -- otherwise pairing them afterwards would be a coincidence. */
+    var fill = function(id, v){ var e = document.getElementById(id); if (e && v) e.value = v; };
+    fill("tracingNucId", (typeof CUR_NUCID !== "undefined" && CUR_NUCID) || "");
+    fill("tracingRootId", (typeof CUR_ROOT !== "undefined" && CUR_ROOT) || "");
+    padOpen();
+    tracingSay("Tracing " + (kind ? tracingWhatOf(kind, "").name : "this organelle") + " at "
+      + (pt || []).join(", ") + " \u2014 outline it on at least two sections. Its centre becomes "
+      + "the cell's coordinate for it, more precise than the logged point.");
+  } catch (e){
+    tracingSay("Could not open the pad there: " + String(e && e.message || e), true);
+  }
+}
+
 function tracingOpen(){
   const got=tracingPos();
   if(got.error){tracingSay(got.error,true);return;}
@@ -951,6 +997,72 @@ function tracingKeep(){
 
 /* Returns whether it went. `quiet` is for the automatic flush, which must not fire a sign-in
    prompt at somebody who did not just press anything. */
+/* ── AN OUTLINE REGISTERS ITS OWN CENTRE ────────────────────────────────────────  2026-09-18
+   Søren: *"When drawing a segmentation of an organelle that does not have an annotation, the
+   volumetric center of the segmentation should be registered as an annotation."*
+
+   An ordinary `organelle_location` row, so everything that reads annotations -- the per-cell
+   summary, the counts beside the filter, the Master cell list -- sees it without knowing anything
+   new. An organelle that has been outlined stops being invisible to half the tool.
+
+   It goes out SILENTLY (his word): noteSaveResult says nothing when it worked and says what the
+   server said when it did not, so three organelles in one press cost no extra toasts and a
+   deployment that refuses the write still gets to say so. The tracing's own toast announces the
+   press already.
+
+   ONLY AN ORGANELLE. A traced cell or nucleus is the cell, not something inside it, and the
+   organelle annotations are a list of things inside cells.
+
+   AND ONLY FOR A CELL. An annotation is filed against a nucleus or a root ID; a tracing with
+   neither has nowhere to be an annotation OF, and inventing a home for it would put it on whatever
+   cell happened to be on screen. */
+function tracingRegisterCentre(t){
+  try {
+    if (!t || !t.rings || !t.rings.length) return false;
+    const kind = String(t.kind || "").toLowerCase();
+    if (!kind || kind === "cell" || kind === "nucleus") return false;
+    if (!window.UJ || !UJ.organellelink) return false;
+    const nid = String(t.nucleus_id || ""), rid = String(t.root_id || "");
+    if (!nid && !rid) return false;
+    const c = UJ.organellelink.centre(t.rings);
+    if (!c || !c.point) return false;
+    const at = c.point.join(",");
+    /* The row explains itself in the sheet before any column is read. */
+    const say = "Volumetric centre of the outlined \u201c" + (t.name || kind) + "\u201d"
+      + (isFinite(t.volume_um3) ? " (" + (t.volume_um3 >= 1 ? t.volume_um3.toFixed(2)
+          : t.volume_um3.toFixed(4)) + " \u00b5m\u00b3, " + c.sections + " sections)" : "")
+      + ", registered from the segmentation rather than placed by hand."
+      /* A centroid can fall outside a curved object. It is still where the organelle is; it is not
+         a point ON it, and the difference is worth one clause. */
+      + (c.inside ? "" : " The centroid lies outside the outline \u2014 a curved shape \u2014 so "
+                       + "this marks where it is rather than a point on it.");
+    const payload = { type: "organelle_location",
+      timestamp: new Date().toISOString(),
+      nucleusId: nid, rootId: rid, coord: at,
+      groupId: "centre_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7),
+      subIndex: 1, subCount: 1,
+      kind: kind, pointA: at, pointB: "",
+      identified: t.type || "", path: "", comment: say,
+      /* WHERE IT CAME FROM, in columns as well as in words. ensureHeaderColumn on the backend adds
+         both by itself, which is how every optional field on that sheet has arrived; a deployment
+         older than today simply ignores them and the row is still a correct annotation. */
+      source: "segmentation", fromStructureId: t.id || "",
+      reporterName: (typeof REPORTER_NAME !== "undefined" && REPORTER_NAME) || "",
+      reporterEmail: (typeof REPORTER_EMAIL !== "undefined" && REPORTER_EMAIL) || "",
+      credential: (typeof GOOGLE_CREDENTIAL !== "undefined" && GOOGLE_CREDENTIAL) || "" };
+    if (typeof noteSaveResult === "function") noteSaveResult(payload);
+    else if (typeof postAndRead === "function") postAndRead(payload);
+    else return false;
+    /* The panel caches the annotations for a minute; this one should be in the next draw of the
+       section it belongs to rather than a minute later. */
+    try { if (typeof PANEL_TRACINGS !== "undefined") PANEL_TRACINGS_AT = 0; } catch (_e){}
+    return true;
+  } catch (e){
+    console.warn("[uJump tracing] could not register the centre:", e && e.message);
+    return false;
+  }
+}
+
 function tracingPublish(t,quiet){
   if(!t||!t.rings||!t.rings.length)return false;
   const signedIn=(typeof GOOGLE_VERIFIED!=="undefined"&&GOOGLE_VERIFIED)
@@ -983,6 +1095,10 @@ function tracingPublish(t,quiet){
   if(ok===false)return false;
   t.pending_share=false;
   t.shared_at=new Date().toISOString();
+  /* AFTER the tracing, and only if the tracing went: an annotation pointing at an outline that was
+     refused would be a coordinate with nothing behind it. Once per tracing, not once per press, so
+     a queued one registers its centre when it finally goes out too. */
+  if(!t.centre_registered&&tracingRegisterCentre(t))t.centre_registered=true;
   tracingWrite(TRACINGS_KEPT);
   return true;
 }

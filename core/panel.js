@@ -452,6 +452,11 @@ function loadTracedStructures(nid, root){
   var render = function(list){
     var mine = (list || []).filter(function(t){
       if (!t) return false;
+      /* ORGANELLES MOVED OUT, 2026-09-18. They are listed in the Organelles section below, beside
+         the logged points they pair with; listing them here as well would be the same object twice
+         on one panel in two vocabularies, which is what that section exists to end. The cell and
+         its nucleus stay, because they are the cell rather than something inside it. */
+      if (typeof organIsOrganelle === "function" && organIsOrganelle(t)) return false;
       return (nid && String(t.nucleusId || "") === String(nid))
           || (root && String(t.rootId || "") === String(root));
     });
@@ -490,13 +495,18 @@ function loadTracedStructures(nid, root){
       + '<p class="hint" style="margin-top:4px">Hand-traced, not from the segmentation. Open one in '
       + '\u00b5Jump\u2019s tracing card to add to it or correct it.</p>';
   };
-  if (PANEL_TRACINGS && Date.now() - PANEL_TRACINGS_AT < 60000){ render(PANEL_TRACINGS); return; }
+  if (PANEL_TRACINGS && Date.now() - PANEL_TRACINGS_AT < 60000){
+    render(PANEL_TRACINGS);
+    try { renderOrganelleSection(nid, root); } catch (_e){}
+    return;
+  }
   fetch(REPORT_ENDPOINT + "?tracings=1" + (typeof panelDsQS === "function" ? panelDsQS() : ""))
     .then(function(r){ return r.json(); })
     .then(function(d){
       PANEL_TRACINGS = (d && d.tracings) || [];
       PANEL_TRACINGS_AT = Date.now();
       render(PANEL_TRACINGS);
+      try { renderOrganelleSection(nid, root); } catch (_e){}
     })
     /* Silently. A cell with no tracings and a backend that does not answer this question yet look
        the same from here, and they should: in both cases there is nothing to show. */
@@ -504,6 +514,247 @@ function loadTracedStructures(nid, root){
 }
 function panelEsc(s){ return String(s == null ? "" : s)
   .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+/* ── ORGANELLES: WHERE IT IS AND WHAT SHAPE IT IS, IN ONE PLACE ─────────────────  2026-09-18
+   Søren: *"Now we have 2 features regarding organelles. First is to annotate their location, second
+   is to segment their 3D structure. I would like that the organelles are featured in the cell
+   identity as an expandable section where the annotations are coupled with the segmentations where
+   the annotation coordinate is within the 3D volume of the segmentation."*
+
+   The two features grew up apart and have never met, which means one cell's mitochondria are listed
+   twice on this panel, in two different vocabularies, with no way to tell that the point and the
+   outline are the same object. The pairing rule is core/organellelink.js -- written once, so this
+   panel, the tracing card and the viewer cannot disagree about it.
+
+   THE TRACED CENTRE IS THE CELL'S ANSWER where there is one. Søren, asked whether a segmentation's
+   centre should replace a manual point: *"this should be more precise than the manually annotated,
+   so it should replace it."* Nothing is deleted -- the record is append-only and somebody's
+   observation is not ours to erase -- so "replace" is a statement about which coordinate this panel
+   gives: the traced centre, with the points it supersedes still listed under it, dimmed, with who
+   placed them. An observation that turned out to be a little off is still evidence that somebody
+   looked.
+
+   TWO FETCHES, ONE SECTION. The annotations arrive with the community reports and the segmentations
+   with ?tracings=1, and neither waits for the other. Both call this; it renders with whatever has
+   arrived and again when the rest does, so a slow one costs the other nothing. */
+var PANEL_ORGAN_ANNS = null, PANEL_ORGAN_NID = "", PANEL_ORGAN_RINGS = {}, PANEL_ORGAN_BUSY = false;
+/* ── THE CONTOURS ARE FETCHED WHEN THE SECTION IS OPENED, AND NOT BEFORE ─────────  2026-09-18
+   ?tracings=1 is one sheet scan and opens no Drive files -- that is what makes listing every
+   tracing in the dataset cheap enough to do on a panel. The price is that the index carries no
+   CONTOURS, and "is this point inside that outline" cannot be answered without them.
+
+   So the section draws immediately from the index -- names, volumes, how many contours on how many
+   sections -- and fetches the geometry of THIS CELL's organelles only when somebody opens it. A few
+   Drive files, on a press, for the cell being looked at. Cached by structureId for the session,
+   because contours do not change: a new version of a tracing is a new groupId and the index says so.
+   Søren asked for an expandable section; this is the half of that which is not decoration. */
+function organFetchRings(nid, root, trs){
+  if (PANEL_ORGAN_BUSY || typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT) return;
+  var want = trs.filter(function(t){
+    return t && t.structureId && !t.rings && !PANEL_ORGAN_RINGS[t.structureId];
+  });
+  if (!want.length) return;
+  PANEL_ORGAN_BUSY = true;
+  var left = want.length;
+  var done = function(){
+    if (--left > 0) return;
+    PANEL_ORGAN_BUSY = false;
+    try { renderOrganelleSection(nid, root); } catch (_e){}
+  };
+  want.forEach(function(t){
+    fetch(REPORT_ENDPOINT + "?tracings=1&structureId=" + encodeURIComponent(t.structureId)
+          + (typeof panelDsQS === "function" ? panelDsQS() : ""))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var one = ((d && d.tracings) || [])[0];
+        var st = (one && !one.error && window.UJ && UJ.tracing)
+               ? (UJ.tracing.rowsToStructures(one.rows || [])[0] || null) : null;
+        /* [] rather than null for a tracing whose file could not be read: null would ask again on
+           every re-render, and the honest answer is "this one has no contours here". */
+        PANEL_ORGAN_RINGS[t.structureId] = (st && st.rings) ? st.rings : [];
+      })
+      .catch(function(){ PANEL_ORGAN_RINGS[t.structureId] = []; })
+      .then(done, done);
+  });
+}
+function organelleSectionBox(){
+  var host = document.getElementById("cellOrganelles");
+  if (host) return host;
+  var after = document.getElementById("tracedOnCell") || document.getElementById("commReports");
+  if (!after || !after.parentNode) return null;
+  host = document.createElement("div");
+  host.id = "cellOrganelles";
+  host.style.marginTop = "10px";
+  after.parentNode.insertBefore(host, after.nextSibling);
+  return host;
+}
+/* The label a person reads for a kind, from whichever vocabulary this page carries. */
+function organKindLabel(k){
+  var v = String(k || "");
+  if (typeof ORGANELLE_KIND_BY_VALUE !== "undefined" && ORGANELLE_KIND_BY_VALUE[v])
+    return ORGANELLE_KIND_BY_VALUE[v].short || ORGANELLE_KIND_BY_VALUE[v].label || v;
+  if (window.UJ && UJ.organelles && UJ.organelles.labelOf) { try { return UJ.organelles.labelOf(v); } catch (_e){} }
+  return v || "structure";
+}
+function organCap(s){ return String(s || "").charAt(0).toUpperCase() + String(s || "").slice(1); }
+function organJump(p){
+  return '<button type="button" class="jumpview" data-x="' + p[0] + '" data-y="' + p[1]
+       + '" data-z="' + p[2] + '" style="margin-left:6px;padding:1px 7px;font-size:11px">Jump</button>';
+}
+function organVol(v){
+  if (!(Number(v) > 0)) return "";
+  var n = Number(v);
+  return n >= 100 ? n.toFixed(0) : n >= 1 ? n.toFixed(2) : n.toFixed(4);
+}
+/* A tracing of a CELL or a NUCLEUS is not an organelle and does not belong in this section -- it is
+   the cell itself, and it is listed with the cell. */
+function organIsOrganelle(t){
+  var k = String((t && (t.instanceOf || t.kind)) || "").toLowerCase();
+  return !!k && k !== "cell" && k !== "nucleus";
+}
+function renderOrganelleSection(nid, root){
+  var host = organelleSectionBox();
+  if (!host) return;
+  if (!window.UJ || !UJ.organellelink){ host.innerHTML = ""; return; }
+  var anns = (PANEL_ORGAN_ANNS && PANEL_ORGAN_NID === String(nid)) ? PANEL_ORGAN_ANNS : [];
+  var trs = (PANEL_TRACINGS || []).filter(function(t){
+    if (!t || !organIsOrganelle(t)) return false;
+    return (nid && String(t.nucleusId || "") === String(nid))
+        || (root && String(t.rootId || "") === String(root));
+  });
+  if (!anns.length && !trs.length){ host.innerHTML = ""; return; }
+
+  /* The index (?tracings=1) carries no contours -- it is one sheet scan and opens no Drive files,
+     which is what makes listing cheap. So a segmentation whose geometry has not been fetched cannot
+     be paired by geometry, and this says so rather than pairing on hope. Rows with contours pair;
+     the rest are listed as segmentations whose outline has not been read here. */
+  /* By kind, then by number. The point of a number is that Mitochondrion 1 and Mitochondrion 2
+     read as a set rather than as two unrelated things, and that only works if they are adjacent and
+     in order -- the index returns them newest-first, which is the wrong order for exactly this. */
+  trs.sort(function(a, b){
+    var ka = String(a.instanceOf || a.kind || ""), kb = String(b.instanceOf || b.kind || "");
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    return (Number(a.instanceIndex) || 0) - (Number(b.instanceIndex) || 0);
+  });
+  trs.forEach(function(t){
+    if (!t.rings && t.structureId && PANEL_ORGAN_RINGS[t.structureId])
+      t.rings = PANEL_ORGAN_RINGS[t.structureId];
+  });
+  var withRings = trs.filter(function(t){ return t.rings && t.rings.length; });
+  var noRings = trs.filter(function(t){ return !(t.rings && t.rings.length); });
+  var r = UJ.organellelink.pair(anns, withRings);
+
+  var rows = [];
+  /* 1. PAIRED: the shape, and the point it now answers for. */
+  r.paired.forEach(function(p){
+    var t = p.tracing;
+    var c = UJ.organellelink.centre(t.rings);
+    var best = c && c.point;
+    var who = (t.contributors && t.contributors.length) ? t.contributors.join(", ") : (t.tracedBy || "");
+    var sup = p.annotations.filter(function(a){ return !a.fromSegmentation; });
+    rows.push('<div class="organrow" style="border-top:1px solid var(--line);padding:5px 0;font-size:12px">'
+      + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      + '<span style="width:10px;height:10px;border-radius:2px;flex:0 0 auto;background:'
+        + panelEsc(t.color || "#3a6b5a") + '"></span>'
+      + '<b style="flex:0 0 auto">' + panelEsc(t.name || organKindLabel(t.instanceOf || t.kind)) + '</b>'
+      + (organVol(t.volumeUm3) ? '<span style="flex:0 0 auto">' + organVol(t.volumeUm3)
+          + ' µm³</span>' : "")
+      + '<span style="opacity:.7;flex:0 0 auto">' + (t.contours || 0) + " contour"
+        + ((t.contours === 1) ? "" : "s") + " on " + (t.sections || 0) + " section"
+        + ((t.sections === 1) ? "" : "s") + '</span>'
+      + (best ? '<span style="flex:0 0 auto">centre (' + best.join(", ") + ')' + organJump(best) + '</span>' : "")
+      + '<span style="opacity:.7;flex:1 1 90px;min-width:0">' + panelEsc(who) + '</span>'
+      + (t.fileUrl ? '<a href="' + panelEsc(t.fileUrl) + '" target="_blank" rel="noopener" '
+          + 'style="opacity:.7;flex:0 0 auto">file</a>' : "")
+      + '</div>'
+      + (sup.length ? '<div class="hint" style="margin-left:18px;opacity:.65">'
+          + 'the traced centre replaces ' + sup.length + ' logged point'
+          + (sup.length === 1 ? "" : "s") + ': '
+          + sup.map(function(a){
+              var pt = UJ.organellelink.parsePoint(a.point || a.pointA);
+              return (pt ? pt.join(", ") : "?") + (a.by ? " (" + panelEsc(a.by) + ")" : ""); }).join("; ")
+          + ' — kept in the record, and more precise is what the outline is for.</div>' : "")
+      + '</div>');
+  });
+  /* 2. AN ANNOTATION WITH NO SEGMENTATION: the offer to draw one. Søren: "Where there is an
+        annotation without a segmentation, there should be an option to start segmenting it." */
+  r.untracedAnnotations.forEach(function(a){
+    var pt = UJ.organellelink.parsePoint(a.point || a.pointA);
+    if (!pt) return;
+    rows.push('<div class="organrow" style="border-top:1px solid var(--line);padding:5px 0;'
+      + 'font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      + '<span style="width:10px;height:10px;border-radius:2px;flex:0 0 auto;border:1px solid var(--line)"></span>'
+      + '<b style="flex:0 0 auto">' + panelEsc(organCap(organKindLabel(a.kind))) + '</b>'
+      + '<span style="opacity:.7;flex:0 0 auto">logged, not outlined</span>'
+      + '<span style="flex:0 0 auto">(' + pt.join(", ") + ')' + organJump(pt) + '</span>'
+      + '<span style="opacity:.7;flex:1 1 80px;min-width:0">' + panelEsc(a.by || "") + '</span>'
+      + '<button type="button" class="organtrace" data-pt="' + pt.join(",") + '" '
+        + 'data-kind="' + panelEsc(a.kind || "") + '" style="flex:0 0 auto;padding:1px 8px;'
+        + 'font-size:11px" title="Opens the tracing pad here, with this organelle already chosen. '
+        + 'Its outline gives it a volume, a 3D shape and a more precise centre than a point can.">'
+        + 'Segment it</button></div>');
+  });
+  /* 3. A SEGMENTATION WITH NO ANNOTATION. After today a new one registers its own centre, so this
+        is older work -- and the centre is computed here anyway, so it can be said. */
+  r.unannotatedTracings.concat(noRings).forEach(function(t){
+    var c = t.rings ? UJ.organellelink.centre(t.rings) : null;
+    var best = c && c.point;
+    rows.push('<div class="organrow" style="border-top:1px solid var(--line);padding:5px 0;'
+      + 'font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      + '<span style="width:10px;height:10px;border-radius:2px;flex:0 0 auto;background:'
+        + panelEsc(t.color || "#3a6b5a") + '"></span>'
+      + '<b style="flex:0 0 auto">' + panelEsc(t.name || organKindLabel(t.instanceOf || t.kind)) + '</b>'
+      + (organVol(t.volumeUm3) ? '<span style="flex:0 0 auto">' + organVol(t.volumeUm3)
+          + ' µm³</span>' : "")
+      + '<span style="opacity:.7;flex:0 0 auto">outlined, not logged</span>'
+      + (best ? '<span style="flex:0 0 auto">centre (' + best.join(", ") + ')' + organJump(best) + '</span>' : "")
+      + (t.fileUrl ? '<a href="' + panelEsc(t.fileUrl) + '" target="_blank" rel="noopener" '
+          + 'style="opacity:.7;flex:0 0 auto">file</a>' : "")
+      + '</div>');
+  });
+
+  var nSeg = trs.length, nAnn = anns.length;
+  host.innerHTML = '<details id="cellOrganDetails"' + (window.__organOpen ? " open" : "") + '>'
+    + '<summary style="cursor:pointer;font-size:12px;text-transform:uppercase;letter-spacing:.06em;'
+    + 'color:var(--mut);font-weight:600">Organelles — ' + nSeg + ' outlined, ' + nAnn
+    + ' logged' + (r.paired.length ? ", " + r.paired.length + " paired" : "") + '</summary>'
+    + '<div style="margin-top:4px">' + rows.join("")
+    + (noRings.length ? '<p class="hint" style="margin-top:4px">'
+        + (PANEL_ORGAN_BUSY ? "Reading " + noRings.length + " outline(s)\u2026"
+           : noRings.length + " outline(s) not read here, so nothing is paired against them.")
+        + '</p>' : "")
+    + '<p class="hint" style="margin-top:4px">A logged point says where; an outline says what shape, '
+    + 'how big, and where more precisely. A point inside an outline is the same organelle — '
+    + 'within half a section step of the outermost contour, with a contour drawn inside another '
+    + 'counting as a hole.</p></div></details>';
+  var det = host.querySelector("#cellOrganDetails");
+  if (det) det.addEventListener("toggle", function(){
+    window.__organOpen = det.open;
+    if (det.open) organFetchRings(nid, root, trs);
+  });
+  /* Already open -- a second cell looked at with the section left open should pair without being
+     opened again. */
+  if (det && det.open) organFetchRings(nid, root, trs);
+  /* The same jump the rest of the panel uses, wired here because this block is rebuilt on its own. */
+  [].slice.call(host.querySelectorAll(".jumpview")).forEach(function(b){
+    b.addEventListener("click", function(){
+      try {
+        document.getElementById("x").value = b.dataset.x;
+        document.getElementById("y").value = b.dataset.y;
+        document.getElementById("z").value = b.dataset.z;
+        document.getElementById("go").click();
+      } catch (_e){}
+    });
+  });
+  [].slice.call(host.querySelectorAll(".organtrace")).forEach(function(b){
+    b.addEventListener("click", function(){
+      var pt = String(b.dataset.pt || "").split(",").map(Number);
+      /* Defined by the tracing card, which is not on every page this panel serves. */
+      if (typeof openTracingAt === "function") openTracingAt(pt, b.dataset.kind || "");
+      else alert("The tracing card is not on this page.");
+    });
+  });
+}
 
 function loadCommunityReports(nid,cellPos){
   const el=document.getElementById("commReports");
@@ -660,6 +911,23 @@ function loadCommunityReports(nid,cellPos){
          coordinate(s) (not just the count) plus a Jump button, since knowing THAT someone
          reported a centriole isn't as useful as being able to go look at where. */
       let organRowsHtml="";
+      {
+        /* ── THE OTHER HALF OF THE ORGANELLES SECTION ────────────────────────────  2026-09-18
+           Flattened here because this is the one fetch that has them, and handed to the section
+           whether or not the segmentations have arrived -- see renderOrganelleSection's header.
+           Outside the `if` on purpose: a cell with segmentations and NO annotations still has a
+           section to draw, and leaving the list unset would let the previous cell's points be
+           paired against this cell's outlines. */
+        PANEL_ORGAN_ANNS=[].concat(...organelleGroups.map(g=>(g.structures||[]).map(s=>({
+          kind:s.kind,pointA:s.pointA,pointB:s.pointB,
+          /* fromSegmentation: set on a point the tracing card registered from an outline's own
+             centre. Blank on every row written before 2026-09-18 and on every hand-placed one,
+             which is exactly what it means. */
+          fromSegmentation:!!(s.source&&/segment/i.test(String(s.source))),
+          by:s.by||""}))));
+        PANEL_ORGAN_NID=String(nid);
+        try{renderOrganelleSection(nid,(typeof CUR_ROOT!=="undefined"&&CUR_ROOT)||"");}catch(_e){}
+      }
       if(organelleGroups.length){
         const allStructs=[].concat(...organelleGroups.map(g=>(g.structures||[]).map(s=>({kind:s.kind,pointA:s.pointA,pointB:s.pointB}))));
         const parts=organelleCountParts(allStructs);
