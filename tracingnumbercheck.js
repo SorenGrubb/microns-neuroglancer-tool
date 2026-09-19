@@ -130,9 +130,16 @@ function shared(sid, index, name){
     ok(got.length === 2, "two structures are submitted", got.length);
     ok(got[0].name === "Lysosome 2" && got[0].id === "lys-b",
        "...the edited one keeps 2", got[0].name);
-    ok(got[1].name === "Lysosome 4" && got[1].id === "lys-b__i1",
+    ok(got[1].name === "Lysosome 4",
        "...and the new one beside it takes 4, not 3 and not 2",
        got[1].name + " / " + got[1].id);
+    /* It used to be asserted as `lys-b__i1` — the edited tracing's id with a suffix on it. That is
+       how the compound ids in Søren's Drive folder were built, and worse, `X + "__i1"` is a name
+       that can already belong to a published structure. Since 2026-09-19 a new structure hangs off
+       a base the pad mints for itself; what matters here is only that it is new. See
+       tracingidcheck.js and src/a_new_structure_gets_its_own_id.py. */
+    ok(got[1].id !== "lys-b__i1" && got[1].id !== got[0].id,
+       "...with an id of its own rather than one built out of the edited tracing's", got[1].id);
   }
 
   console.log("\nwith nothing known, a new tracing is still added rather than refused");

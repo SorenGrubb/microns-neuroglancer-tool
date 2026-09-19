@@ -548,7 +548,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-19 20:05</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-19 20:32</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -5086,7 +5086,9 @@ document.getElementById("go").addEventListener("click",()=>{
   const navFromHistory=NAV_FROM_HISTORY;NAV_FROM_HISTORY=false;
   showNucleus(pos);
   refreshBackNavRow();
-  let state;try{state=buildState(pos);}catch(err){fail("Couldn't read the custom base state \u2014 check it's a valid Neuroglancer link or JSON.");return;}
+  /* An organelle's Jump armed this; anything else cleared it. One shot, read here, so the link
+     that opens shows the lysosome the row was about and not only the place it sits in. */
+  let state;try{state=buildState(pos);organOverlayInto(state);}catch(err){fail("Couldn't read the custom base state \u2014 check it's a valid Neuroglancer link or JSON.");return;}
   const url=document.getElementById("viewer").value+"#!"+encodeURIComponent(JSON.stringify(state));
   document.getElementById("url").textContent=url;document.getElementById("out").classList.add("show");
   const nameEl=document.querySelector("#nucpanel .celltype");
@@ -8702,6 +8704,17 @@ function tracingSeriesLabel(name){
 /* Numbers of tracings opened for editing this session, by structureId. Filled by
    tracingOpenShared, which has the tracing in its hand; read by tracingCurrentAll below. */
 var TRACING_EDIT_INDEX = {};
+/* ── THE PAD'S OWN BASE, WHICH IS NEVER SOMEBODY ELSE'S ID ─────────────────────  2026-09-19
+   Søren's Drive folder had `lysosome_…__i1__i2.json`: the id of a new organelle built by adding a
+   suffix to the id of a DIFFERENT tracing that happened to be open for editing. The compound name
+   is the harmless half. The other half never fired only by luck — editing `X` and drawing a second
+   organelle files it as `X__i1`, which is not a new structure but the one already published under
+   that id, so a new organelle would have become the next version of an existing one.
+
+   The suffix is only a way to mint distinct ids; nothing reads the relationship. So it hangs off a
+   base the pad owns. Minted once per pad session and kept, because structure two must get the SAME
+   id on every press or each press files another tracing. */
+var TRACING_BASE_ID = "";
 /* THE NUMBER A STRUCTURE IS ALREADY PUBLISHED UNDER, or 0 for one that is new. The stash first
    because it cannot be stale and does not depend on the index having loaded; the shared index
    second because it survives a reload, which the stash does not -- a draft of an edit resumed
@@ -8791,9 +8804,18 @@ function tracingCurrentAll(){
     const prior=(TRACINGS_KEPT||[]).filter(function(x){return x&&x.id&&x.name===label;})[0];
     TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(label);
   }
-  /* The same expression the submission ends with, hoisted so the numbering can use it: the first
-     structure keeps the bare id, which is what makes an edited tracing a version of itself. */
-  const idOf=function(g){ return TRACING_PENDING.id+(g.inst?("__i"+g.inst):""); };
+  /* WHERE THE OTHER STRUCTURES HANG FROM.  2026-09-19
+     With nothing opened for editing, the pad's own id — so three structures drawn together are
+     still X, X__i1, X__i2. With a tracing opened, TRACING_PENDING.id names somebody's EXISTING
+     structure: `X__i1 + "__i2"` is the compound id Søren found in Drive, and `X + "__i1"` is worse,
+     because that is a real and different lysosome. A fresh base, minted once and kept, is the only
+     thing here that cannot already belong to something else. */
+  if(!TRACING_BASE_ID)
+    TRACING_BASE_ID = PAD_EDIT_ID ? UJ.tracing.structureId(groups[0].w.name || "tracing")
+                                  : TRACING_PENDING.id;
+  /* One expression for what a structure is called, used by the numbering below AND by the
+     submission at the end. They were two copies of it, which is how they could have disagreed. */
+  const idOf=function(g){ return g.inst?(TRACING_BASE_ID+"__i"+g.inst):TRACING_PENDING.id; };
 
   /* ── A VERSION KEEPS ITS NUMBER ─────────────────────────────────────────────────  2026-09-19
      Søren: *"because I have edited one of the lysosomes twice, it is now called Lysosome 5... I
@@ -8846,8 +8868,9 @@ function tracingCurrentAll(){
     if(nid)t.nucleus_id=nid;
     if(rid)t.root_id=rid;
     /* The pad's own index, not the published number: see the header. The first structure keeps the
-       bare id, so editing a shared tracing and adding it back is still a version of THAT tracing. */
-    t.id=TRACING_PENDING.id+(g.inst?("__i"+g.inst):"");
+       bare id, so editing a shared tracing and adding it back is still a version of THAT tracing;
+       every other one hangs off the pad's base rather than off that tracing's id (2026-09-19). */
+    t.id=idOf(g);
     return t;
   });
 }
@@ -8966,6 +8989,36 @@ function tracingFillPos(force){
    One layer PER STRUCTURE rather than one for all of them, for two reasons that happen to agree:
    a layer carries one colour, and the reader chains loose lines within a layer, so two structures
    sharing one would be read back as one. */
+/* ── AND THE LINK IT BUILDS SHOWS IT ─────────────────────────────  2026-09-19
+   Søren: *"For the jump button here, it would make sense that it shows the organelle."*
+
+   The other end of core/panel.js's ORGAN_SHOW_NEXT: a Jump beside an organelle arms it, and the
+   next link this page builds gets that organelle on it. Read once and cleared, because every
+   navigation rebuilds the link and contours left over from the last jump would be drawn at a
+   coordinate they have nothing to do with -- which looks exactly like a correct answer.
+
+   Returns whether anything went on, so the check can tell "nothing was armed" from "something was
+   armed and dropped". */
+function organOverlayInto(st){
+  const want = (typeof ORGAN_SHOW_NEXT !== "undefined") ? ORGAN_SHOW_NEXT : null;
+  if (typeof ORGAN_SHOW_NEXT !== "undefined") ORGAN_SHOW_NEXT = null;
+  if (!want || !st) return false;
+  /* Neuroglancer keys layers by name, and the page's own base state may already carry one called
+     this -- tracingViewerOpen's reason, and the same answer. */
+  const nm = (String(want.name || "").replace(/[^\w .\u00b5-]+/g, "").trim() || "organelle");
+  let anns = null;
+  if (want.rings && want.rings.length) anns = tracingRingLines(want.rings, "org");
+  else if (want.point && want.point.length === 3)
+    anns = [{ type: "point", id: "orgpt", point: want.point.map(Math.round) }];
+  if (!anns || !anns.length) return false;
+  st.layers = (st.layers || []).filter(function(l){
+    return !(l && l.type === "annotation" && String(l.name || "") === nm);
+  });
+  st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
+                   name: nm, annotationColor: want.color || "#40e28c", annotations: anns });
+  st.selectedLayer = { layer: nm, visible: true };
+  return true;
+}
 function tracingRingLines(rings, idPrefix){
   const out = [];
   (rings || []).forEach(function(r, ri){
@@ -9242,7 +9295,7 @@ function tracingKeep(){
     PAD_INST_KIND = {}; PAD_INST_COLOUR = {};
     try { padPaint(); padRings(); } catch (_e){}
   }
-  PAD_EDIT_ID = "";
+  PAD_EDIT_ID = ""; TRACING_BASE_ID = "";
   tracingRenderList();
   const what=all.length===1
     ?'“'+all[0].name+'”'
@@ -10070,6 +10123,10 @@ function draftNow(){
            mip: val("tracePadMip"), step: val("tracePadStep"),
            editId: PAD_EDIT_ID || "",
            structureId: (TRACING_PENDING && TRACING_PENDING.id) || "",
+           /* THE BASE GOES IN THE DRAFT, 2026-09-19. Without it, resuming tomorrow mints a new one
+              and every structure after the first is filed as a NEW tracing rather than a version of
+              the one it already is -- the same class of fault as the compound ids this fixes. */
+           baseId: TRACING_BASE_ID || "",
            used: !!(found && found.style.display !== "none"),
            what: val("tracingWhat"), name: val("tracingName"), type: val("tracingType"),
            color: val("tracingColor"), nucId: val("tracingNucId"), rootId: val("tracingRootId"),
@@ -10242,6 +10299,9 @@ function draftResume(id){
    above and by the one that had to fetch first. */
 function draftResumeFrom(d){
   if (!d) return;
+  /* Restored before anything else looks at it: a draft written before this existed has none, and
+     "" means the next add mints one, which is what used to happen every time. */
+  TRACING_BASE_ID = d.baseId || "";
   TRACING_DRAFT_ID = d.id || draftCurrentId();
   if (!UJ.emtiles.configured())
     UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
@@ -10443,6 +10503,14 @@ async function tracingOpenShared(sid, btn){
 
     /* The identity travels with it, so adding a version does not quietly drop the cell type or the
        ids somebody else filled in. */
+    /* ── AND THE PAD BEFORE IT DOES NOT ─────────────────────────────────────────  2026-09-19
+       This builds a whole new PAD, so it is a fresh pad by every other measure, but it is not
+       padOpen and it was resetting neither of the two things a pad session owns. Draw two
+       organelles, leave without committing, open somebody's tracing to edit: the stale base would
+       have filed the second structure of THIS session under the second structure of the last one,
+       and the stale draft id would have saved the edit over that session's draft. Same fault as
+       the compound ids, one level up. */
+    TRACING_BASE_ID = ""; TRACING_DRAFT_ID = "";
     PAD_EDIT_ID = st.structureId;
     /* ── WHAT NUMBER IT IS ALREADY PUBLISHED UNDER ──────────────────────────────  2026-09-19
        Søren: *"I would like that editing it does not increase its number."* It did: the submission
@@ -11114,8 +11182,9 @@ function padOpen(){
      on its own left the card below showing three volumes for contours that no longer existed. */
   /* A FRESH PAD IS A FRESH DRAFT, 2026-09-19. Without this the next tracing would save itself
      over the last one's draft entry -- which is the single-slot behaviour this change exists to
-     end, reintroduced one level down. */
-  TRACING_DRAFT_ID = "";
+     end, reintroduced one level down. And a fresh BASE, or the next pad's second structure would
+     be filed as this one's second structure. */
+  TRACING_DRAFT_ID = ""; TRACING_BASE_ID = "";
   PAD_EDIT_ID = ""; tracingPendingClear(); PAD3D_MESHES = null; PAD3D_KEY = "";
   /* A kept draft is not thrown away by opening the pad -- but it WILL be replaced once something is
      drawn here, and being told that before it happens is the whole difference. */

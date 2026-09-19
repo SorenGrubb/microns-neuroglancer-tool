@@ -82,6 +82,39 @@ function panelDsQS(){
    organelleStructRowsHtml comment already warned about). An unrecognized kind string (e.g. from
    an older report predating this kind, or a future kind added server-side before this dropdown
    catches up) falls back to showing the raw kind string rather than being silently dropped. */
+/* ── ONE LOGGED POINT PER ORGANELLE, NOT ONE PER ROW ────────────────  2026-09-19
+   Søren: *"it has not been fixed that it says there are 6x lysosomes, when there are only really
+   3."* Three outlines, each of which had registered its centre twice, counted as six organelles.
+
+   `fromStructureId` names the outline a centre was computed from, so two rows carrying the same one
+   are the same organelle written down twice and the later supersedes -- which is the rule the
+   backend now enforces on new writes. Applied here as well, the old rows in the sheet stop being
+   counted twice without anybody having to tidy them first.
+
+   BLANK IS NOT A KEY. Hand-placed annotations and everything written before 2026-09-18 carry no
+   fromStructureId, and they are all kept: two people pointing at the same lysosome by eye are two
+   opinions, and agreeing is the measurement. Only rows this one feature wrote can collapse.
+
+   THE LAST ONE WINS, because the sheet is append-only and the newest row is the current answer --
+   the same rule as centreRowFor_ at the other end. */
+function organelleOwnStructs(groups){
+  var out = [], at = {};
+  (groups || []).forEach(function(g){
+    ((g && g.structures) || []).forEach(function(s){
+      if (!s) return;
+      var one = { kind: s.kind, pointA: s.pointA || "", pointB: s.pointB || "",
+                  comment: s.comment || (g && g.comment) || "",
+                  source: s.source || "",
+                  fromStructureId: String(s.fromStructureId || ""),
+                  by: s.by || (g && g.by) || "" };
+      var key = one.fromStructureId;
+      if (key && at[key] !== undefined){ out[at[key]] = one; return; }
+      if (key) at[key] = out.length;
+      out.push(one);
+    });
+  });
+  return out;
+}
 function organelleCountParts(structs){
   const counts={};
   structs.forEach(s=>{counts[s.kind]=(counts[s.kind]||0)+1;});
@@ -117,7 +150,13 @@ function organelleCentreBits(comment){
 }
 function organelleStructRowsHtml(structs){
   const parsePt=s=>{const p=(s||"").split(",").map(Number);return(p.length===3&&p.every(n=>!isNaN(n)))?p:null;};
-  const jumpBtn=p=>'<button type="button" class="jumpview" data-x="'+p[0]+'" data-y="'+p[1]+'" data-z="'+p[2]+'" style="margin-left:6px;padding:2px 8px;font-size:11px">Jump</button>';
+  /* The second argument is the organelle the row is about, when there is one: organJump's
+     reasons, one file-section up, and the same dataset attributes so the one capture listener
+     picks up both kinds of row. */
+  const jumpBtn=(p,t)=>'<button type="button" class="jumpview" data-x="'+p[0]+'" data-y="'+p[1]+'" data-z="'+p[2]+'"'
+    +((t&&t.structureId)?' data-sid="'+escHtml(String(t.structureId))+'"':"")
+    +((t&&t.name)?' data-name="'+escHtml(String(t.name))+'"':"")
+    +' style="margin-left:6px;padding:2px 8px;font-size:11px">Jump</button>';
   return structs.map(s=>{
     const pa=parsePt(s.pointA);
     const info=ORGANELLE_KIND_BY_VALUE[s.kind];
@@ -149,7 +188,7 @@ function organelleStructRowsHtml(structs){
     return '<div class="meta" style="margin-top:4px;display:flex;align-items:baseline;gap:4px;'
       +'flex-wrap:wrap"><span>'+escHtml(named)+'</span>'+size+from
       +'<span style="flex:1 1 auto"></span><span>('+coordSpan(pa[0],pa[1],pa[2])+')</span>'
-      +jumpBtn(pa)+'</div>';
+      +jumpBtn(pa,{structureId:s.fromStructureId||"",name:named})+'</div>';
   }).join("");
 }
 
@@ -573,6 +612,43 @@ function panelEsc(s){ return String(s == null ? "" : s)
    with ?tracings=1, and neither waits for the other. Both call this; it renders with whatever has
    arrived and again when the rest does, so a slow one costs the other nothing. */
 var PANEL_ORGAN_ANNS = null, PANEL_ORGAN_NID = "", PANEL_ORGAN_RINGS = {}, PANEL_ORGAN_BUSY = false;
+/* ── WHAT THE NEXT JUMP SHOULD SHOW ────────────────────────────────  2026-09-19
+   Søren: *"For the jump button here, it would make sense that it shows the organelle."*
+
+   A Jump wrote a coordinate and rebuilt the viewer link for it, with the cell on it and no sign of
+   WHICH thing at that coordinate the row was about. The outline is in hand -- the row's volume and
+   centre were computed from it -- so it rides along, and the page that builds the link picks it up
+   from here.
+
+   ONE CAPTURE-PHASE LISTENER, because .jumpview buttons are wired by three separate handlers in
+   this project and a copy of this in each of them is the drift this file keeps warning about. It
+   runs before any of them, and a jump button with no organelle on it CLEARS the slot rather than
+   leaving the last one armed -- which is what makes it one-shot for every jump, not only ours.
+
+   The rings are copied in HERE rather than looked up later: by the time the link is built the panel
+   has been told to render a different cell, and reading a cache mid-rebuild is how an outline ends
+   up drawn on the wrong coordinate. */
+var ORGAN_SHOW_NEXT = null;
+if (typeof document !== "undefined" && !window.__organJumpArmed){
+  window.__organJumpArmed = 1;
+  document.addEventListener("click", function(ev){
+    var b = null;
+    try { b = ev.target && ev.target.closest ? ev.target.closest(".jumpview") : null; }
+    catch (_e){ b = null; }
+    if (!b){ return; }                       // not a jump at all: leave whatever is armed alone
+    var sid = (b.dataset && b.dataset.sid) || "";
+    /* data-mark: a row that has a logged point and no outline. It still marks the thing, with a
+       point annotation, because "which of these blobs" is the question either way -- it just does
+       not pretend to a shape nobody has drawn. */
+    var mark = !!(b.dataset && b.dataset.mark);
+    if (!sid && !mark){ ORGAN_SHOW_NEXT = null; return; }
+    var rings = sid ? PANEL_ORGAN_RINGS[sid] : null;
+    var pt = [b.dataset.x, b.dataset.y, b.dataset.z].map(Number);
+    ORGAN_SHOW_NEXT = { sid: sid, name: b.dataset.name || "", color: b.dataset.color || "",
+                        rings: (rings && rings.length) ? rings : null,
+                        point: pt.every(function(n){ return isFinite(n); }) ? pt : null };
+  }, true);
+}
 /* ── THE CONTOURS ARE FETCHED WHEN THE SECTION IS OPENED, AND NOT BEFORE ─────────  2026-09-18
    ?tracings=1 is one sheet scan and opens no Drive files -- that is what makes listing every
    tracing in the dataset cheap enough to do on a panel. The price is that the index carries no
@@ -632,9 +708,29 @@ function organKindLabel(k){
   return v || "structure";
 }
 function organCap(s){ return String(s || "").charAt(0).toUpperCase() + String(s || "").slice(1); }
-function organJump(p){
+/* `t` is the thing the row is about, when the row is about something: a tracing (structureId,
+   name, colour) whose outline should go on the link, or a bare {name} for a logged point that has
+   no outline and takes a marker instead. Left out entirely, this is the plain coordinate jump it
+   always was -- and such a jump CLEARS the slot, which is what keeps one organelle's contours from
+   being drawn at the next place you navigate to. */
+function organJump(p, t){
+  var sid = (t && t.structureId) ? String(t.structureId) : "";
+  var nm = t ? String(t.name || "") : "";
+  var col = t ? String(t.color || "") : "";
   return '<button type="button" class="jumpview" data-x="' + p[0] + '" data-y="' + p[1]
-       + '" data-z="' + p[2] + '" style="margin-left:6px;padding:1px 7px;font-size:11px">Jump</button>';
+       + '" data-z="' + p[2] + '"'
+       + (sid ? ' data-sid="' + panelEsc(sid) + '"' : "")
+       + ((!sid && nm) ? ' data-mark="1"' : "")
+       + (nm ? ' data-name="' + panelEsc(nm) + '"' : "")
+       + (col ? ' data-color="' + panelEsc(col) + '"' : "")
+       + ' title="' + (sid
+           ? 'Jumps here and puts this organelle&#39;s outline on the viewer link, so opening it '
+             + 'shows the organelle rather than only the place it is in.'
+           : nm
+             ? 'Jumps here and marks this logged point on the viewer link. Nobody has outlined it, '
+               + 'so there is no shape to show.'
+             : 'Jumps to this coordinate.')
+       + '" style="margin-left:6px;padding:1px 7px;font-size:11px">Jump</button>';
 }
 function organVol(v){
   if (!(Number(v) > 0)) return "";
@@ -697,7 +793,7 @@ function renderOrganelleSection(nid, root){
       + '<span style="opacity:.7;flex:0 0 auto">' + (t.contours || 0) + " contour"
         + ((t.contours === 1) ? "" : "s") + " on " + (t.sections || 0) + " section"
         + ((t.sections === 1) ? "" : "s") + '</span>'
-      + (best ? '<span style="flex:0 0 auto">centre (' + best.join(", ") + ')' + organJump(best) + '</span>' : "")
+      + (best ? '<span style="flex:0 0 auto">centre (' + best.join(", ") + ')' + organJump(best, t) + '</span>' : "")
       + '<span style="opacity:.7;flex:1 1 90px;min-width:0">' + panelEsc(who) + '</span>'
       + (t.fileUrl ? '<a href="' + panelEsc(t.fileUrl) + '" target="_blank" rel="noopener" '
           + 'style="opacity:.7;flex:0 0 auto">file</a>' : "")
@@ -721,7 +817,10 @@ function renderOrganelleSection(nid, root){
       + '<span style="width:10px;height:10px;border-radius:2px;flex:0 0 auto;border:1px solid var(--line)"></span>'
       + '<b style="flex:0 0 auto">' + panelEsc(organCap(organKindLabel(a.kind))) + '</b>'
       + '<span style="opacity:.7;flex:0 0 auto">logged, not outlined</span>'
-      + '<span style="flex:0 0 auto">(' + pt.join(", ") + ')' + organJump(pt) + '</span>'
+      /* No outline exists for this one, so the jump carries a point and says so rather than
+         pretending to a shape nobody has drawn. */
+      + '<span style="flex:0 0 auto">(' + pt.join(", ") + ')'
+        + organJump(pt, { name: organCap(organKindLabel(a.kind)) }) + '</span>'
       + '<span style="opacity:.7;flex:1 1 80px;min-width:0">' + panelEsc(a.by || "") + '</span>'
       + '<button type="button" class="organtrace" data-pt="' + pt.join(",") + '" '
         + 'data-kind="' + panelEsc(a.kind || "") + '" style="flex:0 0 auto;padding:1px 8px;'
@@ -742,7 +841,7 @@ function renderOrganelleSection(nid, root){
       + (organVol(t.volumeUm3) ? '<span style="flex:0 0 auto">' + organVol(t.volumeUm3)
           + ' µm³</span>' : "")
       + '<span style="opacity:.7;flex:0 0 auto">outlined, not logged</span>'
-      + (best ? '<span style="flex:0 0 auto">centre (' + best.join(", ") + ')' + organJump(best) + '</span>' : "")
+      + (best ? '<span style="flex:0 0 auto">centre (' + best.join(", ") + ')' + organJump(best, t) + '</span>' : "")
       + (t.fileUrl ? '<a href="' + panelEsc(t.fileUrl) + '" target="_blank" rel="noopener" '
           + 'style="opacity:.7;flex:0 0 auto">file</a>' : "")
       + '</div>');
@@ -953,13 +1052,17 @@ function loadCommunityReports(nid,cellPos){
            Outside the `if` on purpose: a cell with segmentations and NO annotations still has a
            section to draw, and leaving the list unset would let the previous cell's points be
            paired against this cell's outlines. */
-        PANEL_ORGAN_ANNS=[].concat(...organelleGroups.map(g=>(g.structures||[]).map(s=>({
-          kind:s.kind,pointA:s.pointA,pointB:s.pointB,
+        /* Through organelleOwnStructs since 2026-09-19, so the section's "N logged" counts
+           organelles and not rows -- the same list, read the same way, as the line above it. */
+        PANEL_ORGAN_ANNS=organelleOwnStructs(organelleGroups).map(function(s){
+          return {kind:s.kind,pointA:s.pointA,pointB:s.pointB,
           /* fromSegmentation: set on a point the tracing card registered from an outline's own
              centre. Blank on every row written before 2026-09-18 and on every hand-placed one,
              which is exactly what it means. */
-          fromSegmentation:!!(s.source&&/segment/i.test(String(s.source))),
-          by:s.by||""}))));
+                  fromSegmentation:!!(s.source&&/segment/i.test(String(s.source))),
+                  fromStructureId:s.fromStructureId||"",
+                  by:s.by||""};
+        });
         PANEL_ORGAN_NID=String(nid);
         try{renderOrganelleSection(nid,(typeof CUR_ROOT!=="undefined"&&CUR_ROOT)||"");}catch(_e){}
       }
@@ -967,9 +1070,10 @@ function loadCommunityReports(nid,cellPos){
         /* The comment travels WITH its structure now rather than being swept into a paragraph
            at the end: it is what the row reads its name and size out of. subCount is 1 for every
            one of these, so a group is a structure. */
-        const allStructs=[].concat(...organelleGroups.map(g=>(g.structures||[]).map(s=>({
-          kind:s.kind,pointA:s.pointA,pointB:s.pointB,
-          comment:s.comment||g.comment||"",source:s.source||"",by:s.by||g.by||""}))));
+        /* The comment travels WITH its structure -- it is what the row reads its name and
+           size out of -- and two rows for one outline arrive as one, so "6× lysosome" for three
+           lysosomes is no longer sayable. See organelleOwnStructs. */
+        const allStructs=organelleOwnStructs(organelleGroups);
         const parts=organelleCountParts(allStructs);
         /* ── SIX SENTENCES BECOME SIX ROWS, BEHIND A FOLD ────────────────────────  2026-09-19
            Søren: *"This is getting out of hand. We need to have the details in an expandable menu,
