@@ -548,7 +548,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-19 18:43</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-19 19:13</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -5761,7 +5761,10 @@ function handleGoogleCred(resp){
     const payload=JSON.parse(decodeURIComponent(atob(resp.credential.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")).split("").map(c=>"%"+("00"+c.charCodeAt(0).toString(16)).slice(-2)).join("")));
     REPORTER_NAME=payload.name||REPORTER_NAME;REPORTER_EMAIL=payload.email||REPORTER_EMAIL;
     if(payload.email){GOOGLE_VERIFIED=true;GOOGLE_CREDENTIAL=resp.credential;GOOGLE_EXP=payload.exp||0;
-      Array.prototype.forEach.call(document.querySelectorAll(".gate-note"),function(el){el.textContent="✓ Signed in as "+(REPORTER_EMAIL||REPORTER_NAME)+" — you can submit";el.style.color="var(--accent)";});if(typeof gamifyOnSignIn==="function")gamifyOnSignIn();}
+      Array.prototype.forEach.call(document.querySelectorAll(".gate-note"),function(el){el.textContent="✓ Signed in as "+(REPORTER_EMAIL||REPORTER_NAME)+" — you can submit";el.style.color="var(--accent)";});if(typeof gamifyOnSignIn==="function")gamifyOnSignIn();
+      /* Signing in is the moment the account's drafts become knowable, so it is when they are
+         asked for. 2026-09-19. */
+      try{ draftServerSoon(true); }catch(_dse){}}
     localStorage.setItem("reporterName",REPORTER_NAME);localStorage.setItem("reporterEmail",REPORTER_EMAIL);
     /* The centriole/cilium report now renders its identity field inline alongside the cell-type
        result screen's own (see renderResult()/organelleFormHtml()) rather than as a separate
@@ -9830,14 +9833,98 @@ var draftStore = (function(){
         return false;
       }
       if (at >= 0) list.splice(at, 1, d); else list.unshift(d);
-      return writeAll(list);
+      var wrote = writeAll(list);
+      /* The browser first, always: it is the copy that cannot fail and the one the pad reads back.
+         The server is a mirror of it, throttled, and its failure costs nothing here. */
+      if (wrote) draftPush(d, false);
+      return wrote;
     },
     drop: function(id){
       var list = readAll().filter(function(d){ return d.id !== id; });
+      draftPushDelete(id);
       return writeAll(list);
+    },
+    /* EVERY DRAFT THIS ACCOUNT HAS, from both copies. One kept in both is shown once, preferring
+       whichever was updated later — so a draft carried on from the laptop resumes the laptop's
+       version rather than a stale copy of it sitting in this browser. */
+    all: function(){
+      var here = readAll(), seen = {}, out = [];
+      here.forEach(function(d){ seen[d.id] = 1; out.push(d); });
+      DRAFT_SERVER.forEach(function(s){
+        var mine = null, i;
+        for (i = 0; i < out.length; i++) if (out[i].id === s.draftId){ mine = out[i]; break; }
+        if (!mine){
+          out.push({ id: s.draftId, title: s.title, at: s.updated, remote: true,
+                     rings: new Array(Math.max(0, s.contours | 0)), pending: [],
+                     sections: s.sections, editId: s.editId });
+          return;
+        }
+        mine.alsoRemote = true;
+        if (String(s.updated || "") > String(mine.at || "")) mine.staler = s;
+      });
+      out.sort(function(a, b){ return String(b.at || "").localeCompare(String(a.at || "")); });
+      return out;
     }
   };
 })();
+
+/* ── THE SERVER COPY ───────────────────────────────────────────────────────────  2026-09-19
+   Søren chose drafts kept in the dataset, so they follow the account between machines.
+
+   NOT postReport: that fires Google One Tap and shows an alert when signed out, which is right for
+   submitting a report and wrong for an autosave. Signed out this does nothing at all, and that is
+   the intended behaviour rather than a degraded one — the card already promises a tracing is kept
+   whether or not anybody has signed in.
+
+   THROTTLED, and the number is not arbitrary: the pad autosaves about every 1.2 s while somebody
+   draws, and a Drive write per second per tracer is a quota mail. Two minutes, plus every explicit
+   save. The backend generator says the same thing at its end, because a throttle enforced in one
+   place and assumed in the other is a thing that gets changed in ignorance. */
+var DRAFT_PUSH_AT = 0, DRAFT_PUSH_EVERY = 120000, DRAFT_SERVER = [], DRAFT_SERVER_AT = 0;
+function draftSignedIn(){
+  return !!(typeof GOOGLE_VERIFIED !== "undefined" && GOOGLE_VERIFIED
+            && typeof GOOGLE_CREDENTIAL !== "undefined" && GOOGLE_CREDENTIAL && REPORT_ENDPOINT);
+}
+function draftPush(d, force){
+  if (!draftSignedIn() || !d || !d.id) return false;
+  if (!force && Date.now() - DRAFT_PUSH_AT < DRAFT_PUSH_EVERY) return false;
+  DRAFT_PUSH_AT = Date.now();
+  const zs = {}, insts = {};
+  (d.rings || []).forEach(function(r){ zs[r.z] = 1; insts[r.inst || 0] = 1; });
+  try {
+    postAndRead({ type: "tracing_draft", action: "save", credential: GOOGLE_CREDENTIAL,
+      draftId: d.id, title: d.title || "", updated: d.at || new Date().toISOString(),
+      contours: (d.rings || []).length, sections: Object.keys(zs).length,
+      structures: Object.keys(insts).length,
+      x: (d.centre && d.centre[0]) || 0, y: (d.centre && d.centre[1]) || 0, z: d.z || 0,
+      nucleusId: d.nucId || "", rootId: d.rootId || "", editId: d.editId || "",
+      draft: JSON.stringify(d) }).then(function(){ draftServerSoon(true); }, function(){});
+  } catch (_e){ return false; }
+  return true;
+}
+function draftPushDelete(id){
+  if (!draftSignedIn() || !id) return;
+  try {
+    postAndRead({ type: "tracing_draft", action: "delete",
+                  credential: GOOGLE_CREDENTIAL, draftId: id }).then(function(){
+      DRAFT_SERVER = DRAFT_SERVER.filter(function(x){ return x.draftId !== id; });
+      draftRender();
+    }, function(){});
+  } catch (_e){}
+}
+/* The index, which opens no Drive file at the other end. Cheap enough to ask for on sign-in and
+   after a push, and not cheap enough to ask for on every render. */
+function draftServerSoon(force){
+  if (!draftSignedIn()) return;
+  if (!force && Date.now() - DRAFT_SERVER_AT < 30000) return;
+  DRAFT_SERVER_AT = Date.now();
+  fetch(REPORT_ENDPOINT + "?drafts=" + encodeURIComponent(GOOGLE_CREDENTIAL))
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (j && j.ok && j.drafts){ DRAFT_SERVER = j.drafts; draftRender(); }
+    })
+    .catch(function(){});
+}
 
 /* Which draft the pad is writing to. One per drafting session: a fresh pad starts a new one, and
    resuming adopts the id of the one resumed, so saving updates it rather than growing a second
@@ -9934,9 +10021,16 @@ function draftSave(explicit){
       return null;
     }
   }
-  draftWrite(d); draftRender();
-  if (explicit) padSay("Draft saved in this browser. Close the page if you like \u2014 the pad "
-    + "reopens where you left it, on the same section.");
+  draftWrite(d);
+  /* AN EXPLICIT PRESS BEATS THE THROTTLE. Somebody pressing Save draft is saying "make sure", and
+     making sure is precisely what the two-minute timer does not do. */
+  if (explicit) draftPush(d, true);
+  draftRender();
+  if (explicit) padSay(draftSignedIn()
+    ? "Draft saved \u2014 in this browser and on your account, so you can carry on from another "
+      + "machine. The pad reopens where you left it, on the same section."
+    : "Draft saved in this browser. Close the page if you like \u2014 the pad reopens where you "
+      + "left it, on the same section. Sign in and it is kept on your account too.");
   return d;
 }
 function draftSoon(){
@@ -9965,14 +10059,14 @@ function draftWhen(iso){
 function draftRender(){
   const bar = document.getElementById("tracingDraftBar");
   if (!bar) return;
-  const list = draftStore.list();
+  const list = draftStore.all();
   if (!list.length){ bar.style.display = "none"; bar.innerHTML = ""; return; }
   const wrap = document.getElementById("tracePadWrap");
   const open = wrap && wrap.style.display !== "none";
   const here = TRACING_DRAFT_ID;
   bar.style.display = "";
   bar.innerHTML = '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;'
-      + 'color:var(--mut);margin-bottom:6px">Unfinished tracings kept in this browser'
+      + 'color:var(--mut);margin-bottom:6px">Unfinished tracings'
       + (list.length > 1 ? " (" + list.length + ")" : "") + '</div>'
     + list.map(function(d){
         const zs = {};
@@ -9986,8 +10080,15 @@ function draftRender(){
             + (d.editId ? ' <span class="hint">(a version of one already in the dataset)</span>' : '')
             + '</span>'
           + '<span class="hint" style="flex:0 0 auto">' + (d.rings || []).length + ' contour'
-            + ((d.rings || []).length === 1 ? '' : 's') + ' on ' + nz + ' section'
-            + (nz === 1 ? '' : 's') + ', ' + escHtml(draftWhen(d.at)) + '</span>'
+            + ((d.rings || []).length === 1 ? '' : 's')
+            + (d.remote ? ' on ' + (d.sections || 0) + ' section' + ((d.sections || 0) === 1 ? '' : 's')
+                        : ' on ' + nz + ' section' + (nz === 1 ? '' : 's'))
+            + ', ' + escHtml(draftWhen(d.at))
+            /* SAID, NOT ASSUMED: a draft that is only on the account has to be fetched before it
+               can be drawn, and one that is newer there than here would otherwise resume as a
+               stale copy without a word. */
+            + (d.remote ? ' \u00b7 on your account' : (d.staler ? ' \u00b7 a newer one is on your account'
+                                                              : '')) + '</span>'
           + (mine
               ? '<span class="hint" style="flex:0 0 auto">on the pad now</span>'
               : '<button type="button" class="hist-chip draftres" data-id="' + escHtml(d.id) + '">'
@@ -10015,6 +10116,43 @@ function draftResume(id){
   /* THE ID IS ADOPTED, not replaced: saving from here on updates the draft that was resumed rather
      than growing a second copy of the same work on the next autosave. */
   const d = id ? draftStore.get(id) : draftRead();
+  /* ── FETCHED FIRST, WHEN IT IS NOT IN THIS BROWSER ─────────────────────────────  2026-09-19
+     The index carries the counts but not a single coordinate, which is what makes listing cheap;
+     a draft started on another machine therefore has to be asked for before it can be drawn. The
+     same route brings back a NEWER server copy of one that is also here, so carrying on from the
+     laptop on the desktop resumes the laptop's version. */
+  const stale = d && d.staler;
+  if ((!d || d.remote || stale) && id && draftSignedIn()){
+    padSay("Fetching that tracing from your account\u2026");
+    fetch(REPORT_ENDPOINT + "?drafts=" + encodeURIComponent(GOOGLE_CREDENTIAL)
+          + "&draftId=" + encodeURIComponent(id))
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!j || !j.ok || !j.draft){
+          padSay("That tracing could not be read from your account"
+            + (j && j.error ? ": " + j.error : "") + ".", true);
+          return;
+        }
+        var got = j.draft;
+        got.id = id;
+        /* Written to this browser as it arrives, so the pad is reading the same copy everything
+           else does and a reload does not have to fetch it again. */
+        draftStore.put(got);
+        TRACING_DRAFT_ID = id;
+        draftResumeFrom(got);
+      })
+      .catch(function(e){
+        padSay("Could not reach your account to fetch that tracing: "
+          + String(e && e.message || e), true);
+      });
+    return;
+  }
+  if (!d) return;
+  draftResumeFrom(d);
+}
+/* The half that puts a draft on the pad, split out so it can be reached both by the local path
+   above and by the one that had to fetch first. */
+function draftResumeFrom(d){
   if (!d) return;
   TRACING_DRAFT_ID = d.id || draftCurrentId();
   if (!UJ.emtiles.configured())

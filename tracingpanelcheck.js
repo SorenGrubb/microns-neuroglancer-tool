@@ -2000,7 +2000,7 @@ function link(annotations){
        saved.d.editId + " / " + saved.d.nucId);
     /* "tracings", plural, and with a title on each row since 2026-09-19: the card lists every
        unfinished tracing rather than the one most recently saved. */
-    ok(/Unfinished tracings kept/.test(saved.bar) && /Lysosome/.test(saved.bar),
+    ok(/Unfinished tracings/.test(saved.bar) && /Lysosome/.test(saved.bar),
        "...and the card lists it, by what it is", saved.bar.slice(0, 70));
     /* Søren: *"We need to calculate the organelle volumes also."* ON THE PAD, while drawing -- a
        volume you only see after submitting cannot tell you that you have traced one section too
@@ -2025,7 +2025,7 @@ function link(annotations){
                padShut: document.getElementById("tracePadWrap").style.display === "none" };
     }, { timeout: 30000 }).then(h => h.jsonValue())
       .catch(() => ({ bar: "", shown: false, resume: false, padShut: false }));
-    ok(back.shown && back.resume && /Unfinished tracings kept/.test(back.bar),
+    ok(back.shown && back.resume && /Unfinished tracings/.test(back.bar),
        "AFTER A RELOAD the card still offers it", back.bar.slice(0, 70));
     ok(back.padShut, "...without reopening the pad by itself");
 

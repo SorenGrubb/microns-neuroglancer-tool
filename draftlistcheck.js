@@ -97,7 +97,7 @@ const MAKE = `(function(what, nuc, nRings, z0){
     ok(!got.__absent && (got.list||[]).length > 0 && got.list.every(d => d.title && d.title !== "Unfinished tracing"),
        "...and a name computed from what was filled in, rather than three “Untitled”",
        (got.list||[]).map(d => d.title).join(" | "));
-    ok(!got.__absent && /Unfinished tracings kept/.test(got.bar||'') && /\(3\)/.test(got.bar),
+    ok(!got.__absent && /Unfinished tracings/.test(got.bar||'') && /\(3\)/.test(got.bar),
        "the card lists them and says how many", (got.bar||got.__absent||'').slice(0, 60));
     ok(!got.__absent && got.rows === 6, "...with a Resume and a Discard on every row, not only the newest",
        got.rows / 2 + " rows of two buttons");
