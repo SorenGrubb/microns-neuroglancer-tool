@@ -11,6 +11,9 @@
        resampling is by arc length rather than by index;
      - the stack is CLOSED: every contour with no neighbour above or below gets a cap, so the
        preview is a solid rather than an open tube somebody would read as a hole in their tracing;
+     - a contour drawn INSIDE another is a HOLE, and the hole is in the surface and not only in the
+       arithmetic: the mesh still closes and its SIGNED volume subtracts (added 2026-09-19, when it
+       did neither -- see the last section);
      - it is in nanometres, absolute, in the frame the cell's own mesh arrives in -- a preview in
        the wrong place next to a ghost is worse than no preview;
      - and it survives the shapes a real tracing has: one section, a skipped section, two contours
@@ -53,6 +56,39 @@ function vert(g, i){ return [g.positions[i*3], g.positions[i*3+1], g.positions[i
    Edges within one section are excluded deliberately, and not as a convenience: a cap is a fan from
    the centroid, so its spokes are one radius long by construction, and counting them would drown
    the signal in a number that is the same whatever the band does. */
+/* Every edge of a closed surface is shared by exactly two triangles. The caps are fans (or, where
+   a contour has holes cut out of it, an ear-clipped polygon) and the bands are quads split in two,
+   so this is the whole test of "is it closed" in one number. Keyed on the rounded POSITION rather
+   than on the vertex index, because the caps and the bands each push their own copies of the same
+   points. */
+function unsharedEdges(g){
+  const edges = {};
+  const key = i => [Math.round(g.positions[i*3]*1e3), Math.round(g.positions[i*3+1]*1e3),
+                    Math.round(g.positions[i*3+2]*1e3)].join(",");
+  for (let t = 0; t + 2 < g.indices.length; t += 3){
+    const v = [g.indices[t], g.indices[t+1], g.indices[t+2]];
+    for (let k = 0; k < 3; k++){
+      const p = key(v[k]), q = key(v[(k+1)%3]);
+      const e = p < q ? p + "|" + q : q + "|" + p;
+      edges[e] = (edges[e] || 0) + 1;
+    }
+  }
+  return Object.keys(edges).filter(k => edges[k] !== 2).length;
+}
+/* Signed volume of a closed triangle mesh, by the divergence theorem -- the same measure
+   blender/trace_mesh.py's mesh_volume_um3 uses. Positions are nm, so the answer is µm³.
+   SIGNED, deliberately and not absolute: a hole is a hole here only if its triangles face the
+   other way and subtract, and taking the modulus per triangle would hide exactly that. */
+function signedVolumeUm3(g){
+  let v = 0;
+  for (let t = 0; t + 2 < g.indices.length; t += 3){
+    const a = vert(g, g.indices[t]), b = vert(g, g.indices[t+1]), c = vert(g, g.indices[t+2]);
+    v += (a[0] * (b[1] * c[2] - c[1] * b[2])
+        - a[1] * (b[0] * c[2] - c[0] * b[2])
+        + a[2] * (b[0] * c[1] - c[0] * b[1])) / 6;
+  }
+  return v / 1e9;
+}
 function longestEdge(g){
   let worst = 0;
   for (let t = 0; t + 2 < g.indices.length; t += 3){
@@ -147,24 +183,8 @@ console.log("\nthe stack is closed: an open tube reads as a hole in the tracing"
   const g = L.loft([{ z: 0, points: circle(0, 0, 100, 20) },
                     { z: 1, points: circle(0, 0, 100, 20) }], [1, 1, 1]);
   ok(g.capped === 2, "both ends are capped", g.capped + " caps");
-  /* Every edge of a closed surface is shared by exactly two triangles. The caps are fans and the
-     bands are quads split in two, so this is the whole test of "is it closed" in one line. */
-  const edges = {};
-  for (let t = 0; t + 2 < g.indices.length; t += 3){
-    const v = [g.indices[t], g.indices[t+1], g.indices[t+2]];
-    for (let k = 0; k < 3; k++){
-      const a = v[k], b = v[(k+1)%3];
-      const p = [Math.round(g.positions[a*3]*1e3), Math.round(g.positions[a*3+1]*1e3),
-                 Math.round(g.positions[a*3+2]*1e3)].join(",");
-      const q = [Math.round(g.positions[b*3]*1e3), Math.round(g.positions[b*3+1]*1e3),
-                 Math.round(g.positions[b*3+2]*1e3)].join(",");
-      const key = p < q ? p + "|" + q : q + "|" + p;
-      edges[key] = (edges[key] || 0) + 1;
-    }
-  }
-  const odd = Object.keys(edges).filter(k => edges[k] !== 2);
-  ok(odd.length === 0, "and every edge is shared by exactly two triangles, so it is watertight",
-     odd.length + " unshared edge(s)");
+  ok(unsharedEdges(g) === 0, "and every edge is shared by exactly two triangles, so it is watertight",
+     unsharedEdges(g) + " unshared edge(s)");
 }
 
 console.log("\nthe shapes a real tracing actually has");
@@ -313,20 +333,133 @@ console.log("\nvolume: against shapes whose answer is arithmetic");
     }
     const v = L.volume(rings, R);
     const g = L.loft(rings, R);
-    /* Signed volume of a closed triangle mesh, by the divergence theorem -- the same measure
-       blender/trace_mesh.py's mesh_volume_um3 uses, in nm here. */
-    let vol = 0;
-    for (let t = 0; t + 2 < g.indices.length; t += 3){
-      const a = vert(g, g.indices[t]), b = vert(g, g.indices[t + 1]), c = vert(g, g.indices[t + 2]);
-      vol += (a[0] * (b[1] * c[2] - c[1] * b[2])
-            - a[1] * (b[0] * c[2] - c[0] * b[2])
-            + a[2] * (b[0] * c[1] - c[0] * b[1])) / 6;
-    }
-    const loftUm3 = Math.abs(vol) / 1e9;
+    const loftUm3 = Math.abs(signedVolumeUm3(g));
     ok(Math.abs(loftUm3 - v.volumeTrapezoidUm3) / v.volumeTrapezoidUm3 < 0.05,
        "the lofted surface and the trapezoid agree — two independent sums over one tracing",
        loftUm3.toFixed(3) + " vs " + v.volumeTrapezoidUm3.toFixed(3) + " µm³");
   }
+}
+
+/* ── A CONTOUR INSIDE ANOTHER IS A HOLE, IN THE MESH TOO ───────────────────────────  2026-09-19
+   Søren: *"If I draw one contour inside another, it should subtract the inside from the outside, so
+   that the inner one becomes a hole. This hole should also exist in the 3D mesh."*
+
+   volume() had subtracted since the day it was written and trace_mesh.py had filled even-odd since
+   the day IT was written; loft() gave the inner contour its own tube. So the assertions that matter
+   are about the SURFACE: that it still closes, and that its signed volume subtracts. Signed rather
+   than absolute — a hole whose triangles faced the wrong way would ADD, and would pass any test
+   that took the modulus per triangle.
+
+   The annulus is the one shape here whose answer is arithmetic from two radii, so it is the shape
+   to ask: a 1 µm circle with a 0.5 µm circle inside it is three quarters of the disc, on every
+   section, and the mesh has to say so too. */
+console.log("\na hole is a hole in the surface, not only in the arithmetic");
+{
+  const R = [4, 4, 40], uM = 1000 / 4;
+  const holed = [], solid = [];
+  for (let z = 0; z <= 10; z += 5){
+    holed.push({ z: z, points: circle(0, 0, 1.0 * uM, 128) });
+    holed.push({ z: z, points: circle(0, 0, 0.5 * uM, 128) });     // drawn INSIDE the first
+    solid.push({ z: z, points: circle(0, 0, 1.0 * uM, 128) });
+  }
+  const g = L.loft(holed, R), s = L.loft(solid, R);
+  ok(g.holes === 3, "the inner contour is recognised as a hole on every section", g.holes + " holes");
+  ok(unsharedEdges(g) === 0,
+     "the surface with a hole through it is still watertight", unsharedEdges(g) + " unshared edge(s)");
+  const ratio = signedVolumeUm3(g) / signedVolumeUm3(s);
+  ok(Math.abs(ratio - 0.75) < 0.01,
+     "and the mesh encloses three quarters of the solid — the hole SUBTRACTS", ratio.toFixed(4));
+  const trap = L.volume(holed, R).volumeTrapezoidUm3;
+  ok(Math.abs(signedVolumeUm3(g) - trap) / trap < 0.05,
+     "...which is the same answer volume() gets from the contours, by the other route",
+     signedVolumeUm3(g).toFixed(3) + " vs " + trap.toFixed(3) + " µm³");
+  /* The preview used to loft the inner contour as a second tube, which ADDED. Worth asserting
+     against the old behaviour by name, because the symptom was a plausible-looking picture. */
+  ok(signedVolumeUm3(g) < signedVolumeUm3(s),
+     "...and not a second tube standing inside the first, which is what it used to be",
+     signedVolumeUm3(g).toFixed(3) + " < " + signedVolumeUm3(s).toFixed(3) + " µm³");
+
+  /* THE COMMON CASE IS NOT THE END SECTIONS. A nucleus inside a soma starts and stops inside the
+     stack, where the outer is never capped — so the cavity is closed by the hole's OWN disc,
+     reversed, rather than by anything being cut out. Different code path, same requirement. */
+  const mid = [];
+  for (let z = 0; z <= 20; z += 5){
+    mid.push({ z: z, points: circle(0, 0, 1.0 * uM, 64) });
+    if (z > 0 && z < 20) mid.push({ z: z, points: circle(0, 0, 0.5 * uM, 64) });
+  }
+  const gm = L.loft(mid, R);
+  ok(gm.holes === 3 && unsharedEdges(gm) === 0,
+     "a hole that begins and ends inside the stack is a closed cavity",
+     gm.holes + " holes, " + unsharedEdges(gm) + " unshared edge(s)");
+  const cavity = Math.PI * 0.25 * (10 * 40 / 1000);          // the hole's own cylinder, µm³
+  const gmSolid = L.loft(mid.filter(r => r.points.length === 64 && r.z % 5 === 0
+                                         && Math.hypot(r.points[0][0], r.points[0][1]) > 0.75 * uM), R);
+  ok(Math.abs((signedVolumeUm3(gmSolid) - signedVolumeUm3(gm)) - cavity) / cavity < 0.02,
+     "...and what it removes is its own volume, not more and not less",
+     (signedVolumeUm3(gmSolid) - signedVolumeUm3(gm)).toFixed(4) + " vs " + cavity.toFixed(4) + " µm³");
+
+  /* Two holes in one outline need two bridges into one polygon, and a hole inside a hole is SOLID
+     again — the vesicle in the vacuole. Both are even-odd rather than special cases, and both have
+     to close. */
+  const twoHoles = [], nested = [];
+  for (let z = 0; z <= 5; z += 5){
+    twoHoles.push({ z: z, points: circle(0, 0, 1.0 * uM, 96) });
+    twoHoles.push({ z: z, points: circle(-0.4 * uM, 0, 0.2 * uM, 48) });
+    twoHoles.push({ z: z, points: circle(0.4 * uM, 0, 0.2 * uM, 48) });
+    nested.push({ z: z, points: circle(0, 0, 1.0 * uM, 96) });
+    nested.push({ z: z, points: circle(0, 0, 0.6 * uM, 96) });
+    nested.push({ z: z, points: circle(0, 0, 0.3 * uM, 96) });
+  }
+  const g2 = L.loft(twoHoles, R), g3 = L.loft(nested, R);
+  const t2 = L.volume(twoHoles, R).volumeTrapezoidUm3, t3 = L.volume(nested, R).volumeTrapezoidUm3;
+  ok(unsharedEdges(g2) === 0 && Math.abs(signedVolumeUm3(g2) - t2) / t2 < 0.02,
+     "two holes in one outline: two bridges, one polygon, still watertight",
+     signedVolumeUm3(g2).toFixed(4) + " vs " + t2.toFixed(4) + " µm³");
+  ok(g3.holes === 2 && unsharedEdges(g3) === 0 && Math.abs(signedVolumeUm3(g3) - t3) / t3 < 0.02,
+     "a ring inside a hole is solid again — the vesicle inside the vacuole",
+     signedVolumeUm3(g3).toFixed(4) + " vs " + t3.toFixed(4) + " µm³");
+
+  /* Not a circle. The bridge has to find its way round a squashed outline with an off-centre hole,
+     because a hand-drawn contour is never the shape the algorithm was tested on. */
+  const blob = (cx, cy, rx, ry, n, ph) => {
+    const o = [];
+    for (let i = 0; i < n; i++){
+      const a = 2 * Math.PI * i / n + ph;
+      o.push([cx + rx * Math.cos(a), cy + ry * Math.sin(a)]);
+    }
+    return o;
+  };
+  const odd = [];
+  for (let z = 0; z <= 5; z += 5){
+    odd.push({ z: z, points: blob(0, 0, 1.2 * uM, 0.6 * uM, 73, 0.3) });
+    odd.push({ z: z, points: blob(0.4 * uM, 0.1 * uM, 0.25 * uM, 0.2 * uM, 31, 1.1) });
+  }
+  const go = L.loft(odd, R), to = L.volume(odd, R).volumeTrapezoidUm3;
+  ok(unsharedEdges(go) === 0 && Math.abs(signedVolumeUm3(go) - to) / to < 0.02,
+     "an off-centre hole in a squashed outline, which is what a hand does",
+     signedVolumeUm3(go).toFixed(4) + " vs " + to.toFixed(4) + " µm³");
+
+  /* SUBTRACTING AND ADDING ON THE SAME SECTION: a cell with a hole in it, and another cell drawn
+     beside it. The hole subtracts from its own outline and the neighbour adds, which is the whole
+     of even-odd in one fixture and the case a real tracing of two organelles produces.
+
+     It is also where pairing BY PARITY earns its keep: the bands are matched once over the
+     outlines and once over the holes, so greedy nearest-centroid can never run a band from a hole
+     to the outline of the cell next door. That is asserted here only as far as the answer shows
+     it -- the surface closes and the volume is outer minus hole plus neighbour, neither of which
+     survives a band joining the wrong two rings. */
+  const beside = [];
+  for (let z = 0; z <= 5; z += 5){
+    beside.push({ z: z, points: circle(0, 0, 1.0 * uM, 64) });
+    beside.push({ z: z, points: circle(0.1 * uM, 0, 0.3 * uM, 64) });      // a hole in it
+    beside.push({ z: z, points: circle(1.6 * uM, 0, 0.3 * uM, 64) });      // a cell next door
+  }
+  const gb = L.loft(beside, R), tb = L.volume(beside, R).volumeTrapezoidUm3;
+  ok(gb.holes === 2 && gb.contours === 6, "one outline, one hole in it, one cell beside it",
+     gb.contours + " contours, " + gb.holes + " holes");
+  ok(unsharedEdges(gb) === 0 && Math.abs(signedVolumeUm3(gb) - tb) / tb < 0.02,
+     "...and the mesh is outline minus hole plus neighbour, closed",
+     signedVolumeUm3(gb).toFixed(4) + " vs " + tb.toFixed(4) + " µm³");
 }
 
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");

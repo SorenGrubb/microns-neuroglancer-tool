@@ -1329,6 +1329,7 @@ async function pad3DDraw(){
     pad3DRelease();
     const um = [0, 1, 2].map(function(i){ return (hi[i] - lo[i]) / 1000; });
     const nContours = lofts.reduce(function(n, L){ return n + (L.g.contours || 0); }, 0);
+    const nHoles = lofts.reduce(function(n, L){ return n + (L.g.holes || 0); }, 0);
     const zSeen = {};
     rings.forEach(function(r){ zSeen[r.z] = 1; });
     const nSections = Object.keys(zSeen).length;
@@ -1336,8 +1337,17 @@ async function pad3DDraw(){
       + "lofted section to section — " + nContours + " contour" + (nContours === 1 ? "" : "s")
       + " on " + nSections + " section" + (nSections === 1 ? "" : "s") + ", "
       + um.map(function(v){ return v.toFixed(1); }).join(" × ") + " µm. The Blender export "
-      + "fills each section and marches cubes over the stack, which is smoother and treats a "
-      + "contour drawn inside another as a hole.</span>";
+      + "fills each section and marches cubes over the stack, which is smoother.</span>";
+    /* SAID OUT LOUD WHEN THERE IS ONE, since 2026-09-19. This caption used to end "...and treats a
+       contour drawn inside another as a hole", which was the polite way of saying the preview did
+       not -- it lofted the inner contour as a second tube. Now both do, and the thing worth saying
+       instead is how many the tool found, because a hole it did NOT recognise is the failure a
+       tracer needs to catch while the pad is still open. */
+    if (nHoles)
+      lead += "<br><span class='hint'>" + nHoles + " contour" + (nHoles === 1 ? " is" : "s are")
+        + " drawn inside another, and " + (nHoles === 1 ? "is" : "are")
+        + " cut out as " + (nHoles === 1 ? "a hole" : "holes") + " — here, in the volume above "
+        + "and in the export.</span>";
     if (lofts.length > 1)
       lead += "<br><span class='hint'>" + lofts.length + " structures, each lofted on its own and "
         + "in the colour of its chip above — "
@@ -2239,7 +2249,28 @@ function padPaint(){
   if (PAD_BASE_READY) g.drawImage(PAD_BASE, 0, 0);
   if (!PAD_VIEW) return;
   const px = function(t){ return PAD_VIEW.pxAt(t); };
-  /* Contours already closed on THIS section, then the one being drawn. */
+  /* Contours already closed on THIS section, then the one being drawn.
+
+     ONE PATH PER STRUCTURE, FILLED EVEN-ODD, since 2026-09-19 (Søren: *"If I draw one contour
+     inside another, it should subtract the inside from the outside, so that the inner one becomes
+     a hole"*). Each ring used to get its own beginPath/fill, which painted an inner contour ON TOP
+     of the outer one — two overlapping washes where the volume, the export and now the preview
+     all say there is a hole. Grouping by r.inst is what keeps two mitochondria drawn side by side
+     from punching each other: same structure, same path; different structures, different paths. */
+  const padFills = {};
+  PAD.rings.forEach(function(r){
+    if (r.z !== PAD.z) return;
+    const key = String(r.inst || 0);
+    if (!padFills[key]){ padFills[key] = new Path2D(); }
+    const sub = padFills[key];
+    r.points.forEach(function(p, i){ const q = px([p[0], p[1], PAD.z]);
+      if (i) sub.lineTo(q[0], q[1]); else sub.moveTo(q[0], q[1]); });
+    sub.closePath();
+  });
+  Object.keys(padFills).forEach(function(key){
+    g.fillStyle = hexA(padInstColour(+key || 0), 0.14);
+    g.fill(padFills[key], "evenodd");
+  });
   PAD.rings.forEach(function(r){
     if (r.z !== PAD.z) return;
     g.beginPath();
@@ -2247,10 +2278,10 @@ function padPaint(){
       if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
     g.closePath();
     /* Its own structure's colour, so two mitochondria side by side are two shapes rather than one
-       ambiguous pair of outlines. */
+       ambiguous pair of outlines. The OUTLINE is still per contour: it is about the line you drew,
+       not about the region it bounds, and a hole's rim has to be visible to be draggable. */
     const col = padInstColour(r.inst || 0);
     g.strokeStyle = col; g.lineWidth = 2; g.stroke();
-    g.fillStyle = hexA(col, 0.14); g.fill();
     /* The vertices of a CLOSED contour, because since 2026-09-17 they can be dragged, and a handle
        you cannot see is a handle you do not know you have. */
     r.points.forEach(function(p){

@@ -14,11 +14,16 @@
 
    WHERE IT DIFFERS FROM THE EXPORT, said plainly because a preview that quietly disagrees with the
    file you download is worse than no preview:
-     · a contour drawn INSIDE another is lofted as its own tube here, and is a HOLE in the export;
      · two contours on one section are two tubes here, and one blended object there;
      · a section skipped is bridged straight here, and interpolated there.
    For one closed outline per section — which is what tracing a cell looks like — the two agree on
    the silhouette and differ only in smoothness.
+
+   A CONTOUR INSIDE ANOTHER IS A HOLE IN BOTH, since 2026-09-19 (Søren: *"it should subtract the
+   inside from the outside... This hole should also exist in the 3D mesh"*). It was lofted as its
+   own tube standing inside the first until then, while volume() below and trace_mesh.py both
+   already subtracted it — so the preview was the only place the tracing looked wrong, which is
+   the worst place for it to look wrong.
 
    CORRESPONDENCE IS THE WHOLE PROBLEM. Two contours with different vertex counts, drawn from
    different starting points, possibly in opposite directions, have to be joined without the
@@ -126,6 +131,127 @@ UJ.traceloft = (function(){
     return { pairs: pairs, usedAbove: used };
   }
 
+  /* @loftholes:start */
+  /* ── WHICH CONTOURS ARE HOLES ──────────────────────────────────────────────────  2026-09-19
+     Søren: *"If I draw one contour inside another, it should subtract the inside from the outside,
+     so that the inner one becomes a hole. This hole should also exist in the 3D mesh."*
+
+     The same counting areaOfSection() has always done, on the resampled rings: how many other
+     contours of this section contain this one. Odd is a hole; even is solid; a ring inside a hole
+     is solid again, so a vesicle inside a vacuole inside a cell needs no special case.
+
+     The PARENT is the container one depth up, which is what decides whose cap a hole is punched
+     out of. Found by a second pass rather than by sorting on area, because "inside" is the
+     question and a large ring can sit inside a larger concave one. */
+  function nestOf(list){
+    var depth = [], parent = [], i, j;
+    for (i = 0; i < list.length; i++){
+      var d = 0;
+      for (j = 0; j < list.length; j++)
+        if (i !== j && pointInRing(list[i].pts[0], list[j].pts)) d++;
+      depth.push(d); parent.push(-1);
+    }
+    for (i = 0; i < list.length; i++)
+      for (j = 0; j < list.length; j++)
+        if (i !== j && depth[j] === depth[i] - 1 && pointInRing(list[i].pts[0], list[j].pts))
+          parent[i] = j;
+    return { depth: depth, parent: parent };
+  }
+
+  /* ── A CAP WITH ITS HOLES CUT OUT ──────────────────────────────────────────────  2026-09-19
+     Only needed where a contour that HAS holes also has no neighbour on one side -- the two ends
+     of the stack, and a branch. A hole that starts or stops mid-stack never comes through here:
+     its parent is not capped there, and the hole's own reversed disc is the cavity's floor. */
+  function cross2(o, a, b){
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  }
+  /* STRICTLY inside, which matters more than it looks: bridging duplicates two vertices, and a
+     test that counted a coincident point as inside would reject every ear and stall the clip. */
+  function inTri(p, a, b, c){
+    return cross2(a, b, p) > 0 && cross2(b, c, p) > 0 && cross2(c, a, p) > 0;
+  }
+  /* Eberly's bridge. From the hole's rightmost vertex M, cast +x; the outer edge hit first gives a
+     point I, and the candidate P is that edge's right-hand end. If any REFLEX vertex of the outer
+     lies inside the triangle M-I-P it blocks the straight line, and the visible one is whichever
+     of them sits at the smallest angle from +x -- nearest wins a tie. */
+  function bridge(outer, hole){
+    var m = 0, i;
+    for (i = 1; i < hole.length; i++) if (hole[i][0] > hole[m][0]) m = i;
+    var M = hole[m], bestX = Infinity, e = -1;
+    for (i = 0; i < outer.length; i++){
+      var a = outer[i], b = outer[(i + 1) % outer.length];
+      if ((a[1] > M[1]) === (b[1] > M[1])) continue;          // the edge does not span M's row
+      var x = a[0] + (M[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]);
+      if (x >= M[0] && x < bestX){ bestX = x; e = i; }
+    }
+    if (e < 0) return null;                                    // the hole is not inside after all
+    var p = outer[e][0] > outer[(e + 1) % outer.length][0] ? e : (e + 1) % outer.length;
+    var I = [bestX, M[1]], P = outer[p], bestAng = Infinity, bestD = Infinity;
+    for (i = 0; i < outer.length; i++){
+      if (i === p) continue;
+      var R = outer[i];
+      var prev = outer[(i + outer.length - 1) % outer.length], next = outer[(i + 1) % outer.length];
+      if (cross2(prev, R, next) > 0) continue;                 // convex: it cannot block anything
+      if (!inTri(R, M, I, P) && !inTri(R, M, P, I)) continue;
+      var dx = R[0] - M[0], dy = R[1] - M[1], L = Math.sqrt(dx * dx + dy * dy) || 1;
+      var ang = Math.abs(dy) / L, d = dx * dx + dy * dy;
+      if (ang < bestAng - 1e-12 || (Math.abs(ang - bestAng) <= 1e-12 && d < bestD)){
+        bestAng = ang; bestD = d; p = i;
+      }
+    }
+    return { hole: m, outer: p };
+  }
+  /* Holes are bridged rightmost first, so a later bridge can see the boundary an earlier one
+     already folded in rather than crossing it. */
+  function mergeHoles(outer, holes){
+    var poly = outer.slice(), order = [], i, k;
+    for (k = 0; k < holes.length; k++){
+      var m = 0;
+      for (i = 1; i < holes[k].length; i++) if (holes[k][i][0] > holes[k][m][0]) m = i;
+      order.push({ h: holes[k], x: holes[k][m][0] });
+    }
+    order.sort(function(a, b){ return b.x - a.x; });
+    for (k = 0; k < order.length; k++){
+      var br = bridge(poly, order[k].h);
+      if (!br) return null;
+      var H = order[k].h, merged = [];
+      for (i = 0; i <= br.outer; i++) merged.push(poly[i]);
+      for (i = 0; i < H.length; i++) merged.push(H[(br.hole + i) % H.length]);
+      merged.push(H[br.hole]);
+      merged.push(poly[br.outer]);
+      for (i = br.outer + 1; i < poly.length; i++) merged.push(poly[i]);
+      poly = merged;
+    }
+    return poly;
+  }
+  /* Ear clipping, O(n²) and unapologetic: a cap is at most a few hundred vertices and happens
+     twice per structure per stack, not per frame. It returns what it managed rather than throwing,
+     and the caller checks the count. */
+  function earClip(poly){
+    var n = poly.length, V = [], tris = [], i, guard = 2 * n * n;
+    for (i = 0; i < n; i++) V.push(i);
+    while (V.length > 3 && guard-- > 0){
+      var cut = -1;
+      for (var vi = 0; vi < V.length; vi++){
+        var i0 = V[(vi + V.length - 1) % V.length], i1 = V[vi], i2 = V[(vi + 1) % V.length];
+        var a = poly[i0], b = poly[i1], c = poly[i2];
+        if (cross2(a, b, c) <= 0) continue;                    // reflex or degenerate: not an ear
+        var clear = true;
+        for (var k = 0; k < V.length; k++){
+          var ik = V[k];
+          if (ik === i0 || ik === i1 || ik === i2) continue;
+          if (inTri(poly[ik], a, b, c)){ clear = false; break; }
+        }
+        if (!clear) continue;
+        tris.push([i0, i1, i2]); cut = vi; break;
+      }
+      if (cut < 0) break;
+      V.splice(cut, 1);
+    }
+    if (V.length === 3) tris.push([V[0], V[1], V[2]]);
+    return tris;
+  }
+
   function loft(rings, resNm){
     var res = resNm || [1, 1, 1];
     var byZ = {}, zs = [];
@@ -138,6 +264,21 @@ UJ.traceloft = (function(){
       byZ[z].push({ pts: pts, c: centroid(pts) });
     });
     zs.sort(function(a, b){ return a - b; });
+
+    /* HOLES ARE STORED REVERSED, and that is the whole of the special-casing. band() and cap()
+       below are untouched: a ring wound the other way makes them emit triangles whose normals
+       point into the cavity, which is where the material is. Reversing after resampling keeps the
+       equal-arc-length spacing, and the centroid is the same either way. */
+    var nest = {};
+    zs.forEach(function(z){
+      var list = byZ[z], n = nestOf(list);
+      nest[z] = n;
+      list.forEach(function(r, i){
+        r.hole = (n.depth[i] % 2) === 1;
+        r.parent = n.parent[i];
+        if (r.hole) r.pts = r.pts.slice().reverse();
+      });
+    });
 
     var pos = [], idx = [];
     function put(p, z){
@@ -154,6 +295,31 @@ UJ.traceloft = (function(){
         if (flip) idx.push(mid, b, a); else idx.push(mid, a, b);
       }
     }
+    /* The same cap, with this contour's holes cut out of it. Falls back to fans -- the outer's,
+       plus each hole's reversed -- if the bridge or the clip cannot cope: coplanar and ugly, but
+       closed, and still outer-minus-hole by signed volume. Returns whether the holes were dealt
+       with here, so the caller knows not to give them their own disc as well. */
+    function capHoled(ring, holes, z, flip){
+      if (!holes.length){ cap(ring, z, flip); return true; }
+      /* The holes are ALREADY clockwise -- that is how they are stored -- which is exactly the
+         winding a hole has to have to be spliced into a counter-clockwise outer and leave one
+         simple polygon behind. Nothing to turn round here. */
+      var poly = mergeHoles(ring.pts, holes.map(function(h){ return h.pts; }));
+      var tris = poly ? earClip(poly) : null;
+      if (!tris || tris.length < poly.length - 2){
+        cap(ring, z, flip);
+        holes.forEach(function(h){ cap(h, z, flip); });
+        return true;
+      }
+      var first = pos.length / 3, i;
+      for (i = 0; i < poly.length; i++) put(poly[i], z);
+      for (i = 0; i < tris.length; i++){
+        var t = tris[i];
+        if (flip) idx.push(first + t[0], first + t[2], first + t[1]);
+        else idx.push(first + t[0], first + t[1], first + t[2]);
+      }
+      return true;
+    }
     function band(lo, hi, zLo, zHi){
       var off = bestOffset(lo.pts, hi.pts);
       var baseA = pos.length / 3, i;
@@ -166,20 +332,35 @@ UJ.traceloft = (function(){
         /* WOUND OUTWARD, to agree with the caps. Nothing on screen depends on it -- the renderer
            has no culling and its shader is two-sided -- but a surface whose triangles disagree
            about which side is out has no signed volume, and traceloftcheck.js measures exactly that
-           to cross-check volume() against the loft. Two sums over one tracing that agree are worth
-           more than either of them alone, and they can only agree if this is consistent. */
+           to cross-check volume() against the loft. Two sums over one tracing are worth more than
+           either of them alone, and they can only agree if this is consistent. */
         idx.push(a0, b1, b0, a0, a1, b1);
       }
     }
+    function holesOf(z, i){
+      return byZ[z].filter(function(r){ return r.parent === i; });
+    }
 
     if (!zs.length) return { positions: new Float32Array(0), indices: new Uint32Array(0),
-                             sections: 0, contours: 0, capped: 0 };
+                             sections: 0, contours: 0, capped: 0, holes: 0 };
+    function holeCount(){
+      var n = 0;
+      zs.forEach(function(z){ byZ[z].forEach(function(r){ if (r.hole) n++; }); });
+      return n;
+    }
     /* ONE SECTION IS NOT A SOLID, and saying so beats drawing a disc somebody would read as one.
-       Two flat caps facing opposite ways give a visible outline with no thickness claimed. */
+       Two flat caps facing opposite ways give a visible outline with no thickness claimed -- with
+       the hole cut out of both, so a single traced section of a ring shows as a ring. */
     if (zs.length === 1){
-      byZ[zs[0]].forEach(function(r){ cap(r, zs[0], false); cap(r, zs[0], true); });
+      var z0 = zs[0];
+      byZ[z0].forEach(function(r, i){
+        if (r.hole) return;
+        capHoled(r, holesOf(z0, i), z0, false);
+        capHoled(r, holesOf(z0, i), z0, true);
+      });
       return { positions: new Float32Array(pos), indices: new Uint32Array(idx),
-               sections: 1, contours: byZ[zs[0]].length, capped: byZ[zs[0]].length, flat: true };
+               sections: 1, contours: byZ[z0].length, capped: byZ[z0].length,
+               holes: holeCount(), flat: true };
     }
 
     /* A contour is capped on whichever side it has no neighbour: both ends of the stack always,
@@ -188,31 +369,58 @@ UJ.traceloft = (function(){
     var hasAbove = {}, hasBelow = {}, capped = 0, contours = 0;
     function mark(set, z, i){ set[z + ":" + i] = 1; }
     function marked(set, z, i){ return !!set[z + ":" + i]; }
-    for (var k = 0; k < zs.length - 1; k++){
-      var below = byZ[zs[k]], above = byZ[zs[k + 1]];
-      var got = pairUp(below, above);
-      /* eslint-disable no-loop-func */
-      (function(zLo, zHi, lo, hi){
-        got.pairs.forEach(function(p){
-          band(lo[p[0]], hi[p[1]], zLo, zHi);
-          mark(hasAbove, zLo, p[0]);
-          mark(hasBelow, zHi, p[1]);
-        });
-      })(zs[k], zs[k + 1], below, above);
+    /* BY PARITY. Outlines are paired with outlines and holes with holes, in two passes, so greedy
+       nearest-centroid can never join a hole to an outline -- which would be a sheet through the
+       middle of the tissue, and is exactly what a small hole next to a small neighbouring cell
+       would have produced. */
+    function pairByParity(below, above, wantHole, zLo, zHi){
+      var bi = [], ai = [], b = [], a = [], i;
+      for (i = 0; i < below.length; i++) if (!below[i].hole === !wantHole){ bi.push(i); b.push(below[i]); }
+      for (i = 0; i < above.length; i++) if (!above[i].hole === !wantHole){ ai.push(i); a.push(above[i]); }
+      if (!b.length || !a.length) return;
+      pairUp(b, a).pairs.forEach(function(p){
+        band(b[p[0]], a[p[1]], zLo, zHi);
+        mark(hasAbove, zLo, bi[p[0]]);
+        mark(hasBelow, zHi, ai[p[1]]);
+      });
     }
+    for (var k = 0; k < zs.length - 1; k++){
+      pairByParity(byZ[zs[k]], byZ[zs[k + 1]], false, zs[k], zs[k + 1]);
+      pairByParity(byZ[zs[k]], byZ[zs[k + 1]], true, zs[k], zs[k + 1]);
+    }
+    /* Which holes were taken care of by their parent's cap, so they do not also get a disc of
+       their own on that side -- two coplanar caps facing the same way is a doubled surface, and
+       doubles the volume it encloses. */
+    var doneBelow = {}, doneAbove = {};
     zs.forEach(function(z, k){
       byZ[z].forEach(function(r, i){
-        contours++;
-        if (k > 0 && !marked(hasBelow, z, i)){ cap(r, z, true); capped++; }
-        if (k === 0){ cap(r, z, true); capped++; }
-        if (k < zs.length - 1 && !marked(hasAbove, z, i)){ cap(r, z, false); capped++; }
-        if (k === zs.length - 1){ cap(r, z, false); capped++; }
+        if (r.hole) return;
+        var hs = holesOf(z, i);
+        if (k === 0 || !marked(hasBelow, z, i)){
+          capHoled(r, hs, z, true); capped++;
+          hs.forEach(function(h){ doneBelow[z + ":" + byZ[z].indexOf(h)] = 1; });
+        }
+        if (k === zs.length - 1 || !marked(hasAbove, z, i)){
+          capHoled(r, hs, z, false); capped++;
+          hs.forEach(function(h){ doneAbove[z + ":" + byZ[z].indexOf(h)] = 1; });
+        }
       });
+      /* A hole that begins or ends inside the stack: its parent carries on past it, so nothing was
+         punched, and the cavity needs its own floor or ceiling. Reversed storage points it the
+         right way round without a flag. */
+      byZ[z].forEach(function(r, i){
+        if (!r.hole) return;
+        if ((k === 0 || !marked(hasBelow, z, i)) && !doneBelow[z + ":" + i]){ cap(r, z, true); capped++; }
+        if ((k === zs.length - 1 || !marked(hasAbove, z, i)) && !doneAbove[z + ":" + i]){
+          cap(r, z, false); capped++;
+        }
+      });
+      contours += byZ[z].length;
     });
     return { positions: new Float32Array(pos), indices: new Uint32Array(idx),
-             sections: zs.length, contours: contours, capped: capped };
+             sections: zs.length, contours: contours, capped: capped, holes: holeCount() };
   }
-
+  /* @loftholes:end */
   /* ── HOW MUCH OF IT THERE IS ────────────────────────────────────────────────────  2026-09-17
      Søren: *"We need to calculate the organelle volumes also and add the volumes to the data for
      the cell when submitting."*
@@ -320,7 +528,8 @@ UJ.traceloft = (function(){
   return { loft: loft, volume: volume,
            _orient: orient, _resample: resample, _bestOffset: bestOffset,
            _signedArea: signedArea, _pairUp: pairUp,
-           _ringArea: ringArea, _pointInRing: pointInRing, _areaOfSection: areaOfSection, N: N };
+           _ringArea: ringArea, _pointInRing: pointInRing, _areaOfSection: areaOfSection,
+           _nestOf: nestOf, _mergeHoles: mergeHoles, _earClip: earClip, N: N };
 })();
 if (typeof module !== "undefined" && module.exports)
   module.exports = (typeof window !== "undefined" ? window : global).UJ.traceloft;
