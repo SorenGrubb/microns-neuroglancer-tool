@@ -548,7 +548,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-19 19:13</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-19 20:05</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -8699,6 +8699,24 @@ function tracingWhat(){
 function tracingSeriesLabel(name){
   return String(name || "").replace(/\s+\d+$/, "").trim().toLowerCase();
 }
+/* Numbers of tracings opened for editing this session, by structureId. Filled by
+   tracingOpenShared, which has the tracing in its hand; read by tracingCurrentAll below. */
+var TRACING_EDIT_INDEX = {};
+/* THE NUMBER A STRUCTURE IS ALREADY PUBLISHED UNDER, or 0 for one that is new. The stash first
+   because it cannot be stale and does not depend on the index having loaded; the shared index
+   second because it survives a reload, which the stash does not -- a draft of an edit resumed
+   tomorrow has no memory of what it is a version of, and the index does. */
+function tracingPublishedIndex(structureId){
+  var id = String(structureId || "");
+  if (!id) return 0;
+  if (TRACING_EDIT_INDEX[id] > 0) return TRACING_EDIT_INDEX[id];
+  var found = 0;
+  (TRACING_SHARED || []).forEach(function(t){
+    if (t && String(t.structureId || "") === id && Number(t.instanceIndex) > 0)
+      found = Math.round(Number(t.instanceIndex));
+  });
+  return found;
+}
 function tracingNextIndex(kind, label, nuc, root){
   var wantK = String(kind || ""), wantL = tracingSeriesLabel(label);
   var top = 0;
@@ -8766,24 +8784,48 @@ function tracingCurrentAll(){
   const seriesKey=function(w){
     return String(w.kind||"")+"|"+((w.kind==="other")?tracingSeriesLabel(w.name):"");
   };
-  const first={}, taken={}, count={};
-  groups.forEach(function(g){
-    const k=seriesKey(g.w);
-    count[k]=(count[k]||0)+1;
-    if(first[k]===undefined)first[k]=tracingNextIndex(g.w.kind,g.w.name,nid,rid);
-  });
-
+  /* THE ID IS SETTLED FIRST, because it is what decides whether a structure is new. It used to
+     be assigned after the numbering, which was harmless only while the numbering did not care. */
   if(!TRACING_PENDING.id){
     const label=groups[0].w.name;
     const prior=(TRACINGS_KEPT||[]).filter(function(x){return x&&x.id&&x.name===label;})[0];
     TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(label);
   }
+  /* The same expression the submission ends with, hoisted so the numbering can use it: the first
+     structure keeps the bare id, which is what makes an edited tracing a version of itself. */
+  const idOf=function(g){ return TRACING_PENDING.id+(g.inst?("__i"+g.inst):""); };
+
+  /* ── A VERSION KEEPS ITS NUMBER ─────────────────────────────────────────────────  2026-09-19
+     Søren: *"because I have edited one of the lysosomes twice, it is now called Lysosome 5... I
+     would like that editing it does not increase its number."* Every structure used to be handed
+     "one more than the highest this cell carries", including one that IS that highest. Three
+     lysosomes came out numbered 1, 3 and 5.
+
+     Only genuinely new structures draw from the fresh numbers now, so a new organelle traced beside
+     an edited one still gets the next free one rather than inheriting anything. */
+  const first={}, taken={}, count={}, keep={};
+  groups.forEach(function(g){
+    const k=seriesKey(g.w);
+    count[k]=(count[k]||0)+1;
+    const has=tracingPublishedIndex(idOf(g));
+    if(has){ keep[g.inst]=has; return; }
+    if(first[k]===undefined)first[k]=tracingNextIndex(g.w.kind,g.w.name,nid,rid);
+  });
 
   return groups.map(function(g){
     const k=seriesKey(g.w);
-    const n=(taken[k]||0); taken[k]=n+1;
-    const index=first[k]+n;
-    const several=(count[k]>1)||(first[k]>1);
+    const mine=keep[g.inst]||0;
+    let index, several;
+    if(mine){
+      index=mine;
+      /* It was published WITH a number, so it keeps one: dropping it on a re-add would rename
+         "Lysosome 3" to "Lysosome" and make the same object look like a different one. */
+      several=(mine>1)||(count[k]>1);
+    } else {
+      const n=(taken[k]||0); taken[k]=n+1;
+      index=first[k]+n;
+      several=(count[k]>1)||(first[k]>1);
+    }
     const t={name:UJ.tracing.instanceName(g.w.name,index,several),
              kind:g.w.kind,type:type,
              color:(typeof padInstColour==="function")?padInstColour(g.inst):"#3a6b5a",
@@ -9162,6 +9204,17 @@ function tracingKeep(){
     const at=TRACINGS_KEPT.findIndex(function(x){return x&&x.id&&x.id===t.id;});
     const prior=at>=0?TRACINGS_KEPT[at]:null;
     if(prior&&prior.shared_at)t.shared_at=prior.shared_at;
+    /* ── AND WHAT IT HAS ALREADY REGISTERED ─────────────────────────────────────  2026-09-19
+       Søren: *"the 3 lysosomes I have segmented seem to have 2 annotation points each... they
+       should only have one annotation point."*
+
+       `shared_at` was carried across a re-add and `centre_registered` was not, so every re-add
+       looked like a tracing that had never registered its centre and posted a second point. The
+       COORDINATE comes with it, because the flag alone would be the wrong fix for the other half of
+       what he saw: when an outline is edited its centroid moves, and a tracing that refuses to
+       re-register leaves the stale point standing. Moved is the question; pressed is not. */
+    if(prior&&prior.centre_registered)t.centre_registered=prior.centre_registered;
+    if(prior&&prior.centre_at)t.centre_at=prior.centre_at;
     t.pending_share=true;
     if(at>=0)TRACINGS_KEPT.splice(at,1,t); else TRACINGS_KEPT.push(t);
   });
@@ -9227,6 +9280,21 @@ function tracingKeep(){
    AND ONLY FOR A CELL. An annotation is filed against a nucleus or a root ID; a tracing with
    neither has nowhere to be an annotation OF, and inventing a home for it would put it on whatever
    cell happened to be on screen. */
+/* Where a tracing's centre is, as the string the annotation carries, or "" for a tracing that
+   has no business having one. Split out of tracingRegisterCentre so that "has this moved?" can be
+   asked without posting anything -- the two were one function, which is why the only question
+   available was "has anything been pressed?". */
+function tracingCentreAt(t){
+  try {
+    if (!t || !t.rings || !t.rings.length) return "";
+    const kind = String(t.kind || "").toLowerCase();
+    if (!kind || kind === "cell" || kind === "nucleus") return "";
+    if (!window.UJ || !UJ.organellelink) return "";
+    if (!String(t.nucleus_id || "") && !String(t.root_id || "")) return "";
+    const c = UJ.organellelink.centre(t.rings);
+    return (c && c.point) ? c.point.join(",") : "";
+  } catch (_e){ return ""; }
+}
 function tracingRegisterCentre(t){
   try {
     if (!t || !t.rings || !t.rings.length) return false;
@@ -9308,8 +9376,28 @@ function tracingPublish(t,quiet){
   t.shared_at=new Date().toISOString();
   /* AFTER the tracing, and only if the tracing went: an annotation pointing at an outline that was
      refused would be a coordinate with nothing behind it. Once per tracing, not once per press, so
-     a queued one registers its centre when it finally goes out too. */
-  if(!t.centre_registered&&tracingRegisterCentre(t))t.centre_registered=true;
+     a queued one registers its centre when it finally goes out too.
+
+     ONCE PER PLACE, since 2026-09-19. "Once per tracing" was the intent and `centre_registered`
+     the mechanism, but tracingKeep did not carry it and every re-add posted again. It carries it
+     now, and the test is whether the centre has MOVED rather than whether anything was pressed:
+     an unchanged re-add posts nothing, and an edited outline posts its new centre, which the
+     backend files over the old one rather than beside it. */
+  const centreNow=tracingCentreAt(t);
+  /* A RECORD THAT SAYS REGISTERED BUT NOT WHERE is every tracing kept before today, and treating
+     "place unknown" as "moved" would have re-registered all of them at once. So: never registered
+     and it has a centre -> register; registered and the place is KNOWN to have changed -> register;
+     registered with no place recorded -> leave it alone. The last of those means an old tracing
+     edited tomorrow keeps its old point rather than gaining a second, which is the conservative
+     direction of the two and the one this whole change is about. Caught by tracingpanelcheck.js,
+     whose fourth tracing is exactly that record. */
+  const moved=t.centre_registered
+    ? !!(t.centre_at&&centreNow&&centreNow!==t.centre_at)
+    : !!centreNow;
+  if(moved&&tracingRegisterCentre(t)){
+    t.centre_registered=true;
+    t.centre_at=centreNow;
+  }
   tracingWrite(TRACINGS_KEPT);
   return true;
 }
@@ -10356,6 +10444,12 @@ async function tracingOpenShared(sid, btn){
     /* The identity travels with it, so adding a version does not quietly drop the cell type or the
        ids somebody else filled in. */
     PAD_EDIT_ID = st.structureId;
+    /* ── WHAT NUMBER IT IS ALREADY PUBLISHED UNDER ──────────────────────────────  2026-09-19
+       Søren: *"I would like that editing it does not increase its number."* It did: the submission
+       builder asked for "one more than the highest this cell has" for every structure, including a
+       version of one that is already counted in that highest. Remembered here, where the tracing
+       itself is in hand, rather than re-derived later from an index that may not have loaded. */
+    TRACING_EDIT_INDEX[String(st.structureId)] = Math.round(Number(st.instanceIndex) || 0);
     TRACING_PENDING = { rings: UJ.tracepad.toRings(PAD), id: st.structureId };
     draftSoon();          // an edit is draftable from the moment it is opened
     const what = document.getElementById("tracingWhat");

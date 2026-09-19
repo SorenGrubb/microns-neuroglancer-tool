@@ -97,6 +97,24 @@ function organelleCountParts(structs){
    loadCommunityReports() below (in-region, per-nucleus organelleGroups) and
    renderUserReportedCell() (out-of-region, coordinate-matched organelle reports -- see
    organellesNearPos()), factored out so both stay in sync rather than drifting apart. */
+/* ── WHAT AN OUTLINE'S CENTRE ROW SAYS ─────────────────────────────────────────  2026-09-19
+   Søren: *"We need to have the details in an expandable menu, where they are written in a more
+   organised manner."*
+
+   The size and the name it was outlined under live only in the comment -- the row's own columns
+   never carried them -- and that comment is written by tracingRegisterCentre in this project, so
+   this is reading back our own sentence rather than somebody else's prose. Anything it cannot read
+   is left out: a shorter row is a row, an invented one is a bug. */
+function organelleCentreBits(comment){
+  var s = String(comment || "");
+  if (!/registered from the segmentation/i.test(s)) return null;
+  var out = { name: "", size: "", sections: "" };
+  var m = /outlined\s+[\u201c"]([^\u201d"]+)[\u201d"]/.exec(s);
+  if (m) out.name = m[1];
+  var v = /\(([\d.eE+-]+)\s*\u00b5m\u00b3(?:,\s*(\d+)\s*sections?)?\)/.exec(s);
+  if (v){ out.size = v[1]; out.sections = v[2] || ""; }
+  return out;
+}
 function organelleStructRowsHtml(structs){
   const parsePt=s=>{const p=(s||"").split(",").map(Number);return(p.length===3&&p.every(n=>!isNaN(n)))?p:null;};
   const jumpBtn=p=>'<button type="button" class="jumpview" data-x="'+p[0]+'" data-y="'+p[1]+'" data-z="'+p[2]+'" style="margin-left:6px;padding:2px 8px;font-size:11px">Jump</button>';
@@ -114,7 +132,24 @@ function organelleStructRowsHtml(structs){
         +(pb?' &rarr; '+pl[1]+' ('+coordSpan(pb[0],pb[1],pb[2])+')'+jumpBtn(pb):'')
         +'</div>';
     }
-    return pa?'<div class="meta" style="margin-top:4px">'+capLabel+' at ('+coordSpan(pa[0],pa[1],pa[2])+')'+jumpBtn(pa)+'</div>':"";
+    if(!pa)return"";
+    /* ONE ROW, IN COLUMNS: what it is, how big it is, where it is. The paragraph this replaces had
+       all three and no shape; six of them had three shapes and no paragraph anybody could read. */
+    const bits=organelleCentreBits(s.comment);
+    const named=(bits&&bits.name)?bits.name:capLabel;
+    const size=(bits&&bits.size)
+      ?('<span class="hint" style="margin-left:8px">'+bits.size+' \u00b5m\u00b3'
+        +(bits.sections?(' \u00b7 '+bits.sections+' sections'):'')+'</span>')
+      :'';
+    /* Where it came from, once, quietly. A centre computed from an outline is a different KIND of
+       claim from a point somebody placed by eye, and the panel already prefers the first. */
+    const from=(bits||/segment/i.test(String(s.source||"")))
+      ?'<span class="hint" style="margin-left:8px">from the outline</span>'
+      :(s.by?'<span class="hint" style="margin-left:8px">by '+escHtml(String(s.by))+'</span>':'');
+    return '<div class="meta" style="margin-top:4px;display:flex;align-items:baseline;gap:4px;'
+      +'flex-wrap:wrap"><span>'+escHtml(named)+'</span>'+size+from
+      +'<span style="flex:1 1 auto"></span><span>('+coordSpan(pa[0],pa[1],pa[2])+')</span>'
+      +jumpBtn(pa)+'</div>';
   }).join("");
 }
 
@@ -929,11 +964,35 @@ function loadCommunityReports(nid,cellPos){
         try{renderOrganelleSection(nid,(typeof CUR_ROOT!=="undefined"&&CUR_ROOT)||"");}catch(_e){}
       }
       if(organelleGroups.length){
-        const allStructs=[].concat(...organelleGroups.map(g=>(g.structures||[]).map(s=>({kind:s.kind,pointA:s.pointA,pointB:s.pointB}))));
+        /* The comment travels WITH its structure now rather than being swept into a paragraph
+           at the end: it is what the row reads its name and size out of. subCount is 1 for every
+           one of these, so a group is a structure. */
+        const allStructs=[].concat(...organelleGroups.map(g=>(g.structures||[]).map(s=>({
+          kind:s.kind,pointA:s.pointA,pointB:s.pointB,
+          comment:s.comment||g.comment||"",source:s.source||"",by:s.by||g.by||""}))));
         const parts=organelleCountParts(allStructs);
-        const comments=organelleGroups.filter(g=>g.comment).map(g=>g.comment);
-        html+=(html?"<br>":"")+'<span style="color:var(--accent)">&#128172; '+organelleGroups.length+' '+(organelleGroups.length>1?"users have":"user has")+' logged organelle locations for this cell'+(parts.length?" &mdash; "+parts.join(", "):"")+(comments.length?" ("+comments.join("; ")+")":"")+'.</span>';
-        organRowsHtml=organelleStructRowsHtml(allStructs);
+        /* ── SIX SENTENCES BECOME SIX ROWS, BEHIND A FOLD ────────────────────────  2026-09-19
+           Søren: *"This is getting out of hand. We need to have the details in an expandable menu,
+           where they are written in a more organised manner."*
+
+           And "6 users" was one user: this counted SUBMISSIONS and called them users, so a person
+           who had outlined six of their own lysosomes was told six people agreed with them. Named
+           reporters are counted when there are any; when there are none the line counts LOCATIONS,
+           which is the thing it actually knows. */
+        const who={};
+        allStructs.forEach(function(s){ if(s.by)who[String(s.by)]=1; });
+        const nWho=Object.keys(who).length;
+        const head=nWho
+          ? (nWho+' '+(nWho>1?'people have':'person has')+' logged organelle locations for this cell')
+          : (allStructs.length+' organelle location'+(allStructs.length===1?'':'s')
+             +' for this cell');
+        html+=(html?"<br>":"")
+          +'<details class="rv-panel" style="margin-top:6px"><summary style="color:var(--accent)">'
+          +'&#128172; '+head+(parts.length?" &mdash; "+parts.join(", "):"")+'</summary>'
+          +'<div style="margin-top:4px">'+organelleStructRowsHtml(allStructs)+'</div></details>';
+        /* The rows used to be printed BELOW the paragraph as well, so everything appeared twice in
+           two shapes. They are inside the fold now and nowhere else. */
+        organRowsHtml="";
       }
       /* Entry point for proposing a centriole/cilium location from the CELL PANEL. Until now the
          only way in was to run the guided identification through to a result screen, which meant

@@ -244,7 +244,12 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
        (el.textContent.replace(/\s+/g, " ").match(/Also log[^L]*/) || [""])[0].trim().slice(0, 80));
     ok("...not marked empty", el.getAttribute("data-empty") === "0",
        el.getAttribute("data-empty"));
-    ok("...and the existing reports are still listed", /logged organelle locations/.test(el.textContent),
+    /* WORDING CHANGED 2026-09-19 (src/the_organelle_locations_fold_up.py): the line counted
+       SUBMISSIONS and called them users, so it now counts named reporters when there are any and
+       LOCATIONS when there are none. The claim this assertion makes is that the read-back is still
+       there, so it tests for either form rather than for one sentence. */
+    ok("...and the existing reports are still listed",
+       /logged organelle locations|organelle locations? for this cell/.test(el.textContent),
        "  <- adding a way in must not remove the read-back");
   }
 
