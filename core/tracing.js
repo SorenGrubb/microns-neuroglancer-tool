@@ -150,64 +150,46 @@ UJ.tracing = (function(){
   }
 
   /* ── what a link contains ──────────────────────────────────────────────────────────────────── */
-  function ringsFromLink(text, layerName){
-    var d = decode(text);
-    if (d.error) return { ok: false, error: d.error, structures: [], rings: [] };
-    var st = d.state;
-    var seen = { volumes: 0, polygons: 0, polylines: 0, lines: 0, points: 0, unreadable: 0,
-                 mixedZ: 0 };
-    var byId = {}, polys = [], plines = [], vols = [], loose = [], dots = [], layers = 0;
+  /* @perlayer:start */
+  /* ── ONE LAYER AT A TIME ───────────────────────────────────────────────────────  2026-09-19
+     Søren: *"If there is more than one annotation channel in the neuroglancer link, it should be
+     suggested that there are more than one organelle, and the user can then deselect tracings if
+     they are not supposed to be there."*
 
-    /* WHICH ANNOTATION LAYERS COUNT, when nobody named one.  2026-09-17
-       A pasted µJump link normally carries "Cortical layers" -- the pia/white-matter bands, which
-       are `line` annotations in a local annotation layer exactly like a hand-drawn contour. Read
-       as contours they chain into rings spanning the whole dataset, quietly, and the result still
-       meshes. So: never read them.
+     This is the old body of ringsFromLink, moved, and it is worth saying why the move is the whole
+     change: everything readable used to be poured into ONE structure, so a cell, a mitochondrion
+     and a nucleus drawn in three layers came back as a single object with all of it in it. Run per
+     layer instead, the same code says three structures, and the caller can take them apart.
 
-       And a link from the card's own "Open a viewer to trace in" button carries a layer called
-       "tracing". If one is there, it is the answer and nothing else needs looking at -- which
-       means the layer box can stay empty in the ordinary case instead of being a name he has to
-       match by hand. */
-    var annLayers = (st.layers || []).filter(function(l){
-      return l && l.type === "annotation" && !/^cortical layers$/i.test(String(l.name || ""));
+     A Volume inside a layer still wins: it is a stronger statement about what belongs together
+     than a layer is, and it can still make several structures out of one layer. */
+  function readLayer(l, seen){
+    var byId = {}, polys = [], plines = [], vols = [], loose = [], dots = [];
+    (l.annotations || []).forEach(function(a){
+      if (!a) return;
+      if (a.id) byId[a.id] = a;
+      var t = String(a.type || "").toLowerCase();
+      if (t === "volume"){ vols.push(a); seen.volumes++; return; }
+      if (t === "polygon"){ polys.push(a); seen.polygons++; return; }
+      /* ── POLYLINE, WHICH SPELUNKER DOES PUT IN THE LINK ────────────────────  2026-09-18
+         Recorded here on 2026-09-17 as drawing on screen and never reaching the state. That was
+         wrong -- Søren pasted the state and it is there, and in the best shape of anything this
+         function reads: one annotation per contour, `points` in order, in the tool's own 4/4/40
+         voxels, closed (last point repeats the first, which ringFrom already strips), all on one
+         z. A polyline in progress is NOT in the state, which is the likeliest way a measurement
+         taken with the tool still armed came back empty. */
+      if (t === "polyline"){ plines.push(a); seen.polylines++; return; }
+      if (t === "point"){
+        /* ORDER IS THE CONTOUR. Neuroglancer appends a new annotation to this array, so points
+           arrive in the order they were clicked -- measured on ngl.microns-explorer.org,
+           2026-09-17. Going round a cell in one direction therefore needs no chaining at all. */
+        var P = trip(a.point);
+        if (P && !a.parentAnnotationId){ seen.points++; dots.push(P); }
+        return;
+      }
+      var A = trip(a.pointA), B = trip(a.pointB);
+      if (A && B){ seen.lines++; if (!a.parentAnnotationId) loose.push({ a: A, b: B }); }
     });
-    if (!layerName && annLayers.some(function(l){ return l.name === "tracing"; }))
-      layerName = "tracing";
-
-    annLayers.forEach(function(l){
-      if (layerName && l.name !== layerName) return;
-      layers++;
-      (l.annotations || []).forEach(function(a){
-        if (!a) return;
-        if (a.id) byId[a.id] = a;
-        var t = String(a.type || "").toLowerCase();
-        if (t === "volume"){ vols.push(a); seen.volumes++; return; }
-        if (t === "polygon"){ polys.push(a); seen.polygons++; return; }
-        /* ── POLYLINE, WHICH SPELUNKER DOES PUT IN THE LINK ────────────────────  2026-09-18
-           Recorded here on 2026-09-17 as drawing on screen and never reaching the state. That was
-           wrong -- Søren pasted the state and it is there, and in the best shape of anything this
-           function reads: one annotation per contour, `points` in order, in the tool's own 4/4/40
-           voxels, closed (last point repeats the first, which ringFrom already strips), all on one
-           z. A polyline in progress is NOT in the state, which is the likeliest way a measurement
-           taken with the tool still armed came back empty. */
-        if (t === "polyline"){ plines.push(a); seen.polylines++; return; }
-        if (t === "point"){
-          /* ORDER IS THE CONTOUR. Neuroglancer appends a new annotation to this array, so points
-             arrive in the order they were clicked -- measured on ngl.microns-explorer.org,
-             2026-09-17. Going round a cell in one direction therefore needs no chaining at all. */
-          var P = trip(a.point);
-          if (P && !a.parentAnnotationId){ seen.points++; dots.push(P); }
-          return;
-        }
-        var A = trip(a.pointA), B = trip(a.pointB);
-        if (A && B){ seen.lines++; if (!a.parentAnnotationId) loose.push({ a: A, b: B }); }
-      });
-    });
-
-    if (!layers)
-      return { ok: false, structures: [], rings: [], seen: seen,
-               error: layerName ? ('that link has no annotation layer called "' + layerName + '"')
-                                : "that link has no annotation layer on it" };
 
     var structures = [], all = [];
     function addRing(ring, into){
@@ -277,6 +259,52 @@ UJ.tracing = (function(){
       }
       if (rings2.length) structures.push({ name: "", rings: rings2, from: from });
     }
+    return { structures: structures, rings: all };
+  }
+
+  function ringsFromLink(text, layerName){
+    var d = decode(text);
+    if (d.error) return { ok: false, error: d.error, structures: [], rings: [] };
+    var st = d.state;
+    var seen = { volumes: 0, polygons: 0, polylines: 0, lines: 0, points: 0, unreadable: 0,
+                 mixedZ: 0 };
+
+    /* WHICH ANNOTATION LAYERS COUNT, when nobody named one.  2026-09-17
+       A pasted µJump link normally carries "Cortical layers" -- the pia/white-matter bands, which
+       are `line` annotations in a local annotation layer exactly like a hand-drawn contour. Read
+       as contours they chain into rings spanning the whole dataset, quietly, and the result still
+       meshes. So: never read them. */
+    var annLayers = (st.layers || []).filter(function(l){
+      return l && l.type === "annotation" && !/^cortical layers$/i.test(String(l.name || ""));
+    });
+    /* A HINT NOW, NOT A FILTER, since 2026-09-19. A link from the card's own "Open a viewer to
+       trace in" button carries a layer called "tracing", and until today finding one meant reading
+       NOTHING ELSE -- which is exactly the case Søren is asking about: a "tracing" layer beside two
+       organelle layers came back as the tracing alone, silently. So the name is reported and the
+       card decides what is ticked. The reader says what is on the link; it does not choose. */
+    var preferred = annLayers.some(function(l){ return l.name === "tracing"; }) ? "tracing" : "";
+
+    var structures = [], all = [], layers = 0, layerList = [];
+    annLayers.forEach(function(l){
+      if (layerName && l.name !== layerName) return;
+      layers++;
+      var got = readLayer(l, seen), zs = {};
+      got.rings.forEach(function(r){ zs[r.z] = 1; all.push(r); });
+      got.structures.forEach(function(s){
+        /* WHICH LAYER IT CAME FROM, on the structure itself -- the card lists these as ticks, and a
+           row that could not say where it came from would be asking somebody to choose between
+           three things called nothing. */
+        s.layer = String(l.name || "");
+        structures.push(s);
+      });
+      layerList.push({ name: String(l.name || ""), structures: got.structures.length,
+                       rings: got.rings.length, sections: Object.keys(zs).length });
+    });
+
+    if (!layers)
+      return { ok: false, structures: [], rings: [], seen: seen,
+               error: layerName ? ('that link has no annotation layer called "' + layerName + '"')
+                                : "that link has no annotation layer on it" };
 
     if (!all.length)
       return { ok: false, structures: [], rings: [], seen: seen,
@@ -284,9 +312,10 @@ UJ.tracing = (function(){
                     + "with POINT annotations (ctrl+click each vertex, going round one way), at "
                     + "least three to a section and on at least two sections. Lines and polygons "
                     + "are read too." };
-    return { ok: true, structures: structures, rings: all, seen: seen };
+    return { ok: true, structures: structures, rings: all, seen: seen,
+             layers: layerList, preferred: preferred };
   }
-
+  /* @perlayer:end */
   /* ── storage ───────────────────────────────────────────────────────────────────────────────────
      ONE ROW PER RING, which is what makes this fit a spreadsheet at all: a ring of forty points is
      about four hundred characters, a cell over sixty sections is sixty rows, and nothing has to be
@@ -512,7 +541,8 @@ UJ.tracing = (function(){
     });
   }
 
-  return { ringsFromLink: ringsFromLink, ringsToRows: ringsToRows, toSubmission: toSubmission,
+  return { ringsFromLink: ringsFromLink, _readLayer: readLayer,
+           ringsToRows: ringsToRows, toSubmission: toSubmission,
            INSTANCE_COLOURS: INSTANCE_COLOURS, instanceColour: instanceColour,
            instanceName: instanceName,
            rowsToStructures: rowsToStructures, toTracings: toTracings,

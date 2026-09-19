@@ -1354,7 +1354,10 @@ async function pad3DDraw(){
         + lofts.map(function(L){
             return '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;'
               + 'background:' + escHtml(padInstColour(L.inst)) + '"></span> ' + (L.inst + 1); }).join(", ")
-        + ". The one you are drawing is the brightest.</span>";
+        /* "The one you are drawing" is the pad's sentence; on a pasted link nothing is being
+           drawn and the subject is simply the first. 2026-09-19. */
+        + (pad3DTarget() === "paste" ? ". The first one is the brightest.</span>"
+                                     : ". The one you are drawing is the brightest.</span>");
     if (lofts.every(function(L){ return L.g.flat; }))
       lead += "<br><span class='hint'>One section only, so this is a flat outline. Step with "
         + "<b>,</b> or <b>.</b> and go round again to give it a shape.</span>";

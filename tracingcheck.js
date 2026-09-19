@@ -457,6 +457,60 @@ console.log("\nthe bands \u00b5Jump puts on its own links are not contours");
      "naming a layer by hand still overrides all of it", named.rings.length + " rings");
 }
 
+/* ── A LAYER IS A STRUCTURE ────────────────────────────────────────────────────────  2026-09-19
+   Søren: *"If there is more than one annotation channel in the neuroglancer link, it should be
+   suggested that there are more than one organelle."*
+
+   Everything readable used to be poured into ONE structure, so a cell, a mitochondrion and a
+   nucleus drawn in three channels came back as a single object with all of it in it -- which meshed,
+   which is the failure mode this project cares about most. The reader now says three, tagged, and
+   the card can take them apart. */
+console.log("\nseveral annotation layers are several structures");
+{
+  const lay = (name, cx, cy) => ({ type: "annotation", name: name, annotations: [
+    { type: "polyline", id: name + "0", points: circle(cx, cy, 100, 60, 16) },
+    { type: "polyline", id: name + "1", points: circle(cx, cy, 105, 58, 16) }
+  ]});
+  const url = layers => "https://neuroglancer.example/#!"
+    + encodeURIComponent(JSON.stringify({ layers: layers }));
+
+  const r = T.ringsFromLink(url([lay("cell", 1000, 2000),
+                                 lay("mitochondrion", 1400, 2000),
+                                 lay("nucleus", 1000, 2400)]));
+  ok(r.ok && r.structures.length === 3,
+     "three channels are three structures, not one object with everything in it",
+     r.structures.length + " structure(s)");
+  ok(r.structures.map(s => s.layer).join(",") === "cell,mitochondrion,nucleus",
+     "...each tagged with the layer it came from", r.structures.map(s => s.layer).join(", "));
+  ok(r.structures.every(s => s.rings.length === 2) && r.rings.length === 6,
+     "...with its own contours, and the flat list still has all of them",
+     r.structures.map(s => s.rings.length).join("+") + " = " + r.rings.length);
+  ok(r.layers.length === 3 && r.layers[1].sections === 2,
+     "...and the link reports its layers, with how much is on each",
+     JSON.stringify(r.layers[1]));
+
+  /* THE "tracing" PREFERENCE IS A HINT NOW. It used to read that layer and NOTHING ELSE, which is
+     exactly the case being asked about: a link with a tracing layer beside two organelle layers
+     came back as the tracing alone, silently. The reader reports; the card decides. */
+  const both = T.ringsFromLink(url([lay("tracing", 1000, 2000), lay("mitochondrion", 1400, 2000)]));
+  ok(both.structures.length === 2,
+     "a “tracing” layer no longer suppresses the others", both.structures.length + " structure(s)");
+  ok(both.preferred === "tracing",
+     "...it says which one it would have preferred, and leaves the choosing to the card",
+     JSON.stringify(both.preferred));
+  ok(T.ringsFromLink(url([lay("a", 1000, 2000)])).preferred === "",
+     "...and says nothing when there is no such layer");
+
+  /* Within a layer the old rule still holds, and a Volume still overrules it. Both are asserted
+     above in their own sections; this is the one that says the layer loop did not break them. */
+  const one = T.ringsFromLink(url([lay("cell", 1000, 2000)]));
+  ok(one.structures.length === 1 && one.structures[0].rings.length === 2,
+     "one cell in one layer is still one cell", one.structures.length + " structure(s)");
+  const named = T.ringsFromLink(url([lay("a", 1000, 2000), lay("b", 5000, 2000)]), "b");
+  ok(named.structures.length === 1 && named.structures[0].layer === "b",
+     "and naming a layer by hand still reads that one alone", named.structures[0].layer);
+}
+
 console.log("\nwhat it refuses, and what it says");
 {
   const bad = [
