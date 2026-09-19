@@ -448,6 +448,14 @@ function link(annotations){
         document.getElementById(id).value = [240640, 207872, 21360][i];
       });
       window.CUR_POS = null;
+      /* A CLEAN PAD FOR EACH STORY.  2026-09-19. Opening the pad at a new coordinate no longer
+         replaces what is on it — it carries the contours over and starts the next number, which is
+         what a person tracing several organelles in one sitting wants and is why three lysosomes
+         were lost before it did (src/a_save_never_takes_work_away.py). This file, though, is one
+         page telling a dozen separate stories, and each of them assumes it begins with an empty
+         pad. A person gets that by committing or by opening the page; here it is said out loud. */
+      if (typeof PAD !== "undefined" && PAD){ PAD.rings = []; PAD.pending = []; PAD.inst = 0; }
+      if (typeof TRACING_PENDING !== "undefined") TRACING_PENDING = null;
       document.getElementById("tracePadOpen").click();
     });
     await p.waitForTimeout(250);
@@ -812,7 +820,9 @@ function link(annotations){
         if (typeof TRACING_DRAFT_SOON !== "undefined" && TRACING_DRAFT_SOON){
           clearTimeout(TRACING_DRAFT_SOON); TRACING_DRAFT_SOON = null;
         }
-        try { localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e){}
+        try { localStorage.removeItem("ujump_tracing_drafts_v2");
+              localStorage.removeItem("ujump_tracing_drafts_v2");
+      localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e){}
         draftRender();
       });
     }
@@ -880,6 +890,14 @@ function link(annotations){
         document.getElementById(id).value = [240640, 207872, 21360][i];
       });
       window.CUR_POS = null;
+      /* A CLEAN PAD FOR EACH STORY.  2026-09-19. Opening the pad at a new coordinate no longer
+         replaces what is on it — it carries the contours over and starts the next number, which is
+         what a person tracing several organelles in one sitting wants and is why three lysosomes
+         were lost before it did (src/a_save_never_takes_work_away.py). This file, though, is one
+         page telling a dozen separate stories, and each of them assumes it begins with an empty
+         pad. A person gets that by committing or by opening the page; here it is said out loud. */
+      if (typeof PAD !== "undefined" && PAD){ PAD.rings = []; PAD.pending = []; PAD.inst = 0; }
+      if (typeof TRACING_PENDING !== "undefined") TRACING_PENDING = null;
       document.getElementById("tracePadOpen").click();
     });
     await p.waitForTimeout(250);
@@ -1113,6 +1131,12 @@ function link(annotations){
     const w2 = document.getElementById("tracingWhat");
     w2.value = "__other"; w2.dispatchEvent(new Event("change", { bubbles: true }));
     document.getElementById("tracingName").value = "second tracing";
+    /* READ BEFORE THE PRESS, 2026-09-19. The claim is that the volume was on screen BEFORE anything
+       was sent, and this used to read it afterwards and get away with it because adding left the
+       whole block standing. It does not any more — a card describing a tracing that has gone into
+       the dataset is a card describing nothing — so the assertion now takes its evidence at the
+       moment it is actually about. */
+    const volSayBefore = document.getElementById("tracingVolSay").textContent;
     document.getElementById("tracingKeep").click();
     const mine = TRACINGS_KEPT[TRACINGS_KEPT.length - 1];
     const out = { alerts: window.__alerts.length, posted: window.__posted.length,
@@ -1135,7 +1159,10 @@ function link(annotations){
                                            areas: (x.areas || []).length,
                                            zs: (x.contours || []).map(c => c.z).join(","),
                                            pts: (x.contours || []).map(c => (c.points || "").split(";").length).join(",") }));
-    out.volSay = document.getElementById("tracingVolSay").textContent;
+    out.volSay = volSayBefore;
+    /* ...and the block goes when the tracing does: the contours are in the dataset now. */
+    out.volSayAfter = document.getElementById("tracingVolSay").textContent;
+    out.foundAfter = document.getElementById("tracingFound").style.display;
     /* Adding the same tracing AGAIN, signed in: same structureId, new groupId -- that pair is what
        the backend versions on, so coming back after tracing five more sections is a correction
        rather than a rival tracing of the same cell. */
@@ -1189,6 +1216,9 @@ function link(annotations){
   ok(row.areas === 2, "...and one area per section, for the file", row.areas + " areas");
   ok(/Volume/.test(shared.volSay) && /Cavalieri/.test(shared.volSay),
      "and it was on screen before anything was sent", shared.volSay.slice(0, 70));
+  ok(shared.volSayAfter === "" && shared.foundAfter === "none",
+     "...and off it afterwards, so the card never quotes a volume for contours it has given away",
+     JSON.stringify(shared.volSayAfter) + " / " + JSON.stringify(shared.foundAfter));
   ok(shared.again[0].gid !== row.gid,
      "...with a NEW groupId, which is what makes it a new version rather than a duplicate",
      shared.again[0].gid);
@@ -1280,6 +1310,14 @@ function link(annotations){
       ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
         document.getElementById(id).value = [240000, 207872, 21360][i];
       });
+      /* A CLEAN PAD FOR EACH STORY.  2026-09-19. Opening the pad at a new coordinate no longer
+         replaces what is on it — it carries the contours over and starts the next number, which is
+         what a person tracing several organelles in one sitting wants and is why three lysosomes
+         were lost before it did (src/a_save_never_takes_work_away.py). This file, though, is one
+         page telling a dozen separate stories, and each of them assumes it begins with an empty
+         pad. A person gets that by committing or by opening the page; here it is said out loud. */
+      if (typeof PAD !== "undefined" && PAD){ PAD.rings = []; PAD.pending = []; PAD.inst = 0; }
+      if (typeof TRACING_PENDING !== "undefined") TRACING_PENDING = null;
       document.getElementById("tracePadOpen").click();
       await new Promise(r => setTimeout(r, 300));
       const cv = document.getElementById("tracePad");
@@ -1369,6 +1407,14 @@ function link(annotations){
       document.getElementById("tracingX").value = "1000";
       document.getElementById("tracingY").value = "2000";
       document.getElementById("tracingZ").value = "900";
+      /* A CLEAN PAD FOR EACH STORY.  2026-09-19. Opening the pad at a new coordinate no longer
+         replaces what is on it — it carries the contours over and starts the next number, which is
+         what a person tracing several organelles in one sitting wants and is why three lysosomes
+         were lost before it did (src/a_save_never_takes_work_away.py). This file, though, is one
+         page telling a dozen separate stories, and each of them assumes it begins with an empty
+         pad. A person gets that by committing or by opening the page; here it is said out loud. */
+      if (typeof PAD !== "undefined" && PAD){ PAD.rings = []; PAD.pending = []; PAD.inst = 0; }
+      if (typeof TRACING_PENDING !== "undefined") TRACING_PENDING = null;
       document.getElementById("tracePadOpen").click();
       out.afterFresh = PAD_EDIT_ID;
       return out;
@@ -1408,6 +1454,14 @@ function link(annotations){
       document.getElementById("tracingX").value = "1000";
       document.getElementById("tracingY").value = "2000";
       document.getElementById("tracingZ").value = "700";
+      /* A CLEAN PAD FOR EACH STORY.  2026-09-19. Opening the pad at a new coordinate no longer
+         replaces what is on it — it carries the contours over and starts the next number, which is
+         what a person tracing several organelles in one sitting wants and is why three lysosomes
+         were lost before it did (src/a_save_never_takes_work_away.py). This file, though, is one
+         page telling a dozen separate stories, and each of them assumes it begins with an empty
+         pad. A person gets that by committing or by opening the page; here it is said out loud. */
+      if (typeof PAD !== "undefined" && PAD){ PAD.rings = []; PAD.pending = []; PAD.inst = 0; }
+      if (typeof TRACING_PENDING !== "undefined") TRACING_PENDING = null;
       document.getElementById("tracePadOpen").click();
       PAD.rings = [
         { z: 700, points: [[1000,2000],[1040,2000],[1040,2040],[1000,2040]] },
@@ -1518,7 +1572,9 @@ function link(annotations){
      the reason another one fails, which is a failure that teaches nobody anything. */
   await p.evaluate(() => {
     if (window.TRACING_DRAFT_SOON){ clearTimeout(TRACING_DRAFT_SOON); TRACING_DRAFT_SOON = null; }
-    try { localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e) {}
+    try { localStorage.removeItem("ujump_tracing_drafts_v2");
+          localStorage.removeItem("ujump_tracing_drafts_v2");
+      localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e) {}
     if (window.__padSnap){ PAD.rings = window.__padSnap.rings; UJ.tracepad.setInstance(PAD, window.__padSnap.inst); }
     PAD3D_KEY = null;
   });
@@ -1586,6 +1642,14 @@ function link(annotations){
       ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
         document.getElementById(id).value = [240640, 207872, 41000][i];
       });
+      /* A CLEAN PAD FOR EACH STORY.  2026-09-19. Opening the pad at a new coordinate no longer
+         replaces what is on it — it carries the contours over and starts the next number, which is
+         what a person tracing several organelles in one sitting wants and is why three lysosomes
+         were lost before it did (src/a_save_never_takes_work_away.py). This file, though, is one
+         page telling a dozen separate stories, and each of them assumes it begins with an empty
+         pad. A person gets that by committing or by opening the page; here it is said out loud. */
+      if (typeof PAD !== "undefined" && PAD){ PAD.rings = []; PAD.pending = []; PAD.inst = 0; }
+      if (typeof TRACING_PENDING !== "undefined") TRACING_PENDING = null;
       document.getElementById("tracePadOpen").click();
       await new Promise(r => setTimeout(r, 200));
       document.getElementById("tracingNucId").value = "253863";
@@ -1874,6 +1938,14 @@ function link(annotations){
         }
         return false;
       };
+      /* A CLEAN PAD FOR EACH STORY.  2026-09-19. Opening the pad at a new coordinate no longer
+         replaces what is on it — it carries the contours over and starts the next number, which is
+         what a person tracing several organelles in one sitting wants and is why three lysosomes
+         were lost before it did (src/a_save_never_takes_work_away.py). This file, though, is one
+         page telling a dozen separate stories, and each of them assumes it begins with an empty
+         pad. A person gets that by committing or by opening the page; here it is said out loud. */
+      if (typeof PAD !== "undefined" && PAD){ PAD.rings = []; PAD.pending = []; PAD.inst = 0; }
+      if (typeof TRACING_PENDING !== "undefined") TRACING_PENDING = null;
       document.getElementById("tracePadOpen").click();
       await ready();
       /* Two sections, and a half-drawn contour on the second -- a draft that dropped the contour in
@@ -1909,7 +1981,7 @@ function link(annotations){
       let raw = null, prev = null, same = 0;
       for (let i = 0; i < 80; i++){
         await new Promise(r => setTimeout(r, 100));
-        raw = localStorage.getItem("ujump_tracing_draft_v1");
+        raw = JSON.stringify(draftRead());
         if (raw && raw === prev){ if (++same >= 4) break; } else same = 0;
         prev = raw;
       }
@@ -1926,7 +1998,10 @@ function link(annotations){
     ok(saved.d.editId === "hers_1" && saved.d.nucId === "253863",
        "...and WHICH tracing it is, with what has been filled in",
        saved.d.editId + " / " + saved.d.nucId);
-    ok(/Unfinished tracing kept/.test(saved.bar), "...and the card says so", saved.bar.slice(0, 60));
+    /* "tracings", plural, and with a title on each row since 2026-09-19: the card lists every
+       unfinished tracing rather than the one most recently saved. */
+    ok(/Unfinished tracings kept/.test(saved.bar) && /Lysosome/.test(saved.bar),
+       "...and the card lists it, by what it is", saved.bar.slice(0, 70));
     /* Søren: *"We need to calculate the organelle volumes also."* ON THE PAD, while drawing -- a
        volume you only see after submitting cannot tell you that you have traced one section too
        few. traceloftcheck.js is where the estimator is checked against arithmetic. */
@@ -1946,18 +2021,19 @@ function link(annotations){
       var b = document.getElementById("tracingDraftBar");
       if (!(b && b.style.display !== "none" && /Unfinished/.test(b.textContent))) return null;
       return { bar: b.textContent, shown: true,
-               resume: !!document.getElementById("draftResume"),
+               resume: !!document.querySelector(".draftres"),
                padShut: document.getElementById("tracePadWrap").style.display === "none" };
     }, { timeout: 30000 }).then(h => h.jsonValue())
       .catch(() => ({ bar: "", shown: false, resume: false, padShut: false }));
-    ok(back.shown && back.resume && /Unfinished tracing kept/.test(back.bar),
+    ok(back.shown && back.resume && /Unfinished tracings kept/.test(back.bar),
        "AFTER A RELOAD the card still offers it", back.bar.slice(0, 70));
     ok(back.padShut, "...without reopening the pad by itself");
 
     const resumed = await p.evaluate(async ({ src }) => {
       eval("(" + src + ")()");
       document.getElementById("tracingPanel").open = true;
-      document.getElementById("draftResume").click();
+      /* One Resume per row now; this story keeps exactly one draft, so the first is it. */
+      document.querySelector(".draftres").click();
       await new Promise(r => setTimeout(r, 400));
       return { rings: PAD.rings.length, zs: PAD.rings.map(r => r.z).join(","),
                pending: PAD.pending.length, z: PAD.z,
@@ -1984,7 +2060,9 @@ function link(annotations){
       const w = document.getElementById("tracingWhat");
       w.value = "__cell"; w.dispatchEvent(new Event("change", { bubbles: true }));
       document.getElementById("tracingKeep").click();
-      return { draft: localStorage.getItem("ujump_tracing_draft_v1"),
+      /* draftRead() returns the object or null; JSON.stringify(null) is the STRING "null", which
+         is what this used to compare against by accident of the old key being read raw. */
+      return { draft: draftRead(),
                bar: document.getElementById("tracingDraftBar").style.display,
                edit: PAD_EDIT_ID };
     });
@@ -2022,11 +2100,21 @@ function link(annotations){
     };
     const drew = await p.evaluate(async ({ src }) => {
       eval("(" + src + ")()");
-      try { localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e) {}
+      try { localStorage.removeItem("ujump_tracing_drafts_v2");
+          localStorage.removeItem("ujump_tracing_drafts_v2");
+      localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e) {}
       document.getElementById("tracingPanel").open = true;
       ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
         document.getElementById(id).value = [240640, 207872, 33000][i];
       });
+      /* A CLEAN PAD FOR EACH STORY.  2026-09-19. Opening the pad at a new coordinate no longer
+         replaces what is on it — it carries the contours over and starts the next number, which is
+         what a person tracing several organelles in one sitting wants and is why three lysosomes
+         were lost before it did (src/a_save_never_takes_work_away.py). This file, though, is one
+         page telling a dozen separate stories, and each of them assumes it begins with an empty
+         pad. A person gets that by committing or by opening the page; here it is said out loud. */
+      if (typeof PAD !== "undefined" && PAD){ PAD.rings = []; PAD.pending = []; PAD.inst = 0; }
+      if (typeof TRACING_PENDING !== "undefined") TRACING_PENDING = null;
       document.getElementById("tracePadOpen").click();
       await new Promise(r => setTimeout(r, 250));
       const ring = (pts) => {
@@ -2041,7 +2129,7 @@ function link(annotations){
       ring([[300,300],[380,300],[380,380]]);
       padRings();
       await new Promise(r => setTimeout(r, 1600));      // the autosave, not the button
-      const raw = JSON.parse(localStorage.getItem("ujump_tracing_draft_v1") || "null");
+      const raw = draftRead();
       return { insts: PAD.rings.map(r => r.inst || 0),
                saved: raw && raw.rings.map(r => r.inst),
                savedInst: raw && raw.inst,
@@ -2064,7 +2152,8 @@ function link(annotations){
     const back = await p.evaluate(async ({ src }) => {
       eval("(" + src + ")()");
       document.getElementById("tracingPanel").open = true;
-      document.getElementById("draftResume").click();
+      /* One Resume per row now; this story keeps exactly one draft, so the first is it. */
+      document.querySelector(".draftres").click();
       await new Promise(r => setTimeout(r, 500));
       const chips = [].slice.call(document.querySelectorAll("#tracePadInsts .padinst"));
       const secChips = [].slice.call(document.querySelectorAll("#tracePadRings .padring"));
