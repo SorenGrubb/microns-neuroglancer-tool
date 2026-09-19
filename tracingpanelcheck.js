@@ -401,9 +401,12 @@ function link(annotations){
     const ann = ((v.state && v.state.layers) || []).filter(l => l.type === "annotation");
     const tr = ann.find(l => l.name === "tracing");
     ok(!!tr, "the link carries an annotation layer called tracing");
-    ok(!!tr && tr.tool === "annotatePoint",
-       "...with the POINT tool live \u2014 no viewer a link can reach has a polygon tool "
-       + "(measured 2026-09-17), and a point is one ctrl+click per vertex against a line's two",
+    /* WAS annotatePoint until 2026-09-18, when Søren pasted a Spelunker state proving its polyline
+       reaches the link after all. The old note here said "no viewer a link can reach has a polygon
+       tool (measured 2026-09-17)" -- that measurement was wrong, and this button now opens
+       Spelunker with its polyline armed. See the "drawing viewer is not the viewing viewer" block. */
+    ok(!!tr && tr.tool === "annotatePolyline",
+       "...with the POLYLINE tool live — Spelunker has one and no viewer has a button for it",
        tr && tr.tool);
     ok(!!tr && Array.isArray(tr.annotations) && tr.annotations.length === 0,
        "...and empty, so everything that comes back is his");
@@ -2419,13 +2422,14 @@ function link(annotations){
   }
 
   const newErrors = errors.filter(e => !/atob/.test(e));
-  console.log("\nthe viewer link arms a drawing tool, since there is no button for one");
+  console.log("\nthe drawing viewer is not the viewing viewer");
   {
-    /* Søren, 2026-09-18: "I still don't see the polyline tool" — with a screenshot of Spelunker's
-       annotation tab showing four icons and no polyline among them. His own pasted state carried
-       "tool": "annotatePolyline", so the tool is in the build with no icon to click. A layer's `tool`
-       in the state IS the armed tool, so the link can do it for him. Per viewer, because only
-       Spelunker has it. */
+    /* Søren, 2026-09-18: "If it is armed, why does it still produce single point annotations when
+       I try?" — with a screenshot of ngl.microns-explorer.org and a state full of loose points. It
+       WAS armed; he was in the wrong viewer, because this button was reading the Jump tab's viewer
+       picker. That picker answers "which viewer do I want to VIEW a cell in", and its first option
+       is the MICrONS viewer for its Share button. Drawing needs a polyline, which only Spelunker
+       has, so the two questions are now answered separately. */
     const armed = await p.evaluate(async (viewers) => {
       const out = {};
       const sel = document.getElementById("viewer");
@@ -2440,31 +2444,55 @@ function link(annotations){
         if (!url){ out[v] = { none: true }; continue; }
         const st = JSON.parse(decodeURIComponent(url.split("#!")[1]));
         const tl = (st.layers || []).find(l => l && l.name === "tracing");
-        out[v] = { tool: tl && tl.tool, tab: tl && tl.tab,
+        out[v] = { host: url.split("#!")[0], tool: tl && tl.tool, tab: tl && tl.tab,
                    selected: st.selectedLayer && st.selectedLayer.layer,
                    say: (document.getElementById("tracingStatus") || {}).textContent || "" };
       }
       return out;
-    }, ["https://spelunker.cave-explorer.org/", "https://ngl.microns-explorer.org/"]);
+    }, ["https://ngl.microns-explorer.org/", "https://spelunker.cave-explorer.org/",
+        "https://neuroglancer-demo.appspot.com/"]);
 
-    const sp = armed["https://spelunker.cave-explorer.org/"];
-    const ng = armed["https://ngl.microns-explorer.org/"];
-    ok(sp && sp.tool === "annotatePolyline",
-       "Spelunker opens with the POLYLINE tool live — the toolbar has no button for it",
-       sp && sp.tool);
-    ok(sp && sp.selected === "tracing" && sp.tab === "annotations",
-       "...on the tracing layer, with its annotations tab open", sp && sp.selected);
-    ok(sp && /POLYLINE/.test(sp.say) && /close it/.test(sp.say),
-       "...and the page says so, including how to close the ring", (sp && sp.say || "").slice(0, 60));
-    /* THE OTHER VIEWER MUST NOT BE HANDED A TOOL IT HAS NOT GOT. An unknown tool name would leave
-       the layer selected with nothing armed, and the instructions would be for a tool that is not
-       there — worse than the point tool, which that viewer does have. */
-    ok(ng && ng.tool === "annotatePoint",
-       "the MICrONS viewer keeps the point tool, which is what it actually has", ng && ng.tool);
-    ok(ng && /no polyline tool/.test(ng.say) && /Spelunker/.test(ng.say),
-       "...and the page says where the polyline is instead of pretending",
-       (ng && ng.say || "").slice(0, 60));
+    const hosts = Object.keys(armed);
+    ok(hosts.every(v => /spelunker|cave-explorer/.test(armed[v].host)),
+       "whatever viewer is picked for VIEWING, tracing opens Spelunker",
+       hosts.map(v => v.replace(/https?:\/\//, "").split("/")[0] + " -> "
+                    + armed[v].host.replace(/https?:\/\//, "").split("/")[0]).join(", "));
+    ok(hosts.every(v => armed[v].tool === "annotatePolyline"),
+       "...with the POLYLINE tool armed — no viewer has a button for it",
+       armed[hosts[0]].tool);
+    ok(hosts.every(v => armed[v].selected === "tracing" && armed[v].tab === "annotations"),
+       "...on the tracing layer, with its annotations tab open");
+    /* THE REASON, IN THE PAGE. Silently ignoring his viewer choice would be its own puzzle; the
+       toast says which viewer opened and why it is not the one he picked. */
+    const say = armed[hosts[0]].say;
+    ok(/Spelunker opened/.test(say) && /only one with a polyline/.test(say),
+       "...and the page says which viewer it opened, and why not the picked one",
+       say.slice(0, 64));
+    ok(/close the ring/.test(say), "...including how to close a contour", "close the ring");
+
+    /* AND NOWHERE ELSE. Søren, closing the loop on this: "if you need to use the Spelunker to use
+       the poly line, then open the viewer in Spelunker in the segmentation panel only for the
+       polyline annotation tool to work for segmentations." Spelunker is the DRAWING viewer, not a
+       new default — every other link this page writes, including opening a tracing that already
+       exists, still goes to whatever he picked. That boundary is one line of code and would be
+       trivially widened by accident, so it is asserted from both sides. */
+    const viewing = await p.evaluate(async () => {
+      document.getElementById("viewer").value = "https://ngl.microns-explorer.org/";
+      let url = null;
+      const realOpen = window.open;
+      window.open = u => { url = u; return null; };
+      tracingViewerOpen([{ name: "Whole cell", color: "#40e28c",
+                           rings: [{ z: 100, points: [[9000,9000],[9100,9000],[9100,9100]] }] }],
+                        null, { nuc: "", root: "" });
+      await new Promise(r => setTimeout(r, 200));
+      window.open = realOpen;
+      return { host: url ? url.split("#!")[0] : "(nothing opened)" };
+    });
+    ok(/ngl\.microns-explorer\.org/.test(viewing.host),
+       "...while OPENING a tracing that already exists still goes to the picked viewer",
+       viewing.host);
   }
+
 
   ok(newErrors.length === 0, "the page still loads with no new errors",
      newErrors.join(" | ") || "none");
