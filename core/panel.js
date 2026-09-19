@@ -155,6 +155,7 @@ function organelleStructRowsHtml(structs){
      picks up both kinds of row. */
   const jumpBtn=(p,t)=>'<button type="button" class="jumpview" data-x="'+p[0]+'" data-y="'+p[1]+'" data-z="'+p[2]+'"'
     +((t&&t.structureId)?' data-sid="'+escHtml(String(t.structureId))+'"':"")
+    +((t&&!t.structureId&&t.name)?' data-mark="1"':"")
     +((t&&t.name)?' data-name="'+escHtml(String(t.name))+'"':"")
     +' style="margin-left:6px;padding:2px 8px;font-size:11px">Jump</button>';
   return structs.map(s=>{
