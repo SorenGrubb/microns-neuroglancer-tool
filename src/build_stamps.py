@@ -56,6 +56,32 @@ PAGES = ["ujump.html", "djump.html", "pjump.html", "ljump.html", "hjump.html", "
 
 STAMP_RE = re.compile(r'<span class="build"[^>]*>build [^<]*</span>')
 
+# ── THE FILES THE PAGE LOADS COUNT AS THE PAGE ──────────────────────  2026-09-19
+#
+# Søren, twice: "It seems like nothing happened?" and "I have pressed ctrl+shift+R many times, it
+# does not update." Both times the page showed a fresh stamp and ran an old core/panel.js. Three
+# fixes that day lived entirely in core/, so every page was byte-identical, nothing re-stamped, and
+# the stamp displayed a time with no relation to the code running underneath it.
+#
+# Everything this module's docstring says about telling a stale cache from a stale file is true of
+# a core file, and none of it covered them. So the stamp now moves when they do. It says nothing
+# about WHICH file changed -- one number for "and everything it loads" is enough to answer the only
+# question anybody asks the stamp.
+CORE_TAG = re.compile(r'<script src="core/[A-Za-z0-9_.\-]+\.js"')
+
+def core_version():
+    """One short hash over every core/*.js, so a change to any of them moves every page's stamp."""
+    d = os.path.join(HERE, "core")
+    if not os.path.isdir(d):
+        return ""
+    h = hashlib.sha256()
+    for name in sorted(os.listdir(d)):
+        if not name.endswith(".js"):
+            continue
+        h.update(name.encode("utf-8"))
+        h.update(io.open(os.path.join(d, name), "rb").read())
+    return h.hexdigest()[:10]
+
 def stamp_html(when):
     return ('<span class="build" title="' + TITLE + '">build ' + when + '</span>')
 
@@ -132,6 +158,7 @@ def main():
     except Exception:
         prev = {}
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    corever = core_version()
     state, changed, kept = {}, [], []
     for page in PAGES:
         p = os.path.join(HERE, page)
@@ -143,7 +170,11 @@ def main():
         s = insert_line(s, page)
         h = content_hash(s)
         old = prev.get(page) or {}
-        if old.get("hash") == h and STAMP_RE.search(s) and old.get("stamp"):
+        # Recorded beside the hash and never written into the markup: what changed is what the page
+        # SERVES, and a page that loads no core files (index.html) is unaffected by any of it.
+        mine = corever if CORE_TAG.search(s) else ""
+        if old.get("hash") == h and old.get("core", "") == mine \
+                and STAMP_RE.search(s) and old.get("stamp"):
             when = old["stamp"]                      # unchanged: the stamp must not move
             kept.append(page)
         else:
@@ -151,7 +182,8 @@ def main():
             changed.append(page)
         s = STAMP_RE.sub(lambda _m: stamp_html(when), s, count=1)
         io.open(p, "w", encoding="utf-8").write(s)
-        state[page] = {"hash": content_hash(s), "stamp": when}
+        state[page] = {"hash": content_hash(s), "stamp": when,
+                       "core": corever if CORE_TAG.search(s) else ""}
     json.dump(state, io.open(STATE, "w", encoding="utf-8"), indent=1, sort_keys=True)
     print("stamped " + str(len(changed)) + ": " + (", ".join(changed) or "none"))
     print("unchanged " + str(len(kept)) + ": " + (", ".join(kept) or "none"))

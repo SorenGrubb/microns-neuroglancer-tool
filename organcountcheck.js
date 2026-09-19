@@ -122,6 +122,36 @@ function handRow(kind, pt, by){
          ? "295845" : r.text.slice(0, 60));
   }
 
+  console.log("\nhis own six rows, exactly as the deployed backend returns them");
+  {
+    /* Read off the live endpoint on 2026-09-19, after he had hard-refreshed repeatedly and then
+       deleted rows by hand without the count moving. The id of the outline is in `source`, and
+       `fromStructureId` is empty — these rows predate the split of those two columns. Keying only
+       on fromStructureId collapsed nothing, and testing /segment/ on `source` made every one of
+       them look hand-placed, so the panel listed six points beside three outlines it refused to
+       pair them with. Both halves are in this fixture. */
+    const REAL = [
+      ["295844,151391,17862", "lysosome_1789846306269"],
+      ["295844,151391,17862", "lysosome_1789846306269"],
+      ["295974,151346,17838", "lysosome_1789846306269__i1"],
+      ["295974,151346,17838", "lysosome_1789846306269__i1"],
+      ["295812,151370,17901", "lysosome_1789846306269__i1__i2"],
+      ["295813,151358,17899", "lysosome_1789846306269__i1__i2"]
+    ].map(([pt, sid], i) => ({ groupId: "r" + i, subCount: 1, comment: "",
+      structures: [{ kind: "lysosome", pointA: pt, pointB: "",
+                     source: sid, fromStructureId: "", by: "Søren Grubb" }] }));
+    const r = await render(REAL);
+    ok(/3× lysosome/.test(r.head), "three lysosomes, from six rows with an empty column",
+       r.head.trim());
+    ok(r.rows === 3, "...three rows behind the fold", r.rows);
+    ok(/0 outlined, 3 logged/i.test(r.organHead),
+       "...and three in the Organelles section, not six", r.organHead.trim());
+    const fromOutline = await p.evaluate(() =>
+      (PANEL_ORGAN_ANNS || []).filter(a => a.fromSegmentation).length);
+    ok(fromOutline === 3,
+       "...each known to have come from an outline, not from somebody's eye", fromOutline);
+  }
+
   console.log("\nand two people pointing at the same organelle by hand stay two");
   {
     /* The measurement this whole dataset is for. These rows carry no fromStructureId — nothing

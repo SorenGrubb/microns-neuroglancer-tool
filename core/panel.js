@@ -97,6 +97,27 @@ function panelDsQS(){
 
    THE LAST ONE WINS, because the sheet is append-only and the newest row is the current answer --
    the same rule as centreRowFor_ at the other end. */
+/* ── WHICH OUTLINE A LOGGED POINT CAME FROM ────────────────────────  2026-09-19
+   Two columns have carried this, and Søren's own six rows are in the older one. `source` held the
+   outline's id when the feature was first written; it was then repurposed to say what KIND of
+   source a point has -- "segmentation" as against somebody's eye -- and `fromStructureId` was added
+   for the id. Rows written in between keep the id in `source` and nothing in `fromStructureId`.
+
+   A SHAPE, NOT A GUESS. Our ids are a slug, an underscore, a millisecond timestamp and optionally
+   `__iN` suffixes. "segmentation" and "hand" cannot match that, and neither can a blank. So a
+   `source` that looks like an id is read as one, and anything else is left alone. */
+function organelleFromId(s){
+  var f = String((s && s.fromStructureId) || "");
+  if (f) return f;
+  var src = String((s && s.source) || "");
+  return /^[A-Za-z0-9-]+_\d{6,}(__i\d+)*$/.test(src) ? src : "";
+}
+/* And a point whose source is an id came FROM an outline, whatever the word in the column says --
+   which is what decides whether an outline supersedes it or the panel lists them side by side. */
+function organelleIsFromOutline(s){
+  var src = String((s && s.source) || "");
+  return !!(/segment/i.test(src) || organelleFromId(s));
+}
 function organelleOwnStructs(groups){
   var out = [], at = {};
   (groups || []).forEach(function(g){
@@ -105,7 +126,7 @@ function organelleOwnStructs(groups){
       var one = { kind: s.kind, pointA: s.pointA || "", pointB: s.pointB || "",
                   comment: s.comment || (g && g.comment) || "",
                   source: s.source || "",
-                  fromStructureId: String(s.fromStructureId || ""),
+                  fromStructureId: organelleFromId(s),
                   by: s.by || (g && g.by) || "" };
       var key = one.fromStructureId;
       if (key && at[key] !== undefined){ out[at[key]] = one; return; }
@@ -1060,7 +1081,10 @@ function loadCommunityReports(nid,cellPos){
           /* fromSegmentation: set on a point the tracing card registered from an outline's own
              centre. Blank on every row written before 2026-09-18 and on every hand-placed one,
              which is exactly what it means. */
-                  fromSegmentation:!!(s.source&&/segment/i.test(String(s.source))),
+                  /* Either column, since 2026-09-19: a point whose `source` is a structure id
+                     came from an outline, and reading only the word listed Søren's six centres as
+                     hand-placed beside the three outlines they were computed from. */
+                  fromSegmentation:organelleIsFromOutline(s),
                   fromStructureId:s.fromStructureId||"",
                   by:s.by||""};
         });
