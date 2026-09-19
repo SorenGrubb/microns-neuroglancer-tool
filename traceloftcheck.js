@@ -49,13 +49,6 @@ function circle(cx, cy, r, n, clockwise){
 }
 function tri(g){ return g.indices.length / 3; }
 function vert(g, i){ return [g.positions[i*3], g.positions[i*3+1], g.positions[i*3+2]]; }
-/* The longest RUNG: the longest edge that runs from one section to the next. A twisted band shows
-   up here and almost nowhere else -- the surface still closes, still meshes and still has the right
-   triangle count; it simply has rungs running clear across the cell.
-
-   Edges within one section are excluded deliberately, and not as a convenience: a cap is a fan from
-   the centroid, so its spokes are one radius long by construction, and counting them would drown
-   the signal in a number that is the same whatever the band does. */
 /* Every edge of a closed surface is shared by exactly two triangles. The caps are fans (or, where
    a contour has holes cut out of it, an ear-clipped polygon) and the bands are quads split in two,
    so this is the whole test of "is it closed" in one number. Keyed on the rounded POSITION rather
@@ -89,6 +82,20 @@ function signedVolumeUm3(g){
   }
   return v / 1e9;
 }
+/* "The same number", for two sums of the same triangles added up in a different order. Not ===:
+   floating-point addition is not associative, and reordering the contours reorders the emission,
+   which moved one of these answers by a single unit in the last place (0.45769090159742121 against
+   ...110). A tolerance of 1e-12 relative is far below anything a tracing could mean and far above
+   what reassociation can cost, so it says "identical" without asserting something that is merely
+   true today. */
+function sameNumber(a, b){ return a === b || Math.abs(a - b) <= 1e-12 * Math.abs(a || 1); }
+/* The longest RUNG: the longest edge that runs from one section to the next. A twisted band shows
+   up here and almost nowhere else -- the surface still closes, still meshes and still has the right
+   triangle count; it simply has rungs running clear across the cell.
+
+   Edges within one section are excluded deliberately, and not as a convenience: a cap is a fan from
+   the centroid, so its spokes are one radius long by construction, and counting them would drown
+   the signal in a number that is the same whatever the band does. */
 function longestEdge(g){
   let worst = 0;
   for (let t = 0; t + 2 < g.indices.length; t += 3){
@@ -379,6 +386,23 @@ console.log("\na hole is a hole in the surface, not only in the arithmetic");
      "...and not a second tube standing inside the first, which is what it used to be",
      signedVolumeUm3(g).toFixed(3) + " < " + signedVolumeUm3(s).toFixed(3) + " µm³");
 
+  /* WHICHEVER WAS DRAWN FIRST. Søren, 2026-09-19: *"if you draw the inner circle before the outer
+     circle will it still be a hole?"* Nothing here sorts by area or trusts the order: nestOf()
+     asks how many rings CONTAIN each ring, which is a property of the geometry. Asserted on every
+     number this file computes, to the last digit — an order that changed the answer by a rounding
+     error would be a bug hiding in a tolerance. */
+  {
+    const reversed = holed.slice().reverse();                  // the hole drawn before its outline
+    const gr = L.loft(reversed, R);
+    ok(gr.holes === g.holes && gr.indices.length === g.indices.length
+       && unsharedEdges(gr) === 0 && sameNumber(signedVolumeUm3(gr), signedVolumeUm3(g)),
+       "drawing the hole BEFORE the outline gives the identical mesh",
+       signedVolumeUm3(gr).toFixed(6) + " vs " + signedVolumeUm3(g).toFixed(6) + " µm³");
+    ok(L.volume(reversed, R).volumeUm3 === L.volume(holed, R).volumeUm3,
+       "...and the identical volume, to the bit, which is where the tracer would notice",
+       L.volume(reversed, R).volumeUm3.toFixed(6) + " µm³");
+  }
+
   /* THE COMMON CASE IS NOT THE END SECTIONS. A nucleus inside a soma starts and stops inside the
      stack, where the outer is never capped — so the cavity is closed by the hole's OWN disc,
      reversed, rather than by anything being cut out. Different code path, same requirement. */
@@ -418,6 +442,14 @@ console.log("\na hole is a hole in the surface, not only in the arithmetic");
   ok(g3.holes === 2 && unsharedEdges(g3) === 0 && Math.abs(signedVolumeUm3(g3) - t3) / t3 < 0.02,
      "a ring inside a hole is solid again — the vesicle inside the vacuole",
      signedVolumeUm3(g3).toFixed(4) + " vs " + t3.toFixed(4) + " µm³");
+  /* Three deep, drawn innermost outwards — the order somebody tracing a vesicle they spotted first
+     would actually produce, and the one where "the first ring is the outline" would come apart. */
+  const g3r = L.loft(nested.slice().reverse(), R);
+  ok(g3r.holes === 2 && g3r.indices.length === g3.indices.length
+     && sameNumber(signedVolumeUm3(g3r), signedVolumeUm3(g3)),
+     "...however deep the nesting, and whichever end of it was drawn first",
+     g3r.indices.length / 3 + " triangles either way, "
+     + signedVolumeUm3(g3r).toPrecision(17) + " vs " + signedVolumeUm3(g3).toPrecision(17));
 
   /* Not a circle. The bridge has to find its way round a squashed outline with an off-centre hole,
      because a hand-drawn contour is never the shape the algorithm was tested on. */

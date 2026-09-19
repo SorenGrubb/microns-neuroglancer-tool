@@ -112,6 +112,26 @@ function box(cx, cy, r, cw){
        "inside " + got[0] + ", between " + got[1]);
   }
 
+  console.log("\n...and whichever of the two was drawn first");
+  {
+    /* Søren, 2026-09-19: *"if you draw the inner circle before the outer circle will it still be a
+       hole?"* It is a fair thing to doubt — "the first one wins" is how a paint program behaves, and
+       the pad DID behave that way until today, when the second fill simply landed on top of the
+       first. Even-odd asks whether a point is enclosed an odd number of times, which no more
+       depends on the order the contours were laid into the path than it does on their winding.
+       Asserted rather than reasoned about, because the tracer has no way to know which one the tool
+       thinks came first. */
+    const outer = { z: 0, inst: 0, points: box(200, 200, 120) };
+    const inner = { z: 0, inst: 0, points: box(200, 200, 50) };
+    const first = await paint([outer, inner], [[200, 200], [200, 110], [200, 40]]);
+    const last = await paint([inner, outer], [[200, 200], [200, 110], [200, 40]]);
+    ok(JSON.stringify(first) === JSON.stringify(last),
+       "drawing the hole BEFORE the outline gives exactly the same picture",
+       "outer first " + first.join("/") + ", inner first " + last.join("/"));
+    ok(last[0] === false && last[1] === true,
+       "...and it is still the hole that is empty, not the ring", "inside: " + last[0]);
+  }
+
   console.log("\nbut a SEPARATE structure inside a cell's outline is not a hole in it");
   {
     /* The ordinary way to use this pad: outline the cell, then trace a mitochondrion inside it as
