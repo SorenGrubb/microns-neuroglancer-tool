@@ -7,10 +7,18 @@
    margin inside the <summary> and shoves the rotating triangle off the heading's baseline. The
    feature worked and looked like a mistake.
 
-   THIS IS THE SHAPE OF THE WHOLE PORT, IN ONE LINE. Anything in core/ reaches five tools the
+   THIS IS THE SHAPE OF THE WHOLE PORT, IN ONE LINE. Anything in core/ reaches six tools the
    instant it is pushed; the CSS it needs does not, because every page carries its own copy of the
    stylesheet. So this checks the pairing rather than the line: a page that carries the history
    panel must carry the rules that make it legible.
+
+   THE PAIRING RUNS BOTH WAYS, since 2026-09-20. ηJump used to be exempted here: it carried the
+   whole .chist-* block, inherited from µJump's chrome, and rendered no history at all — it did not
+   load core/panel.js, and `chist-` appeared nowhere in it outside the stylesheet. It joined that
+   afternoon (src/hjump_gets_a_cell_history.py), so the exemption is gone and replaced by its
+   opposite: a page carrying these rules must be a page that can render the thing they style.
+   Styling for a panel that does not exist is not harmless — it is how a page comes to look
+   finished from the inside while showing nothing.
 
    Static, on purpose — no browser. The question is whether two files agree, and reading them is
    the whole of it.
@@ -39,15 +47,12 @@ console.log("\n--- every page with the history panel can style its fold ---");
 PAGES.forEach(f => {
   const s = read(f);
   if (!/\.chist-panel\{/.test(s)) return;            // index.html has no cell panel
-  /* ηJump carries the .chist-* block — it was built from µJump's chrome — but renders no history
-     at all: it does not load core/panel.js, and `chist-` appears nowhere in it outside the
-     stylesheet. Asserting the pairing there would encode "ηJump has a cell history" as a fact.
-     When it joins the shared stack this exemption is the thing that should fail. */
-  if (!/<script src="core\/panel\.js">/.test(s)){
-    ok(f + ": (no core/panel.js — renders no history, so nothing to pair)", true,
-       "remove this exemption when it joins the shared stack");
-    return;
-  }
+  /* THE OTHER DIRECTION. These rules style a panel only core/panel.js draws, so a page carrying
+     them and not loading it is carrying dead CSS for a feature its users cannot see — which is
+     exactly the state ηJump sat in for a month. */
+  ok(f + ": carries these rules AND the file that renders what they style",
+     /<script src="core\/panel\.js">/.test(s),
+     "without it these are styling for a panel the page never draws");
   ok(f + ": the <h4> in the summary has its margin removed",
      /\.chist-panel>summary>h4\{margin:0\}/.test(s),
      "without it the triangle sits off the heading's baseline");

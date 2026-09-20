@@ -299,6 +299,24 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
     w.showCell(0, 0, false);
     await sleep(200);
     const np = D.getElementById("nucpanel");
+    /* THE REST OF THE HOST CONTRACT, added 2026-09-20 with the cell history
+       (src/hjump_gets_a_cell_history.py). The history itself is core/panel.js's and is exercised
+       by cellfoldcheck; what belongs here is the part hjump.html has to supply — somewhere to
+       render it, and the three globals panel.js reads off the page. They are reached through
+       `typeof` guards, so a missing one costs no error and simply renders nothing, which is the
+       failure worth naming rather than discovering. */
+    ok("there is somewhere for the cell history to go", !!D.getElementById("classHistoryPanel"),
+       "  <- core/panel.js writes into it; without it loadClassificationHistory returns silently");
+    /* AND THE CARD ITSELF FOLDS. cellfoldcheck drives cellCardFold directly, so it passes on any
+       page that merely LOADS core/panel.js — it cannot see whether showCell calls it. This is the
+       only place that asks the real render. */
+    ok("...and showCell actually folded the card",
+       !!D.querySelector("#nucpanel > details.cellfold"),
+       "  <- cellfoldcheck calls cellCardFold itself, so it cannot catch a page that never does");
+    ok("...and the cell's ids are on the page for it to read",
+       w.CUR_NUCID === "1" && !!w.CUR_ROOT && (w.CUR_POS || []).length === 3,
+       "nuc " + w.CUR_NUCID + ", root " + w.CUR_ROOT + ", pos " + (w.CUR_POS || []).join(",")
+       + "  <- H01's cell body and c3 segment, since it has no nucleus");
     ok("the cell card offers it", /Log an organelle here/.test(np.textContent),
        "  <- mounted under the guided-ID call to action, not inside it");
     /* ITS OWN IDS. #nucpanel and #idfpanel are both in the DOM at once, so the card's toggle and

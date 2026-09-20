@@ -438,7 +438,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:24</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:35</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1230,6 +1230,15 @@ function showCell(i, distNm, fromHistory){
   });
   h+='<span style="display:inline-block;min-width:150px">spininess <b>'+HSP[i].toFixed(3)+'</b></span></div></div>';
 
+  /* ── WHO HAS SAID WHAT ABOUT THIS CELL ─────────────────────────  2026-09-20
+     Filled by core/panel.js's loadClassificationHistory() below. Empty until then, and empty for
+     good on a cell nobody has written about -- the panel says so itself rather than being hidden,
+     because "nothing recorded yet" is an answer to the question somebody just asked.
+
+     Above the call to action, the way λJump has it: the record of what has been said comes before
+     the invitation to say something. */
+  h+='<div id="classHistoryPanel" style="margin:14px 0 0"></div>';
+
   /* Same .idcta call-to-action µJump ends its cell panel with. The warn variant is used when H01
      itself has no call, since that is the case where a user's identification is worth most. */
   const noCall=H01_NO_CALL[t];
@@ -1254,6 +1263,17 @@ function showCell(i, distNm, fromHistory){
   ID_CTX={i:i, seg:seg, body:String(HSB[i]), pos:pos,
           layer:(volLayer(i)!=="no-layer"?volLayer(i):tagLayer(i)), depth:depthUm(i),
           published:H01_NO_CALL[t]?null:t};
+  /* ── WHAT core/panel.js READS OFF THE PAGE ────────────────────────  2026-09-20
+     Three globals its contract names, none of which existed here. The history row prints the
+     coordinate the report was filed at (CUR_POS) and matches hand-traced structures by root id
+     (CUR_ROOT); CUR_NUCID is set beside them because a page defining two of the three is a page
+     somebody trips over later.
+
+     H01 HAS NO NUCLEUS, so these carry what this dataset actually has, exactly as UJ.panel.cellIds
+     does for the organelle form: the cell_bodies object id, and the c3 segment as the root. */
+  window.CUR_POS=pos.slice();
+  CUR_NUCID=String(HSB[i]);
+  CUR_ROOT=seg;
   wireOrganelleFlag(null,"nuc");
   const idfBtn=panel.querySelector("#idfgo");
   if(idfBtn) idfBtn.addEventListener("click",function(){ openIdentify(i); });
@@ -1264,7 +1284,17 @@ function showCell(i, distNm, fromHistory){
      cell itself appearing. Each writes into its own placeholder or stays empty. */
   loadIdentityVotes(String(HSB[i]), H01_NO_CALL[t]?[]:[longName(t)]);
   loadExtraIdPanel(String(HSB[i]));
+  /* core/panel.js's, shared with the other five tools since this page started loading it.
+     Guarded because everything else on this card works without it, and a page that loses one
+     script should lose one panel rather than the cell. */
+  if(typeof loadClassificationHistory==="function") loadClassificationHistory(String(HSB[i]));
   if(typeof refreshFavStars==="function") refreshFavStars();
+  /* ── AND THE CARD FOLDS ─────────────────────────────────  2026-09-20
+     The last of the six to get it. No tail selector: this card is shaped like µJump's -- the class
+     badge, the layer and the morphological modifiers all come BEFORE `.celltype`, so they ride
+     into the summary on their own. λJump and βJump build it the other way round and have to say
+     `.cardtags`; this one does not. */
+  try{ cellCardFold(panel); }catch(_e){}
 
   /* Same wiring vocabulary as µJump: .jump/.njump fill the coordinate boxes and re-run the
      search, .idval copies on click. */
@@ -1433,6 +1463,12 @@ function jwtPayload(cred){
    simply does not appear. Declared here beside the name it travels with, filled from the same
    Google payload below. */
 let GOOGLE_VERIFIED=false, GOOGLE_CREDENTIAL=null, REPORTER_NAME="", REPORTER_EMAIL="";
+/* Declared here rather than only assigned in showCell: core/panel.js reaches both through
+   `typeof CUR_ROOT !== "undefined"` guards, and an assignment inside a function would make them
+   implicit globals that do not exist until the first cell is drawn. `var`, not `let`, because
+   panel.js is a separate script and a `let` in temporal dead zone throws where an undefined `var`
+   simply reads undefined. */
+var CUR_NUCID="", CUR_ROOT="";
 /* ── THE TOKEN'S OWN EXPIRY ──────────────────────────────────────────────────────  2026-09-03
    Google's ID token lasts about an hour. Until today this page took it once and used it until the
    tab closed, so every write after that hour came back "unauthenticated" -- which reads as "you
