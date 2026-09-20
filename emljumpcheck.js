@@ -351,10 +351,14 @@ const INFO = {
       document.getElementById("tracePadOpen").click();
       await new Promise(r => setTimeout(r, 7000));
       return { asked: (typeof PAD_VIEW !== "undefined" && PAD_VIEW) ? PAD_VIEW.windowAsked : null,
-               fn: (typeof tracingWindow === "function") ? tracingWindow() : null };
+               fn: (typeof tracingWindow === "function") ? tracingWindow() : null,
+               intro: (typeof tracingIntro === "function") ? tracingIntro() : null };
     });
     ok(got.fn && got.fn.lo === 27 && got.fn.hi === 240,
        "the card reads this page's window", JSON.stringify(got.fn));
+    ok(got.intro && /image only/.test(got.intro),
+       "the card opens by saying why EVERY cell here is traced by hand", got.intro
+       + "  <- \u00b5Jump's \"for a cell the segmentation does not have\" implies this dataset has one");
     ok(got.asked && got.asked[0] === 27 && got.asked[1] === 240,
        "...and the pad's own draw asked for it", JSON.stringify(got.asked)
        + "  <- it asked for nothing at all until 2026-09-20, and got minnie65's 86–172");

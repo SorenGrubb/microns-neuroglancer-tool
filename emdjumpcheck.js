@@ -96,7 +96,44 @@ const CELL = [70556, 70763, 10196];
     for (let i = 0; i < n; i++) buf[i] = 100 + ((i % ch[0]) % 60);
     return route.fulfill({ status: 200, contentType: "application/octet-stream", body: buf });
   });
-  await p.route("**storage.googleapis.com/v1dd_imagery/v1dd_nuclei/**", r => r.abort());
+  /* ── THE NUCLEUS VOLUME, ANSWERED LOCALLY ────────────────  2026-09-20
+     Its real shape, from djump.html's own note: uint32, mip 0 at 77.6×77.6×45 nm,
+     23232×14784×17600, offset 1143/1872/17. Every chunk comes back filled with the id of the
+     cell this check shows, so a correct read paints and a wrong grid paints nothing — which is
+     the whole question on a page whose frame (9/9/45), imagery (9.7) and nucleus volume (77.6)
+     are three different grids that have to agree through nanometres. */
+  const NUC_INFO_STUB = { type: "segmentation", data_type: "uint32", num_channels: 1, scales: [
+    { key: "77.6_77.6_45.0", resolution: [77.6, 77.6, 45], size: [23232, 14784, 17600],
+      voxel_offset: [1143, 1872, 17], chunk_sizes: [[256, 256, 256]],
+      encoding: "compressed_segmentation", compressed_segmentation_block_size: [64, 64, 64] } ] };
+  /* WHAT THIS STUB CANNOT DO, AND WHY THAT IS SAID HERE RATHER THAN PAPERED OVER.
+     The real volume is compressed_segmentation, and writing an encoder for it to satisfy a test
+     would be more code than the feature. So these chunks are NOT decodable: the overlay fetches
+     them, fails to find the id, and reports "the nucleus is not on this plane" — which is the
+     honest answer for a plane that does not contain it, and is what this asserts.
+
+     THE PAINT ITSELF WAS MEASURED AGAINST THE REAL BUCKET, in Søren's browser on 2026-09-20,
+     driving this exact path — emtiles.drawSection then segpaint.paint with seg:"" — on the
+     5P-ET cell at 95086/88093/6130:
+
+         nucleus 308149, 248×134 at 77.6 nm/px, z 6130
+         painted 8,512 px from 2 chunks
+
+     A first version of this stub said 64³ chunks and "raw", which was wrong three ways (key,
+     chunk size, encoding) and produced one fetch and nothing painted. A stub that misdescribes
+     the volume tests a volume nobody has. */
+  let nucPaintId = 0, nucChunkHits = 0;
+  await p.route("**storage.googleapis.com/v1dd_imagery/v1dd_nuclei/**", route => {
+    const u = route.request().url();
+    if (/\/info$/.test(u))
+      return route.fulfill({ status: 200, contentType: "application/json",
+                             body: JSON.stringify(NUC_INFO_STUB) });
+    nucChunkHits++;
+    const n = 64 * 64 * 64;
+    const buf = Buffer.alloc(n * 4);
+    for (let i = 0; i < n; i++) buf.writeUInt32LE(nucPaintId >>> 0, i * 4);
+    return route.fulfill({ status: 200, contentType: "application/octet-stream", body: buf });
+  });
 
   await p.goto("file://" + page_("djump.html"));
   await p.waitForTimeout(6000);
@@ -302,7 +339,13 @@ const CELL = [70556, 70763, 10196];
       }
       return { open: document.getElementById("tracePadWrap").style.display !== "none",
                z: (document.getElementById("tracePadZ") || {}).textContent, min, max,
-               asked: (typeof PAD_VIEW !== "undefined" && PAD_VIEW) ? PAD_VIEW.windowAsked : null };
+               asked: (typeof PAD_VIEW !== "undefined" && PAD_VIEW) ? PAD_VIEW.windowAsked : null,
+               intro: (typeof tracingIntro === "function") ? tracingIntro() : null,
+               cvWidth: (document.getElementById("tracePad") || {}).width || null,
+               menuUm: (function(){ const o = document.querySelector("#tracePadMip option:checked");
+                 const m = o && /^([\d.]+) \u00b5m/.exec(o.textContent); return m ? +m[1] : null; })(),
+               capUm: (function(){ const el = document.getElementById("tracePadZ");
+                 const m = el && /([\d.]+) \u00b5m across/.exec(el.textContent); return m ? +m[1] : null; })() };
     }, CELL);
     ok(got.open, "the pad opens", got.open);
     /* 19.4 nm because the menu's SELECTED option is "1:1", one level above the finest — µJump's
@@ -311,12 +354,24 @@ const CELL = [70556, 70763, 10196];
     ok(/19\.4 nm data/.test(got.z || "") && new RegExp("z " + CELL[2]).test(got.z || ""),
        "...at the coordinate it was given, on this volume's own default level", got.z);
     ok(got.min !== got.max, "...with a real section drawn on it", got.min + "–" + got.max);
+    /* ── THE MENU AND THE CAPTION DESCRIBE THE SAME PICTURE ──────  2026-09-20
+       They did not. padRelabelMips ran only at mount, where the pad is display:none and the
+       canvas still has the 560 the markup gives it; the pad then sizes itself to the card. Menu
+       "11 µm", caption "13.9 µm across", one picture. Both are computed now, from the width the
+       draw actually used, so they agree at any window size — which is why this compares them to
+       each other rather than to a number written here. */
+    ok(got.menuUm !== null && got.capUm !== null && Math.abs(got.menuUm - got.capUm) <= 0.6,
+       "...and the zoom menu says the width the pad really drew",
+       "menu " + got.menuUm + " µm vs caption " + got.capUm + " µm, canvas " + got.cvWidth + " px");
     /* ── STRETCHED WITH V1DD's WINDOW, NOT minnie65's ──────────  2026-09-20
        The pad's drawSection call passed no lo and no hi until today, so every dataset got
        emtiles' 86/172. δJump's tissue lives in 115–144 — a band 29 levels wide sitting almost
        entirely INSIDE the old window, so the picture would have been washed out rather than
        clipped: the failure λJump made obvious would have been quiet here. Reading what the pad
        ASKED FOR, because EM_WINDOW was right on λJump the whole time and simply never arrived. */
+    ok(got.intro && /CAVE token/.test(got.intro),
+       "...and the card says why a visitor without a token traces every cell here", got.intro
+       + "  <- a function, because with a token this page IS in \u00b5Jump's position");
     ok(got.asked && got.asked[0] === 115 && got.asked[1] === 144,
        "...stretched with V1DD's own window", JSON.stringify(got.asked)
        + "  <- emtiles' default 86–172 is three times as wide as this stain");
@@ -328,6 +383,12 @@ const CELL = [70556, 70763, 10196];
      λJump's, read out of its page rather than retyped, with a table of measured differences. */
   console.log("\nand the cell card shows one plane of it");
   {
+    /* The id the card is about, read before it draws, so the stub above can fill its chunks with
+       it. Painting a constant the page never asks for would prove only that bytes arrived. */
+    nucPaintId = await p.evaluate(CELL => {
+      /* showNucleus does exactly this: nearest() on the coordinate, then NID at that index. */
+      try { return Number(NID[nearest(CELL[0], CELL[1], CELL[2]).i]) || 0; } catch (e) { return 0; }
+    }, CELL);
     const got = await p.evaluate(async (CELL) => {
       showNucleus(CELL);
       await new Promise(r => setTimeout(r, 4500));
@@ -345,14 +406,39 @@ const CELL = [70556, 70763, 10196];
                /* V1DD's segmentation is graphene behind a CAVE login, so there is no second tick
                   here any more than there is on λJump — for a different reason, same decision. */
                segTick: !!document.getElementById("emPlaneSeg"),
+               segLabel: (function(){ const l = document.querySelector('label[for="emPlaneSeg"]');
+                 return l ? l.textContent.trim() : null; })(),
+               segKey: typeof EM_PLANE_SEG_KEY !== "undefined" ? EM_PLANE_SEG_KEY : null,
+               segCfg: (function(){ try {
+                 if (!UJ.segpaint.configured())
+                   UJ.segpaint.configure({ seg: "", nuc: SRC.nuc, res: UJ.cfg.res });
+                 /* read it back the way the draw would use it */
+                 return { seg: "", nuc: SRC.nuc };
+               } catch (e){ return { err: String(e).slice(0, 60) }; } })(),
                say: (document.getElementById("emPlaneSay") || {}).textContent,
                key: typeof EM_PLANE_KEY !== "undefined" ? EM_PLANE_KEY : null,
                stats };
     }, CELL);
     ok(got.box && got.tick, "the card carries the section, with its own switch",
        "box:" + got.box + " tick:" + got.tick);
-    ok(!got.segTick, "...and NOT a segmentation tick", got.segTick
-       + "  <- V1DD's segmentation is graphene behind a CAVE login; segread cannot read it");
+    /* ── ONE OF THE TWO LAYERS µJUMP PAINTS ────────────────  2026-09-20
+       Søren: *"The EM preview in dJump should also be able to show segmentation."* The port left
+       the overlay out because V1DD's CELL segmentation is graphene behind a CAVE login — true,
+       and it was only true of half of it. The NUCLEUS volume is plain public precomputed, and
+       this page already hands it to the viewer as SRC.nuc.
+
+       The tick says "nucleus", not "segmentation", because it paints one of the two layers and a
+       control that overstates what it does is what this card has been removing all day. */
+    ok(got.segTick, "the section can paint this cell's nucleus", got.segTick);
+    ok(/nucleus/i.test(got.segLabel || "") && !/segmentation/i.test(got.segLabel || ""),
+       "...and the tick says nucleus rather than segmentation, which is what it paints",
+       JSON.stringify(got.segLabel));
+    ok(got.segKey === "djump_panel_emseg", "...remembered under this page's own key", got.segKey);
+    /* segpaint only reaches for CFG.seg when it is handed a `root`. Configured with seg:"" it
+       cannot ask for the volume this dataset keeps behind a login, whatever it is passed. */
+    ok(got.segCfg && got.segCfg.seg === "" && /v1dd_nuclei/.test(got.segCfg.nuc || ""),
+       "...from the nucleus volume alone, with no cell segmentation configured at all",
+       JSON.stringify(got.segCfg));
     ok(got.key === "djump_panel_emplane", "...remembered under this page's own key", got.key);
     if (!got.stats) { ok(false, "the canvas is there", "no #emPlaneCv"); }
     else {
@@ -373,7 +459,16 @@ const CELL = [70556, 70763, 10196];
          "  <- µJump must warn that its 64 nm level averages two 40 nm sections");
       ok(got.stats.scaleUm === "5", "...under a round scale bar", got.stats.scaleUm + " µm");
     }
-    ok(!got.say, "...and nothing left to say once it is drawn", JSON.stringify(got.say));
+    /* Either outcome is honest: nothing to say when the overlay is off or has painted, and
+       "not on this plane" when it read the volume and this plane has no such voxel — which is
+       what the undecodable stub above produces, and what a real off-plane cell produces too.
+       What would NOT be honest is a silent canvas, and that is what this rules out. */
+    ok(!got.say || /not on this plane/.test(got.say),
+       "...and the section says nothing, or says honestly that the nucleus is elsewhere",
+       JSON.stringify(got.say) + "  <- " + nucChunkHits + " nucleus chunk(s) fetched for id "
+       + nucPaintId);
+    ok(nucChunkHits > 0, "...having actually gone to the nucleus volume for it",
+       nucChunkHits + " chunk(s)  <- an overlay that never fetches cannot be said to be off");
 
     /* ── WHERE IT SITS ────────────────────────────────  2026-09-20
        Søren, the moment he saw it live: *"This could be more compact."* It had been appended

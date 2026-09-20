@@ -59,6 +59,19 @@ PAGES.forEach(f => {
   /* The triangle and the summary typography come from .rv-panel, which the fold also asks for. */
   ok(f + ": ...and .rv-panel supplies the triangle", /\.rv-panel summary\{/.test(s),
      "the fold is <details class=\"chist-panel rv-panel\">");
+  /* ── AND THE BUTTON IN IT CAN ACTUALLY RESTORE ──────────────  2026-09-20
+     core/panel.js draws "Restore this version" inside this panel and calls restoreClassification()
+     behind a `typeof` guard. On a page without one the button asks "Restore the cell to this
+     earlier classification?", the user says yes, it disables itself, prints "Submitting…" — and
+     submits nothing. ηJump sat in that state because it never loaded core/report.js, which is
+     where that function lives.
+
+     THE SAME PAIRING THIS FILE IS ABOUT, one layer down: a page that draws the panel must carry
+     the file that makes its controls work, not only the CSS that makes it legible. Checked as the
+     script tag, because the function is a plain global and this check does not open a browser. */
+  ok(f + ": ...and loads the file that makes its Restore button work",
+     /<script src="core\/report\.js">/.test(s),
+     "core/report.js defines restoreClassification; without it the button confirms and does nothing");
 });
 
 const bad = R.filter(x => !x).length;

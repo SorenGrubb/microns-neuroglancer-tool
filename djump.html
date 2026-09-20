@@ -471,6 +471,19 @@ UJ.cfg = {
     draftsKey: "djump_tracing_drafts_v2",
     draftKey:  "djump_tracing_draft_v1",
     penKey:    "djump_tracing_pen_v1",
+    /* A FUNCTION, because on this page the answer depends on who is asking. V1DD's segmentation
+       is CAVE-authenticated: with a token you are in µJump's position, where the card is for the
+       cells the segmentation missed; without one you are in λJump's, where it is for all of them.
+       Reads the same key the Connectivity panel and the mesh downloads read. */
+    intro:     function(){
+                 var tok = "";
+                 try { tok = (localStorage.getItem(UJ.cfg.mesh.caveTokenKey) || "").trim(); }
+                 catch (_e){ tok = ""; }
+                 return tok
+                   ? "For a cell the segmentation does not have."
+                   : "V1DD\u2019s segmentation needs a CAVE token, so without one every cell here is "
+                     + "one you outline yourself — and with one, this is for the cells it missed.";
+               },
     sources:   function(){
                  return { em: SRC.em, nuc: SRC.nuc, skipScales: ["placeholder"] };
                }
@@ -676,7 +689,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 20:19</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 20:50</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -2635,6 +2648,10 @@ const EM_SHADER_CONTROLS={normalized:{range:[115,144]}};
    contrasty, which is a choice, so his is the one that ships. */
 const EM_WINDOW = { lo: EM_SHADER_CONTROLS.normalized.range[0],
                     hi: EM_SHADER_CONTROLS.normalized.range[1] };
+/* How solid the nucleus overlay is on the EM section. µJump's number, and the same reasoning:
+   dark enough to read the boundary against grey tissue, light enough to see the chromatin
+   through it. */
+const EM_SEG_ALPHA = 0.32;
 
 /* The one place the reader is pointed at this dataset. Called before any draw; emtiles keeps ONE
    configured source, so configuring twice is harmless and configuring nowhere is a blank canvas.
@@ -2673,7 +2690,8 @@ const EM_WINDOW = { lo: EM_SHADER_CONTROLS.normalized.range[0],
    each await, dropping out if a newer cell has been shown since. Without that, stepping through
    cells paints whichever fetch lands last, and the panel shows the wrong cell -- which it would
    be. */
-var EM_PLANE_KEY = "djump_panel_emplane", EM_PLANE_TOKEN = 0,
+var EM_PLANE_KEY = "djump_panel_emplane", EM_PLANE_SEG_KEY = "djump_panel_emseg",
+    EM_PLANE_TOKEN = 0,
     EM_PLANE_WIRED = false, EM_PLANE_LAST = null;
 /* 248x134 DRAWN, 260 SHOWN, AND THE WIDTH IS THE TISSUE RATHER THAN THE PIXELS.
    µJump draws 19.2 µm of cortex here because that is what Søren asked for, and it reaches it with
@@ -2687,6 +2705,12 @@ var EM_PLANE_KEY = "djump_panel_emplane", EM_PLANE_TOKEN = 0,
 var EM_PLANE_W = 248, EM_PLANE_H = 134, EM_PLANE_CSS = 260, EM_PLANE_MIP = 3;
 function emPlaneOn(){
   try { var v = localStorage.getItem(EM_PLANE_KEY); return v === null ? true : v === "1"; }
+  catch (_e) { return true; }
+}
+/* On by default, like the section itself: somebody who has asked for the EM has asked to see
+   which nucleus the card is talking about. Remembered per page. */
+function emPlaneSegOn(){
+  try { var v = localStorage.getItem(EM_PLANE_SEG_KEY); return v === null ? true : v === "1"; }
   catch (_e) { return true; }
 }
 function emPlaneSay(tok, msg, bad){
@@ -2726,13 +2750,13 @@ async function emPlaneBB(){
    page this came from -- the section simply did not appear, with nothing to suggest it ever
    should have. A core/*.js that 404s on the server, or a script an extension blocked, looks
    exactly like a page that never had the feature. */
-function emPlaneBox(pos){
+function emPlaneBox(pos, nucId){
   var missing = null;
   if (typeof UJ === "undefined" || !UJ.emtiles || !UJ.segread)
     missing = "the EM reader did not load \u2014 check that core/emtiles.js and core/segread.js are "
             + "being served, then reload with Ctrl-Shift-R";
   var tok = ++EM_PLANE_TOKEN, on = emPlaneOn() && !missing;
-  EM_PLANE_LAST = { pos: pos };
+  EM_PLANE_LAST = { pos: pos, nuc: String(nucId == null ? "" : nucId) };
   if (!missing) setTimeout(function(){ drawPanelEmPlane(tok); }, 0);
   /* The <label> resets four properties it would inherit from this page's global label rule
      (display:block, uppercase, letter-spaced, muted). That rule is for the form labels that head
@@ -2745,7 +2769,24 @@ function emPlaneBox(pos){
     + 'cell on a cold cache takes a few seconds; turning it off here is remembered.">'
     + '<input type="checkbox" id="emPlaneOn" style="width:auto;margin:0"' + (on ? " checked" : "")
     + (missing ? " disabled" : "") + '> '
-    + 'EM section</label> <span id="emPlaneSay" style="color:var(--mut)">'
+    + 'EM section</label>'
+    /* ── THE NUCLEUS, AND ONLY THE NUCLEUS ────────────────  2026-09-20
+       µJump's version of this paints the cell in magenta AND the nucleus in blue. V1DD's cell
+       segmentation is graphene behind a CAVE login, which core/segread.js cannot read a chunk of
+       at all; its NUCLEUS volume is plain public precomputed, and this page already hands it to
+       the viewer. So the label says nucleus rather than segmentation: a tick called
+       "segmentation" that paints one of the two layers is exactly the half-true control this
+       card removes elsewhere. */
+    + (missing ? "" :
+       ' <label for="emPlaneSeg" style="display:inline-flex;align-items:center;gap:5px;'
+     + 'margin:0 0 0 9px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:inherit;'
+     + 'color:inherit" title="Paints this cell\'s nucleus over the section in blue, from the same '
+     + 'volume Neuroglancer paints. V1DD\'s CELL segmentation is not offered here: it is a '
+     + 'CAVE-authenticated graphene volume, and this reader can only fetch plain precomputed '
+     + 'chunks. Costs one more fetch, and it is remembered.">'
+     + '<input type="checkbox" id="emPlaneSeg" style="width:auto;margin:0"'
+     + (emPlaneSegOn() ? " checked" : "") + '> nucleus</label>')
+    + ' <span id="emPlaneSay" style="color:var(--mut)">'
     + (missing ? escHtml(missing) : "") + '</span></div>'
     + '<canvas id="emPlaneCv" width="' + EM_PLANE_W + '" height="' + EM_PLANE_H + '" '
     + 'style="width:100%;max-width:' + EM_PLANE_CSS + 'px;display:' + (on ? "block" : "none")
@@ -2828,6 +2869,29 @@ async function drawPanelEmPlane(tok){
              + "fill it)"
            : "") + ".";
     } catch (_t) {}
+    /* ── AND THE NUCLEUS ON TOP OF IT ─────────────────────  2026-09-20
+       segpaint only reaches for CFG.seg when it is handed a `root`, so configuring with seg:""
+       and passing nuc alone paints one layer and never asks for the volume this dataset keeps
+       behind a login. Three grids have to agree for this to land on the nucleus — the page's
+       9/9/45 frame, the imagery's 9.7, and this volume's 77.6 at mip 0 — and they agree through
+       nanometres, which is what the picture shows. */
+    var nucId = (EM_PLANE_LAST && EM_PLANE_LAST.nuc) || "";
+    if (emPlaneSegOn() && nucId && UJ.segpaint) {
+      if (!UJ.segpaint.configured())
+        UJ.segpaint.configure({ seg: "", nuc: SRC.nuc, res: UJ.cfg.res });
+      emPlaneSay(tok, "reading the nucleus\u2026");
+      var got = await UJ.segpaint.paint(cv, view, { nuc: nucId, alpha: EM_SEG_ALPHA });
+      if (EM_PLANE_TOKEN !== tok) return;
+      /* After the overlay, because segpaint rewrites the whole canvas. */
+      emPlaneScaleBar(cv, view);
+      if (got && got.ok && !got.painted) {
+        emPlaneSay(tok, "the nucleus is not on this plane");
+        return;
+      }
+    } else if (!emPlaneSegOn()) {
+      emPlaneSay(tok, "");
+      return;
+    }
     emPlaneSay(tok, "");
   } catch (e) {
     if (EM_PLANE_TOKEN !== tok) return;
@@ -2840,8 +2904,9 @@ function wireEmPlaneToggle(){
   EM_PLANE_WIRED = true;
   document.addEventListener("change", function(e){
     var t = e.target;
-    if (!t || t.id !== "emPlaneOn") return;
-    try { localStorage.setItem(EM_PLANE_KEY, t.checked ? "1" : "0"); } catch (_e) {}
+    if (!t || (t.id !== "emPlaneOn" && t.id !== "emPlaneSeg")) return;
+    try { localStorage.setItem(t.id === "emPlaneSeg" ? EM_PLANE_SEG_KEY : EM_PLANE_KEY,
+                              t.checked ? "1" : "0"); } catch (_e) {}
     var box = document.getElementById("emPlaneBox");
     drawPanelEmPlane(box ? Number(box.dataset.tok || 0) : EM_PLANE_TOKEN);
   });
@@ -3357,7 +3422,9 @@ function renderLayerDiagram(layer){
      purple/etc, same "data-encoding colours are out of scope for theming" rule as the rest of the
      file's chart-series/segment colours -- see the light-mode CSS comment block), not on the page
      background, so near-white text reads fine there in both themes already. */
-  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:var(--bg)" xmlns="http://www.w3.org/2000/svg">';
+  /* Flush left, for the reason the top view beside it is — it was centred in its own 337 px
+     column with a 39 px indent, which read as dead space down the left of the card. */
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px 0;background:var(--bg)" xmlns="http://www.w3.org/2000/svg">';
   for(const bd of bands){
     const y0=px(bd[1]+LEP),y1=px(bd[2]+LEP);
     const desc=LAYER_INFO[bd[0]]||"";
@@ -3697,7 +3764,11 @@ function renderTopViewDiagram(vx,vy,vz){
   const W=260,H=140+TOP,pad=6;
   const sx=v=>pad+(v-fullA0)/(fullA1-fullA0)*(W-2*pad);
   const sy=v=>TOP+pad+(v-fullB0)/(fullB1-fullB0)*(H-TOP-2*pad);
-  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:var(--bg);border:1px solid var(--line);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
+  /* FLUSH LEFT, NOT CENTRED.  2026-09-20. Søren: "can we vertically align the top view with the
+     EM preview?" They are both 260 px wide and they sat 39 px apart, because this had
+     `margin:6px auto` and the EM canvas below it has `margin:4px 0 0`. Centring is what an SVG
+     alone in a card wants; this one has not been alone since the section moved up beside it. */
+  let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px 0;background:var(--bg);border:1px solid var(--line);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
   svg+='<text x="'+pad+'" y="11" font-size="9.5" font-family="monospace" style="fill:var(--mut)">Top view (X &rarr;, Z &darr;)</text>';
   for(const e of extents){
     const ex0=sx(e.a0),ex1=sx(e.a1),ey0=sy(e.b0),ey1=sy(e.b1);
@@ -4738,7 +4809,7 @@ function showNucleus(pos){
      correction UI, not two to keep in sync. Nothing needs to happen here any more. */
   /* The section goes UNDER THE TOP VIEW rather than under the whole block — see
      renderLocationDiagram's header for the two holes that closes. */
-  h+=renderLocationDiagram(pos,emPlaneBox(pos));
+  h+=renderLocationDiagram(pos,emPlaneBox(pos,NID[i]));
   h+='<div class="meta">nearest nucleus at voxel '+coordSpan(NX[i],NY[i],NZ[i])+' &middot; '+(r.dist/1000).toFixed(2)+' &micro;m from query</div>';
   /* nearest() has no distance cap, so a query point that MICrONS's automatic nucleus detector
      never picked up at all (a real cell it simply missed) still silently returns whatever

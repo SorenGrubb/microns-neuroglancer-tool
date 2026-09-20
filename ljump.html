@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 20:19</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 20:50</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -854,6 +854,9 @@ UJ.cfg = {
     draftsKey: "ljump_tracing_drafts_v2",
     draftKey:  "ljump_tracing_draft_v1",
     penKey:    "ljump_tracing_pen_v1",
+    /* Not "a cell the segmentation does not have" — there is no segmentation, so that is every
+       cell in the volume, and saying it µJump's way would imply this dataset has one. */
+    intro:     "The Lee16 release is image only, so every cell here is one you outline yourself.",
     sources:   function(){ return { em: UJ.cfg.viewer.em }; }
   }
 };

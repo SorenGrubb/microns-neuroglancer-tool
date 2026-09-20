@@ -307,6 +307,54 @@ const CONTRACT = [
        "...with the tails that say what a level is FOR left alone", got.lee[5]);
   }
 
+  /* ── AND IT SURVIVES BEING RUN AGAIN ──────────────────────  2026-09-20
+     Since 2026-09-20 padRelabelMips runs on every draw, not only at mount, so the menu can
+     describe the pad's real width rather than the 560 the markup gives it. That makes idempotency
+     a requirement rather than a nicety — and it was not true: the regex matched `\d+ nm data`,
+     which matches minnie65's 16 and 32 and NOT V1DD's 19.4. On V1DD it replaced once, put a
+     decimal in the string, and then silently never matched again. The menu kept saying 11 µm
+     beside a caption saying 13.9. */
+  console.log("\nand relabelling twice says the same thing twice");
+  {
+    const got = await p.evaluate(async () => {
+      const real = UJ.emtiles;
+      const stub = list => ({ configured: () => true, configure: () => {},
+        scaleAt: async m => ({ scale: list[Math.min(list.length - 1, m)] }) });
+      /* V1DD: fractional nanometres, which is the case that broke it. */
+      const V1DD = [9.7, 19.4, 38.8, 77.6].map(r => ({ resolution: [r, r, 45],
+                                                       chunk_sizes: [[64, 64, 64]] }));
+      const read = () => [...document.querySelectorAll("#tracePadMip option")]
+                           .map(o => o.textContent);
+      UJ.emtiles = stub(V1DD);
+      await padRelabelMips(); const once = read();
+      await padRelabelMips(); const twice = read();
+      await padRelabelMips(); const thrice = read();
+      UJ.emtiles = real;
+      return { once, twice, thrice };
+    });
+    ok(got.once.join("|") === got.twice.join("|") && got.twice.join("|") === got.thrice.join("|"),
+       "three relabels of a fractional-nm volume give one answer",
+       got.once[1] + "  →  " + got.twice[1] + "  →  " + got.thrice[1]);
+    ok(/19\.4 nm data/.test(got.thrice[1] || ""),
+       "...and it is still the volume's own number after all three", got.thrice[1]);
+  }
+
+  /* ── WHAT THE CARD SAYS IT IS FOR ───────────────────────  2026-09-20
+     "For a cell the segmentation does not have" is minnie65's situation, and a precise one. The
+     ticks beside it already read from the host; this sentence did not, so a card that had
+     correctly removed its segmentation tick still opened by talking about a segmentation. */
+  console.log("\nand µJump's opening sentence is unchanged");
+  {
+    const got = await p.evaluate(() => ({
+      fn: typeof tracingIntro === "function" ? tracingIntro() : null,
+      shown: (document.querySelector("#tracingCard p.hint") || {}).textContent || ""
+    }));
+    ok(got.fn === "For a cell the segmentation does not have.",
+       "the default is minnie65's sentence, because minnie65 is what it describes", got.fn);
+    ok(got.shown.indexOf(got.fn) === 0, "...and it is what the card opens with",
+       got.shown.slice(0, 60));
+  }
+
   ok(errors.length === 0, "the page still loads with no new errors",
      errors.length ? errors[0] : "none");
 

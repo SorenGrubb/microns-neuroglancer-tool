@@ -438,7 +438,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 20:19</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 20:50</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -928,6 +928,19 @@ document.addEventListener("DOMContentLoaded", function(){
      community-identification block and the cell history are a separate decision about what this
      tool claims a cell is, not a refactor. -->
 <script src="core/panel.js"></script>
+<!-- ── THE SHARED REPORTING SURFACE ───────────────────────  2026-09-20
+     core/panel.js's cell-history panel draws a "Restore this version" button and calls
+     restoreClassification() behind a typeof guard. Without this file that guard was always false
+     here: the button confirmed, disabled itself, said "Submitting…" and submitted nothing.
+
+     SAFE TO ADD, CHECKED ON THE RUNNING PAGE RATHER THAN ASSUMED. None of the ten functions this
+     file declares already exists here — including showSubmitToast, which matters, because
+     ηJump keeps its own postReport and core/report.js's header records that postReport was
+     deliberately left out of it for that reason. Every global its host contract requires is
+     already present. And the file has no top-level statements at all: parsed, it declares ten
+     functions and does nothing, so the merged-nucleus and not-a-nucleus forms it also carries are
+     inert on a page that never opens them. -->
+<script src="core/report.js"></script>
 <!-- The family's chart look: palette, layout, and the dot-plot functions, generated from
      ujump.html by src/core_charts.py so the two cannot differ. Loaded after ontology.js and
      before this page's own scripts; the UJ.charts hooks it reads are set below, and read at

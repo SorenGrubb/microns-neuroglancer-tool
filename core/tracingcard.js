@@ -161,6 +161,26 @@ function tracingWindow(){
   if (!w || w.lo == null || w.hi == null) return { lo: 86, hi: 172 };
   return { lo: w.lo, hi: w.hi };
 }
+/* ── WHY THIS DATASET NEEDS THE CARD ────────────────────  2026-09-20
+   The card's first sentence was "For a cell the segmentation does not have." That is minnie65's
+   situation and a precise one — the top of that volume has nuclei segmented and cells not. It is
+   wrong on Lee16, which has no segmentation at all so that is EVERY cell, and wrong on V1DD,
+   whose segmentation is behind a CAVE login so it depends who is asking.
+
+   The ticks beside it already read from the host and so does the zoom menu; the sentence saying
+   what the card is FOR did not, so a card that had correctly removed its segmentation tick still
+   opened by talking about a segmentation.
+
+   A plain string, or a function for a host whose answer depends on who is signed in. µJump's
+   sentence is the default, so a page that sets nothing is unchanged. */
+function tracingIntro(){
+  try {
+    var s = (UJ && UJ.cfg && UJ.cfg.tracing) ? UJ.cfg.tracing.intro : null;
+    if (typeof s === "function") s = s();
+    if (s) return String(s);
+  } catch (_e){}
+  return "For a cell the segmentation does not have.";
+}
 function tracingCfg(){
   try { return (UJ && UJ.cfg && UJ.cfg.tracing) || {}; } catch (_e){ return {}; }
 }
@@ -2761,6 +2781,14 @@ async function padDraw(){
       lo: PAD_WIN.lo, hi: PAD_WIN.hi,
       onProgress: function(d, n){ if (d < n) padSay("Loading the section\u2026 " + d + "/" + n); }
     });
+    /* ── THE MENU NOW DESCRIBES THIS PAD, NOT A 560 px ONE ────────  2026-09-20
+       padRelabelMips also runs at mount, where the canvas still has the 560 the markup gives it
+       because the pad is display:none and has no width to measure. The pad then sizes itself to
+       the card — 718 px in a 1280 px window — so the menu read "11 µm" beside a caption reading
+       "13.9 µm across", both about the same picture. drawSection has just set cv.width to the
+       width it really used, so this is the first moment the two can agree. Not awaited: the
+       labels are not what the reader is waiting for. */
+    try { padRelabelMips(); } catch (_e){}
     /* ── THE SEGMENTATION GOES ON BEFORE THE CAPTURE ───────────────────────────  2026-09-17
        padCapture() snapshots the canvas as the base that every later contour repaint restores. An
        overlay painted after it would be wiped by the first mouse move; painted here it is part of
@@ -3693,7 +3721,7 @@ function tracingCardHtml(){
   return [
     "<details id=\"tracingPanel\">",
     "<summary style=\"cursor:pointer;font-weight:600\">Trace a cell or organelle &mdash; outline it, and it joins the dataset</summary>",
-    "<p class=\"hint\" style=\"margin-top:8px\">For a cell the segmentation does not have. The button below opens <b>Spelunker</b> with its <b>polyline</b> tool already armed &mdash; no viewer has a button for that tool, so the link arms it. Click each vertex round the cell, click the first one again to close the ring, then step a section with <b>,</b> or <b>.</b> and go round again. Paste the whole address bar back here. (Spelunker rather than the viewer picked at the top of the Jump tab: that choice is for viewing and sharing, and Spelunker is the only one with a polyline.) Three vertices to a section, two sections minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>",
+    "<p class=\"hint\" style=\"margin-top:8px\">" + tracingIntro() + " The button below opens <b>Spelunker</b> with its <b>polyline</b> tool already armed &mdash; no viewer has a button for that tool, so the link arms it. Click each vertex round the cell, click the first one again to close the ring, then step a section with <b>,</b> or <b>.</b> and go round again. Paste the whole address bar back here. (Spelunker rather than the viewer picked at the top of the Jump tab: that choice is for viewing and sharing, and Spelunker is the only one with a polyline.) Three vertices to a section, two sections minimum; tracing every fifth section comes out about half a percent off the real volume, every fortieth about eleven.</p>",
     "<label style=\"margin-top:10px\">Where to open it <span style=\"font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px\">&mdash; voxels, the same as the coordinate box at the top of this tab</span></label>",
     "<div class=\"row\"><div class=\"coord\"><input type=\"text\" id=\"tracingX\" inputmode=\"decimal\" placeholder=\"x\"></div><div class=\"coord\"><input type=\"text\" id=\"tracingY\" inputmode=\"decimal\" placeholder=\"y\"></div><div class=\"coord\"><input type=\"text\" id=\"tracingZ\" inputmode=\"decimal\" placeholder=\"z\"></div></div>",
     "<p class=\"hint\" style=\"margin-top:4px\">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically. Filled in from the cell you look up, and kept in step with it until you type a coordinate of your own.</p>",
@@ -3972,6 +4000,11 @@ async function padRelabelMips(){
   if (!sel || typeof UJ === "undefined" || !UJ.emtiles) return false;
   try { if (!UJ.emtiles.configured()) UJ.emtiles.configure(tracingSources()); } catch (_e){}
   try { if (!UJ.emtiles.configured()) return false; } catch (_e){ return false; }
+  /* THE CANVAS'S OWN WIDTH, which is the number of voxels drawn across it. At mount that is the
+     560 the markup carries, because the pad is display:none and has nothing to measure; after the
+     first draw it is what the pad actually used, and padOpen calls this again then. The six
+     hand-written labels this reproduces were written for 560, so before a draw the menu says what
+     they said and after one it says what is on screen. */
   var cv = document.getElementById("tracePad");
   var w = (cv && cv.width) || 560;
   var chunk0 = 0, chunk1 = 0;
@@ -3987,7 +4020,10 @@ async function padRelabelMips(){
     var head = (um >= 10 ? Math.round(um) : Math.round(um * 10) / 10) + " \u00b5m"
              + (i === 0 ? " across" : "") + " \u2014 " + nm + " nm data";
     o.textContent = o.textContent.replace(
-      /^[\d.]+ \u00b5m( across)? \u2014 \d+ nm data/, head);
+      /* [\d.]+ FOR THE NANOMETRES TOO. `\d+` matches minnie65's 16 and 32 and Lee16's 4 and 8,
+         and not V1DD's 19.4 — so on V1DD this replaced once, put a decimal into the string, and
+         then never matched again. A relabel that runs on every draw has to be idempotent. */
+      /^[\d.]+ \u00b5m( across)? \u2014 [\d.]+ nm data/, head);
     try {
       var cs = got.scale.chunk_sizes && got.scale.chunk_sizes[0];
       if (i === 0) chunk0 = (cs && cs[0]) || 0;
