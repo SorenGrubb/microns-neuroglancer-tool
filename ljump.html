@@ -233,6 +233,11 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
    established elsewhere in this file) rather than inventing new colours per source. */
 .chist-panel{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
 .chist-panel h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 8px}
+/* The history is a <details> since 2026-09-20 (core/panel.js's renderCellHistory) and its <h4>
+   lives in the <summary>, where the margin below it would push the triangle off the text's
+   baseline. The fold ships in core/ and reaches every tool at once; this line has to travel with
+   it, because each page carries its own copy of the stylesheet. */
+.chist-panel>summary>h4{margin:0}
 .chist-row{border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin-bottom:8px}
 .chist-row:last-child{margin-bottom:0}
 .chist-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px}
@@ -383,7 +388,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 08:41</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 14:19</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
