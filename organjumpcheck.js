@@ -112,33 +112,48 @@ const SETUP = `(function(){
     ok(got.colour === "#c83232", "...in the colour it was drawn in", got.colour);
   }
 
-  console.log("\nand the link that gets built shows it");
+  console.log("\nand EVERY link built for that coordinate shows it");
   {
+    /* The fault Søren found on 2026-09-20: the out-box link had the outline and the ↗ beside the
+       cell's name did not, because that one is built by showNucleus BEFORE the go handler reaches
+       buildState — so a one-shot overlay was used up before the link he actually clicks was made.
+       buildState carries it now, and nothing consumes it. */
     const got = await p.evaluate(() => {
-      const st = buildState([1050, 2050, 101]);
-      const put = organOverlayInto(st);
-      const lyr = (st.layers || []).filter(l => l.type === "annotation"
-                                                && String(l.name) === "Lysosome 1")[0];
-      const again = organOverlayInto(buildState([1050, 2050, 101]));
-      return { put: put, again: again,
-               n: lyr ? (lyr.annotations || []).length : -1,
-               kinds: lyr ? Array.from(new Set((lyr.annotations || []).map(a => a.type))) : [],
-               colour: lyr && lyr.annotationColor,
-               local: lyr && lyr.source,
-               selected: st.selectedLayer && st.selectedLayer.layer,
-               armed: ORGAN_SHOW_NEXT };
+      const first = buildState([1050, 2050, 101]);
+      const second = buildState([1050, 2050, 101]);      // the arrow, the copy button, the next render
+      const elsewhere = buildState([9, 9, 9]);
+      const lyrIn = st => (st.layers || []).filter(l => l.type === "annotation"
+                                                        && String(l.name) === "Lysosome 1")[0];
+      const a = lyrIn(first), b = lyrIn(second), c = lyrIn(elsewhere);
+      return { n: a ? (a.annotations || []).length : -1,
+               kinds: a ? Array.from(new Set((a.annotations || []).map(x => x.type))) : [],
+               centre: a ? (a.annotations || []).filter(x => x.type === "point")
+                            .map(x => x.point.join(",")) : [],
+               colour: a && a.annotationColor,
+               local: a && a.source,
+               selected: first.selectedLayer && first.selectedLayer.layer,
+               secondHasIt: !!b,
+               elsewhereHasIt: !!c,
+               stillArmed: !!ORGAN_SHOW_NEXT };
     });
-    ok(got.put === true, "the outline goes onto the state", got.put);
-    /* Four vertices closed is four lines, three sections of it is twelve. */
-    ok(got.n === 12, "...as twelve closed-loop lines, three contours' worth", got.n);
-    ok(got.kinds.length === 1 && got.kinds[0] === "line",
-       "...lines, the shape the tracing card can read back in", got.kinds.join("/"));
+    /* Four vertices closed is four lines, three sections of it is twelve — and the centre. */
+    ok(got.n === 13, "twelve closed-loop lines, three contours' worth, and the centre", got.n);
+    ok(got.kinds.length === 2 && got.kinds.indexOf("line") >= 0 && got.kinds.indexOf("point") >= 0,
+       "...the shape and the point, in one layer because it is one organelle",
+       got.kinds.join("/"));
+    ok(got.centre.length === 1 && got.centre[0] === "1050,2050,101",
+       "...the centre marked where the row says it is", got.centre.join(" "));
     ok(got.colour === "#c83232" && got.local === "local://annotations",
        "...in its own colour, on a local layer", got.colour + " " + got.local);
     ok(got.selected === "Lysosome 1", "...and selected, so the viewer opens on it", got.selected);
-    ok(got.armed === null, "the slot is emptied by the read", JSON.stringify(got.armed));
-    ok(got.again === false, "...so the next link does not carry it to a different coordinate",
-       got.again);
+    ok(got.secondHasIt === true,
+       "a second link for the same coordinate has it too — the arrow beside the cell's name",
+       got.secondHasIt);
+    ok(got.elsewhereHasIt === false,
+       "...and a link somewhere else does NOT, which is the thing that must never happen",
+       got.elsewhereHasIt);
+    ok(got.stillArmed === true, "...so it is the coordinate that decides, not who asked first",
+       got.stillArmed);
   }
 
   console.log("\na row with no outline takes a marker, not a borrowed shape");
@@ -151,17 +166,14 @@ const SETUP = `(function(){
       b.click();
       const armedRings = ORGAN_SHOW_NEXT && ORGAN_SHOW_NEXT.rings;
       const st = buildState([9000, 9000, 50]);
-      const put = organOverlayInto(st);
       const lyr = (st.layers || []).filter(l => l.type === "annotation"
                                                 && String(l.name) === "Mitochondrion")[0];
-      return { armedRings: armedRings, put: put,
-               anns: lyr ? lyr.annotations : null };
+      return { armedRings: armedRings, anns: lyr ? lyr.annotations : null };
     });
     ok(got.armedRings === null, "nothing pretends there is an outline", got.armedRings);
-    ok(got.put === true, "...but the place is still marked", got.put);
     ok(!!got.anns && got.anns.length === 1 && got.anns[0].type === "point"
        && got.anns[0].point.join(",") === "9000,9000,50",
-       "...with one point annotation, where it was logged",
+       "...but the place is still marked, with one point where it was logged",
        got.anns ? JSON.stringify(got.anns) : "none");
   }
 

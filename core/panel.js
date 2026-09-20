@@ -481,7 +481,21 @@ function renderCellHistory(items,nucleusId,rootId,coord){
       +'<div class="chist-status '+statusClass+'">'+escHtml(h.status||"recorded")+'</div>'
       +'</div>';
   }).join("");
-  el.innerHTML='<div class="chist-panel"><h4>Cell history ('+items.length+')</h4>'+rows+'</div>';
+  /* ── FOLDABLE, AND OPEN TO BEGIN WITH ────────────────────────────  2026-09-20
+     Søren: *"We should also be able to collapse the cell history and the cell identity cards, but
+     by default they should be expanded."* Six organelle reports is six cards of four lines, each
+     quoting back a sentence this project wrote -- worth reading once and worth getting out of the
+     way afterwards.
+
+     .rv-panel supplies the rotating triangle and the summary typography the sections around it
+     use, and the <h4> stays inside the summary so the heading still looks like the heading. The
+     choice is remembered across cells: collapsing this on one cell and finding it open on the next
+     is how a person learns not to bother. */
+  el.innerHTML='<details class="chist-panel rv-panel"'+(window.__histOpen===false?"":" open")
+    +'><summary><h4 style="margin:0">Cell history ('+items.length+')</h4></summary>'
+    +'<div style="margin-top:8px">'+rows+'</div></details>';
+  var _det=el.querySelector("details");
+  if(_det)_det.addEventListener("toggle",function(){ window.__histOpen=_det.open; });
   if(nucleusId){
     Array.prototype.forEach.call(el.querySelectorAll(".chist-restore-btn"),function(btn){
       btn.addEventListener("click",function(){
@@ -1242,17 +1256,35 @@ function wireOrganelleFlag(slug){
 
    The parsing and the marker-to-row arithmetic are both core/organelles.js's -- markersFromLink
    and rowsFromPoints. Nothing about how many markers a cilium takes is decided here. */
+/* ── FOLDED, AND SHUT TO BEGIN WITH ─────────────────────────────  2026-09-20
+   Søren: *"The bulk organelle annotation should be moved into the log an organelle and be collapsed
+   by default there."*
+
+   It was already inside the form -- that was the problem. A dashed box with a 61-item dropdown, a
+   link field and a button, sitting above the rows you came to fill in, reads as the main path
+   because it is the biggest thing on screen. It is the shortcut for the day you have twelve
+   mitochondria, not the way in.
+
+   So it keeps its place and loses its size: one summary line, shut. Nothing inside changes -- same
+   ids, same wiring, same kind picker -- because the feature was right and only its loudness was
+   wrong.
+
+   SHUT EVERY TIME, deliberately, where the cell history and the identity card remember what he did
+   with them. This is a tool you reach for occasionally, and a form that has quietly grown a
+   dropdown again three cells later is a form that surprises you. */
 function organellePasteHtml(){
-  return '<div class="organ-paste-box" style="border:1px dashed var(--line);border-radius:8px;'
-    +'padding:10px;margin:0 0 10px">'
-    +'<div class="hint" style="margin:0">Or point at them instead: Ctrl+click each structure in the '
+  return '<details class="organ-paste-box rv-panel" style="border:1px dashed var(--line);'
+    +'border-radius:8px;padding:10px;margin:0 0 10px">'
+    +'<summary style="margin:0">Or point at them in the viewer &mdash; paste a link, get a row per '
+    +'marker</summary>'
+    +'<div class="hint" style="margin:8px 0 0">Ctrl+click each structure in the '
     +'viewer, then paste that link here &mdash; every marker becomes a row of the kind you pick.</div>'
     +'<div style="margin-top:8px"><label for="organPasteKind">What are these?</label>'
     +'<select id="organPasteKind">'+ORGANELLE_KIND_OPTIONS_HTML+'</select></div>'
     +'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">'
     +'<input type="text" id="organPasteLink" placeholder="paste a Neuroglancer link" style="flex:1 1 240px">'
     +'<button type="button" class="idbtn" id="organPasteGo" style="width:auto">Add a row per marker</button>'
-    +'</div><div class="hint" id="organPasteNote" style="margin:6px 0 0"></div></div>';
+    +'</div><div class="hint" id="organPasteNote" style="margin:6px 0 0"></div></details>';
 }
 function organelleFormHtml(slug){
   const name=(slug&&typeof LEAF_NAMES!=="undefined")?LEAF_NAMES[slug]:null;
