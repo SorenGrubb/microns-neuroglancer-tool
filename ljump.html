@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 16:50</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 18:52</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -549,6 +549,16 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 </div>
 
 <div id="panel"></div>
+
+<!-- ── TRACE A CELL THIS DATASET HAS NO SEGMENTATION FOR ─────────────  2026-09-20
+     On µJump this card is for the cells minnie65's segmentation missed. Here it is for ALL of
+     them: the Lee16 public release is image only, so every cell in this volume is a cell you have
+     to outline yourself. The pad draws the EM section, the polygon tool puts vertices on it, and
+     what comes out is a mesh the Blender export can take — the same path µJump uses.
+
+     EMPTY ON PURPOSE. core/tracingcard.js fills it on load: where the card sits is this page's
+     decision, what is inside it is the module's. -->
+<div class="card" id="tracingCard"></div>
 
 <div class="card">
 <label>About this dataset</label>
@@ -820,7 +830,32 @@ UJ.cfg = {
   label: "Lee16 — mouse V1 serial-section TEM",
   /* 4/4/40 nm, IDENTICAL to minnie65. The one dataset in this family that needs no unit
      conversion at all: a coordinate typed here means the same thing it means in µJump. */
-  res: [4, 4, 40]
+  res: [4, 4, 40],
+  /* ── THE TRACING CARD ─────────────────────────────  2026-09-20
+     core/tracingcard.js is 3,700 lines of pad, polygon tool, volumes, drafts and link reading,
+     extracted from µJump so it could be shared rather than forked. λJump is the first page other
+     than µJump to load it, and everything per-dataset about it is these few lines.
+
+     THE FOUR KEYS ARE LITERALS AND THEY ARE λJUMP'S OWN. localStorage is one store shared by
+     every page on grubblab.com: had these been left unset, the module's fallbacks are µJump's
+     keys and the two tools would read and write ONE list of tracings and ONE set of drafts — the
+     bug storagekeycheck.js was written after µJump and πJump spent a week overwriting each
+     other's navigation history. Literals rather than `id + "_tracings_v1"` because that check can
+     only audit a key it can read, and because µJump's own id is "microns", not "ujump".
+
+     sources IS A FUNCTION so it is read after UJ.cfg.viewer is assigned, further down this file.
+     em only. Lee16 is image only — no segmentation, no nucleus volume, no meshes — and the card
+     removes the two ticks that would need them rather than offering controls that can only fail.
+
+     AND NO identityFor. There are no prediction tables for this dataset, so the card's community
+     identity line stays away. Absent rather than stubbed, which is this page's whole rule. */
+  tracing: {
+    lsKey:     "ljump_tracings_v1",
+    draftsKey: "ljump_tracing_drafts_v2",
+    draftKey:  "ljump_tracing_draft_v1",
+    penKey:    "ljump_tracing_pen_v1",
+    sources:   function(){ return { em: UJ.cfg.viewer.em }; }
+  }
 };
 var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
 UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
@@ -1221,6 +1256,10 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/traceloft.js"></script>
 <script src="core/nucmesh.js"></script>
 <script src="core/tracing.js"></script>
+<!-- The tracing card, shared with µJump since 2026-09-20. Same slot as there: after the modules
+     it is built on, before this page's own script, which supplies the host contract its header
+     lists (buildState, escHtml, postReport, UJ.cfg.tracing). -->
+<script src="core/tracingcard.js"></script>
 <script src="core/ontology.js"></script>
 <!-- The family's chart look, generated from ujump.html by src/core_charts.py. The UJ.charts
      hooks it reads are set in the dashboard section below and read at DRAW time, so tag

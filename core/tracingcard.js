@@ -50,7 +50,11 @@
        to SRC so µJump is unchanged.
      - (fixed 2026-09-20) tracingIdentityFor asks UJ.cfg.tracing.identityFor first and returns
        null on a page with no tables, instead of throwing inside a click handler.
-     - the card's MARKUP is still in ujump.html's body; this file wires it but does not build it.
+     - (fixed 2026-09-20, stage C) the card's MARKUP is built by tracingCardHtml(); a host
+       supplies an empty <div class="card" id="tracingCard"></div> and calls UJ.tracingcard.mount().
+     - (fixed 2026-09-20) the two ticks that need a segmentation and meshes are removed on a
+       dataset that has neither, and the pad's six zoom labels are computed from the volume's own
+       scale list instead of carrying minnie65's numbers — padTrimForHost, padRelabelMips.
 
    DOM IDS THIS MODULE READS/WRITES — a host page must use these names:
      #tracingCard #tracingPanel #tracingX/Y/Z #tracingOpen #tracePadOpen #tracePad #tracePadWrap
@@ -3727,7 +3731,7 @@ function tracingCardHtml(){
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>+ another one</b></td><td style=\"padding:3px 0\">Start a second organelle of the same type in the same cell &mdash; a cell has forty mitochondria, not one. Each gets its own colour here and its own number when added (Mitochondrion 1, 2, 3&hellip;), and they are added as separate structures with separate volumes. Click a colour in the <b>Drawing:</b> strip to go back to one of them.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>name each one separately</b></td><td style=\"padding:3px 0\">Appears once there are two. Off (the usual case) they are all the same type. On, each carries its own: click a number in the <b>Drawing:</b> strip and the type box becomes that one's &mdash; so one pass over a cell can log a mitochondrion, a lysosome and two vesicles. They are still added in one press, and each is numbered within its own type.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>the &micro;m dropdown</b></td><td style=\"padding:3px 0\">How much of the section is on the pad. Below 8 nm the voxels are drawn larger rather than finer &mdash; the label says which. The widest view is the slowest to load.</td></tr>",
-    "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>Show it in 3D</b></td><td style=\"padding:3px 0\">The shape so far, rebuilt after every contour. With the checkbox, the cell&rsquo;s own mesh and the nucleus are drawn see-through around it. Drag to turn, scroll to zoom.</td></tr>",
+    "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>Show it in 3D</b></td><td style=\"padding:3px 0\">The shape so far, rebuilt after every contour. <span id=\"tracePadHelpGhosts\">With the checkbox, the cell&rsquo;s own mesh and the nucleus are drawn see-through around it.</span> Drag to turn, scroll to zoom.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>Use these contours</b></td><td style=\"padding:3px 0\">Hand them to the fields below, where you say what it is and add it to the dataset. Two sections minimum &mdash; a flat outline has no surface to close.</td></tr>",
     "</table>",
     "<p class=\"hint\" id=\"padHelpMac\" style=\"margin-top:4px\"></p>",
@@ -3855,6 +3859,113 @@ function tracingCardHtml(){
    IDEMPOTENT ON PURPOSE. µJump has the card in its markup and is wired once, on DOMContentLoaded.
    A tool that BUILDS the card when a panel opens calls UJ.tracingcard.wire() again afterwards, and
    two sets of listeners on one button is a button that fires twice. */
+/* ── A CONTROL THE DATASET CANNOT HONOUR IS REMOVED, NOT DISABLED ──────  2026-09-20
+   The card is one piece of markup now shared by five datasets, and two of its ticks need volumes
+   only some of them have:
+
+     #tracePadSeg     paints this cell's own segmentation under the contours. It needs a
+                      segmentation. Lee16 is image only, and tracingSources().seg is "".
+     #tracePadGhosts  fetches the cell mesh and the nucleus mesh and draws them see-through around
+                      the tracing. It needs meshes. λJump says it has none by having no
+                      UJ.cfg.mesh at all, which is a statement in its config, not an omission.
+
+   THE GHOST TICK IS TWO TICKS AND A SENTENCE, which the first version of this missed and the
+   check caught: #tracingPasteGhosts is the same control on the pasted-contours side of the card,
+   and the help table has a line describing both. Removing one of three leaves a page that offers
+   the feature twice and explains it once.
+
+   REMOVED RATHER THAN DISABLED, because a greyed tick is a promise that it will work later and a
+   tooltip nobody opens is the only place the truth could live. What a dataset does not have is
+   not offered. µJump has both volumes and keeps both ticks.
+
+   THE LABEL GOES, NOT JUST THE INPUT. Each tick is an <input> inside its own <label>; removing
+   only the input would leave the words "show the segmentation" with nothing to tick.
+
+   ONLY ON MARKUP THIS MODULE BUILT. mount() calls this in the branch that filled an empty
+   wrapper, so a page carrying its own copy of the card keeps every control it wrote. */
+function padTrimForHost(el){
+  el = el || document.getElementById("tracingCard") || document;
+  var gone = [];
+  function drop(id, alsoId){
+    var n = el.querySelector("#" + id);
+    if (!n) return;
+    var lab = (n.closest && n.closest("label")) || n;
+    if (lab.parentNode) lab.parentNode.removeChild(lab);
+    gone.push(id);
+    if (alsoId){
+      var s = el.querySelector("#" + alsoId);
+      if (s && s.parentNode){ s.parentNode.removeChild(s); gone.push(alsoId); }
+    }
+  }
+  var seg = "";
+  try { seg = tracingSources().seg || ""; } catch (_e){ seg = ""; }
+  if (!seg) drop("tracePadSeg", "tracePadSegSay");   // its own status line goes with it
+  var mesh = null;
+  try { mesh = (UJ && UJ.cfg && UJ.cfg.mesh) || null; } catch (_e){ mesh = null; }
+  if (!(mesh && (mesh.meshBase || mesh.meshBaseAlt))){
+    drop("tracePadGhosts");        // beside the pad's own 3D window
+    drop("tracingPasteGhosts");    // the same control on the pasted-contours side
+    drop("tracePadHelpGhosts");    // and the line in the help table that describes them
+  }
+  return gone;
+}
+
+/* ── THE ZOOM MENU SAYS WHAT THIS VOLUME ACTUALLY IS ────────────  2026-09-20
+   Each option's value is "mip:zoom" and its text begins with a width in µm and the data's own
+   resolution in nm — "18 µm across — 32 nm data". Both numbers were typed for minnie65, whose
+   finest scale is 8 nm. Lee16's finest is 4 nm, so mip 2 there is 16 nm and half as wide, and the
+   menu was describing a volume the pad was not drawing.
+
+   Computed from core/emtiles.js's own scale list rather than tabulated per tool:
+
+       width µm = canvas px × (nm per voxel at this mip) ÷ zoom ÷ 1000
+
+   µJump's six labels come out of this BYTE-IDENTICAL to the ones a person typed in 2026-09-17,
+   which is the evidence that the arithmetic is the same arithmetic and not a second opinion.
+
+   Only the head is rewritten. The tails — "a whole cell", "full detail", "drawn 2×" — say what
+   the level is FOR, and that is true of any volume. The one exception is ", slower to load" on the
+   widest option: see below, it is a fact about chunk geometry and is checked rather than kept.
+
+   Silent when emtiles cannot answer. A menu with minnie65's numbers on it is wrong; a page that
+   refuses to open the pad because a label could not be computed is worse. */
+async function padRelabelMips(){
+  var sel = document.getElementById("tracePadMip");
+  if (!sel || typeof UJ === "undefined" || !UJ.emtiles) return false;
+  try { if (!UJ.emtiles.configured()) UJ.emtiles.configure(tracingSources()); } catch (_e){}
+  try { if (!UJ.emtiles.configured()) return false; } catch (_e){ return false; }
+  var cv = document.getElementById("tracePad");
+  var w = (cv && cv.width) || 560;
+  var chunk0 = 0, chunk1 = 0;
+  for (var i = 0; i < sel.options.length; i++){
+    var o = sel.options[i], parts = String(o.value).split(":");
+    var mip = parseInt(parts[0], 10) || 0, zoom = Math.max(1, parseInt(parts[1], 10) || 1);
+    var got;
+    try { got = await UJ.emtiles.scaleAt(mip); } catch (_e){ return false; }
+    if (!got || !got.scale) return false;
+    var nm = got.scale.resolution[0], um = w * nm / zoom / 1000;
+    /* 18, 9, 4.5, 2.2, 1.1, 0.6 — whole numbers stay whole, the rest keep one decimal, which is
+       exactly how the hand-written labels were written. */
+    var head = (um >= 10 ? Math.round(um) : Math.round(um * 10) / 10) + " \u00b5m"
+             + (i === 0 ? " across" : "") + " \u2014 " + nm + " nm data";
+    o.textContent = o.textContent.replace(
+      /^[\d.]+ \u00b5m( across)? \u2014 \d+ nm data/, head);
+    try {
+      var cs = got.scale.chunk_sizes && got.scale.chunk_sizes[0];
+      if (i === 0) chunk0 = (cs && cs[0]) || 0;
+      if (i === 1) chunk1 = (cs && cs[0]) || 0;
+    } catch (_e){}
+  }
+  /* ", slower to load" IS A minnie65 FACT, AND IT IS CHECKED.
+     There it is true: at 32 nm the chunks are 64 px wide where at 16 nm they are 128, so the
+     widest view costs about three times as many fetches. Lee16 chunks 512 px at every scale, so
+     its widest view is no slower than the next one and the warning would be a lie. */
+  if (sel.options.length && chunk0 && chunk1 && chunk0 >= chunk1)
+    sel.options[0].textContent =
+      sel.options[0].textContent.replace(/, slower to load$/, "");
+  return true;
+}
+
 UJ.tracingcard = UJ.tracingcard || {};
 /* ── FILL THE WRAPPER, THEN WIRE WHAT WAS FILLED ───────────────────  2026-09-20
    A host supplies an empty `<div class="card" id="tracingCard"></div>` wherever the card belongs
@@ -3868,8 +3979,14 @@ UJ.tracingcard.mount = function(el){
   if (el && !el.firstElementChild) {
     try { el.innerHTML = tracingCardHtml(); }
     catch (e){ try { console.warn("tracingcard: mount", e); } catch (_c){} return false; }
+    /* Only what this module built is trimmed — see padTrimForHost's header. */
+    try { padTrimForHost(el); } catch (_e){}
   }
-  return UJ.tracingcard.wire();
+  var ok = UJ.tracingcard.wire();
+  /* AFTER wiring, and not awaited. The menu's listener is already on by then, so a relabel cannot
+     race it, and the first scale fetch must not hold up a card that is otherwise ready. */
+  try { padRelabelMips(); } catch (_e){}
+  return ok;
 };
 UJ.tracingcard.wire = function(){
   if (UJ.tracingcard._wired) return false;

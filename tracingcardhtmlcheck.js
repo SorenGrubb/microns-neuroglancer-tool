@@ -141,6 +141,149 @@ const CONTRACT = [
        "...and a press is still one press", got.once + " then " + got.twice);
   }
 
+  /* ── WHAT THE HOST'S DATASET CAN AND CANNOT HONOUR ───────────────────────  2026-09-20
+     One piece of markup now serves five datasets, and two of its ticks need volumes only some of
+     them have: #tracePadSeg paints a segmentation, #tracePadGhosts fetches meshes. minnie65 has
+     both and µJump must keep both — this is the half of the rule that a "remove it" edit gets
+     wrong by removing too much. The λJump half (both gone, because Lee16 is image only) is in
+     emljumpcheck.js, against the real page. */
+  console.log("\nand it keeps the controls minnie65 can honour");
+  {
+    const got = await p.evaluate(() => ({
+      seg: !!document.getElementById("tracePadSeg"),
+      say: !!document.getElementById("tracePadSegSay"),
+      ghosts: !!document.getElementById("tracePadGhosts"),
+      hasSeg: !!(tracingSources() || {}).seg,
+      hasMesh: !!(window.UJ && UJ.cfg && UJ.cfg.mesh &&
+                  (UJ.cfg.mesh.meshBase || UJ.cfg.mesh.meshBaseAlt))
+    }));
+    ok(got.hasSeg && got.seg && got.say,
+       "µJump has a segmentation, so the tick that paints it stays",
+       "source " + got.hasSeg + ", tick " + got.seg + ", its status line " + got.say);
+    ok(got.hasMesh && got.ghosts,
+       "...and it has meshes, so the see-through cell stays too",
+       "meshBase " + got.hasMesh + ", tick " + got.ghosts);
+  }
+
+  console.log("\nand a host with neither gets neither");
+  {
+    /* The same module, the same markup, a host that has less. Built into a DETACHED wrapper: it is
+       never appended, so its ids do not collide with the page's own card. Appending it first was
+       the first attempt and it silently measured the wrong card — `d.querySelectorAll("#x y")`
+       resolves `#x` against the document and then filters to descendants of d, so a duplicated id
+       returns nothing at all rather than the copy inside d. The config is put back either way. */
+    const got = await p.evaluate(() => {
+      const keepMesh = UJ.cfg.mesh, keepTracing = UJ.cfg.tracing;
+      UJ.cfg.mesh = null;
+      UJ.cfg.tracing = Object.assign({}, keepTracing,
+                                     { sources: function(){ return { em: "precomputed://x" }; } });
+      const d = document.createElement("div");
+      let r;
+      try {
+        UJ.tracingcard.mount(d);
+        r = {
+          seg: !!d.querySelector("#tracePadSeg"),
+          say: !!d.querySelector("#tracePadSegSay"),
+          ghosts: !!d.querySelector("#tracePadGhosts"),
+          /* THE SAME TICK EXISTS TWICE. #tracingPasteGhosts is the pasted-contours side of the
+             card and needs the same meshes; removing only the pad's leaves the page offering a
+             feature it cannot perform. Found by this assertion, not by reading. */
+          pasteGhosts: !!d.querySelector("#tracingPasteGhosts"),
+          /* the words, not only the box: each tick is an <input> inside its own <label>, and the
+             help table has a sentence describing the ghosts as well */
+          segWords: /show the segmentation/.test(d.textContent),
+          ghostWords: /see-through/.test(d.textContent),
+          pen: !!d.querySelector("#tracePadPen"),
+          pad: !!d.querySelector("#tracePad"),
+          /* THE DROPDOWN IS PRESENT AND EMPTY, AND THAT IS CORRECT. Its 64 kinds are put in by
+             wireTracing() from the ontology, not by the markup — and wire() runs once per page,
+             so this second, throwaway card is never filled. Asserted as "the select survived the
+             trim", which is what this section is about; the 64 kinds are asserted further up,
+             on the real card. Counting options here failed twice before the reason was read. */
+          whatSelect: [...d.getElementsByTagName("select")].some(s => s.id === "tracingWhat"),
+          mipSelect: [...d.getElementsByTagName("select")].some(s => s.id === "tracePadMip")
+        };
+      } finally {
+        UJ.cfg.mesh = keepMesh; UJ.cfg.tracing = keepTracing;
+      }
+      return r;
+    });
+    ok(!got.seg && !got.say && !got.segWords,
+       "no segmentation means no tick and no words for it",
+       "tick " + got.seg + ", status line " + got.say + ", label text " + got.segWords
+       + "  <- the input is inside its label; removing only the box leaves the words behind");
+    ok(!got.ghosts && !got.pasteGhosts && !got.ghostWords,
+       "no meshes means no see-through cell, on either side of the card",
+       "pad tick " + got.ghosts + ", paste tick " + got.pasteGhosts
+       + ", any wording left " + got.ghostWords
+       + "  <- the ghost control is two ticks and a line of help, not one tick");
+    ok(got.pen && got.pad && got.whatSelect && got.mipSelect,
+       "...and nothing else was taken with them",
+       "pen " + got.pen + ", pad " + got.pad + ", what-is-it " + got.whatSelect
+       + ", zoom menu " + got.mipSelect);
+  }
+
+  /* ── THE ZOOM MENU IS ARITHMETIC, AND HERE IS THE ARITHMETIC ──────────────  2026-09-20
+     The six labels ("18 µm across — 32 nm data") were typed for minnie65 on 2026-09-17. They are
+     now computed from whatever volume the host points at. THE EVIDENCE THAT THE CALCULATION IS
+     THE SAME CALCULATION is that, fed minnie65's scales, it reproduces the typed strings exactly
+     — including the decimals, which were chosen by hand.
+
+     Driven from a stubbed UJ.emtiles rather than the network: the sandbox has no egress, and this
+     is arithmetic, not a fetch. Both volumes are the ones measured off the buckets on 2026-09-20
+     (claude/which-datasets-can-be-traced-on.md). */
+  console.log("\nand the pad's zoom levels are computed, not tabulated");
+  {
+    const TYPED = [
+      "18 µm across — 32 nm data, slower to load",
+      "9 µm — 16 nm data, a whole cell",
+      "4.5 µm — 8 nm data, full detail",
+      "2.2 µm — 8 nm data, drawn 2×",
+      "1.1 µm — 8 nm data, drawn 4×",
+      "0.6 µm — 8 nm data, drawn 8× (an organelle)"
+    ];
+    const got = await p.evaluate(async () => {
+      const real = UJ.emtiles;
+      const stub = list => ({
+        configured: () => true, configure: () => {},
+        scaleAt: async m => ({ scale: list[Math.min(list.length - 1, m)] })
+      });
+      /* minnie65: three scales keep 40 nm z, and the chunk halves in width at the coarsest —
+         which is the whole reason the widest level is slower. */
+      const MINNIE = [
+        { resolution: [8, 8, 40],   chunk_sizes: [[128, 128, 32]] },
+        { resolution: [16, 16, 40], chunk_sizes: [[128, 128, 32]] },
+        { resolution: [32, 32, 40], chunk_sizes: [[64, 64, 64]] }
+      ];
+      /* Lee16: ten scales, all 40 nm z, all chunked 512×512×16 — nothing gets slower. */
+      const LEE = [0, 1, 2, 3].map(i => ({ resolution: [4 << i, 4 << i, 40],
+                                           chunk_sizes: [[512, 512, 16]] }));
+      const read = () => [...document.querySelectorAll("#tracePadMip option")]
+                           .map(o => o.textContent);
+      UJ.emtiles = stub(MINNIE);
+      await padRelabelMips();
+      const minnie = read();
+      UJ.emtiles = stub(LEE);
+      await padRelabelMips();
+      const lee = read();
+      UJ.emtiles = real;
+      return { minnie, lee };
+    });
+    const same = got.minnie.every((s, i) => s === TYPED[i]);
+    ok(same, "fed minnie65's scales it reproduces the hand-written labels exactly",
+       same ? "all six" : got.minnie.find((s, i) => s !== TYPED[i]) + "  <- expected "
+              + TYPED[got.minnie.findIndex((s, i) => s !== TYPED[i])]);
+    ok(got.lee[0] === "9 µm across — 16 nm data" && got.lee[1] === "4.5 µm — 8 nm data, a whole cell"
+       && got.lee[2] === "2.2 µm — 4 nm data, full detail",
+       "...and fed Lee16's it says Lee16's numbers", got.lee.slice(0, 3).join(" | ")
+       + "  <- one scale finer, so the same mip is half the width and half the nanometres");
+    ok(!/slower to load/.test(got.lee[0]) && /slower to load/.test(got.minnie[0]),
+       "...and the warning about chunk counts goes only where it is true",
+       "minnie65 chunks 64 px at 32 nm against 128 at 16; Lee16 chunks 512 at every scale");
+    ok(got.lee.every(s => /µm/.test(s)) && got.lee.length === 6,
+       "...with the tails that say what a level is FOR left alone", got.lee[5]);
+  }
+
   ok(errors.length === 0, "the page still loads with no new errors",
      errors.length ? errors[0] : "none");
 

@@ -231,6 +231,78 @@ const INFO = {
     }
   }
 
+  /* ── THE TRACING CARD, WHICH IS THE POINT OF ALL OF THE ABOVE ─────────────  2026-09-20
+     Stage D of the core/tracingcard.js extraction: λJump is the first page other than µJump to
+     load the module, which is the only thing that turns "moved into core/" into "shared".
+
+     A shared card on a dataset that has less than minnie65 is where this gets interesting. Lee16
+     is IMAGE ONLY, and three parts of the card assume otherwise. What is asserted here is that
+     each one is ABSENT rather than broken — a tick that cannot work is removed, an identity the
+     dataset cannot predict is null, and a zoom menu labelled for the wrong volume is relabelled
+     from this one's own scale list. */
+  console.log("\nand it carries the shared tracing card, trimmed to what this dataset has");
+  {
+    const got = await p.evaluate(() => ({
+      wrapper: !!document.getElementById("tracingCard"),
+      filled: !!(document.getElementById("tracingCard") || {}).firstElementChild,
+      wired: !!(window.UJ && UJ.tracingcard && UJ.tracingcard._wired),
+      pad: !!document.getElementById("tracePad"),
+      /* The four keys are top-level `const`s in the module, so they are reachable by name. */
+      keys: [TRACING_KEY, TRACING_DRAFTS_KEY, TRACING_DRAFT_KEY, TRACING_PEN_KEY],
+      src: (function(){ try { return tracingSources(); } catch (e){ return { err: String(e) }; } })(),
+      segTick: !!document.getElementById("tracePadSeg"),
+      segSay: !!document.getElementById("tracePadSegSay"),
+      ghosts: !!document.getElementById("tracePadGhosts"),
+      penTick: !!document.getElementById("tracePadPen"),
+      ident: (function(){ try { return tracingIdentityFor("1", ""); } catch (e){ return "threw: " + e; } })(),
+      mips: [...document.querySelectorAll("#tracePadMip option")].map(o => o.textContent)
+    }));
+    ok(got.wrapper && got.filled, "the module built the card into λJump's wrapper",
+       got.wrapper + "/" + got.filled);
+    ok(got.wired && got.pad, "...and wired it, so the pad is a pad", got.wired + "/" + got.pad);
+
+    /* THE ONE THAT WOULD HAVE COST REAL WORK. Unset, the module falls back to µJump's keys and
+       the two tools share one list of tracings and one set of drafts. storagekeycheck.js reports
+       four collisions by name the moment these are removed — verified by removing them. */
+    ok(got.keys.every(k => /^ljump_/.test(k)),
+       "...reading and writing λJump's own storage, not µJump's", got.keys.join(", "));
+
+    ok(got.src && got.src.em === "precomputed://s3://open-neurodata/lee/lee16/image" && !got.src.seg,
+       "...pointed at Lee16's imagery, with no segmentation to point at",
+       JSON.stringify(got.src));
+
+    /* REMOVED, NOT DISABLED. Both ticks need a volume this release does not contain. A greyed
+       control is a promise it will work later; there is nothing to come. */
+    ok(!got.segTick && !got.segSay,
+       "...so the pad does not offer to paint a segmentation that does not exist",
+       "tick " + got.segTick + ", its status line " + got.segSay);
+    ok(!got.ghosts,
+       "...nor to fetch cell and nucleus meshes this dataset has none of", got.ghosts
+       + "  <- λJump has no UJ.cfg.mesh at all, which is a statement in its config");
+    ok(got.penTick, "...while the controls that need only imagery stay", got.penTick);
+
+    /* NULL IS THE ANSWER, NOT A FAILURE. No prediction tables exist for Lee16, so the community
+       identity line stays away rather than claiming a type nobody predicted. Before stage B this
+       threw inside a click handler. */
+    ok(got.ident === null, "...and a cell here has no predicted identity to report",
+       JSON.stringify(got.ident));
+
+    /* THE MENU WAS DESCRIBING minnie65. Its six labels were hand-written for a volume whose
+       finest scale is 8 nm; Lee16's is 4 nm, so every one of them was one step out — the page
+       said "32 nm data" while drawing 16. Computed now from this volume's own scale list.
+       µJump's labels come out of the same arithmetic byte-identical to the typed ones, which is
+       what says this is the same calculation and not a second opinion. */
+    ok(/^9 µm across — 16 nm data/.test(got.mips[0] || ""),
+       "the widest zoom level says what this volume actually is", got.mips[0]);
+    ok(/^4\.5 µm — 8 nm data/.test(got.mips[1] || "") && /^2\.2 µm — 4 nm data/.test(got.mips[2] || ""),
+       "...and so do the rest", (got.mips[1] || "") + " | " + (got.mips[2] || ""));
+    /* ", slower to load" is a fact about minnie65's chunk geometry: 64 px wide at 32 nm against
+       128 at 16. Lee16 chunks 512 at every scale, so its widest view is not slower and the
+       warning would be untrue. Checked against the chunk sizes, not assumed. */
+    ok(!/slower to load/.test(got.mips[0] || ""),
+       "...without µJump's warning about chunk counts, which is not true here", got.mips[0]);
+  }
+
   ok(errors.length === 0, "the page still loads with no new errors",
      errors.length ? errors[0] : "none");
 
