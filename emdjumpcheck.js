@@ -374,6 +374,44 @@ const CELL = [70556, 70763, 10196];
       ok(got.stats.scaleUm === "5", "...under a round scale bar", got.stats.scaleUm + " µm");
     }
     ok(!got.say, "...and nothing left to say once it is drawn", JSON.stringify(got.say));
+
+    /* ── WHERE IT SITS ────────────────────────────────  2026-09-20
+       Søren, the moment he saw it live: *"This could be more compact."* It had been appended
+       after the two-column block, so it landed under BOTH columns — a 688 px box around a 260 px
+       canvas, with 428 px of empty row beside it, under a top view that already had 165 px of
+       empty column beneath it. Two holes that fill each other.
+
+       ASSERTED AS GEOMETRY rather than as markup, the way λJump's was: what was wrong is how it
+       looked, and a selector would go on passing through any restyling that put the gap back. */
+    const laid = await p.evaluate(() => {
+      const box = document.getElementById("emPlaneBox");
+      const panel = document.getElementById("nucpanel");
+      const layer = [...panel.querySelectorAll("svg")]
+                      .find(s => /Leptomeninges/.test(s.textContent || ""));
+      const top = [...panel.querySelectorAll("svg")]
+                    .find(s => /Top view/.test(s.textContent || ""));
+      if (!box || !layer || !top) return { skip: !box ? "no emPlaneBox" : "no diagram" };
+      const b = box.getBoundingClientRect(), l = layer.getBoundingClientRect(),
+            t = top.getBoundingClientRect();
+      return { boxLeft: Math.round(b.left), boxTop: Math.round(b.top),
+               boxBottom: Math.round(b.bottom),
+               layerRight: Math.round(l.right), layerBottom: Math.round(layer.parentNode.getBoundingClientRect().bottom),
+               topLeft: Math.round(t.left), topBottom: Math.round(t.bottom) };
+    });
+    if (laid.skip) { ok(false, "the section's placement could be measured", laid.skip); }
+    else {
+      ok(laid.boxLeft >= laid.layerRight,
+         "...beside the layer diagram, not underneath it",
+         "section starts at " + laid.boxLeft + ", the layers end at " + laid.layerRight);
+      ok(laid.boxTop >= laid.topBottom,
+         "...stacked under the top view, in its column",
+         "section top " + laid.boxTop + " vs top view bottom " + laid.topBottom);
+      /* The point of stacking it there: the right column now ends where the left one does
+         instead of 175 px further down the page. 40 px of slack for font metrics. */
+      ok(Math.abs(laid.boxBottom - laid.layerBottom) < 40,
+         "...so the two columns end level, which is what closes the gap",
+         "right column ends " + laid.boxBottom + ", left " + laid.layerBottom);
+    }
   }
 
   /* ── THE TOP VIEW ───────────────────────────────────  2026-09-20

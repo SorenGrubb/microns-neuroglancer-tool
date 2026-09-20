@@ -557,6 +557,14 @@ UJ.cfg.mesh = {
      Requiring a token for 3D is not an extra burden here: Spelunker needs the same login
      to render V1DD segmentation at all. */
   meshBase:"https://storage.googleapis.com/v1dd_pcg/ws/graphene_meshes/initial/",
+  /* WHERE THE EDITED FRAGMENTS LIVE.  2026-09-20
+     The manifest for a proofread root mixes two kinds: `~<id>:<layer>:…shard:<n>` initial meshes,
+     baked into the shards above, and plain `<id>:0:<x0-x1>_<y0-y1>_<z0-z1>` DYNAMIC meshes,
+     generated for supervoxels proofreading has changed. core/mesh.js used to count the second
+     kind as failed without trying, which took the SOMA off every proofread cell — that is where
+     the edits are. Same bucket, same Draco encoding, one path segment along, and public: an
+     anonymous GET returns 206 with no token. */
+  meshBaseDynamic:"https://storage.googleapis.com/v1dd_pcg/ws/graphene_meshes/dynamic/",
   meshBaseAlt:"https://storage.googleapis.com/storage/v1/b/v1dd_pcg/o/ws%2Fgraphene_meshes%2Finitial%2F",
   meshBaseAltSuffix:"?alt=media",
   manifestBase:"https://api.em.brain.allentech.org/meshing/api/v1/table/v1dd_public/manifest/",
@@ -668,7 +676,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 19:52</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 20:19</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -788,7 +796,7 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
      NOTHING MOVED IN THE JAVASCRIPT: #x, #y, #z and #go keep their ids, and
      getElementById reaches into a closed <details> exactly as it reaches anywhere else. -->
 <details class="rv-panel" id="coordPanel">
-<summary>Or jump to a coordinate <span style="font-weight:400;color:var(--mut);font-size:12px">&mdash; jump to it in minnie65, identify the nearest cell &amp; its neighbours, and load the cell + nucleus in 3D</span></summary>
+<summary>Or jump to a coordinate <span style="font-weight:400;color:var(--mut);font-size:12px">&mdash; jump to it in V1DD, identify the nearest cell &amp; its neighbours, and load the cell + nucleus in 3D</span></summary>
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Jump to this coordinate, build the Neuroglancer link and enable identification">&#8594;</button></div>
 <p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.</p>
 </details>
@@ -3716,14 +3724,26 @@ function renderTopViewDiagram(vx,vy,vz){
 /* Combines the depth/layer diagram with the top-down dataset-extent diagram side by side, so
    a single coordinate shows both where it sits among cortical layers AND where it sits in the
    physical dataset, rather than either alone. */
-function renderLocationDiagram(pos){
+/* ── WHAT GOES UNDER THE TOP VIEW ────────────────────────  2026-09-20
+   Søren: *"This could be more compact."* Measured on the card before changing it: the top view is
+   168 px tall against the layer diagram's 332, so 165 px of its column was empty; and the EM
+   section, appended after this block, spanned the full 688 px around a 260 px canvas, so 428 px
+   of that row was empty too. Two holes that fill each other.
+
+   `under` is stacked in the SECOND column, beneath the top view. 168 + 166 = 334 against 332,
+   which is as level as this gets. Optional, because this function is called in five places on
+   this page and exactly one of them has a section to place. */
+function renderLocationDiagram(pos,under){
   const[vx,vy,vz]=pos;
   const layerSvg=renderLayerDiagram(estimateLayer(vx,vy,vz));
   const topSvg=renderTopViewDiagram(vx,vy,vz);
-  if(!layerSvg&&!topSvg)return "";
+  under=under||"";
+  if(!layerSvg&&!topSvg&&!under)return "";
+  /* align-items:flex-start keeps each column its own height rather than stretching the shorter
+     one, which is what lets the right column end level with the left instead of below it. */
   return '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-top:10px">'
     +(layerSvg?'<div style="flex:1 1 200px;min-width:180px">'+layerSvg+'</div>':'')
-    +(topSvg?'<div style="flex:1 1 200px;min-width:180px">'+topSvg+'</div>':'')
+    +((topSvg||under)?'<div style="flex:1 1 200px;min-width:180px">'+topSvg+under+'</div>':'')
     +'</div>';
 }
 
@@ -4516,8 +4536,8 @@ function renderStandalone(st,panel,outOfRegion){
   if(st.gl)oh+='<div class="meta" style="margin-top:-6px">'+st.gl+'</div>';
   oh+='<div class="meta">'+linkifyAuthors(st.authors)+'</div>';
   const locNote=outOfRegion
-    ?'outside the minnie65 predicted volume (e.g. minnie35/Img35 imagery), so no MICrONS segmentation or root ID is available here.'
-    :'inside the minnie65 predicted volume, but MICrONS\u2019s automatic nucleus detector produced no matching detection here, so no MICrONS segmentation or root ID is available for this point.';
+    ?'outside the part of V1DD the automatic detector covers, so no segmentation or root ID is available here.'
+    :'inside the covered part of V1DD, but its automatic nucleus detector produced no matching detection here, so no segmentation or root ID is available for this point.';
   oh+='<div class="meta">'+(st.dist<50?"at":st.dist.toFixed(0)+" nm from")+' voxel ('+coordSpan(st.pos[0],st.pos[1],st.pos[2])+') &mdash; '+locNote+'</div>';
   oh+=renderLocationDiagram(st.pos);
   if(st.centriole)oh+='<div class="meta">Centriole at voxel ('+coordSpan(st.centriole[0],st.centriole[1],st.centriole[2])+') <button class="jumpview" data-x="'+st.centriole[0]+'" data-y="'+st.centriole[1]+'" data-z="'+st.centriole[2]+'" style="margin-left:6px;padding:2px 8px;font-size:11px">Jump to centriole</button></div>';
@@ -4612,7 +4632,7 @@ function showNucleus(pos){
        estimate. Same ID_CTX.noNucleus path and "new_cell_no_nucleus" report as that warning. */
     panel.classList.add("oob");
     panel.innerHTML='<div class="oobmsg"><b>Outside the imaged volume.</b><br>This coordinate lies beyond the V1DD block, so there is no nucleus to identify here.</div>'
-      +'<div class="idcta warn" style="margin-top:10px"><div class="idcta-top"><span>Found a real cell here? The minnie35/Img35 imagery isn\'t covered by MICrONS\'s nucleus detector or verified-cell dataset at all yet.</span><button class="idbtn" id="idfNewCellGo">Report a new cell &rarr;</button></div>'
+      +'<div class="idcta warn" style="margin-top:10px"><div class="idcta-top"><span>Found a real cell here? This part of the volume isn\'t covered by V1DD\'s nucleus detector or verified-cell dataset at all yet.</span><button class="idbtn" id="idfNewCellGo">Report a new cell &rarr;</button></div>'
       +'<div class="idcta-search">'+leafSearchHtml("newCellLeaf","Already know the type? Jump straight there")+'</div>'
       +'<div class="hint" style="margin-top:8px">Not sure what type it is yet? <span class="idf-back" id="idfLocOnlyGo" style="margin:0">Just log its location and any segmentation IDs, skip classification for now &rarr;</span></div></div>';
     const newCellCtx={pos,noNucleus:true};
@@ -4716,10 +4736,9 @@ function showNucleus(pos){
      relocation (see its "3. Full-panel relocation" comment) -- the real #nucpanel now physically
      moves under the step-through card while stepping, so there is exactly one identity/voting/
      correction UI, not two to keep in sync. Nothing needs to happen here any more. */
-  h+=renderLocationDiagram(pos);
-  /* The section goes under the layer diagram and the top view, which is the slot µJump uses:
-     the reader is already asking where this cell is rather than what it is. */
-  h+=emPlaneBox(pos);
+  /* The section goes UNDER THE TOP VIEW rather than under the whole block — see
+     renderLocationDiagram's header for the two holes that closes. */
+  h+=renderLocationDiagram(pos,emPlaneBox(pos));
   h+='<div class="meta">nearest nucleus at voxel '+coordSpan(NX[i],NY[i],NZ[i])+' &middot; '+(r.dist/1000).toFixed(2)+' &micro;m from query</div>';
   /* nearest() has no distance cap, so a query point that MICrONS's automatic nucleus detector
      never picked up at all (a real cell it simply missed) still silently returns whatever
@@ -6221,7 +6240,7 @@ function loadRootIdPanel(nid,containerEl){
     const isOwner=OWNER_EMAIL&&REPORTER_EMAIL===OWNER_EMAIL;
     const n=list.length;
     let body=(failed?'<div style="font-size:12px;color:var(--bad);margin-bottom:6px">The list of already-proposed IDs could not be read just now, so it is not shown \u2014 proposing still works, and duplicates are merged by ID.</div>':'')
-      +'<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Segmentation and nucleus detection are often patchy — one cell can span several meshes. Proposed IDs are added to the matching Neuroglancer layer for everyone; vote whether each belongs. Pick which segmentation each ID comes from — an Img65 or Img35 segment ID, or a Nucleus ID — because an ID only works in its own segmentation.</div>';
+      +'<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Segmentation and nucleus detection are often patchy — one cell can span several meshes. Proposed IDs are added to the matching Neuroglancer layer for everyone; vote whether each belongs. Pick which segmentation each ID comes from — a segment ID or a Nucleus ID — because an ID only works in its own segmentation.</div>';
     if(n){
       list.forEach(x=>{
         var st=x.segType||"img65";
@@ -7563,7 +7582,7 @@ function renderUserReportedCell(ur,panel){
   oh+='<div class="celltype">'+celltypeLink(ur.pos,isUnclassified?"Unclassified cell":escHtml(ur.identified))+'</div>';
   oh+='<div class="meta">Reported by '+escHtml(who)+(ur.certainty?' &middot; certainty '+escHtml(ur.certainty)+'/5':'')+'</div>';
   if(ur.comment)oh+='<div class="meta">'+escHtml(ur.comment)+'</div>';
-  oh+='<div class="meta">'+(ur.dist<50?"at":ur.dist.toFixed(0)+" nm from")+' voxel ('+coordSpan(ur.pos[0],ur.pos[1],ur.pos[2])+') &mdash; this is the reporter’s own estimated location; the minnie35/Img35 imagery here has no MICrONS nucleus detection to compare against.</div>';
+  oh+='<div class="meta">'+(ur.dist<50?"at":ur.dist.toFixed(0)+" nm from")+' voxel ('+coordSpan(ur.pos[0],ur.pos[1],ur.pos[2])+') &mdash; this is the reporter’s own estimated location; there is no automatic nucleus detection here to compare against.</div>';
   oh+=renderLocationDiagram(ur.pos);
   /* 2026-08-09 (Søren: "cells lacking nuclei should allow assignment of a nucleus ID, future
      calculation of nucleus volume, future calculation of root ID volume") -- this block used to
@@ -7625,7 +7644,7 @@ function renderUserReportedCell(ur,panel){
        minnie35/Img35 territory at all, which is still very sparse. A "nearest" match here can
        easily be tens of µm away and say nothing about what's actually next to this cell, so this
        needs its own caveat rather than reusing the in-region list's implicit trust. */
-    oh+='<div class="meta" style="color:var(--warn);margin-bottom:8px">&#9888; Only a handful of cells have been identified in the minnie35/Img35 imagery so far, unlike the densely-covered minnie65 dataset &mdash; these "nearest" matches can easily be tens of &micro;m away and shouldn’t be trusted as real neighbours yet.</div>';
+    oh+='<div class="meta" style="color:var(--warn);margin-bottom:8px">&#9888; Only a handful of cells have been identified out here so far, unlike the densely-covered part of V1DD &mdash; these "nearest" matches can easily be tens of &micro;m away and shouldn’t be trusted as real neighbours yet.</div>';
     for(const c of nearby)oh+=oobNeighborRowHtml(c);
     oh+='</div>';
   }
@@ -12648,13 +12667,19 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       });
     });
     if(!boxesNm.length){c.innerHTML='<p class="hint">Enter both corners (voxels) for at least one box to preview it.</p>';return;}
+    /* ONE EXTENT, NOT THE SAME ONE TWICE.  2026-09-20
+       MINNIE35_EM_BB is assigned `= MINNIE65_EM_BB` further down this file, so this drew two
+       dashed rectangles exactly on top of each other, in two colours, under the names of two
+       volumes this tool does not have — with a legend explaining the difference between them.
+       Same fault the top view had, in the second diagram that carries it. The constants keep
+       their minnie-shaped names; renaming those reaches three more callers and is its own
+       change. #b388ff is the purple this page already draws its own extent in. */
+    const EXTENT_NAME="V1DD imaged extent",EXTENT_COLOR="#b388ff";
     const extentsXZ=[
-      {name:"Img65 (minnie65)",color:"#58a6ff",a0:MINNIE65_EM_BB.xmin,a1:MINNIE65_EM_BB.xmax,b0:MINNIE65_EM_BB.zmin,b1:MINNIE65_EM_BB.zmax},
-      {name:"Img35 (minnie35)",color:"#f0883e",a0:MINNIE35_EM_BB.xmin,a1:MINNIE35_EM_BB.xmax,b0:MINNIE35_EM_BB.zmin,b1:MINNIE35_EM_BB.zmax}
+      {name:EXTENT_NAME,color:EXTENT_COLOR,a0:MINNIE65_EM_BB.xmin,a1:MINNIE65_EM_BB.xmax,b0:MINNIE65_EM_BB.zmin,b1:MINNIE65_EM_BB.zmax}
     ];
     const extentsXY=[
-      {name:"Img65 (minnie65)",color:"#58a6ff",a0:MINNIE65_EM_BB.xmin,a1:MINNIE65_EM_BB.xmax,b0:MINNIE65_EM_BB.ymin,b1:MINNIE65_EM_BB.ymax},
-      {name:"Img35 (minnie35)",color:"#f0883e",a0:MINNIE35_EM_BB.xmin,a1:MINNIE35_EM_BB.xmax,b0:MINNIE35_EM_BB.ymin,b1:MINNIE35_EM_BB.ymax}
+      {name:EXTENT_NAME,color:EXTENT_COLOR,a0:MINNIE65_EM_BB.xmin,a1:MINNIE65_EM_BB.xmax,b0:MINNIE65_EM_BB.ymin,b1:MINNIE65_EM_BB.ymax}
     ];
     let html="";
     if(boxesNm.length>1){
