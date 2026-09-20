@@ -203,6 +203,32 @@ const INFO = {
        "  <- µJump must warn that its 64 nm level averages two; all ten Lee16 scales keep 40 nm z");
     ok(got.scaleUm === "5", "...under a round scale bar", got.scaleUm + " µm");
     ok(!got.say, "...and nothing left to say once it is drawn", JSON.stringify(got.say));
+
+    /* WHERE IT SITS, which Søren asked about the moment he saw it live: *"This can be arranged
+       more compact."* It had landed in a row of its own under the depth ruler, which left ~200 px
+       of empty background beside the ruler AND margins either side of the picture. The paragraph
+       and the section are now a stack beside the ruler, so both gaps close.
+
+       Asserted as GEOMETRY rather than as markup: what was wrong was how it looked, and a
+       selector would go on passing through any restyling that put the gap back. */
+    const laid = await p.evaluate(() => {
+      const box = document.getElementById("emPlaneBox");
+      const svg = document.querySelector("#panel .card svg[aria-label^='Depth of this nucleus']");
+      if (!box || !svg) return { skip: !box ? "no emPlaneBox" : "no depth ruler" };
+      const b = box.getBoundingClientRect(), r = svg.getBoundingClientRect();
+      return { boxLeft: Math.round(b.left), rulerRight: Math.round(r.right),
+               boxTop: Math.round(b.top), rulerBottom: Math.round(r.bottom) };
+    });
+    if (laid.skip) {
+      ok(false, "the section's placement could be measured", laid.skip);
+    } else {
+      ok(laid.boxLeft >= laid.rulerRight,
+         "...beside the depth ruler, not underneath it",
+         "section starts at " + laid.boxLeft + ", ruler ends at " + laid.rulerRight);
+      ok(laid.boxTop < laid.rulerBottom,
+         "...level with it, so the space beside the ruler is used rather than left empty",
+         "section top " + laid.boxTop + " vs ruler bottom " + laid.rulerBottom);
+    }
   }
 
   ok(errors.length === 0, "the page still loads with no new errors",

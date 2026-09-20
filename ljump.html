@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 16:22</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 16:29</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1001,7 +1001,7 @@ function emPlaneBox(pos){
     + (missing ? escHtml(missing) : "") + '</span></div>'
     + '<canvas id="emPlaneCv" width="' + EM_PLANE_W + '" height="' + EM_PLANE_H + '" '
     + 'style="width:100%;max-width:' + EM_PLANE_CSS + 'px;display:' + (on ? "block" : "none")
-    + ';margin:0 auto;background:var(--bg);border:1px solid var(--line);'
+    + ';margin:4px 0 0;background:var(--bg);border:1px solid var(--line);'
     + 'border-radius:6px"></canvas></div>';
 }
 /* A ROUND NUMBER, NOT A FIXED FRACTION. A bar of "30% of the view" reads 5.76 \u00b5m here and
@@ -1849,7 +1849,20 @@ function showCell(i, distNm){
 
   h+='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;align-items:flex-start">'
     +'<div style="flex:0 0 auto">'+renderDepthRuler(i)+'</div>'
-    +'<p class="hint" style="flex:1 1 200px;margin-top:0">'
+    /* ── THE STACK BESIDE THE RULER ─────────────────────────  2026-09-20
+       Søren, seeing the section land in a row of its own: *"This can be arranged more compact."*
+       It was: one paragraph three lines deep beside a ruler 260 px tall, then ~200 px of empty
+       background, then the picture in a full-width row with margins either side.
+
+       So the paragraph and the section become a column and fill that space, which is the move
+       µJump already made for the same reason -- "the two diagrams stop being two flex siblings and
+       become a model column and a stack, and the stack is what grew".
+
+       min-width 240: below that the row wraps and the stack goes full width, which is right on a
+       phone. Without a floor it wraps early and the section renders narrower than the 260 px it is
+       drawn at, on a screen with room for both. */
+    +'<div style="flex:1 1 300px;min-width:240px">'
+    +'<p class="hint" style="margin:0">'
     +(added
       ? 'This nucleus has no detection, so its depth is <b>estimated</b>: a plane fitted to the '
         +DEPTH_FIT_K+' nearest detections\u2019 own depths, anchored on the nearest one. The pial '
@@ -1859,12 +1872,12 @@ function showCell(i, distNm){
       : 'Depth is measured from the <b>traced pial surface</b>, which is inside this volume '
         +'&mdash; not from a fitted plane. The layer boundaries themselves are standard mouse V1 '
         +'values, not measured here, so treat a cell near a boundary as near a boundary.')
-    +'</p></div>';
-
-  /* The section goes under the depth ruler, which is the slot µJump uses: beside the orientation
-     diagram, where this column has room and the reader is already asking where the cell is rather
-     than what it is. */
-  h+=emPlaneBox(pos);
+    +'</p>'
+    /* Inside the stack now, not in a row of its own. Still the slot µJump uses -- beside the
+       orientation diagram, where the reader is already asking where the cell is rather than what
+       it is -- just without the empty row that used to separate them. */
+    +emPlaneBox(pos)
+    +'</div></div>';
 
   h+='<div class="meta">'
     +(added?('added by '+escHtml(rec.reporterName||"someone")
