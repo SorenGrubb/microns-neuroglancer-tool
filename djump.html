@@ -507,6 +507,10 @@ UJ.cfg.backend = {
    by changing only this object. loadInfo() overwrites the sharding fields at runtime from the
    bucket's info file, which stays authoritative. */
 UJ.cfg.mesh = {
+  /* Its own, not core/mesh.js's shared default. Five tools were writing one list of
+     "roots with no mesh", and an id absent from one volume is a real id in the next —
+     see βJump's own note, which said so a month before anybody else applied it. */
+  notFoundKey: "djump_mesh_notfound_v1",
   /* V1DD meshes, verified 2026-08-20. A whole fetch is exactly two requests:
        1. the root -> fragment manifest, which NEEDS the user's CAVE token:
           https://api.em.brain.allentech.org/meshing/api/v1/table/v1dd_public/manifest/<root>:0
@@ -599,7 +603,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 16:50</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 17:46</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------

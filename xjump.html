@@ -1246,7 +1246,12 @@ UJ.cfg.backend = {
    meshVertexToNm from UJ.cfg.mesh first and UJ.cfg.volume second, precisely because this line
    exists: a copy written above it is erased here, silently, and cb2 cells would then reach the
    scene 60,000x too small. The one true copy is UJ.cfg.volume.meshVertexToNm. 2026-09-08. */
-UJ.cfg.mesh = {};
+UJ.cfg.mesh = {
+  /* Its own, not core/mesh.js's shared default. Five tools were writing one list of
+     "roots with no mesh", and an id absent from one volume is a real id in the next —
+     see βJump's own note, which said so a month before anybody else applied it. */
+  notFoundKey: "xjump_mesh_notfound_v1"
+};
 </script>
 <!-- core/mesh.js, for its EXPORT half only: the .glb container, the PowerPoint skeleton and the
      volume sum, split out of it on 2026-09-01 so a tool with its own decoder could reach them.

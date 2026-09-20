@@ -438,7 +438,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 16:50</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 17:46</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -836,6 +836,10 @@ UJ.toVox = function(p){ return [p[0]/UJ_RX, p[1]/UJ_RY, p[2]/UJ_RZ]; };
    core/mesh.js works unchanged. Read from the bucket's own info file; loadInfo() re-reads and
    overwrites the sharding fields at runtime anyway. */
 UJ.cfg.mesh = {
+  /* Its own, not core/mesh.js's shared default. Five tools were writing one list of
+     "roots with no mesh", and an id absent from one volume is a real id in the next —
+     see βJump's own note, which said so a month before anybody else applied it. */
+  notFoundKey: "hjump_mesh_notfound_v1",
   meshBase: "https://storage.googleapis.com/h01-release/data/20210601/c3/mesh/",
   meshBaseAlt: "https://storage.googleapis.com/storage/v1/b/h01-release/o/data%2F20210601%2Fc3%2Fmesh%2F",
   meshBaseAltSuffix: ".shard?alt=media",

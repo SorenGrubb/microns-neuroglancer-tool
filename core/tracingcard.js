@@ -27,8 +27,13 @@
    ── HOST CONTRACT ─ what the page must provide ───────────────────────────────────
 
    required : escHtml, postReport, REPORT_ENDPOINT, REPORTER_NAME, REPORTER_EMAIL,
-              GOOGLE_VERIFIED, GOOGLE_CREDENTIAL, buildState(pos), SRC (with .em/.seg/.nuc),
-              UJ.cfg (.id, .res)
+              GOOGLE_VERIFIED, GOOGLE_CREDENTIAL, buildState(pos), UJ.cfg (.res), and this
+              dataset's imagery — either a global SRC with .em/.seg/.nuc, or UJ.cfg.tracing.sources
+   config   : UJ.cfg.tracing = { lsKey, draftsKey, draftKey, penKey, sources, identityFor }.
+              Every field optional; the four keys fall back to µJump's, sources falls back to SRC,
+              and identityFor to µJump's own tables when they are present. A tool that sets none of
+              them gets µJump's storage, which is why setting the four keys is the first thing a
+              new host must do — storagekeycheck.js fails until it does
    from core: core/segread.js, core/segpaint.js, core/emtiles.js, core/tracepad.js,
               core/traceloft.js, core/tracing.js, core/organellelink.js, core/nucmesh.js,
               core/ontology.js (LEAF_NAMES), core/organelles.js, core/gamify.js
@@ -41,8 +46,10 @@
      - four localStorage keys are literal "ujump_..." strings. A second tool loading this file
        TODAY would share µJump's tracings and drafts — exactly the bug storagekeycheck.js was
        written for. Nothing else loads it yet.
-     - SRC.em / SRC.seg / SRC.nuc are read directly in six places.
-     - tracingIdentityFor reads NID/NT/OWN_TYPE/CT_NAMES, which are µJump's own tables.
+     - (fixed 2026-09-20) the seven SRC reads now go through tracingSources(), which falls back
+       to SRC so µJump is unchanged.
+     - (fixed 2026-09-20) tracingIdentityFor asks UJ.cfg.tracing.identityFor first and returns
+       null on a page with no tables, instead of throwing inside a click handler.
      - the card's MARKUP is still in ujump.html's body; this file wires it but does not build it.
 
    DOM IDS THIS MODULE READS/WRITES — a host page must use these names:
@@ -75,7 +82,51 @@ var UJ = UJ || {};
    is it. But anyone may extend or correct one -- Søren, same message: *"other people should be
    able to add to it or edit it"* -- so credit accumulates instead of transferring, and no version
    is ever deleted. */
-const TRACING_KEY="ujump_tracings_v1";
+/* ── WHOSE STORAGE THIS IS ──────────────────────────────────  2026-09-20
+   localStorage is ONE store shared by every page on grubblab.com, so a key written into a shared
+   module is a key every tool that loads it takes turns overwriting. µJump and πJump spent a week
+   doing exactly that to each other's dashboard cache and navigation history; storagekeycheck.js
+   is what came out of it.
+
+   EACH PAGE NAMES ITS OWN, as literals, through UJ.cfg.tracing — the shape core/stepthrough.js
+   already uses (`stepCfg().lsKey || "ujump_stepthrough_v1"`). The fallbacks below are µJump's
+   real keys, so µJump is unchanged whether or not it configures them.
+
+   NOT BUILT FROM UJ.cfg.id, which was the first plan and would have been a quiet disaster:
+   µJump's id is "microns", not "ujump", so every key would have been renamed and every tracing
+   and draft anybody had saved would still be in their browser under a name nothing reads.
+
+   AND NOT COMPUTED AT ALL, for a second reason: storagekeycheck.js resolves a key only when it is
+   a literal it can read in the page. A computed key is reported as an expression nobody can
+   audit, and it says so because a computed key escapes both of its other rules. */
+/* ── WHERE THIS DATASET'S IMAGERY IS ─────────────────────────────  2026-09-20
+   Three facts and a voxel size: the EM to draw a section from, the segmentation to paint over it,
+   the nuclei to read a nucleus id out of, and how big a voxel is. µJump keeps them in a global
+   called SRC; λJump keeps the same facts in UJ.cfg.viewer.
+
+   FALLS BACK TO SRC, so µJump declares nothing and is unchanged. A host without one sets
+   UJ.cfg.tracing.sources — an object, or a function of no arguments for a host whose sources are
+   themselves assembled at load time.
+
+   IT RETURNS res TOO, and that is not tidiness: five of the seven call sites carried their own
+   copy of `res: UJ.cfg ? UJ.cfg.res : [4, 4, 40]`, which is five places for a dataset with a
+   different voxel size to be got wrong in, and only one of them would be noticed. */
+function tracingSources(){
+  var o = null;
+  try {
+    var c = (UJ && UJ.cfg && UJ.cfg.tracing) ? UJ.cfg.tracing.sources : null;
+    if (c) o = (typeof c === "function") ? c() : c;
+  } catch (_e){ o = null; }
+  if (!o) { try { o = SRC; } catch (_e){ o = null; } }   // ReferenceError on a page with no SRC
+  o = o || {};
+  var res = [4, 4, 40];
+  try { if (UJ && UJ.cfg && UJ.cfg.res) res = UJ.cfg.res; } catch (_e){}
+  return { em: o.em || "", seg: o.seg || "", nuc: o.nuc || "", res: res };
+}
+function tracingCfg(){
+  try { return (UJ && UJ.cfg && UJ.cfg.tracing) || {}; } catch (_e){ return {}; }
+}
+const TRACING_KEY = tracingCfg().lsKey || "ujump_tracings_v1";
 let TRACINGS_KEPT=[];
 function tracingRead(){
   try{ const v=JSON.parse(localStorage.getItem(TRACING_KEY)||"[]"); return Array.isArray(v)?v:[]; }
@@ -787,7 +838,7 @@ function tracingShowCellIn(st, root, nuc){
   }
   if (root){
     if (!cellLayer){
-      cellLayer = { type: "segmentation", source: SRC.seg, tab: "source", name: "segmentation",
+      cellLayer = { type: "segmentation", source: tracingSources().seg, tab: "source", name: "segmentation",
                     notSelectedAlpha: 0.05 };
       st.layers.push(cellLayer);
     }
@@ -796,7 +847,7 @@ function tracingShowCellIn(st, root, nuc){
   } else if (cellLayer){ delete cellLayer.segments; }
   if (nuc){
     if (!nucLayer){
-      nucLayer = { type: "segmentation", source: SRC.nuc, tab: "source", name: "nuclei",
+      nucLayer = { type: "segmentation", source: tracingSources().nuc, tab: "source", name: "nuclei",
                    notSelectedAlpha: 0.05 };
       st.layers.push(nucLayer);
     }
@@ -1364,7 +1415,7 @@ async function pad3DGhostMeshes(){
   }
   if (ids.nuc && UJ.nucmesh){
     try {
-      if (!UJ.nucmesh.configured()) UJ.nucmesh.configure({ nuc: SRC.nuc });
+      if (!UJ.nucmesh.configured()) UJ.nucmesh.configure({ nuc: tracingSources().nuc });
       pad3DNote("fetching the nucleus’ mesh…");
       const n = await UJ.nucmesh.fetchNucleus(ids.nuc);
       if (n && n.positions.length) out.push({ what: "nucleus", mesh: n });
@@ -1671,8 +1722,11 @@ function tracingVolShow(){
    THE OLD KEY IS READ AND NEVER WRITTEN. A draft saved before today is adopted on first read and
    left exactly where it is -- belt and braces, on the day a tracing was destroyed by a save that
    thought it knew better. */
-const TRACING_DRAFTS_KEY = "ujump_tracing_drafts_v2";
-const TRACING_DRAFT_KEY = "ujump_tracing_draft_v1";     // the old single slot: read, never written
+const TRACING_DRAFTS_KEY = tracingCfg().draftsKey || "ujump_tracing_drafts_v2";
+const TRACING_DRAFT_KEY = tracingCfg().draftKey || "ujump_tracing_draft_v1";  // old single slot: read, never written
+/* The pen tick's own preference. It was three copies of one literal in the wiring below, which is
+   three places to forget when a second tool loads this file. */
+const TRACING_PEN_KEY = tracingCfg().penKey || "ujump_tracing_pen_v1";
 const TRACING_DRAFTS_MAX = 50;
 var TRACING_DRAFT_SOON = null, TRACING_DRAFT_ID = "";
 
@@ -2057,7 +2111,7 @@ function draftResumeFrom(d){
   TRACING_BASE_ID = d.baseId || "";
   TRACING_DRAFT_ID = d.id || draftCurrentId();
   if (!UJ.emtiles.configured())
-    UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
+    UJ.emtiles.configure(tracingSources());
   PAD = UJ.tracepad.create();
   /* inst: the other half of the fix in draftNow() above. A draft written before this existed has
      no inst on its contours, and `|| 0` puts all of them on structure one -- which is what it
@@ -2237,7 +2291,7 @@ async function tracingOpenShared(sid, btn){
     if (!st || !st.rings.length) throw new Error("that tracing came back with no contours on it");
 
     if (!UJ.emtiles.configured())
-      UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
+      UJ.emtiles.configure(tracingSources());
     PAD = UJ.tracepad.create();
     PAD.rings = st.rings.map(function(r){
       return { z: Math.round(r.z),
@@ -2619,7 +2673,7 @@ async function padSegOverlay(){
   }
   try {
     if (!UJ.segpaint.configured())
-      UJ.segpaint.configure({ seg: SRC.seg, nuc: SRC.nuc, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
+      UJ.segpaint.configure(tracingSources());
     const cv = document.getElementById("tracePad");
     padSegSay("Reading the segmentation…");
     const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, nuc: nuc, alpha: 0.4,
@@ -2883,7 +2937,7 @@ function padOpen(){
   const got = tracingPos();
   if (got.error){ tracingSay(got.error, true); return; }
   if (!UJ.emtiles.configured())
-    UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg ? UJ.cfg.res : [4, 4, 40] });
+    UJ.emtiles.configure(tracingSources());
 
   /* ── WITH WORK IN HAND, THIS MOVES THE PAD; IT DOES NOT REPLACE IT ─────────────  2026-09-19
      Søren: *"I then moved to another coordinate to continue segmenting, but then the drawing
@@ -2965,6 +3019,19 @@ function padOpen(){
    version of this filled the nucleus in from a root id and never the other way round. Caught by the
    check asserting BOTH directions rather than one. */
 function tracingIdentityFor(nucIn, rootIn){
+  /* ── WHAT THIS CELL ALREADY IS, IF THE PAGE KNOWS ──────────────────  2026-09-20
+     The body below is µJump's, and it reads µJump's tables: NID, NT, OWN_TYPE, OWN_TYPE_NAMES,
+     CT_NAMES. Most are behind a `typeof` guard; NID and CT_NAMES were not, and on a page without
+     them this throws inside a click handler — which looks like a button that does nothing.
+
+     A host that can identify its own cells answers here. One that cannot gets null, and the form
+     simply does not pre-select a type. That is a real state, not a degraded one: this only ever
+     OFFERS a starting point, and offering none is better than offering a wrong one. */
+  try {
+    var hook = (UJ && UJ.cfg && UJ.cfg.tracing) ? UJ.cfg.tracing.identityFor : null;
+    if (typeof hook === "function") return hook(nucIn, rootIn) || null;
+  } catch (_e){}
+  if (typeof NID === "undefined") return null;      // no tables on this page, and none promised
   var i = -1, via = "";
   if (nucIn && typeof nidToIndex === "function"){
     i = nidToIndex(String(nucIn));
@@ -2989,7 +3056,7 @@ function tracingIdentityFor(nucIn, rootIn){
   var comm = (window.__COMM_ROWTYPE || {})[String(NID[i])];
   if (comm) return answer(comm, "reported by the community");
   var t = (typeof NT !== "undefined") ? NT[i] : 0;
-  if (t) return answer(CT_NAMES[t - 1], "MICrONS\u2019 prediction");
+  if (t && typeof CT_NAMES !== "undefined") return answer(CT_NAMES[t - 1], "MICrONS\u2019 prediction");
   return answer("", "no identity on file");
 }
 
@@ -3062,7 +3129,7 @@ async function tracingResolveAt(pos){
   const nucEl=document.getElementById("tracingNucId"), rootEl=document.getElementById("tracingRootId");
   if(!say||!nucEl||!rootEl)return;
   try{
-    UJ.segread.configure({seg:SRC.seg,nuc:SRC.nuc,res:UJ.cfg.res});
+    UJ.segread.configure(tracingSources());
   }catch(e){say.textContent="";return;}
   say.textContent="Reading what is at "+pos.join(", ")+"\u2026";
   try{
@@ -3103,9 +3170,9 @@ function wirePad(){
      the theme; it is a preference about the hand doing the drawing, not about the tracing. */
   const pen = document.getElementById("tracePadPen");
   if (pen){
-    try { pen.checked = localStorage.getItem("ujump_tracing_pen_v1") === "1"; } catch (_e){}
+    try { pen.checked = localStorage.getItem(TRACING_PEN_KEY) === "1"; } catch (_e){}
     pen.addEventListener("change", function(){
-      try { localStorage.setItem("ujump_tracing_pen_v1", pen.checked ? "1" : "0"); } catch (_e){}
+      try { localStorage.setItem(TRACING_PEN_KEY, pen.checked ? "1" : "0"); } catch (_e){}
       padSay(pen.checked
         ? "Freehand on — press and draw all the way round the structure, then lift. Shift+drag "
           + "pans while this is on."
@@ -3211,7 +3278,7 @@ function wirePad(){
     if (!drawFreehand() && e.pointerType === "pen"){
       const box = document.getElementById("tracePadPen");
       if (box){ box.checked = true;
-        try { localStorage.setItem("ujump_tracing_pen_v1", "1"); } catch (_e){}
+        try { localStorage.setItem(TRACING_PEN_KEY, "1"); } catch (_e){}
         padSay("Pen detected — freehand drawing is on. Draw all the way round the structure "
           + "and lift. Untick “draw freehand” to go back to clicking each vertex."); }
     }

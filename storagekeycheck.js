@@ -14,8 +14,9 @@
    Fixing the four keys fixes today. This file is what stops the fifth, because the next page
    derived from an existing one will inherit exactly the same way:
 
-     1. every storage key a page uses is found -- literals, the *_KEY constants, and the second
-        argument of persistDetailsOpen();
+     1. every storage key a page uses is found -- literals, the *_KEY constants, the second
+        argument of persistDetailsOpen(), the config objects a page hands to a shared module, and
+        the keys inside every core/*.js that page loads;
      2. no key may be used by two pages, except a NAMED list of deliberately shared ones, each with
         its reason;
      3. every other key must begin with its own page's prefix;
@@ -25,8 +26,25 @@
    Rule 4 is the one that keeps this check honest as the pages change. Reading the shipped HTML
    directly, no browser needed.
 
+   ── WHY IT NOW READS core/ AS WELL ──────────────────────────────────────────────  2026-09-20
+
+   The tracing card moved into core/tracingcard.js, taking four "ujump_..." keys with it, and this
+   check went on passing — because it read only the .html pages, and the keys were no longer in
+   one. A shared module is the WORST place for an unaudited key: a key in a page can collide with
+   eight other pages, a key in core/ collides with every page that loads it, by construction.
+
+   So a page's keys are now its own PLUS those of every core module it loads. A literal key in a
+   shared module is attributed to each of its hosts, which is what makes the second tool to load
+   that module fail this check until it names keys of its own — which is the point.
+
+   A module asks its host for them (core/stepthrough.js's `stepCfg().lsKey || "ujump_..."`, and
+   core/tracingcard.js's `tracingCfg().lsKey || "ujump_..."`), so the page states them as literals
+   in a config object. Those are found too: rule 4 refuses a key this file cannot read, and a key
+   handed over as `lsKey: "..."` is one it can.
+
    Run from this folder:  node storagekeycheck.js */
 const fs = require("fs");
+const path = require("path");
 const page_ = require("./pagepath.js");
 
 const R = [];
@@ -44,6 +62,14 @@ const PREFIX = { "ujump.html": "ujump_", "djump.html": "djump_", "pjump.html": "
                     panel (ljump_recent_v1). Listed here so the prefix rule applies to it rather
                     than reading it as a page borrowing somebody else's namespace. */
                  "ljump.html": "ljump_",
+                 /* βJump and ωJump had namespaces of their own all along — bjump_active_tab,
+                    bjump_mesh_notfound_v1, bjump_stepthrough_v1, wjump_active_tab — but every one
+                    of them reaches localStorage through a shared module, handed over as
+                    `lsKey: "..."` in a config object. This file read only literal calls and
+                    *_KEY constants, so it had never seen one of them, and both pages looked like
+                    pages that store nothing. Listed on 2026-09-20, when reading core/ and the
+                    config objects made their keys visible for the first time. */
+                 "bjump.html": "bjump_", "wjump.html": "wjump_",
                  /* The index is not a tool and has no Greek letter, so its namespace is the site's
                     own name -- grubblab_lb_pooled_v1, the pooled leaderboard cache added the same
                     day. Anything it stores has to be as clearly its own as a tool's is. */
@@ -87,6 +113,13 @@ function keysOf(file){
   const pre = /persistDetailsOpen\(\s*"[^"]*"\s*,\s*"([^"]*)"\s*\)/g;
   while ((m = pre.exec(src))) keys.add(m[1]);
 
+  /* someKey: "literal" — a key a page HANDS TO A SHARED MODULE, which is how a module in core/
+     gets a name of its own per tool without computing one (core/stepthrough.js's UJ.cfg.tabs.lsKey,
+     core/tracingcard.js's UJ.cfg.tracing.*). Without this the page declares four keys and this
+     file sees none of them, which is precisely the state the tracing extraction left it in. */
+  const cfgre = /\b([a-z][A-Za-z0-9]*Key)\s*:\s*"([^"]+)"/g;
+  while ((m = cfgre.exec(src))) keys.add(m[2]);
+
   /* Every actual call, so nothing can be reached by a route this file does not model. */
   const call = /(?:local|session)Storage\.(?:getItem|setItem|removeItem)\(\s*([^,)]+)/g;
   while ((m = call.exec(src))) {
@@ -104,8 +137,63 @@ function keysOf(file){
   return { keys: Array.from(keys).sort(), unresolved: unresolved };
 }
 
+/* ── the core modules a page loads, and what THEY store ───────────────────────────  2026-09-20
+   Same extraction, pointed at core/*.js. A module's keys belong to every page that loads it: that
+   is what a shared module means, and it is why the second tool to load one has to name keys of its
+   own or fail rule 2 below.
+
+   Unresolved arguments are collected separately and NOT folded into rule 4. A module reads its key
+   through a *_KEY constant that this file resolves; what it cannot resolve is the module's own
+   `cfgFn().lsKey || "literal"` fallback expression, and that expression is the shape this check
+   asked for. The literal inside it is caught by the const rule anyway, so nothing escapes. */
+function coreKeysOf(file) {
+  const src = fs.readFileSync(page_(file), "utf8");
+  const mods = [...src.matchAll(/<script src="core\/([A-Za-z0-9_.\-]+\.js)"><\/script>/g)]
+                 .map(m => m[1]);
+  const dir = path.join(path.dirname(page_(file)), "core");
+  const keys = new Set();
+  const from = {};
+  mods.forEach(function(mod){
+    let s;
+    try { s = fs.readFileSync(path.join(dir, mod), "utf8"); } catch (e) { return; }
+    let m;
+    /* A FALLBACK IS NOT A KEY THIS PAGE USES, if the page overrode it.       2026-09-20
+       These modules are written `CFG.notFoundKey || "microns_mesh_notfound_roots_v1"` — the
+       literal is what a host gets when it says nothing. Attributing it to a host that DID name
+       its own would report a collision between six pages that have six different keys, which is
+       the check crying wolf about the very pattern it asked for.
+       So: a fallback counts against a page only when that page does not set the option. */
+    const fb = /(?:const|let|var)\s+([A-Z][A-Z0-9_]*_KEY)\s*=\s*[A-Za-z_$][\w$.()]*\.(\w+)\s*\|\|\s*"([^"]+)"/g;
+    const overridden = {};
+    while ((m = fb.exec(s))) {
+      const opt = m[2], lit = m[3];
+      if (new RegExp("\\b" + opt + "\\s*:\\s*\"").test(src)) { overridden[lit] = opt; continue; }
+      keys.add(lit); (from[lit] = from[lit] || []).push(mod + " (default " + opt + ")");
+    }
+    const cre = /(?:const|let|var)\s+([A-Z][A-Z0-9_]*_KEY)\s*=\s*[^;\n]*?"([^"]+)"/g;
+    while ((m = cre.exec(s))) {
+      if (overridden[m[2]]) continue;
+      keys.add(m[2]); (from[m[2]] = from[m[2]] || []).push(mod);
+    }
+    const call = /(?:local|session)Storage\.(?:getItem|setItem|removeItem)\(\s*"([^"]+)"/g;
+    while ((m = call.exec(s))) {
+      if (overridden[m[1]]) continue;
+      keys.add(m[1]); (from[m[1]] = from[m[1]] || []).push(mod);
+    }
+  });
+  return { mods, keys: Array.from(keys).sort(), from };
+}
+
 const USED = {};
-PAGES.forEach(f => { USED[f] = keysOf(f); });
+const CORE = {};
+PAGES.forEach(f => {
+  USED[f] = keysOf(f);
+  CORE[f] = coreKeysOf(f);
+  /* Folded in before any rule runs, so a key that reaches a page only through a shared module is
+     held to exactly the same two rules as one written in the page itself. */
+  CORE[f].keys.forEach(k => { if (USED[f].keys.indexOf(k) < 0) USED[f].keys.push(k); });
+  USED[f].keys.sort();
+});
 
 console.log("--- what each page stores ---");
 PAGES.forEach(function(f){

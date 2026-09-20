@@ -448,7 +448,19 @@ UJ.cfg = {
      in the video"). Separate from `label` because label is a UI string that has to stay short in
      headings, and a credit wants to name where the data came from. */
   datasetCredit: "MICrONS minnie65 \u00b7 microns-explorer.org",
-  res: [4, 4, 40]           // nm per voxel, x/y/z
+  res: [4, 4, 40],          // nm per voxel, x/y/z
+  /* THE TRACING CARD'S FOUR STORAGE KEYS, named here rather than in core/tracingcard.js, for the
+     reason core/stepthrough.js names its own here: localStorage is one store shared by every page
+     on this domain, and a key that lives in a shared module is a key every tool that loads it
+     takes turns overwriting. Literals, not built from `id` — partly because storagekeycheck.js
+     can only audit a key it can read, and partly because `id` here is "microns", so arithmetic on
+     it would have renamed all four and orphaned every tracing and draft already saved. */
+  tracing: {
+    lsKey:     "ujump_tracings_v1",
+    draftsKey: "ujump_tracing_drafts_v2",
+    draftKey:  "ujump_tracing_draft_v1",
+    penKey:    "ujump_tracing_pen_v1"
+  }
 };
 var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
 /* "No distance was measured for this row." It used to be 65535, which worked only while the
@@ -476,6 +488,10 @@ UJ.cfg.backend = {
    by changing only this object. loadInfo() overwrites the sharding fields at runtime from the
    bucket's info file, which stays authoritative. */
 UJ.cfg.mesh = {
+  /* Its own, not core/mesh.js's shared default. Five tools were writing one list of
+     "roots with no mesh", and an id absent from one volume is a real id in the next —
+     see βJump's own note, which said so a month before anybody else applied it. */
+  notFoundKey: "ujump_mesh_notfound_v1",
   meshBase:"https://storage.googleapis.com/iarpa_microns/minnie/minnie65/seg_m1300/mesh/",
   meshBaseAlt:"https://storage.googleapis.com/storage/v1/b/iarpa_microns/o/minnie%2Fminnie65%2Fseg_m1300%2Fmesh%2F",
   meshBaseAltSuffix:".shard?alt=media",
@@ -587,7 +603,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 16:50</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 17:46</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
