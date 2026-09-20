@@ -438,6 +438,43 @@ UJ.cfg = {
   /* The dataset reference drawn small at the bottom of a Blender video. Separate from `label`,
      which is a UI string that has to stay short in headings. */
   datasetCredit: "V1DD \u00b7 Allen Institute V1 Deep Dive",
+  /* ── THE TRACING CARD ─────────────────────────────  2026-09-20
+     core/tracingcard.js is the pad, the polygon tool, the volumes, the drafts and the link
+     reader, extracted from µJump so five tools could share one card instead of forking five.
+     Everything per-dataset about it is these few lines.
+
+     THE FOUR KEYS ARE LITERALS AND THEY ARE δJUMP'S OWN. localStorage is one store shared by
+     every page on grubblab.com; left unset, the module falls back to µJump's keys and the two
+     tools read and write ONE list of tracings and ONE set of drafts. storagekeycheck.js fails
+     until these are here, which is the point of it. Literals rather than `id + "_tracings_v1"`
+     because that check can only audit a key it can read.
+
+     sources IS A FUNCTION, so it is read after SRC exists further down this file.
+
+     NO seg, DELIBERATELY. V1DD's segmentation is a live CAVE-authenticated graphene volume, not
+     a precomputed one core/segread.js can read — so the card removes the tick that would paint
+     it. Leaving `sources` unset would have been worse than omitting it: the fallback is the
+     global SRC, whose seg IS that graphene URL, and the tick would have stayed and failed.
+
+     nuc IS public and IS passed: painting the nucleus alone under the contours would work, and
+     is simply not offered yet, because the tick's wording promises the root ID too.
+
+     skipScales, because this volume's scale list opens with an entry that 404s — see
+     emConfigure below. The card configures the reader itself when it finds it unconfigured, so
+     the skip has to travel with the sources rather than living only in emConfigure.
+
+     AND NO identityFor: this page has NID, NT, OWN_TYPE, OWN_TYPE_NAMES and CT_NAMES under the
+     names the module already reads, so the default body answers and a traced cell arrives in the
+     form with its predicted type chosen. The hook exists for pages that cannot do that. */
+  tracing: {
+    lsKey:     "djump_tracings_v1",
+    draftsKey: "djump_tracing_drafts_v2",
+    draftKey:  "djump_tracing_draft_v1",
+    penKey:    "djump_tracing_pen_v1",
+    sources:   function(){
+                 return { em: SRC.em, nuc: SRC.nuc, skipScales: ["placeholder"] };
+               }
+  },
   res: [9, 9, 45]           // nm per voxel, x/y/z -- CONFIRMED empirically 2026-08-20 by
                             // reading root 864691132725502365 in the official Spelunker:
                             // 62200/46559/8701 vs 62201/46560/8702 predicted at 9 nm. The
@@ -582,6 +619,28 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/matchcount.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/organelles.js"></script>
+<!-- ── THE EM STACK ───────────────────────────────────  2026-09-20
+     Eight modules, the same eight and in the same order µJump and λJump load them, because the
+     tracing card is built on all of them and a different order here would be a difference nobody
+     could see until something failed. segread fetches and caches chunks; emtiles turns a
+     coordinate into a section; tracepad and traceloft are the polygon tool and the lofting;
+     tracing reads contours out of a pasted viewer link.
+
+     THEY GO BEFORE ontology/panel, not after: core/tracingcard.js reads LEAF_NAMES out of
+     core/ontology.js at wire time, not at parse time, but the page's own script is what supplies
+     the host contract and that runs last either way. -->
+<script src="core/segread.js"></script>
+<script src="core/segpaint.js"></script>
+<script src="core/organellelink.js"></script>
+<script src="core/emtiles.js"></script>
+<script src="core/tracepad.js"></script>
+<script src="core/traceloft.js"></script>
+<script src="core/nucmesh.js"></script>
+<script src="core/tracing.js"></script>
+<!-- The tracing card, shared with µJump and λJump since 2026-09-20. Same slot as there: after
+     the modules it is built on, before this page's own script, which supplies the host contract
+     its header lists (buildState, escHtml, postReport, the NID/NT/OWN_TYPE tables). -->
+<script src="core/tracingcard.js"></script>
 <script src="core/ontology.js"></script>
 <script src="core/panel.js"></script>
 <script src="core/tree.js"></script>
@@ -603,7 +662,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 18:52</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 19:27</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -777,6 +836,15 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div class="out" id="out" style="display:none"><label>Neuroglancer state URL</label><div class="urlbox" id="url"></div>
 <div class="actions"><button class="copy" id="copy">Copy link</button></div></div>
 </div>
+
+<!-- ── TRACE A CELL THE SEGMENTATION DOES NOT HAVE ───────────────  2026-09-20
+     The same card µJump has. Here it matters for a second reason as well: V1DD's segmentation is
+     behind a CAVE login, so a visitor without a token can see the EM, outline a cell on it and
+     export the result without ever authenticating against the segmentation at all.
+
+     EMPTY ON PURPOSE. core/tracingcard.js fills it on load: where the card sits is this page's
+     decision, what is inside it is the module's. -->
+<div class="card" id="tracingCard"></div>
 </div>
 <div class="tabpanel" data-tabpanel="filter">
 <div class="card" id="filterCard">
@@ -2531,6 +2599,45 @@ const SRC={em:"precomputed://gs://v1dd_imagery/image/aligned_image",em35:"precom
    even narrower band than MICrONS' [86,172]. The [0,255] this shipped with first was a
    placeholder standing in for "contrast not yet characterised", and it read as washed out. */
 const EM_SHADER_CONTROLS={normalized:{range:[115,144]}};
+
+/* ── THE SAME WINDOW THE VIEWER LINKS USE ────────────────  2026-09-20
+   core/emtiles.js stretches [lo,hi] to black-white and defaults to 86/172 — minnie65's numbers,
+   sitting in a shared file as though they were every dataset's. V1DD's stain is far flatter than
+   that: its tissue lives in about 38 levels where minnie65's default spans 86.
+
+   READ OFF EM_SHADER_CONTROLS RATHER THAN WRITTEN AGAIN. That is the invlerp window Søren tuned
+   against this EM in Spelunker on 2026-08-20, and every viewer link this page builds already uses
+   it. Deriving the pad's window from it means the section drawn HERE and the section drawn THERE
+   are stretched identically, and that one edit moves both. A second literal would be a second
+   opinion that nothing would notice had drifted.
+
+   MEASURED INDEPENDENTLY ANYWAY, the way λJump's was: 770,048 tissue pixels over 16 chunks spread
+   across the volume, three planes each, zeros excluded — 2.1% of the sample is black padding at
+   the tissue edge rather than stain, and averaging it in would drag the low end to nothing.
+
+       0.5% → 101    2% → 111    5% → 118    median 131    95% → 147    98% → 149    range 60–173
+
+   A 2–98% stretch is 111–149 against Søren's 115–144. The two agree; his is the tighter and more
+   contrasty, which is a choice, so his is the one that ships. */
+const EM_WINDOW = { lo: EM_SHADER_CONTROLS.normalized.range[0],
+                    hi: EM_SHADER_CONTROLS.normalized.range[1] };
+
+/* The one place the reader is pointed at this dataset. Called before any draw; emtiles keeps ONE
+   configured source, so configuring twice is harmless and configuring nowhere is a blank canvas.
+   Guarded because every other card on this page worked before the EM stack existed, and a page
+   that loses one script should lose one card rather than the cell.
+
+   skipScales NAMES THE DEAD LEVEL. V1DD's scale list opens with `key: "placeholder"`, 4.85 nm,
+   chunk 2048×2048×128, and it 404s at its own voxel_offset and at the origin — probed live
+   2026-09-20. Its z is 45 nm like the real scales, so emtiles' section filter cannot tell it apart
+   and mip 0 would be the dead one. The page knows; the shared module does not. */
+function emConfigure(){
+  if (typeof UJ === "undefined" || !UJ.emtiles || !UJ.segread) return false;
+  if (!UJ.emtiles.configured())
+    UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg.res, skipScales: ["placeholder"] });
+  return true;
+}
+
 const NUC_INFO="https://storage.googleapis.com/v1dd_imagery/v1dd_nuclei/segmentation/info";
 /* ONE NUCLEUS VOLUME, NOT TWO. UJ.cfg.em.nucSource (top of the file, where the Blender panel
    reads it) and SRC.nuc (here, where the viewer reads it) are the same bucket, and a page that

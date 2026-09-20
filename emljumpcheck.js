@@ -88,16 +88,46 @@ const INFO = {
              "nucmesh", "tracing"].filter(m => !!(window.UJ && UJ[m])),
       emtiles: !!(window.UJ && UJ.emtiles && UJ.emtiles.drawSection),
       win: typeof EM_WINDOW !== "undefined" ? EM_WINDOW : null,
+      shader: typeof EM_SHADER_CONTROLS !== "undefined"
+              ? EM_SHADER_CONTROLS.normalized.range : null,
+      /* The layer a built link carries. It had neither shaderControls nor tab:"rendering", so
+         Neuroglancer opened Lee16 on its own flat 0-255 default with the control that would fix
+         it not even the panel on screen. */
+      layer: (function(){ try { var L = buildState([0,0,0]).layers[0];
+                                return { tab: L.tab, sc: L.shaderControls
+                                         ? L.shaderControls.normalized.range : null }; }
+                          catch (e){ return { err: String(e).slice(0,60) }; } })(),
       conf: typeof emConfigure === "function"
     }));
     ok(got.mods.length >= 6, "the tracing modules are loaded", got.mods.join(", "));
     ok(got.emtiles, "...and emtiles can draw a section", got.emtiles);
     ok(got.conf, "...and the page has one place that points the reader at its dataset", got.conf);
     /* MEASURED, NOT COPIED: 2–98% of 480,000 pixels over three sections of the real volume. */
-    ok(got.win && got.win.lo === 44 && got.win.hi === 238,
+    /* ── 27–240, AND WHY IT IS NOT 44–238 ───────────────────  2026-09-20
+       It was 44–238, this volume's measured 2-98%. Søren looked at the pad and said the contrast
+       was "totally off", with the Rendering panel beside it reading 27 → 240. Re-measured on
+       1,048,576 real pixels its 1% is 30 and its 99% is 240 — the same window to within three
+       levels. What each one throws away, on that sample:
+
+           86-172 (emtiles' minnie65 default)   11.5% black   48.2% white
+           44-238                                2.1% black    1.7% white
+           27-240                                0.9% black    1.2% white */
+    ok(got.win && got.win.lo === 27 && got.win.hi === 240,
        "...and its own contrast window, not µJump's",
-       got.win ? got.win.lo + "–" + got.win.hi : "(none)"
-       + "  <- emtiles defaults to minnie65's 86–172; Lee16's median alone is 189");
+       (got.win ? got.win.lo + "–" + got.win.hi : "(none)")
+       + "  <- emtiles defaults to minnie65's 86–172, which clips 59.7% of this tissue flat");
+    /* ONE WINDOW PER DATASET, the shape µJump and δJump already had. A second literal would be a
+       second opinion, and nothing would notice the two had drifted. */
+    ok(got.shader && got.win && got.win.lo === got.shader[0] && got.win.hi === got.shader[1],
+       "...written once, so the viewer links and the pad cannot disagree",
+       got.shader ? "EM_SHADER_CONTROLS " + got.shader.join("–") : "(no shader controls)");
+    /* AND THE LINKS CARRY IT. µJump and δJump have put shaderControls on their image layer all
+       along; λJump had neither that nor tab:"rendering", so a link it built opened Lee16 on
+       Neuroglancer's flat 0-255 default, with the control that would fix it not on screen. */
+    ok(got.layer && got.layer.sc && got.layer.sc[0] === 27 && got.layer.sc[1] === 240,
+       "...and a link this page builds opens already stretched", JSON.stringify(got.layer));
+    ok(got.layer && got.layer.tab === "rendering",
+       "...on the panel that can change it", got.layer && got.layer.tab);
   }
 
   console.log("\nand it draws this dataset, through the unsharded path");
@@ -301,6 +331,33 @@ const INFO = {
        warning would be untrue. Checked against the chunk sizes, not assumed. */
     ok(!/slower to load/.test(got.mips[0] || ""),
        "...without µJump's warning about chunk counts, which is not true here", got.mips[0]);
+  }
+
+  /* ── THE PAD DRAWS WITH THIS PAGE'S WINDOW ────────────────  2026-09-20
+     The bug Søren reported, asserted where it happened. The pad's drawSection call passed no lo
+     and no hi, so every dataset got emtiles' 86/172 — minnie65's — and on this tissue that clips
+     11.5% of the picture to black and 48.2% to white. µJump could never have shown it: its own
+     window IS 86/172.
+
+     AND CHECKING EM_WINDOW WOULD NOT HAVE CAUGHT IT. EM_WINDOW was right the whole time; it simply
+     never reached the canvas. So this reads what the pad ASKED FOR. */
+  console.log("\nand the pad stretches with it, which is the thing that was wrong");
+  {
+    const got = await p.evaluate(async () => {
+      document.getElementById("tracingPanel").open = true;
+      document.getElementById("tracingX").value = "81920";
+      document.getElementById("tracingY").value = "81920";
+      document.getElementById("tracingZ").value = "411";
+      document.getElementById("tracePadOpen").click();
+      await new Promise(r => setTimeout(r, 7000));
+      return { asked: (typeof PAD_VIEW !== "undefined" && PAD_VIEW) ? PAD_VIEW.windowAsked : null,
+               fn: (typeof tracingWindow === "function") ? tracingWindow() : null };
+    });
+    ok(got.fn && got.fn.lo === 27 && got.fn.hi === 240,
+       "the card reads this page's window", JSON.stringify(got.fn));
+    ok(got.asked && got.asked[0] === 27 && got.asked[1] === 240,
+       "...and the pad's own draw asked for it", JSON.stringify(got.asked)
+       + "  <- it asked for nothing at all until 2026-09-20, and got minnie65's 86–172");
   }
 
   ok(errors.length === 0, "the page still loads with no new errors",

@@ -67,7 +67,9 @@ vm.createContext(sandbox);
 let fetched = [];
 sandbox.UJ = { segread: {
   _httpBase: (s) => String(s).replace(/^precomputed:\/\//, ""),
-  _getInfo: async () => INFO,
+  /* One volume by default. INFO_FOR lets a section point the reader at a different one
+     without rebuilding the sandbox — used by the skipScales section, which needs V1DD. */
+  _getInfo: async (base) => (sandbox.INFO_FOR && sandbox.INFO_FOR[base]) || INFO,
   _chunkBuf: async (base, scale, at) => {
     fetched.push(scale.key + ":" + at.c.join(","));
     const ch = scale.chunk_sizes[0];
@@ -364,6 +366,78 @@ console.log("\nthe window can tighten onto the data, and never the other way");
      "a plane of one value is NOT stretched into pure noise — below 16 levels it keeps the window",
      blank.lo + "-" + blank.hi);
   sandbox.VALUE_FN = null;
+}
+
+/* ── A SCALE THE VOLUME LISTS AND DOES NOT SERVE ──────────────────────────  2026-09-20
+   V1DD's image info opens with `key: "placeholder"`, 4.85 nm, chunk 2048×2048×128. Probed live
+   on 2026-09-20 it returns **404 at its own voxel_offset and 404 at the origin**, while
+   `9.7_9.7_45` returns a full 262,144-byte chunk at 16 positions spread across the tissue.
+
+   It is not something this module can detect. Its z is 45 nm — the same as the real scales — so
+   sectionScales() keeps it, and because the index IS the mip, δJump's mip 0 would be the dead
+   one. The page names it; the module skips it. */
+console.log("\nand a scale the page says is not really there is not counted");
+{
+  /* V1DD's real list, read from the bucket on 2026-09-20. */
+  const V1DD = { type: "image", data_type: "uint8", num_channels: 1, scales: [
+    { key: "placeholder",    resolution: [4.85, 4.85, 45], size: [573952, 573952, 17664],
+      voxel_offset: [-17408, -17408, 0], chunk_sizes: [[2048, 2048, 128]], encoding: "raw" },
+    { key: "9.7_9.7_45",     resolution: [9.7, 9.7, 45],   size: [286976, 286976, 17664],
+      voxel_offset: [-8704, -8704, 0],   chunk_sizes: [[128, 128, 16]],    encoding: "raw" },
+    { key: "19.4_19.4_45",   resolution: [19.4, 19.4, 45], size: [143488, 143488, 17664],
+      voxel_offset: [-4352, -4352, 0],   chunk_sizes: [[64, 64, 64]],      encoding: "raw" },
+    { key: "38.8_38.8_45",   resolution: [38.8, 38.8, 45], size: [71744, 71744, 17664],
+      voxel_offset: [-2176, -2176, 0],   chunk_sizes: [[64, 64, 64]],      encoding: "raw" },
+    { key: "77.6_77.6_45",   resolution: [77.6, 77.6, 45], size: [35872, 35872, 17664],
+      voxel_offset: [-1088, -1088, 0],   chunk_sizes: [[64, 64, 64]],      encoding: "raw" },
+    { key: "155.2_155.2_90", resolution: [155.2, 155.2, 90], size: [17936, 17936, 8832],
+      voxel_offset: [-544, -544, 0],     chunk_sizes: [[128, 128, 64]],    encoding: "raw" }
+  ] };
+
+  /* scaleAt asks segread for the info itself, so the sandbox has to SERVE V1DD at a URL of its
+     own — passing the object to sectionScales() would test the filter and leave scaleAt reading
+     minnie65, which is what the first version of this section did. */
+  const V1DD_EM = "precomputed://https://example/v1dd";
+  sandbox.INFO_FOR = { "https://example/v1dd": V1DD };
+
+  /* Unskipped first, so the failure this prevents is on the record rather than described. */
+  E.configure({ em: V1DD_EM, res: [9, 9, 45] });
+  const naive = E.sectionScales(V1DD);
+  ok(naive[0].key === "placeholder",
+     "without it, mip 0 IS the placeholder — the dead level, first in the list", naive[0].key
+     + "  <- its z is 45 nm like the real scales, so the section filter cannot see anything wrong");
+
+  E.configure({ em: V1DD_EM, res: [9, 9, 45], skipScales: ["placeholder"] });
+  const real = E.sectionScales(V1DD);
+  ok(real.length === 4 && real[0].key === "9.7_9.7_45",
+     "named, it is gone and mip 0 is the finest level that serves bytes",
+     real.length + " levels, first " + real[0].key);
+  ok(real.map(s => s.key).join(" ") === "9.7_9.7_45 19.4_19.4_45 38.8_38.8_45 77.6_77.6_45",
+     "...and the four that keep a 45 nm section are the four that are left",
+     real.map(s => s.key).join(" "));
+
+  const at0 = await E.scaleAt(0);
+  ok(at0.scale.key === "9.7_9.7_45" && at0.sectionNm === 45 && at0.slab === 1,
+     "scaleAt(0) is the real finest, one section per plane",
+     at0.scale.key + ", " + at0.sectionNm + " nm, slab " + at0.slab);
+  /* slabOk walks the whole list, and its `slab` count divides by the FINEST z. Measured against
+     info.scales[0] that would still be the placeholder — right by luck here, since both are
+     45 nm, and wrong on the first volume whose dead entry has a different z. */
+  const slabbed = await E.scaleAt(4, true);
+  ok(slabbed.scale.key === "155.2_155.2_90" && slabbed.slab === 2,
+     "...and slabOk counts from the real finest too", slabbed.scale.key + ", slab " + slabbed.slab);
+
+  /* A skipScales that matched everything is a typo, and one dead mip beats no imagery. */
+  E.configure({ em: V1DD_EM, res: [9, 9, 45], skipScales: V1DD.scales.map(s => s.key) });
+  ok(E.sectionScales(V1DD).length > 0,
+     "...and a list that would empty the volume is refused rather than obeyed",
+     E.sectionScales(V1DD).length + " levels kept");
+
+  /* Put the module back where the rest of this file found it. */
+  sandbox.INFO_FOR = null;
+  E.configure({ em: "precomputed://https://example/em", res: [4, 4, 40] });
+  ok(E.sectionScales(INFO).length === 3,
+     "...and a page that names nothing is exactly as it was", E.sectionScales(INFO).length);
 }
 
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");

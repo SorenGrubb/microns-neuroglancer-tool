@@ -165,6 +165,29 @@ const CONTRACT = [
        "meshBase " + got.hasMesh + ", tick " + got.ghosts);
   }
 
+  /* ── µJUMP'S OWN CONTRAST, NOW BY INSTRUCTION RATHER THAN BY LUCK ────  2026-09-20
+     Søren, on λJump: *"The contrast of the lJump tracing window is totally off."* The pad's
+     drawSection call passed no window at all, so every dataset got emtiles' default — 86/172,
+     minnie65's numbers. µJump's own EM_WINDOW IS 86/172, so its pad had always been right for the
+     wrong reason, and nothing on this page could ever have revealed the fault.
+
+     What is asserted here is that µJump's picture did not move: the card reads 86/172 off this
+     page, and the pad asks for the same two numbers it was silently getting before. */
+  console.log("\nand µJump's own window is what µJump's pad asks for");
+  {
+    const got = await p.evaluate(() => ({
+      fn: (typeof tracingWindow === "function") ? tracingWindow() : null,
+      page: (typeof EM_WINDOW !== "undefined") ? EM_WINDOW : null,
+      dflt: { lo: 86, hi: 172 }
+    }));
+    ok(got.fn && got.page && got.fn.lo === got.page.lo && got.fn.hi === got.page.hi,
+       "the card reads this page's window", JSON.stringify(got.fn));
+    ok(got.fn && got.fn.lo === 86 && got.fn.hi === 172,
+       "...which for minnie65 is emtiles' own default, unchanged",
+       JSON.stringify(got.fn)
+       + "  <- which is why the missing window was invisible here for three days");
+  }
+
   console.log("\nand a host with neither gets neither");
   {
     /* The same module, the same markup, a host that has less. Built into a DETACHED wrapper: it is

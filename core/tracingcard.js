@@ -125,7 +125,41 @@ function tracingSources(){
   o = o || {};
   var res = [4, 4, 40];
   try { if (UJ && UJ.cfg && UJ.cfg.res) res = UJ.cfg.res; } catch (_e){}
-  return { em: o.em || "", seg: o.seg || "", nuc: o.nuc || "", res: res };
+  /* skipScales COMES THROUGH, and it has to. This object is what the card hands to
+     UJ.emtiles.configure() in four places when it finds the reader unconfigured — and on V1DD the
+     volume's first scale is a `placeholder` that 404s. Dropping the field here would mean that
+     whether δJump's mip 0 is real depended on whether the cell card or the pad configured emtiles
+     first: open the pad before looking at a cell and the section is a flat grey rectangle, with no
+     chunks fetched and nothing in the console. */
+  return { em: o.em || "", seg: o.seg || "", nuc: o.nuc || "", res: res,
+           skipScales: o.skipScales || [] };
+}
+/* ── THIS DATASET'S CONTRAST, NOT minnie65's ──────────────  2026-09-20
+   core/emtiles.js stretches [lo,hi] to black-white and defaults to 86/172. Those are minnie65's
+   numbers. The pad called drawSection with no window at all, so every dataset got them — and on
+   Lee16, whose median is 189, more than half of every section clipped to pure white and the
+   membranes clipped to pure black. Søren: *"The contrast of the lJump tracing window is totally
+   off."* It was, and by a lot.
+
+   µJump could never have shown it: its own EM_WINDOW is 86/172, so its pad was right by
+   coincidence. δJump's is 115/144 and would have been wrong the day it got the card.
+
+   READ FROM THE PAGE, THREE WAYS, IN ORDER. UJ.cfg.tracing.window if a host wants the pad
+   stretched differently from the rest of its page; otherwise the page's own EM_WINDOW, which all
+   three pages already define in one place and already use for the cell card's EM plane; otherwise
+   emtiles' default, so a page with neither is exactly as it was.
+
+   EM_WINDOW IS READ IN A try, NOT BEHIND typeof. It is a top-level `const`, and on µJump this
+   file is parsed 2,000 lines before that line runs — `typeof` does not protect against a temporal
+   dead zone, it throws like any other read. Called at draw time, so in practice it is long
+   initialised; the try is for the page that loads the card and never defines one. */
+function tracingWindow(){
+  var w = null;
+  try { w = (UJ && UJ.cfg && UJ.cfg.tracing) ? UJ.cfg.tracing.window : null; } catch (_e){ w = null; }
+  if (typeof w === "function"){ try { w = w(); } catch (_e){ w = null; } }
+  if (!w){ try { w = EM_WINDOW; } catch (_e){ w = null; } }
+  if (!w || w.lo == null || w.hi == null) return { lo: 86, hi: 172 };
+  return { lo: w.lo, hi: w.hi };
 }
 function tracingCfg(){
   try { return (UJ && UJ.cfg && UJ.cfg.tracing) || {}; } catch (_e){ return {}; }
@@ -2719,8 +2753,12 @@ async function padDraw(){
        because every extra 128 pixels is another column of chunks to fetch. */
     const host = cv.parentElement;
     const wide = Math.max(320, Math.min(880, (host && host.clientWidth ? host.clientWidth - 2 : 560)));
+    /* THE WINDOW GOES IN. Without it emtiles uses 86/172 — minnie65's — on every volume; see
+       tracingWindow's header for what that did to Lee16. */
+    var PAD_WIN = tracingWindow();
     PAD_VIEW = await UJ.emtiles.drawSection(cv, {
       centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height,
+      lo: PAD_WIN.lo, hi: PAD_WIN.hi,
       onProgress: function(d, n){ if (d < n) padSay("Loading the section\u2026 " + d + "/" + n); }
     });
     /* ── THE SEGMENTATION GOES ON BEFORE THE CAPTURE ───────────────────────────  2026-09-17

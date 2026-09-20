@@ -40,6 +40,10 @@
    voxels wide against the other two's 128. The level that shows the most tissue is the slowest to
    show it. 16 nm puts about 9 um across the canvas, which is a soma.
 
+   CONFIGURE takes { em, res, skipScales }. skipScales names scale keys this volume lists but does
+   not serve — V1DD opens its list with `key: "placeholder"`, which 404s — and defaults to none, so
+   a page that passes nothing behaves exactly as before.
+
    Run: node emtilescheck.js */
 var UJ = UJ || {};
 UJ.emtiles = (function(){
@@ -51,8 +55,30 @@ UJ.emtiles = (function(){
      nanometres rather than assuming any two grids agree -- the same rule segread.js follows, and
      for the same reason: they do not agree, and a factor of two is invisible until it is wrong. */
   function configure(cfg){
-    CFG = { em: UJ.segread._httpBase(cfg.em), res: cfg.res || [4, 4, 40] };
+    CFG = { em: UJ.segread._httpBase(cfg.em), res: cfg.res || [4, 4, 40],
+            /* ── SCALES THE PAGE SAYS ARE NOT REALLY THERE ─────────  2026-09-20
+               V1DD's list opens with `key: "placeholder"`, 4.85 nm, chunk 2048×2048×128, and 404s
+               at its own voxel_offset AND at the origin — an entry with no bytes behind it. Its z
+               is 45 nm like the real scales, so sectionScales() keeps it, and since the index IS
+               the mip, δJump's mip 0 would be the dead one.
+
+               NOT GUESSED HERE. Nothing in an info file marks a scale as empty; the only honest
+               test is to fetch one, and a module that probed every scale on every configure would
+               cost a round trip per level to learn something the page already knows. So the page
+               names the keys, beside the source it is describing. Skip nothing by default. */
+            skipScales: (cfg.skipScales || []).slice() };
     return CFG;
+  }
+
+  /* The scale list with those entries removed, in the order the volume gave them. Applied BEFORE
+     anything computes a finest-z or indexes a mip, so every later number counts real scales only.
+     Refuses to empty the list: a skipScales that matched everything is a typo, and one dead mip is
+     a better failure than no imagery at all. */
+  function realScales(info){
+    var skip = (CFG && CFG.skipScales) || [];
+    if (!skip.length) return info.scales;
+    var kept = info.scales.filter(function(s){ return skip.indexOf(s.key) < 0; });
+    return kept.length ? kept : info.scales;
   }
   function configured(){ return !!CFG; }
 
@@ -60,8 +86,9 @@ UJ.emtiles = (function(){
      slab. Returned coarsest-first is not wanted -- the index IS the mip, so the caller can say
      "mip 2" and mean it. */
   function sectionScales(info){
-    var fineZ = info.scales[0].resolution[2];
-    return info.scales.filter(function(s){ return s.resolution[2] === fineZ; });
+    var all = realScales(info);
+    var fineZ = all[0].resolution[2];
+    return all.filter(function(s){ return s.resolution[2] === fineZ; });
   }
 
   /* ── slabOk: THE COARSER LEVELS, FOR CALLERS THAT ARE NOT TRACING ──────────────────  2026-09-18
@@ -82,9 +109,11 @@ UJ.emtiles = (function(){
      and not a wider default. */
   async function scaleAt(mip, slabOk){
     var info = await UJ.segread._getInfo(CFG.em);
-    var usable = slabOk ? info.scales : sectionScales(info);
+    var usable = slabOk ? realScales(info) : sectionScales(info);
     var i = Math.max(0, Math.min(usable.length - 1, mip | 0));
-    var fineZ = info.scales[0].resolution[2];
+    /* realScales, not info.scales: on δJump scales[0] is the placeholder, and a `slab` count
+       measured against a level that does not exist would be wrong on every page it is shown. */
+    var fineZ = realScales(info)[0].resolution[2];
     return { scale: usable[i], mip: i, count: usable.length,
              sectionNm: usable[i].resolution[2],
              slab: Math.round(usable[i].resolution[2] / fineZ) };

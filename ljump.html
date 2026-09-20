@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 18:52</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 19:27</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -943,9 +943,25 @@ UJ.cfg.viewer = {
 
        0.5% → 16     2% → 44     5% → 68     median 189     95% → 233     98% → 238
 
-   A 2-98% stretch is 44 → 238. Same constant name µJump uses, so the pad code reads identically
-   on both pages and the difference between the two datasets stays in this one place. */
-const EM_WINDOW = { lo: 44, hi: 238 };
+   A 2-98% stretch is 44 → 238.
+
+   ── AND THEN SØREN LOOKED AT IT ─────────────────────────  2026-09-20
+   *"The contrast of the lJump tracing window is totally off. The neuroglancer window should be
+   changed to something like this, and also the tracing window."* — with the Rendering panel beside
+   it reading **27 → 240**.
+
+   That is about this volume's 1-99% (its 0.5% is 16), the wider of the two presets that panel
+   offers, and it does not clip. A 2-98% stretch throws away the tail where Lee16's membranes live,
+   and on a picture you are about to put vertices on, a membrane you cannot see is the one thing
+   that matters. His numbers, and he has looked at the picture.
+
+   ── ONE WINDOW, WRITTEN ONCE ────────────────────────────
+   Written as EM_SHADER_CONTROLS with EM_WINDOW derived from it, which is the shape µJump and
+   δJump already have. The viewer links this page builds and the sections it draws in the page are
+   then stretched by the same two numbers, and one edit moves both. */
+const EM_SHADER_CONTROLS = { normalized: { range: [27, 240] } };
+const EM_WINDOW = { lo: EM_SHADER_CONTROLS.normalized.range[0],
+                    hi: EM_SHADER_CONTROLS.normalized.range[1] };
 
 /* The one place the reader is pointed at this dataset. Called before any draw; emtiles keeps ONE
    configured source, so configuring twice is harmless and configuring nowhere is a blank canvas.
@@ -1400,7 +1416,11 @@ function buildState(pos){
      the generated URL character-identical to the dataset's own published states. */
   return {dimensions:{x:[UJ_RX/1e9,"m"],y:[UJ_RY/1e9,"m"],z:[UJ_RZ/1e9,"m"]},
     position:pos, crossSectionScale:20, projectionScale:20000,
-    layers:[{type:"image",source:V.em,tab:"source",name:"lee16"}],
+    /* shaderControls, 2026-09-20. Without it Neuroglancer opens Lee16 on its own 0-255 default,
+       which is flat — and with tab:"source" the control that would fix it is not even the panel
+       on screen. µJump and δJump have both carried this on their image layer all along. */
+    layers:[{type:"image",source:V.em,tab:"rendering",name:"lee16",
+             shaderControls:EM_SHADER_CONTROLS}],
     selectedLayer:{visible:true,layer:"lee16"},
     /* "xy" and not µJump's "xy-3d": a 3D panel with no segmentation to render is an empty
        quadrant taking a quarter of the screen. */
