@@ -560,7 +560,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 08:12</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 08:41</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -9268,6 +9268,48 @@ function tracingViewerOpen(structs, say, ids){
 
    Called by name from core/panel.js, guarded there: this card is not on every page that panel
    serves. */
+/* ── THE CELL WITH ALL ITS ORGANELLES ───────────────────  2026-09-20
+   Søren: *"There should also be an option to view the cells with all its organelles, but under
+   the organelles list."*
+
+   Each row's Jump answers "where is this one, and what shape is it". Three lysosomes in a microglia
+   is a claim about the CELL -- where they sit relative to each other, whether they cluster, how
+   much of the soma they take up -- and that is a picture you cannot assemble by pressing Jump three
+   times.
+
+   Called by name from core/panel.js's Organelles section and guarded there with a typeof, the same
+   way openTracingAt below is: that panel serves six tools and only the ones with a tracing card can
+   open a viewer full of contours.
+
+   tracingViewerOpen does the work and is not touched. It gives each structure its own annotation
+   layer in its own colour, centres on the middle of the lot, puts the cell in the 3D pane
+   see-through with its nucleus in blue, and refuses politely when the URL would be longer than a
+   viewer can swallow -- all written for the pad's own "Look at it in Neuroglancer", none of it ever
+   pad-specific. A second caller, not a second implementation.
+
+   `missing` is how many of this cell's outlines have not had their geometry read here. Said rather
+   than waited for: fetching first and opening after would put the window.open in a different turn
+   from the click, which is a window the browser does not let you have. */
+function organShowAllInViewer(trs, nid, root, missing){
+  const structs = (trs || []).filter(function(t){ return t && (t.rings || []).length; })
+    .map(function(t){
+      return { name: t.name || (t.instanceOf || t.kind || "organelle"),
+               color: t.color || "#40e28c", rings: t.rings };
+    });
+  if (!structs.length){
+    tracingSay("None of this cell’s outlines have been read here yet — open the "
+      + "Organelles list, give it a moment, and try again.", true);
+    return;
+  }
+  const what = structs.length + " organelle" + (structs.length === 1 ? "" : "s");
+  tracingViewerOpen(structs,
+    "Opened this cell with " + what + " on it — one annotation layer each, in the colours they "
+    + "were drawn in."
+    + (missing ? " " + missing + " more outline" + (missing === 1 ? " has" : "s have")
+                 + " not been read here, so " + (missing === 1 ? "it is" : "they are")
+                 + " not on it." : ""),
+    { nuc: nid || "", root: root || "" });
+}
 function openTracingAt(pt, kind){
   try {
     var panel = document.getElementById("tracingPanel");

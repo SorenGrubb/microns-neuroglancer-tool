@@ -883,12 +883,27 @@ function renderOrganelleSection(nid, root){
       + '</div>');
   });
 
+  /* ── ALL OF THEM AT ONCE, UNDER THE LIST ────────────────────────  2026-09-20
+     Søren: *"There should also be an option to view the cells with all its organelles, but under
+     the organelles list."* Each row's Jump answers "where is this one"; three lysosomes in a
+     microglia is a claim about the cell, and that is a different picture.
+
+     Only when there is something to draw, and only on a page that can draw it -- this panel serves
+     six tools and the viewer opener belongs to the ones with a tracing card. */
+  var allBtn = "";
+  if (withRings.length && typeof organShowAllInViewer === "function")
+    allBtn = '<div style="margin-top:8px"><button type="button" class="idbtn organshowall" '
+      + 'style="width:auto;padding:4px 10px;font-size:12px" '
+      + 'title="Opens the viewer with this cell and every outline on it \u2014 one annotation layer '
+      + 'each, in the colours they were drawn in, with the cell see-through in the 3D pane.">'
+      + 'Show the cell with all ' + withRings.length + ' organelle'
+      + (withRings.length === 1 ? "" : "s") + ' \u2197</button></div>';
   var nSeg = trs.length, nAnn = anns.length;
   host.innerHTML = '<details id="cellOrganDetails"' + (window.__organOpen ? " open" : "") + '>'
     + '<summary style="cursor:pointer;font-size:12px;text-transform:uppercase;letter-spacing:.06em;'
     + 'color:var(--mut);font-weight:600">Organelles — ' + nSeg + ' outlined, ' + nAnn
     + ' logged' + (r.paired.length ? ", " + r.paired.length + " paired" : "") + '</summary>'
-    + '<div style="margin-top:4px">' + rows.join("")
+    + '<div style="margin-top:4px">' + rows.join("") + allBtn
     + (noRings.length ? '<p class="hint" style="margin-top:4px">'
         + (PANEL_ORGAN_BUSY ? "Reading " + noRings.length + " outline(s)\u2026"
            : noRings.length + " outline(s) not read here, so nothing is paired against them.")
@@ -914,6 +929,15 @@ function renderOrganelleSection(nid, root){
         document.getElementById("z").value = b.dataset.z;
         document.getElementById("go").click();
       } catch (_e){}
+    });
+  });
+  /* The structures are handed over directly rather than looked up again from an id: they are in
+     hand here, with their rings, and a second lookup is a second chance to disagree with the list
+     the person is looking at. */
+  [].slice.call(host.querySelectorAll(".organshowall")).forEach(function(b){
+    b.addEventListener("click", function(){
+      if (typeof organShowAllInViewer === "function")
+        organShowAllInViewer(withRings, nid, root, noRings.length);
     });
   });
   [].slice.call(host.querySelectorAll(".organtrace")).forEach(function(b){
