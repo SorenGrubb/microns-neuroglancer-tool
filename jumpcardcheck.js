@@ -17,10 +17,18 @@
    one of them is reached by getElementById from code that was not touched. A card that looks right
    and has lost its Jump button is the failure worth a check.
 
-   Run: node jumpcardcheck.js */
+   ONE CHECK, EVERY TOOL. The card was ported to δJump and πJump on 2026-09-20, and "as close as
+   possible to µJump" is only a claim until the same assertions run against each of them. The page
+   is an argument; with none it checks µJump.
+
+       node jumpcardcheck.js                 (µJump)
+       node jumpcardcheck.js djump.html      (δJump)
+
+   Run: node jumpcardcheck.js [page.html] */
 const { chromium } = require("playwright");
 const page_ = require("./pagepath.js");
 
+const PAGE = process.argv[2] || "ujump.html";
 let fails = 0;
 const ok = (c, what, d) => {
   console.log((c ? "  ok   " : "  FAIL ") + what + (d !== undefined ? "  <- " + d : ""));
@@ -36,10 +44,10 @@ const ok = (c, what, d) => {
   await p.route("**accounts.google.com/**", r => r.abort());
   await p.route("**storage.googleapis.com/**", r => r.abort());
   await p.route("**cdnjs.cloudflare.com/**", r => r.abort());
-  await p.goto("file://" + page_("ujump.html"));
+  await p.goto("file://" + page_(PAGE));
   await p.waitForTimeout(5000);
 
-  console.log("browsing is the first thing, and it never has to be opened");
+  console.log(PAGE + "\n\nbrowsing is the first thing, and it never has to be opened");
   {
     const got = await p.evaluate(() => {
       const rp = document.getElementById("randomCellPanel");
@@ -77,9 +85,14 @@ const ok = (c, what, d) => {
                xShown: document.getElementById("x").checkVisibility(),
                xFound: !!document.getElementById("x"),
                goFound: !!document.getElementById("go"),
+               /* #nearestLine is µJump's — it reports which nucleus a pasted coordinate landed
+                  on, and δ/π have no such line. Asserted only where it exists, rather than
+                  asserting a receipt onto pages that never had one. */
                holds: cp.contains(document.getElementById("x"))
                       && cp.contains(document.getElementById("go"))
-                      && cp.contains(document.getElementById("nearestLine")),
+                      && (!document.getElementById("nearestLine")
+                          || cp.contains(document.getElementById("nearestLine"))),
+               hasNearest: !!document.getElementById("nearestLine"),
                /* What must NOT have been swallowed by the new fold. */
                keptOut: !cp.contains(document.getElementById("rootNucSearchPanel"))
                         && !cp.contains(document.getElementById("recentlyViewedPanel"))
@@ -91,7 +104,9 @@ const ok = (c, what, d) => {
        "...saying it is the other way in", got.summary.slice(0, 50));
     ok(got.xShown === false, "...with the boxes out of the way", got.xShown);
     ok(got.xFound && got.goFound, "...but still reachable by id", got.xFound && got.goFound);
-    ok(got.holds, "...holding the boxes, the arrow and the nearest-nucleus receipt", got.holds);
+    ok(got.holds, "...holding the boxes, the arrow"
+       + (got.hasNearest ? " and the nearest-nucleus receipt" : " (this tool has no receipt line)"),
+       got.holds);
     ok(got.keptOut,
        "...and NOT the Root/Nucleus search, the history or Back — they stay visible", got.keptOut);
   }
@@ -101,9 +116,11 @@ const ok = (c, what, d) => {
     /* The real risk of moving controls into a <details>: code that was not touched still finds
        them. Driven through the DOM rather than by reading it. */
     const got = await p.evaluate(async () => {
-      document.getElementById("x").value = "295857";
-      document.getElementById("y").value = "151338";
-      document.getElementById("z").value = "17852";
+      /* Any three numbers: what is under test is that a shut <details> still hands its boxes to
+         code that was not touched, not whether this dataset has a cell there. */
+      document.getElementById("x").value = "200000";
+      document.getElementById("y").value = "150000";
+      document.getElementById("z").value = "18000";
       document.getElementById("go").click();
       await new Promise(r => setTimeout(r, 1200));
       return { url: (document.getElementById("url").textContent || "").slice(0, 40),

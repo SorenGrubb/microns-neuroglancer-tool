@@ -18,10 +18,14 @@
    own job AND toggles the fold. The card swallows the toggle for anything clickable, so only bare
    space folds it.
 
-   Run: node cellfoldcheck.js */
+   ONE CHECK, EVERY TOOL. The fold was ported to δJump and πJump on 2026-09-20; "as close as
+   possible to µJump" is a claim until the same assertions run there. The page is an argument.
+
+   Run: node cellfoldcheck.js [page.html] */
 const { chromium } = require("playwright");
 const page_ = require("./pagepath.js");
 
+const PAGE = process.argv[2] || "ujump.html";
 let fails = 0;
 const ok = (c, what, d) => {
   console.log((c ? "  ok   " : "  FAIL ") + what + (d !== undefined ? "  <- " + d : ""));
@@ -55,10 +59,10 @@ const PANEL = `(function(open){
   await p.route("**accounts.google.com/**", r => r.abort());
   await p.route("**storage.googleapis.com/**", r => r.abort());
   await p.route("**cdnjs.cloudflare.com/**", r => r.abort());
-  await p.goto("file://" + page_("ujump.html"));
+  await p.goto("file://" + page_(PAGE));
   await p.waitForTimeout(5000);
 
-  console.log("the identity card folds below its name");
+  console.log(PAGE + "\n\nthe identity card folds below its name");
   {
     const got = await p.evaluate(src => {
       // eslint-disable-line no-eval
