@@ -253,6 +253,20 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
    baseline. The fold ships in core/ and reaches every tool at once; this line has to travel with
    it, because each page carries its own copy of the stylesheet. */
 .chist-panel>summary>h4{margin:0}
+/* ── THE IDENTITY CARD FOLDS BELOW ITS NAME ─────────────────  2026-09-20
+   The fold itself is core/panel.js's cellCardFold(); these six rules are its triangle, and they
+   have to travel with it because every page carries its own stylesheet. A fold that ships in
+   core/ with its styling left behind is the exact failure chistfoldcheck.js was written for.
+
+   The triangle sits at the top rather than centred: the summary is two lines tall here, and a
+   triangle beside the middle of a name reads as a bullet. */
+.cellfold{margin:0}
+.cellfold>summary{display:flex;align-items:flex-start;gap:8px;cursor:pointer;list-style:none}
+.cellfold>summary::-webkit-details-marker{display:none}
+.cellfold>summary::before{content:"\25B6";display:inline-block;flex:none;font-size:10px;
+  color:var(--mut);margin-top:9px;transition:transform .15s ease}
+.cellfold[open]>summary::before{transform:rotate(90deg)}
+.cellfold>summary>div{flex:1 1 auto;min-width:0}
 .chist-row{border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin-bottom:8px}
 .chist-row:last-child{margin-bottom:0}
 .chist-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:4px}
@@ -403,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:13</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:24</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1556,7 +1570,11 @@ function showCell(i, distNm){
     + ((typeof favStarHtml==="function")?favStarHtml(String(BID[i]),"",pos[0],pos[1],pos[2]):"")
     + (added?'':' <small>no classifier for this dataset</small>')+'</div>';
 
-  h+='<div style="margin-top:6px">'
+  /* .cardtags: the row core/panel.js's cellCardFold() is told to keep in the summary. On µJump
+     the badge sits BEFORE the name and rides along for free; here it comes after, and a card
+     folded at the name alone would read "Nucleus 521491" and hide its layer, its detector pass
+     and #ctTag -- which is where a community identification gets written. */
+  h+='<div class="cardtags" style="margin-top:6px">'
     +'<span class="tag '+lt.cls+'"'
       +(added?' title="Estimated: this nucleus has no detection, so its depth is fitted from the '
         +DEPTH_FIT_K+' nearest detections and its layer is the majority of the detections nearest '
@@ -1729,6 +1747,15 @@ function showCell(i, distNm){
 
   const panelEl=document.getElementById("panel");
   panelEl.innerHTML=h;
+  /* ── THE CARD FOLDS, AND REMEMBERS ─────────────────────────  2026-09-20
+     The .card div, not #panel: this page wraps its whole cell card in one, so the headline is not
+     a direct child of the panel and the fold would find nothing to fold under. Told to keep
+     .cardtags in the summary too, since the badges come after the name here rather than before it.
+
+     Before the wiring below rather than after, on purpose: every querySelectorAll here is rooted
+     at panelEl and the nodes stay inside it either way, but folding last would mean two orders to
+     keep in step for no gain. */
+  try{ cellCardFold(panelEl.querySelector(".card"), ".cardtags"); }catch(_e){}
   panelEl.querySelectorAll(".idval").forEach(function(el){
     el.addEventListener("click",function(){
       if(navigator.clipboard) navigator.clipboard.writeText(el.dataset.c);

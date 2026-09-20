@@ -599,7 +599,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:13</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:24</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -4546,50 +4546,8 @@ function buildState(pos){
      Neuroglancer's own JSON state schema (both keys accept a plain hex string). */
   return{dimensions:DIM,position:pos,crossSectionScale:3.0,projectionScale:PROJECTION_SCALE(CUR_IS_NEURON),...PROJ_ORIENT(),layers,selectedLayer:{layer:layers[0].name,visible:true},layout:{type:"xy-3d",orthographicProjection:true},showDefaultAnnotations:false,crossSectionBackgroundColor:ngBgColor(),perspectiveViewBackgroundColor:ngBgColor()};
 }
-/* ── EVERYTHING BELOW THE NAME FOLDS ──────────────────────────  2026-09-20
-   Søren: *"We should also be able to collapse the cell history and the cell identity cards, but by
-   default they should be expanded."* Asked which part of the identity card, he chose everything
-   below the name. Ported from µJump unchanged.
-
-   DONE TO THE DOM, NOT TO THE MARKUP. This card is assembled as a string across three render
-   branches, and opening a <details> in one place and closing it in another, three times over, is
-   three chances to ship a page with an unclosed tag. Wrapping the finished panel needs one function
-   and no branch has to know.
-
-   A LINK IN A SUMMARY IS A TRAP, AND THE OBVIOUS FIX IS A WORSE ONE. preventDefault on the summary
-   cancels the whole default action for that click -- and following a link IS the default action, so
-   the ↗ stopped working when µJump first tried it. Measured in a browser afterwards: an ANCHOR
-   consumes the click by itself and needs nothing from us; the star, a copyable id and a button have
-   listeners and no default action worth keeping, so cancelling is free for them. */
-function cellCardFold(panel){
-  if (!panel || panel.querySelector(":scope > details.cellfold")) return;
-  const head = panel.querySelector(":scope > .celltype");
-  if (!head) return;                          // a branch with no headline: nothing to fold under
-  const det = document.createElement("details");
-  det.className = "cellfold";
-  det.open = (window.__cellCardOpen !== false);
-  const sum = document.createElement("summary");
-  const top = document.createElement("div");
-  const body = document.createElement("div");
-  /* Read into arrays first -- moving a node out of a live childNodes list while walking it skips
-     the one after it. */
-  const kids = [].slice.call(panel.childNodes);
-  const at = kids.indexOf(head);
-  kids.slice(0, at + 1).forEach(function(n){ top.appendChild(n); });
-  kids.slice(at + 1).forEach(function(n){ body.appendChild(n); });
-  sum.appendChild(top);
-  det.appendChild(sum);
-  det.appendChild(body);
-  panel.appendChild(det);
-  sum.addEventListener("click", function(ev){
-    const t = ev.target;
-    if (!t || !t.closest) return;
-    if (t.closest("a,input,select,textarea,label")) return;   // it navigates or types; leave it
-    if (t.closest("button,[data-c],.idval,.star,.fav"))
-      ev.preventDefault();                    // it has its own job, and folding is not it
-  });
-  det.addEventListener("toggle", function(){ window.__cellCardOpen = det.open; });
-}
+/* cellCardFold moved to core/panel.js on 2026-09-20 — three copies had already drifted in
+   their comments, and λJump and βJump were about to make it five. See the header there. */
 function fail(m){const e=document.getElementById("err");e.textContent=m;e.style.display="block";document.getElementById("out").classList.remove("show");}
 /* Shows/hides the persistent "Back to previous cell" row (a sibling of #nucpanel, NOT inside it --
    #nucpanel's innerHTML is fully replaced on every showNucleus() render branch, so anything placed

@@ -1,18 +1,18 @@
 {
  "bjump.html": {
-  "core": "1fc8a3176f",
-  "hash": "d59e6563eac5f2fd47969d38a9fbcf74b90507760d0103934b2f2f4b7f27be3f",
-  "stamp": "2026-09-20 15:13"
+  "core": "9283b5ea03",
+  "hash": "a8ad72b6c2b09acacaebc75c68ecf57490a0ad6ed5978331159e7ceb1793bde3",
+  "stamp": "2026-09-20 15:24"
  },
  "djump.html": {
-  "core": "1fc8a3176f",
-  "hash": "05670fa7013104d325c6f3bb008c536e6370eba9ec747f131a50cb1c0ba6d815",
-  "stamp": "2026-09-20 15:13"
+  "core": "9283b5ea03",
+  "hash": "aaa2bf7483f02dc6fba52d41edec10d7307e34fd5caeb7818468427c0b49892d",
+  "stamp": "2026-09-20 15:24"
  },
  "hjump.html": {
-  "core": "1fc8a3176f",
+  "core": "9283b5ea03",
   "hash": "18855968b96182a4078956e43e63e28a2f80abab2f0f021e2bdff5813600df5a",
-  "stamp": "2026-09-20 15:13"
+  "stamp": "2026-09-20 15:24"
  },
  "index.html": {
   "core": "",
@@ -20,18 +20,18 @@
   "stamp": "2026-09-10 21:40"
  },
  "ljump.html": {
-  "core": "1fc8a3176f",
-  "hash": "99cede621e56c35ed833257e1740231e980dd302e161b59b02aafaaeb4b6212d",
-  "stamp": "2026-09-20 15:13"
+  "core": "9283b5ea03",
+  "hash": "289fed8dca79da8a37d40edcb6f2d504403055cca0381db7838f43939077c9c0",
+  "stamp": "2026-09-20 15:24"
  },
  "pjump.html": {
-  "core": "1fc8a3176f",
-  "hash": "7b45cb8be67f6d3dde8c7666972dfd8cabb565e7f86943408763f6e5c07e9184",
-  "stamp": "2026-09-20 15:13"
+  "core": "9283b5ea03",
+  "hash": "271bb4866873c72b88ff15028d13c43f3407bdab85aaa528a83cabc45b1fd710",
+  "stamp": "2026-09-20 15:24"
  },
  "ujump.html": {
-  "core": "1fc8a3176f",
-  "hash": "f5d016d89451c49f42d82093e67b3f333e3287e7e008aeb54cdee1eae6b5d405",
-  "stamp": "2026-09-20 15:13"
+  "core": "9283b5ea03",
+  "hash": "52bf7782825e25af6d2b8d5722d101039b6c93295a8776b2377692746ca4d718",
+  "stamp": "2026-09-20 15:24"
  }
 }

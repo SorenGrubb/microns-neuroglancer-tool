@@ -147,6 +147,50 @@ const PANEL = `(function(open){
     ok(got.nextOpen === false, "...and the next cell opens it closed", got.nextOpen);
   }
 
+  console.log("\nand where the badges come AFTER the name, they still stay beside it");
+  {
+    /* THE ONE REAL DIFFERENCE BETWEEN THE DATASETS.               λJump / βJump, 2026-09-20
+       The probe above is µJump's shape: badge, then name, so the badge lands in the summary for
+       free. λJump and βJump build the card the other way round — the name first, then a row
+       carrying the layer, the detector pass and #ctTag, which is where a community identification
+       gets written. Folding at `.celltype` there collapses the card to "Nucleus 521491" and hides
+       the only part that says anything about the cell.
+
+       So cellCardFold takes an optional second argument naming a later direct child to end the
+       summary at, and those two pages pass `.cardtags`. Driven on the REAL card rather than the
+       probe, because what is under test is that the page passes it — a correct function called
+       with one argument is the failure this exists for. Skipped where the page has no such row. */
+    const real = await p.evaluate(() => {
+      if (!document.querySelector) return { skip: true };
+      if (typeof showCell !== "function") return { skip: true };
+      /* The section above folds the probe by clicking bare space, and the toggle handler writes
+         that down — so without this the real card correctly opens SHUT and the assertion below
+         would be measuring the memory, not the split. */
+      window.__cellCardOpen = undefined;
+      try { showCell(0, 0); } catch (e) { return { skip: true, why: String(e.message) }; }
+      const card = document.querySelector("#panel .card");
+      if (!card || !card.querySelector(".cardtags")) return { skip: true };
+      const det = card.querySelector(":scope > details.cellfold");
+      const sum = det && det.querySelector("summary");
+      return { skip: false, det: !!det, open: det && det.open,
+               name: !!(sum && sum.querySelector(".celltype")),
+               tags: !!(sum && sum.querySelector(".cardtags")),
+               voteOut: !!(det && det.querySelector("div:not(summary) #idVotePanel"))
+                        && !(sum && sum.querySelector("#idVotePanel")),
+               text: sum ? sum.textContent.replace(/\s+/g, " ").trim().slice(0, 70) : "" };
+    });
+    if (real.skip) {
+      console.log("  --   this page puts its badge before the name; nothing to check here"
+                  + (real.why ? "  <- " + real.why : ""));
+    } else {
+      ok(real.det && real.open === true, "the real card is folded, and open", real.open);
+      ok(real.name && real.tags,
+         "...with the name AND the badges beside it in the header",
+         "name:" + real.name + " tags:" + real.tags + "  <- " + real.text);
+      ok(real.voteOut, "...and the vote pills below, inside the fold", real.voteOut);
+    }
+  }
+
   console.log("\nthe cell history folds too, and starts open");
   {
     const got = await p.evaluate(() => {

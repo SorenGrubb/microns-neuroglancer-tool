@@ -446,6 +446,81 @@ function mergeCellHistory(changeItems,annoItems){
    handling) -- isOwn -> button reads "Correct this" (re-apply one of MY OWN earlier calls, no
    time limit); OWNER_EMAIL-but-not-isOwn -> "Restore this version" (administrator override,
    authoritative, no time limit). Never shown for a signed-out visitor or anyone else's entry. */
+/* ── EVERYTHING BELOW THE NAME FOLDS ────────────────────────  2026-09-20
+   Søren: *"We should also be able to collapse the cell history and the cell identity cards, but by
+   default they should be expanded."* Asked which part of the identity card, he chose everything
+   below the name.
+
+   MOVED HERE FROM ujump.html/djump.html/pjump.html on 2026-09-20, because three copies had already
+   become two different things -- identical code, and the thirteen lines below about preventDefault
+   present in one of them. λJump and βJump were about to make it five.
+
+   DONE TO THE DOM, NOT TO THE MARKUP. This card is assembled as a string across up to three render
+   branches -- verified, community-reported, merged-nucleus split -- and opening a <details> in one
+   place and closing it in another, three times over, is three chances to ship a page with an
+   unclosed tag. Wrapping the finished panel needs one function and no branch has to know.
+
+   THE SPLIT IS THE HEADLINE. Everything up to and including `.celltype` (the badge, the name, the
+   ↗ and the star) becomes the summary; everything after it becomes the body. So the cell you are
+   looking at is on screen either way, which is the only reason to fold from the top rather than
+   hide the lot.
+
+   lastInHeadSel (optional) names a LATER direct child to end the summary at instead. µJump, δJump
+   and πJump put the badge BEFORE the name, so it rides along for free and they pass nothing.
+   λJump and βJump put the layer tag, the detector-pass tags and #ctTag -- where a community
+   identification gets written -- AFTER it, and folding at `.celltype` there collapses the card to
+   "Nucleus 521491" and hides the only part that says anything about the cell.
+
+   A LINK IN A SUMMARY IS A TRAP: a click on the ↗, the star or a copyable id would both do its own
+   job AND toggle the fold. The summary swallows the toggle for anything clickable inside it, so
+   only bare space folds the card. */
+function cellCardFold(panel, lastInHeadSel){
+  if (!panel || panel.querySelector(":scope > details.cellfold")) return;
+  const head = panel.querySelector(":scope > .celltype");
+  if (!head) return;                          // a branch with no headline: nothing to fold under
+  const det = document.createElement("details");
+  det.className = "cellfold";
+  det.open = (window.__cellCardOpen !== false);
+  const sum = document.createElement("summary");
+  const top = document.createElement("div");
+  const body = document.createElement("div");
+  /* Everything before the headline, then the headline, into the summary; the rest into the body.
+     Read into arrays first -- moving a node out of a live childNodes list while walking it skips
+     the one after it, which is how the first version left the star behind. */
+  const kids = [].slice.call(panel.childNodes);
+  /* The later of the two, never the earlier: a page that names a tail which turns out to sit
+     ABOVE the headline would otherwise push the name itself into the body, and a fold whose
+     summary does not say which cell it is is the one thing this must not do. */
+  const tail = lastInHeadSel ? panel.querySelector(":scope > " + lastInHeadSel) : null;
+  const at = Math.max(kids.indexOf(head), tail ? kids.indexOf(tail) : -1);
+  kids.slice(0, at + 1).forEach(function(n){ top.appendChild(n); });
+  kids.slice(at + 1).forEach(function(n){ body.appendChild(n); });
+  sum.appendChild(top);
+  det.appendChild(sum);
+  det.appendChild(body);
+  panel.appendChild(det);
+  /* ── WHAT preventDefault COSTS ON A LINK ──────────────────────  2026-09-20
+     Søren, an hour after the first version shipped: *"Now the cell link does not work."* It did not:
+     cancelling the fold from here cancels the whole default action for that click, and following a
+     link IS the default action. The ↗ stopped opening Neuroglancer.
+
+     MEASURED RATHER THAN REASONED ABOUT, because three plausible answers disagree and only a
+     browser settles it. An ANCHOR already consumes the click: Chrome walks default handlers up the
+     path and stops at the first that takes it, so a link inside a summary navigates and does not
+     fold, with nothing needed from us. Everything else -- the star, a copyable id, a button -- has
+     only listeners and no default action worth keeping, so cancelling is free for them.
+
+     So anchors and form controls are left strictly alone, and the rest are cancelled. Bare space
+     still folds the card, which is the affordance. */
+  sum.addEventListener("click", function(ev){
+    const t = ev.target;
+    if (!t || !t.closest) return;
+    if (t.closest("a,input,select,textarea,label")) return;   // it navigates or types; leave it
+    if (t.closest("button,[data-c],.idval,.star,.fav"))
+      ev.preventDefault();                    // it has its own job, and folding is not it
+  });
+  det.addEventListener("toggle", function(){ window.__cellCardOpen = det.open; });
+}
 function renderCellHistory(items,nucleusId,rootId,coord){
   const el=document.getElementById("classHistoryPanel");
   if(!el)return;
