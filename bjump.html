@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:24</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:59</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1597,6 +1597,10 @@ function showCell(i, distNm){
      cell can never leak into this one's PowerPoint title in the window before its community
      fetch resolves -- the same reasoning as showNucleus()'s own reset block in µJump. */
   CUR_NUCID=String(BID[i]); CUR_ROOT=seg?String(seg):"";
+  /* No automated classifier in this dataset — the headline says "no classifier for this dataset"
+     three lines below. core/panel.js's override sentences credit MICrONS unless told otherwise,
+     and MICrONS has never seen a cell in this volume. */
+  window.UJ=window.UJ||{}; UJ.panel=UJ.panel||{}; UJ.panel.source={label:"",noun:"prediction"};
   window.CUR_CELLTYPE_DISPLAY=null; window.CUR_POS=pos.slice();
   /* CUR_MICRONS_NAME/CUR_COMMUNITY_TOP_NAME feed core/panel.js's step-through vote widget
      (#stepVotePanel, shown beneath "Systematically step through matches" on the Filter-and-show

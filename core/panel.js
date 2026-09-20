@@ -58,6 +58,25 @@ UJ.panel.BUILD = "2026-08-18 stage-P1";
 var PANEL_CUR_NID=null;
 UJ.panel.currentNucleusId=function(){return PANEL_CUR_NID;};
 
+/* ── WHO DECIDES WHAT THE FORM IS FILED AGAINST ───────────────────  2026-09-20
+   Opening the organelle form from inside the community block seeds ID_CTX, because coming from
+   there no guided-ID run has populated it. It seeds by REPLACEMENT and in this file's own
+   vocabulary, {nucId, root, pos} — which on ηJump wiped {i, seg, body, pos, layer, depth,
+   published} and left the form with no cell to name.
+
+   MERGING WOULD BE WORSE, which is why it is a hook and not an Object.assign: µJump, δJump and
+   πJump also read ID_CTX.suggested, ID_CTX.locationOnly and ID_CTX.noNucleus, all set by a guided
+   run, and two of those change what a submission means. Carrying them over from a run on a
+   DIFFERENT cell is a wrong submission, not a wrong label. So replacement stays the default.
+
+   A host whose own showCell already keeps ID_CTX current for the cell on screen can say so by
+   defining UJ.panel.seedCtx and returning what it wants kept. */
+function panelSeedCtx(seed){
+  if (typeof UJ !== "undefined" && UJ.panel && typeof UJ.panel.seedCtx === "function"){
+    try { return UJ.panel.seedCtx(seed) || seed; } catch (_e){ return seed; }
+  }
+  return seed;
+}
 function panelDsQS(){
   try{ if(UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds) return "&ds="+encodeURIComponent(UJ.cfg.backend.ds); }catch(_e){}
   return "";
@@ -220,7 +239,11 @@ function loadIdentityVotesPanel(nid,seeds){
   if(!el||!REPORT_ENDPOINT||!nid){if(el)el.innerHTML="";return;}
   if(window.__idvNid!==String(nid)){window.CUR_COMMUNITY_IDS=[];}
   window.__idvNid=String(nid);window.__idvBase=(seeds||[]);
-  var votable=function(nm){return nm&&String(nm).trim()&&!/unclassif/i.test(String(nm));};
+  /* "unknown" as well as "unclassified", carried up from ηJump's own vote panel when that was
+     retired on 2026-09-20. Neither is a claim about a cell, so neither is something to agree with.
+     Checked before widening: no cell-type leaf in core/ontology.js is named "Unknown" on any tool
+     — µJump's "Unknown" is a cortical-LAYER label and never reaches this list. */
+  var votable=function(nm){return nm&&String(nm).trim()&&!/unclassif|unknown/i.test(String(nm));};
   var base=(seeds||[]).concat(window.CUR_COMMUNITY_IDS||[]).filter(votable).map(String);
   el.innerHTML="";
   var render=function(list){
@@ -229,7 +252,7 @@ function loadIdentityVotesPanel(nid,seeds){
     base.concat(list.map(function(v){return v.identity;})).forEach(function(nm){var k=String(nm).toLowerCase();if(k&&!seen[k]&&votable(nm)){seen[k]=1;names.push(nm);}});
     if(!names.length){el.innerHTML="";return;}
     var multi=names.length>1;
-    var h='<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--mut)"><span>agree?</span>';
+    var h='<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--mut)"><span title="Vote on whether each identification is right. More independent agreement is what makes a call trustworthy.">agree?</span>';
     var mine=window.MY_PROPOSED_IDS||{};
     names.forEach(function(nm){
       var t=map[String(nm).toLowerCase()]||{up:0,down:0,net:0};
@@ -369,7 +392,7 @@ function renderStepVotePanel(){
     var sameAsMicrons=micronsName&&commName&&String(micronsName).toLowerCase()===String(commName).toLowerCase();
     var rows=sameAsMicrons
       ?stepVoteRowHtml("Original / community-confirmed",micronsName,map)
-      :stepVoteRowHtml("Original (MICrONS)",micronsName,map)+stepVoteRowHtml("Community",commName,map);
+      :stepVoteRowHtml("Original ("+(panelSource().label||"published")+")",micronsName,map)+stepVoteRowHtml("Community",commName,map);
     el.innerHTML='<div class="stepvote-panel">'+headline
       +(rows?'<div class="stepvote-title">Vote on this cell&rsquo;s classification</div>'+rows:'')+'</div>';
     wireIdCopy();
@@ -1121,8 +1144,9 @@ function loadCommunityReports(nid,cellPos){
             var isConfirmOnly=!wasUncl&&micronsName&&micronsName.toLowerCase()===String(win.name).toLowerCase();
             if(isConfirmOnly){
               var smallEl=headEl.querySelector("small");
-              if(smallEl)smallEl.textContent="MICrONS prediction \u2014 confirmed by "+users(win.n);
-              headEl.title=(headEl.title?headEl.title+" \u2014 ":"")+users(win.n)+" confirmed this matches MICrONS\u2019s prediction"+(win.firstBy?", first confirmed by "+win.firstBy:"")+".";
+              var _s=panelSource();
+              if(smallEl)smallEl.textContent=(_s.label?_s.label+" "+_s.noun:"Published "+_s.noun)+" \u2014 confirmed by "+users(win.n);
+              headEl.title=(headEl.title?headEl.title+" \u2014 ":"")+users(win.n)+" confirmed this matches "+(_s.label?_s.label+"\u2019s "+_s.noun:"the published "+_s.noun)+(win.firstBy?", first confirmed by "+win.firstBy:"")+".";
             } else {
               headEl.innerHTML=(typeof celltypeLink==="function"?celltypeLink(cellPos,escHtml(win.name)):escHtml(win.name))
                 +((typeof favStarHtml==="function"&&cellPos)?favStarHtml(nid,"",cellPos[0],cellPos[1],cellPos[2]):"")
@@ -1134,13 +1158,14 @@ function loadCommunityReports(nid,cellPos){
                  already moved on to the community's "ruling" identification. Per Søren, 28 Jul 2026. */
               window.CUR_CELLTYPE_DISPLAY=win.name;
               if(typeof refreshFavStars==="function")refreshFavStars();try{if(window.CUR_POS){var _k=window.CUR_POS.join(",");for(var _i=0;_i<SEARCH_HISTORY.length;_i++){if(SEARCH_HISTORY[_i].key===_k)SEARCH_HISTORY[_i].label=win.name;}renderSearchHistory();}}catch(_e2){}
+              var _src=panelSource();   // read once: the two sentences below must agree
               headEl.title=win.n+(win.n>1?" users have":" user has")+" identified this cell"
                 +(win.firstBy?", first proposed by "+win.firstBy:"")
-                +(wasUncl?". MICrONS made no prediction here.":". Shown in place of the MICrONS prediction — user reports take precedence here.");
+                +(wasUncl?(_src.label?". There is no "+_src.label+" "+_src.noun+" for this cell.":". This dataset has no automated classifier."):". Shown in place of the "+_src.label+" "+_src.noun+" — user reports take precedence here.");
               const tagEl=document.getElementById("ctTag");
               if(tagEl){
                 tagEl.textContent="community identification";
-                tagEl.title=(wasUncl?"Named by users of this tool, not by MICrONS — MICrONS has no prediction for this nucleus.":"Named by users of this tool and shown in place of the MICrONS prediction — user reports take precedence.")+" The name shown is whichever identification has the most reports; see the breakdown below.";
+                tagEl.title=(wasUncl?(_src.label?"Named by users of this tool, not by "+_src.label+" — there is no "+_src.label+" "+_src.noun+" for this nucleus.":"Named by users of this tool. This dataset has no automated classifier."):"Named by users of this tool and shown in place of the "+_src.label+" "+_src.noun+" — user reports take precedence.")+" The name shown is whichever identification has the most reports; see the breakdown below.";
               }
             }
           }
@@ -1289,7 +1314,7 @@ function loadCommunityReports(nid,cellPos){
                from here there has been no guided-ID run to populate it, so it is seeded from the
                cell currently on screen -- and with no leaf slug, since viewing a cell is not a
                claim about its type. */
-            ID_CTX={nucId:((typeof CUR_NUCID!=="undefined"&&CUR_NUCID)||nid||""),root:((typeof CUR_ROOT!=="undefined"&&CUR_ROOT)||""),pos:cellPos||null};
+            ID_CTX=panelSeedCtx({nucId:((typeof CUR_NUCID!=="undefined"&&CUR_NUCID)||nid||""),root:((typeof CUR_ROOT!=="undefined"&&CUR_ROOT)||""),pos:cellPos||null});
             cBody.innerHTML=organelleFormHtml(null);wireOrganelleForm(cBody,null);cWired=true;
           }
         });
@@ -1333,6 +1358,24 @@ function loadCommunityReports(nid,cellPos){
    READ IN THREE PLACES, and they have to agree: the line the form prints, the groupId that ties
    one submission's rows together, and the nucleusId/rootId that actually go to the sheet. A form
    that shows the cell body id and files against an empty nucleus id is worse than either. */
+/* ── WHOSE AUTOMATED CALL IS THIS, IF THERE IS ONE ────────────────────  2026-09-20
+   The headline override below explains itself in three sentences, and all three used to say
+   MICrONS. True on µJump, δJump and πJump. ηJump's source is H01 — a different dataset, which does
+   not predict but publishes — and λJump and βJump have no automated classifier at all, so they
+   were crediting one that was never involved.
+
+   {label, noun}. A host may set UJ.panel.source; unset, it is MICrONS's prediction, which is what
+   these sentences have always said. label:"" means there is no classifier here, and the sentences
+   drop the attribution rather than inventing one. */
+function panelSource(){
+  var o = null;
+  if (typeof UJ !== "undefined" && UJ.panel && UJ.panel.source){
+    o = (typeof UJ.panel.source === "function") ? UJ.panel.source() : UJ.panel.source;
+  }
+  o = o || {};
+  return { label: o.label === undefined ? "MICrONS" : String(o.label || ""),
+           noun: o.noun || "prediction" };
+}
 function panelCellIds(){
   var c = (typeof ID_CTX !== "undefined" && ID_CTX) ? ID_CTX : {};
   var o = null;
@@ -1345,22 +1388,26 @@ function panelCellIds(){
            nucLabel: o.nucLabel || "nucleus",
            rootLabel: o.rootLabel || "root" };
 }
-/* ── AN OPTIONAL PREFIX, BECAUSE ηJUMP MOUNTS THIS TWICE ───────────────────────  2026-09-20
-   #nucpanel (the cell card) and #idfpanel (the guided-ID result) are both in the DOM at once on
-   ηJump, so a single fixed toggle id leaves one of the two dead -- whichever wired last wins.
+/* ── A PREFIX THAT LASTED HALF A DAY ──────────────────────────  2026-09-20
+   These two took an optional `pfx` for part of 2026-09-20, added so ηJump could mount this form on
+   its cell card as well as its guided-ID screen without the two toggles sharing an id.
 
-   NO PREFIX MEANS TODAY'S IDS, to the byte: #idfOrganelleToggle and #organelleInlineBody. Both
-   are named in this file's own host contract at the top, and reached by five pages and four
-   checks; renaming them to something symmetrical would have been tidier and would have broken all
-   of it for nothing. */
-function organelleFlagHtml(pfx){
-  var tog = (pfx || "idf") + "OrganelleToggle";
-  var bod = pfx ? pfx + "OrganelleInlineBody" : "organelleInlineBody";
-  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Log an organelle here <span class="idf-back" id="'+tog+'" style="margin:0">Log one &rarr;</span></span>'
-    +'<div id="'+bod+'" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
+   It had exactly one caller, and that caller was itself a workaround: ηJump mounted its own copy
+   on the card only because it had no #commReports for the shared one to live in. It got one the
+   same afternoon, the card started showing "Log an organelle here" twice, and the local mount went
+   — taking the prefix's only reason with it. The two mounts that remain are distinct by
+   construction: loadCommunityReports uses commOrganelleToggle / commOrganelleBody, and the guided
+   screen uses the ids below.
+
+   Taken out rather than left optional. A parameter kept "in case" is one the next person copies,
+   and machinery with no live justification is how six tools came to carry six versions of this
+   form in the first place. */
+function organelleFlagHtml(){
+  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Log an organelle here <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Log one &rarr;</span></span>'
+    +'<div id="organelleInlineBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
 }
-function wireOrganelleFlag(slug,pfx){
-  const toggle=document.getElementById((pfx||"idf")+"OrganelleToggle"),body=document.getElementById(pfx?pfx+"OrganelleInlineBody":"organelleInlineBody");
+function wireOrganelleFlag(slug){
+  const toggle=document.getElementById("idfOrganelleToggle"),body=document.getElementById("organelleInlineBody");
   if(!toggle||!body)return;
   let wired=false;
   toggle.addEventListener("click",()=>{

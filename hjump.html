@@ -438,7 +438,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:35</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:59</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1121,7 +1121,17 @@ function fmt(n){ return Number(n).toLocaleString("en-GB"); }
 
 /* Matches µJump's celltypeLink() exactly, including the .ext arrow span -- the cell NAME is the
    Neuroglancer link, there is no separate button (Søren, 2026-08-16). */
+/* ── TWO SHAPES, ONE LINK ──────────────────────────────────  2026-09-20
+   This page's five call sites pass (pos, segId, innerHtml), because an H01 viewer link carries the
+   c3 segment and the other five tools' links do not. core/panel.js calls the shape those five
+   use — celltypeLink(pos, innerHtml) — when a community identification takes over the headline,
+   and would otherwise have passed the cell's NAME as a segment id: a link into a segment called
+   "Astrocyte", and a headline with nothing in it.
+
+   Two arguments means "take the segment from the cell on screen", which is the cell the override
+   is renaming. The three-argument call sites are untouched. */
 function celltypeLink(pos, segId, innerHtml){
+  if(innerHtml===undefined){ innerHtml=segId; segId=(typeof CUR_ROOT!=="undefined"&&CUR_ROOT)||""; }
   return '<a href="'+escHtml(viewerUrl(pos,segId))+'" target="_blank" rel="noopener" '
     +'title="Open this cell in Neuroglancer, with its c3 segment already selected">'
     +innerHtml+' <span class="ext">&#8599;</span></a>';
@@ -1161,6 +1171,16 @@ UJ.panel.cellIds = function(c){
   return { nucId: (c && c.body) || "", root: (c && c.seg) || "",
            nucLabel: "cell body", rootLabel: "c3 segment" };
 };
+/* H01 DOES NOT PREDICT, IT PUBLISHES. The shared panel explains a community override by naming
+   what it replaced, and says "MICrONS prediction" unless a page says otherwise — which would
+   credit a classifier that has never seen this volume. */
+UJ.panel.source = { label: "H01", noun: "published classification" };
+/* showCell sets ID_CTX for the cell on screen every single time, in this page's own terms — the
+   cell_bodies id, the c3 segment, the layer, the depth, whether H01 published a type. Opening the
+   shared organelle form would otherwise replace all of that with {nucId, root, pos} and leave
+   UJ.panel.cellIds above reading a `body` that is no longer there. Nothing to seed: it is already
+   right. */
+UJ.panel.seedCtx = function(){ return ID_CTX; };
 
 function showCell(i, distNm, fromHistory){
   CUR_IDX=i;
@@ -1178,9 +1198,36 @@ function showCell(i, distNm, fromHistory){
   /* favStarHtml comes from core/gamify.js -- same favourites store as µJump, keyed here by the
      cell-body id plus the voxel coordinate, exactly as µJump keys by nucleus id + coordinate. */
   const star=(typeof favStarHtml==="function")?favStarHtml(String(HSB[i]),seg,pos[0],pos[1],pos[2]):"";
-  h+='<div class="celltype">'+celltypeLink(pos,seg,escHtml(longName(t)))+star
+  /* ── THE HEADLINE A COMMUNITY NAME CAN TAKE OVER ──────────────────  2026-09-20
+     #ctHeadline is core/panel.js's, and the two data- attributes are how it decides whether a
+     community identification may replace what is written here:
+
+       data-unclassified="1"  H01 made no call, so the first person to name this cell names it;
+       data-microns-name      what H01 DID publish, so that everyone agreeing with it is recorded
+                              as confirming H01 rather than overriding it. (The attribute keeps
+                              µJump's name — it is read as headEl.dataset.micronsName in the shared
+                              file, and renaming it would be a rename across six pages to describe
+                              one of them better.)
+
+     H01_NO_CALL is the same test the guided-ID call to action and the vote seeds already use, so
+     the three cannot disagree about whether this cell has a published type. */
+  const noPub=!!H01_NO_CALL[t];
+  h+='<div class="celltype" id="ctHeadline" data-unclassified="'+(noPub?"1":"0")+'"'
+    +' data-microns-name="'+(noPub?"":escHtml(longName(t)))+'">'
+    +celltypeLink(pos,seg,escHtml(longName(t)))+star
     +' <small>H01 published classification</small></div>';
+  /* Its own tag, not the class badge above: core/panel.js overwrites #ctTag wholesale the moment
+     a community identification wins, and sharing it with the excitatory/inhibitory badge would
+     silently delete an anatomical fact. Only on a cell H01 did not call — there is nothing to say
+     "unclassified" about otherwise. Same reasoning λJump and βJump use for theirs. */
+  if(noPub) h+=' <span class="tag none" id="ctTag" title="H01 published no cell type for this '
+    +'segment — nobody has agreed on one here yet">unclassified</span>';
   h+='<div id="idVotePanel" style="margin:6px 0"></div>';
+  /* ── WHAT THE COMMUNITY HAS SAID ──────────────────────────────  2026-09-20
+     Filled by loadCommunityReports() below, which also builds the organelle read-back and the
+     traced-structure list inside it. Directly under the headline it can rewrite, so the name and
+     the reason for the name are read together. */
+  h+='<div class="meta" id="commReports" style="margin:6px 0 0"></div>';
 
   const dep=depthUm(i);
   h+='<div class="meta">Soma '+fmt(HVB[i].toFixed(0))+' &micro;m&sup3; &middot; '
@@ -1247,12 +1294,18 @@ function showCell(i, distNm, fromHistory){
             :'Not sure, or think H01 got it wrong? Take the guided identification.')
     +'</span><button class="idbtn" id="idfgo">'+(noCall?'Start guided identification':'Guided identification')+' &rarr;</button></div></div>';
 
-  /* ORGANELLES WITHOUT THE GUIDED IDENTIFICATION (Søren, 2026-09-03). Under the guided-ID
-     call to action, because these are the two ways of contributing to a cell and neither should
-     be a precondition for the other -- knowing there is a cilium on this cell is not the same
-     knowledge as knowing what kind of cell it is, and the page should not demand the second
-     before accepting the first. */
-  h+=organelleFlagHtml("nuc");
+  /* ORGANELLES WITHOUT THE GUIDED IDENTIFICATION (Søren, 2026-09-03): *"I want the same function
+     on the identity cards of all the other tools, so that you don't have to run through the
+     guided identification before you can report organelles."* Still true, and it is now
+     core/panel.js that does it — the "Log an organelle here" line inside #commReports above,
+     which every other tool in the family has, and which comes with the read-back of what is
+     already logged on this cell.
+
+     This page used to mount its OWN copy here, prefixed "nuc", for one reason: it had no
+     #commReports for the shared one to live in. It got one on 2026-09-20 and the card was showing
+     the same affordance twice, so the local mount is gone. Neither was broken — panel.js keeps
+     commOrganelleToggle apart from the guided screen’s idfOrganelleToggle on purpose — there were
+     simply two of them. */
 
   h+='<div class="idcta-search" style="margin-top:10px">'+leafSearchHtml("mainLeaf")+'</div>';
 
@@ -1274,7 +1327,6 @@ function showCell(i, distNm, fromHistory){
   window.CUR_POS=pos.slice();
   CUR_NUCID=String(HSB[i]);
   CUR_ROOT=seg;
-  wireOrganelleFlag(null,"nuc");
   const idfBtn=panel.querySelector("#idfgo");
   if(idfBtn) idfBtn.addEventListener("click",function(){ openIdentify(i); });
   wireLeafSearch("mainLeaf",function(slug){ openIdentify(i); renderResult(slug); });
@@ -1282,7 +1334,13 @@ function showCell(i, distNm, fromHistory){
   renderPriorRunNote(i);
   /* Async, and deliberately after the panel is in the DOM: a slow backend must never delay the
      cell itself appearing. Each writes into its own placeholder or stays empty. */
-  loadIdentityVotes(String(HSB[i]), H01_NO_CALL[t]?[]:[longName(t)]);
+  /* core/panel.js's, since 2026-09-20 — this page's own loadIdentityVotes() was retired the same
+     day (see where it used to be defined). The seed is H01's published name where there is one, so
+     it can be agreed with before anybody has proposed anything; loadCommunityReports re-runs this
+     with window.__idvBase once the community's own names are known, which is how a proposal
+     becomes votable. Same order µJump uses. */
+  loadIdentityVotesPanel(String(HSB[i]), H01_NO_CALL[t]?[]:[longName(t)]);
+  loadCommunityReports(String(HSB[i]), pos);
   loadExtraIdPanel(String(HSB[i]));
   /* core/panel.js's, shared with the other five tools since this page started loading it.
      Guarded because everything else on this card works without it, and a page that loses one
@@ -2430,45 +2488,11 @@ function buildIdentityFilterUI(){
 /* ── identity voting ───────────────────────────────────────────────────────────────────── */
 /* Same backend contract as µJump: ?identityVotes=<id> to read, report type "vote_identity" to
    write. The id here is the CELL BODY id, matching what the guided-ID submit files under. */
-function loadIdentityVotes(bodyId,seedNames){
-  const el=document.getElementById("idVotePanel");
-  if(!el||!REPORT_ENDPOINT||!bodyId){ if(el)el.innerHTML=""; return; }
-  const votable=function(n){ return n&&String(n).trim()&&!/unclassif|unknown/i.test(String(n)); };
-  const base=(seedNames||[]).filter(votable).map(String);
-  const render=function(list){
-    const map={}; list.forEach(function(v){ map[String(v.identity).toLowerCase()]=v; });
-    const names=[], seen={};
-    base.concat(list.map(function(v){ return v.identity; })).forEach(function(n){
-      const k=String(n).toLowerCase(); if(k&&!seen[k]&&votable(n)){ seen[k]=1; names.push(n); }
-    });
-    if(!names.length){ el.innerHTML=""; return; }
-    const multi=names.length>1;
-    let h='<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--mut)">'
-      +'<span title="Vote on whether each identification is right. More independent agreement is what makes a call trustworthy.">agree?</span>';
-    names.forEach(function(n){
-      const t=map[String(n).toLowerCase()]||{up:0,down:0,net:0};
-      h+='<span style="display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:14px;padding:1px 7px">'
-        +(multi?'<span style="color:var(--ink)">'+escHtml(n)+'</span>':'')
-        +'<button class="idbtn idvote" data-nm="'+escHtml(n)+'" data-v="1" title="agree" style="padding:0 5px">&#9650;</button>'
-        +'<span style="min-width:14px;text-align:center;color:var(--ink)">'+(t.net>0?"+":"")+(t.net||0)+'</span>'
-        +'<button class="idbtn idvote" data-nm="'+escHtml(n)+'" data-v="-1" title="disagree" style="padding:0 5px">&#9660;</button>'
-        +'</span>';
-    });
-    el.innerHTML=h+'</div>';
-    el.querySelectorAll(".idvote").forEach(function(b){
-      b.addEventListener("click",function(){
-        postReport({type:"vote_identity",timestamp:new Date().toISOString(),
-                    nucleusId:String(bodyId),identity:b.dataset.nm,vote:Number(b.dataset.v)},
-                   "Vote recorded — thank you.")
-          .then(function(){ setTimeout(function(){ loadIdentityVotes(bodyId,seedNames); },1200); });
-      });
-    });
-  };
-  fetch(REPORT_ENDPOINT+"?identityVotes="+encodeURIComponent(bodyId)+"&ds="+encodeURIComponent(UJ.cfg.backend.ds))
-    .then(function(r){ return r.json(); })
-    .then(function(d){ render((d&&d.identityVotes)||[]); })
-    .catch(function(){ el.innerHTML=""; });
-}
+/* loadIdentityVotes() moved to core/panel.js's loadIdentityVotesPanel() on 2026-09-20.
+   Both wrote #idVotePanel and the later one silently won. The shared one lists community
+   proposals as well as the published name, and will not let you vote on your own — two
+   things this copy never did. The two things this copy did better, the "agree?" tooltip and
+   excluding "unknown" from the pills, went up into the shared file rather than being lost. */
 
 /* ── suggest additional c3 / cell-body IDs ─────────────────────────────────────────────── */
 /* H01's c3 is a conservative agglomeration: one real cell is often split across several

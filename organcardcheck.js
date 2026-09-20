@@ -292,12 +292,21 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
     vc.on("jsdomError", e => errs.push(String(e.message).slice(0, 160)));
     const dom = new JSDOM(html, { runScripts:"dangerously", url:"https://grubblab.com/hjump.html",
       virtualConsole: vc, pretendToBeVisual: true,
-      beforeParse(w){ w.fetch = () => new w.Promise(() => {}); w.open = () => null;
-                      w.alert = () => {}; } });
+      /* THE BACKEND HAS TO ANSWER HERE, where it used to hang.            2026-09-20
+         ηJump's own "Log an organelle here" was mounted unconditionally on the card, so a fetch
+         that never resolved was fine. That mount is gone: the affordance now comes from
+         core/panel.js, inside #commReports, which exists only once the community read returns.
+         An empty payload is the interesting one anyway — a cell nobody has written about is
+         exactly the cell you are looking at when you want to log the first organelle on it. */
+      beforeParse(w){
+        w.fetch = () => w.Promise.resolve({ status: 200, ok: true,
+          json: () => w.Promise.resolve(EMPTY),
+          text: () => w.Promise.resolve(JSON.stringify(EMPTY)) });
+        w.open = () => null; w.alert = () => {}; } });
     const w = dom.window, D = w.document;
     await sleep(700);
     w.showCell(0, 0, false);
-    await sleep(200);
+    await sleep(400);
     const np = D.getElementById("nucpanel");
     /* THE REST OF THE HOST CONTRACT, added 2026-09-20 with the cell history
        (src/hjump_gets_a_cell_history.py). The history itself is core/panel.js's and is exercised
@@ -307,6 +316,36 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
        failure worth naming rather than discovering. */
     ok("there is somewhere for the cell history to go", !!D.getElementById("classHistoryPanel"),
        "  <- core/panel.js writes into it; without it loadClassificationHistory returns silently");
+    /* AND FOR THE COMMUNITY BLOCK, added 2026-09-20 (src/whose_prediction_is_it_anyway.py). The
+       override logic itself is core/panel.js's and sourcenamecheck drives it; what belongs here is
+       the part hjump.html supplies — the element, and the two data- attributes that decide whether
+       a community name may replace what H01 published. A headline with neither attribute is one
+       the community can never rename, silently. */
+    {
+      const hd = D.getElementById("ctHeadline");
+      ok("...and for the community's own name", !!D.getElementById("commReports"));
+      ok("...on a headline it is allowed to rewrite",
+         !!hd && hd.dataset.unclassified === "0"
+             && hd.dataset.micronsName === "Pyramidal neuron",
+         hd ? "uncl=" + hd.dataset.unclassified + " published=" + hd.dataset.micronsName
+            : "(no #ctHeadline)"
+         + "  <- cell 0 HAS an H01 call, so agreeing with it must read as confirming, not overriding");
+      /* THE TWO-ARGUMENT CALL panel.js makes. This page's celltypeLink is
+         (pos, segId, innerHtml) — unique among the six — so the shared override would otherwise
+         pass the cell's NAME as a segment id and build a link into a segment called "Astrocyte". */
+      const link = w.celltypeLink([1, 2, 3], "Astrocyte");
+      ok("...and celltypeLink answers the shared panel's two-argument call",
+         /Astrocyte/.test(link) && !/segments%22%3A%5B%22Astrocyte|segments":\["Astrocyte/.test(link),
+         "  <- two arguments means innerHtml, with the segment taken from the cell on screen");
+    }
+    /* ONE VOTE PANEL. This page kept its own loadIdentityVotes() writing #idVotePanel while
+       loadCommunityReports() called the shared loadIdentityVotesPanel() into the same element —
+       both would render and the later would win, with no error either way. */
+    ok("...and there is only one vote panel left",
+       typeof w.loadIdentityVotes === "undefined"
+         && typeof w.loadIdentityVotesPanel === "function",
+       "own:" + typeof w.loadIdentityVotes + " shared:" + typeof w.loadIdentityVotesPanel
+       + "  <- two writers on #idVotePanel is a race nobody sees fail");
     /* AND THE CARD ITSELF FOLDS. cellfoldcheck drives cellCardFold directly, so it passes on any
        page that merely LOADS core/panel.js — it cannot see whether showCell calls it. This is the
        only place that asks the real render. */
@@ -317,16 +356,23 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
        w.CUR_NUCID === "1" && !!w.CUR_ROOT && (w.CUR_POS || []).length === 3,
        "nuc " + w.CUR_NUCID + ", root " + w.CUR_ROOT + ", pos " + (w.CUR_POS || []).join(",")
        + "  <- H01's cell body and c3 segment, since it has no nucleus");
+    /* ONE OF THEM, NOT TWO.                                                        2026-09-20
+       This page mounted its own "Log an organelle here" on the card, prefixed "nuc", because it
+       had no #commReports for the shared one to live in. It got one that afternoon and the card
+       showed the affordance twice — caught in a screenshot, not by any check. The local mount is
+       gone, and what is asserted now is that exactly one remains and it is the shared one. */
     ok("the cell card offers it", /Log an organelle here/.test(np.textContent),
-       "  <- mounted under the guided-ID call to action, not inside it");
-    /* ITS OWN IDS. #nucpanel and #idfpanel are both in the DOM at once, so the card's toggle and
-       the guided result's toggle cannot share an id -- whichever wired last would win and the
-       other would be a dead link. */
-    ok("...under its own id, not the result screen's", !!D.getElementById("nucOrganelleToggle"),
-       "  <- #nucpanel and #idfpanel coexist; a shared id leaves one toggle dead");
-    const nb = D.getElementById("nucOrganelleInlineBody");
+       "  <- from core/panel.js now, inside the community block, with the read-back beside it");
+    ok("...exactly once", (np.textContent.match(/Log an organelle here/g) || []).length === 1,
+       (np.textContent.match(/Log an organelle here/g) || []).length + " of them"
+       + "  <- two correct affordances side by side are still a defect");
+    ok("...under the shared id, not a prefixed one of this page's own",
+       !!D.getElementById("commOrganelleToggle") && !D.getElementById("nucOrganelleToggle"),
+       "shared:" + !!D.getElementById("commOrganelleToggle")
+       + " local:" + !!D.getElementById("nucOrganelleToggle"));
+    const nb = D.getElementById("commOrganelleBody");
     ok("...closed to start with", nb && nb.style.display === "none");
-    D.getElementById("nucOrganelleToggle").click();
+    D.getElementById("commOrganelleToggle").click();
     await sleep(80);
     const hRowSel = nb.querySelector(".organ-row-kind");
     ok("...opening the same 61-kind form", nb.style.display !== "none" && !!hRowSel
