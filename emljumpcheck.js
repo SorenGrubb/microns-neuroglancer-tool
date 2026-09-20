@@ -34,13 +34,21 @@ const ok = (c, what, d) => {
   if (!c) fails++;
 };
 
-/* Lee16's real info, as read from the bucket on 2026-09-20. Trimmed to the four scales that
-   matter; the offsets and chunk sizes are the volume's own. */
+/* Lee16's real info, as read from the bucket on 2026-09-20 — ALL TEN SCALES, which is the point.
+   This was trimmed to four at first and the EM-plane assertions below failed for it: emtiles
+   clamps a mip to the scale list it is given, so a four-scale stub makes mip 4 mean 32 nm and the
+   page looks like it asked for the wrong level. A stub shorter than the volume tests a volume
+   nobody has.
+
+   The shape that matters: Lee16 downsamples in X AND Y ONLY. Every one of its ten scales keeps
+   40 nm sections, where minnie65's 64 nm level averages two — which is why λJump reaches 64 nm as
+   a plain mip 4 and µJump needs emtiles' slabOk escape hatch to get there at all. */
 const INFO = {
   type: "image", data_type: "uint8", num_channels: 1,
-  scales: ["4_4_40", "8_8_40", "16_16_40", "32_32_40"].map((key, i) => ({
-    key, encoding: "raw", resolution: [4 << i, 4 << i, 40],
-    size: [163840 >> i, 163840 >> i, 822], voxel_offset: [0, 0, 0],
+  scales: Array.from({ length: 10 }, (_, i) => ({
+    key: (4 << i) + "_" + (4 << i) + "_40", encoding: "raw",
+    resolution: [4 << i, 4 << i, 40],
+    size: [Math.max(1, 163840 >> i), Math.max(1, 163840 >> i), 822], voxel_offset: [0, 0, 0],
     chunk_sizes: [[512, 512, 16]]
   }))
 };
@@ -149,6 +157,52 @@ const INFO = {
     ok(got.ours !== got.theirs,
        "this page's window changes the picture, so it is really being used",
        "ours " + got.ours + " vs the shared default " + got.theirs);
+  }
+
+  console.log("\nand the cell card shows one plane of it");
+  {
+    /* SLICE 2. The pad was the plan and the measurement changed it: the pad's code is scattered
+       across nineteen regions of ujump.html, ~1,450 lines interleaved with unrelated code. The EM
+       plane is already marked there for extraction (@emplane), 272 contiguous lines, so it is the
+       piece that was ready. */
+    const got = await p.evaluate(async () => {
+      showCell(0, 0);
+      await new Promise(r => setTimeout(r, 2200));
+      const cv = document.getElementById("emPlaneCv");
+      let stats = null;
+      if (cv) {
+        const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+        let min = 255, max = 0;
+        for (let i = 0; i < d.length; i += 4) { const v = d[i]; if (v < min) min = v; if (v > max) max = v; }
+        stats = { min, max };
+      }
+      return { box: !!document.getElementById("emPlaneBox"),
+               tick: !!document.getElementById("emPlaneOn"),
+               segTick: !!document.getElementById("emPlaneSeg"),
+               shown: cv && cv.style.display, title: cv ? cv.title : "",
+               scaleUm: cv ? cv.dataset.scaleUm : null, stats,
+               say: (document.getElementById("emPlaneSay") || {}).textContent };
+    });
+    ok(got.box && got.tick, "the card carries the section, with its own switch",
+       "box:" + got.box + " tick:" + got.tick);
+    /* LEE16 HAS NO SEGMENTATION VOLUME — its own Colab card says so. µJump's version of this panel
+       is half segmentation overlay; porting that half would have put a tick on the page that can
+       never do anything, and a "segmentation off" status line about a thing that does not exist. */
+    ok(!got.segTick, "...and NOT the segmentation tick µJump has", got.segTick
+       + "  <- Lee16's release is image only; a control that can never act is worse than none");
+    ok(got.shown === "block" && got.stats && got.stats.min !== got.stats.max,
+       "...drawn, with real pixels on it",
+       got.shown + " " + (got.stats ? got.stats.min + "–" + got.stats.max : "(none)"));
+    /* 300 px at 64 nm is 19.2 µm — the width Søren asked for when this was built on µJump. µJump
+       needs emtiles' slabOk to reach 64 nm because minnie65 averages two 40 nm sections there;
+       Lee16 downsamples in x and y only, so mip 4 is 64 nm AND a true single section. */
+    ok(/19\.2 µm across at 64 nm\/px/.test(got.title),
+       "...19.2 µm of tissue, at 64 nm", got.title.slice(0, 46));
+    ok(/One 40 nm section\./.test(got.title) && !/averages/.test(got.title),
+       "...and called one section, because here it really is one",
+       "  <- µJump must warn that its 64 nm level averages two; all ten Lee16 scales keep 40 nm z");
+    ok(got.scaleUm === "5", "...under a round scale bar", got.scaleUm + " µm");
+    ok(!got.say, "...and nothing left to say once it is drawn", JSON.stringify(got.say));
   }
 
   ok(errors.length === 0, "the page still loads with no new errors",
