@@ -560,7 +560,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 06:29</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 08:12</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -8952,10 +8952,25 @@ function cellCardFold(panel){
   det.appendChild(sum);
   det.appendChild(body);
   panel.appendChild(det);
+  /* ── WHAT preventDefault COSTS ON A LINK ───────────────────────  2026-09-20
+     Søren, an hour after the first version shipped: *"Now the cell link does not work."* It did not:
+     cancelling the fold from here cancels the whole default action for that click, and following a
+     link IS the default action. The ↗ stopped opening Neuroglancer.
+
+     MEASURED RATHER THAN REASONED ABOUT, because three plausible answers disagree and only a
+     browser settles it. An ANCHOR already consumes the click: Chrome walks default handlers up the
+     path and stops at the first that takes it, so a link inside a summary navigates and does not
+     fold, with nothing needed from us. Everything else -- the star, a copyable id, a button -- has
+     only listeners and no default action worth keeping, so cancelling is free for them.
+
+     So anchors and form controls are left strictly alone, and the rest are cancelled. Bare space
+     still folds the card, which is the affordance. */
   sum.addEventListener("click", function(ev){
     const t = ev.target;
-    if (t && t.closest && t.closest("a,button,input,select,textarea,label,[data-c],.star,.fav"))
-      ev.preventDefault();                    // it has its own job; folding is not it
+    if (!t || !t.closest) return;
+    if (t.closest("a,input,select,textarea,label")) return;   // it navigates or types; leave it
+    if (t.closest("button,[data-c],.idval,.star,.fav"))
+      ev.preventDefault();                    // it has its own job, and folding is not it
   });
   det.addEventListener("toggle", function(){ window.__cellCardOpen = det.open; });
 }

@@ -18,10 +18,18 @@ tag. So it is done to the DOM, once, after the panel is filled: the badge and th
 the summary, everything after the headline becomes the body. One function, one call site per branch,
 and no branch has to know it is happening.
 
-A LINK IN A SUMMARY IS A TRAP. The headline carries the ↗ to Neuroglancer, the favourite star, and
-the copyable ids -- and inside a `<summary>` a click on any of them both follows the link and toggles
-the fold. So the summary swallows the toggle for anything clickable inside it, and only bare space
-folds the card.
+A LINK IN A SUMMARY IS A TRAP, AND THE OBVIOUS FIX IS A WORSE ONE. The headline carries the ↗ to
+Neuroglancer, the favourite star and the copyable ids. The first version cancelled the fold from the
+summary with preventDefault, and Søren came back within the hour: *"Now the cell link does not
+work."* Of course not -- preventDefault cancels the whole default action for that click, and
+following a link IS the default action.
+
+Measured in a browser rather than reasoned about, because three plausible answers disagreed. An
+ANCHOR consumes the click by itself: Chrome walks default handlers up the path and stops at the
+first that takes it, so a link inside a summary navigates and does not fold, with nothing needed
+from us. Everything else in there -- the star, a copyable id, a button -- has listeners and no
+default action worth keeping, so cancelling costs nothing. Anchors and form controls are left
+strictly alone; the rest are cancelled; bare space still folds the card.
 
 OPEN BY DEFAULT, AND THEN IT REMEMBERS. Both start expanded, as he asked, and each keeps the state
 he last put it in while he moves from cell to cell -- the same `window.__organOpen` pattern the
@@ -120,10 +128,25 @@ function cellCardFold(panel){
   det.appendChild(sum);
   det.appendChild(body);
   panel.appendChild(det);
+  /* ── WHAT preventDefault COSTS ON A LINK ───────────────────────  2026-09-20
+     Søren, an hour after the first version shipped: *"Now the cell link does not work."* It did not:
+     cancelling the fold from here cancels the whole default action for that click, and following a
+     link IS the default action. The ↗ stopped opening Neuroglancer.
+
+     MEASURED RATHER THAN REASONED ABOUT, because three plausible answers disagree and only a
+     browser settles it. An ANCHOR already consumes the click: Chrome walks default handlers up the
+     path and stops at the first that takes it, so a link inside a summary navigates and does not
+     fold, with nothing needed from us. Everything else -- the star, a copyable id, a button -- has
+     only listeners and no default action worth keeping, so cancelling is free for them.
+
+     So anchors and form controls are left strictly alone, and the rest are cancelled. Bare space
+     still folds the card, which is the affordance. */
   sum.addEventListener("click", function(ev){
     const t = ev.target;
-    if (t && t.closest && t.closest("a,button,input,select,textarea,label,[data-c],.star,.fav"))
-      ev.preventDefault();                    // it has its own job; folding is not it
+    if (!t || !t.closest) return;
+    if (t.closest("a,input,select,textarea,label")) return;   // it navigates or types; leave it
+    if (t.closest("button,[data-c],.idval,.star,.fav"))
+      ev.preventDefault();                    // it has its own job, and folding is not it
   });
   det.addEventListener("toggle", function(){ window.__cellCardOpen = det.open; });
 }

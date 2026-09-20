@@ -35,10 +35,10 @@ const PANEL = `(function(open){
   if (open !== undefined) window.__cellCardOpen = open;
   var p = document.getElementById("cellfoldprobe");
   if (p) p.remove();
-  document.body.insertAdjacentHTML("beforeend", '<div class="nuc" id="cellfoldprobe"></div>');
+  document.body.insertAdjacentHTML("beforeend", '<div class="nuc show" id="cellfoldprobe"></div>');
   p = document.getElementById("cellfoldprobe");
   p.innerHTML = '<span class="tag">verified identification</span>'
-    + '<div class="celltype"><a href="https://example.invalid/ngl" id="probeArrow">Microglia \\u2197</a>'
+    + '<div class="celltype"><a href="#probe-went" id="probeArrow">Microglia \\u2197</a>'
     + '<span class="fav" id="probeStar">\\u2606</span></div>'
     + '<div class="meta" id="probeIds">nucleus 521491</div>'
     + '<div id="probeNeigh">3 nearest neighbouring cells</div>';
@@ -89,28 +89,41 @@ const PANEL = `(function(open){
        "ids in summary: " + got.idsInSummary);
   }
 
-  console.log("\nclicking the arrow or the star does not fold the card");
+  console.log("\nthe link in the header still works, and nothing in it folds the card");
   {
-    /* The trap. Inside a <summary>, a click on a link both follows it and toggles — so opening the
-       viewer would collapse the cell you were reading. */
-    const got = await p.evaluate(src => {
-      // eslint-disable-line no-eval
-      eval(src)(true);
+    /* THE REGRESSION THIS SECTION EXISTS FOR. The first version cancelled the fold from the
+       summary with preventDefault — which cancels the whole default action for that click, and
+       following a link IS the default action. Søren, an hour later: *"Now the cell link does not
+       work."*
+
+       So this asserts the NAVIGATION, by real clicks with a real href, not the flags on the event.
+       An anchor turns out to consume the click by itself, so it needs nothing from us; the star,
+       a copyable id and a button have only listeners and are cancelled safely. */
+    await p.evaluate(src => { eval(src)(true); }, PANEL);   // eslint-disable-line no-eval
+    await p.evaluate(() => { location.hash = "nowhere"; window.__probeStarHits = 0;
+      document.getElementById("probeStar")
+        .addEventListener("click", () => { window.__probeStarHits++; }); });
+    await p.click("#probeArrow");
+    await p.waitForTimeout(60);
+    const afterArrow = await p.evaluate(() => ({
+      hash: location.hash,
+      open: document.getElementById("cellfoldprobe").querySelector("details.cellfold").open }));
+    ok(afterArrow.hash === "#probe-went", "the \u2197 actually follows its link", afterArrow.hash);
+    ok(afterArrow.open === true, "...and does not fold the card on the way", afterArrow.open);
+    await p.click("#probeStar");
+    await p.waitForTimeout(60);
+    const afterStar = await p.evaluate(() => ({
+      hits: window.__probeStarHits,
+      open: document.getElementById("cellfoldprobe").querySelector("details.cellfold").open }));
+    ok(afterStar.hits === 1, "the star's own handler still runs", afterStar.hits);
+    ok(afterStar.open === true, "...and it does not fold the card either", afterStar.open);
+    const bare = await p.evaluate(() => {
       const det = document.getElementById("cellfoldprobe").querySelector("details.cellfold");
-      const was = det.open;
-      const ev = () => new MouseEvent("click", { bubbles: true, cancelable: true });
-      const arrowEv = ev(); document.getElementById("probeArrow").dispatchEvent(arrowEv);
-      const starEv = ev(); document.getElementById("probeStar").dispatchEvent(starEv);
-      /* Bare space in the summary still folds it: that is the whole affordance. */
-      const sum = det.querySelector("summary");
-      const bareEv = ev(); sum.dispatchEvent(bareEv);
-      return { was: was, arrowStopped: arrowEv.defaultPrevented,
-               starStopped: starEv.defaultPrevented, bareStopped: bareEv.defaultPrevented };
-    }, PANEL);
-    ok(got.arrowStopped === true, "the \u2197 keeps the card open", got.arrowStopped);
-    ok(got.starStopped === true, "...and so does the favourite star", got.starStopped);
-    ok(got.bareStopped === false, "...while bare space in the header still folds it",
-       got.bareStopped);
+      det.querySelector("summary").dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return det.open;
+    });
+    ok(bare === false, "...while bare space in the header still folds it", bare);
   }
 
   console.log("\nand it remembers, so it does not spring open on the next cell");
