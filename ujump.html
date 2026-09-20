@@ -217,6 +217,29 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 .nrow{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line)}.nrow:last-child{border-bottom:none}
 .nleft{display:flex;align-items:center;gap:9px;min-width:0}
 .dot{width:9px;height:9px;border-radius:50%;flex:none}.dot.exc{background:var(--exc)}.dot.inh{background:var(--inh)}.dot.non{background:var(--non)}.dot.none{background:var(--mut)}
+/* ── A COLOUR PER CELL-TYPE CATEGORY ────────────────────────────────  2026-09-20
+   Søren: *"if the different cell types could have different colors to make them easier to discern,
+   then that would also be nice."*
+
+   By CATEGORY, not by type: there are about forty types and nine categories, and the categories are
+   what tells them apart. Two excitatory subtypes being different colours would be noise.
+
+   DEFINED ONCE, THEMED THREE TIMES FOR FREE. These are references, not values, and var() resolves
+   where it is USED -- so a light-theme --exc reaches --cat-exc without this block being repeated in
+   the light and high-contrast :root blocks below. Leptomeninges is the one category with no
+   existing token of its own; mixing two keeps it themed, where a literal hex would be right in one
+   theme and wrong in the other two. */
+:root{
+  --cat-exc:var(--exc); --cat-inh:var(--inh); --cat-neu:var(--accent);
+  --cat-glia:var(--ok); --cat-vasc:var(--warn); --cat-blood:var(--danger);
+  --cat-immune:var(--non);
+  --cat-lepto:color-mix(in srgb,var(--non) 55%,var(--danger));
+  --cat-other:var(--mut);
+}
+/* Each option inherits its optgroup's colour, and the CLOSED picker shows the chosen one too, so
+   the current category is placed without opening anything. Chrome and Firefox colour options;
+   where a platform refuses, the list is exactly what it was before. */
+#randomTypeSelect optgroup{font-weight:600}
 .ntype{font-weight:600;font-size:14px}.nsub{font-family:var(--mono);font-size:11px;color:var(--mut)}
 .njump{background:var(--inset);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:5px 9px;font-size:12px;cursor:pointer;flex:none}.njump:hover{border-color:var(--accent);color:var(--accent)}
 .idcta{margin-top:14px;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--inset);display:flex;flex-direction:column;gap:10px}
@@ -560,7 +583,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 08:41</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 12:30</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -664,7 +687,33 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
      cell, list its neighbours, load two meshes. All of that is visible the moment it happens, so
      the label was spending a line on what the page would show anyway. What a label has to answer
      is why somebody would type here at all. -->
-<label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; paste one from Neuroglancer to see what cell type you are looking at</span></label>
+<!-- 2026-09-20 (Søren: "Instead of the main thing being the coordinates, the list of cells
+     should be the main thing" and "the cell should be always visible") -- moved above the
+     coordinate box and no longer a <details>: a thing you do every time should not cost a click.
+     The type picker sits above the two random buttons, as his mock-up had it -- the picker is the
+     control that answers "which kind of cell", and the buttons are two ways of not choosing.
+     The id is kept so nothing that refers to this block has to be found and changed. -->
+<div id="randomCellPanel">
+<label>Browse a cell <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; pick a type and draw an example, or take a random one</span></label>
+<div class="row" style="gap:8px;margin-top:2px">
+<select id="randomTypeSelect" style="flex:1 1 auto"></select>
+<!-- 2026-09-18 (Søren: "This could be a mouse-over for the random button instead of taking
+     space.") -- the sentence described what pressing THIS button is for, which is what a title on
+     this button is, and it ran to three lines at narrow widths. -->
+<button class="idbtn" id="randomOfType" title="Great for learning what a cell type looks like (a new random example loads each click), or for quickly finding a cell that still needs a first identification.">Random example</button>
+</div>
+<button class="idbtn" id="randomUnclassified" style="width:100%;margin-bottom:8px;margin-top:10px">Random unassigned cell &mdash; help identify one</button>
+<p class="hint" id="unclCount" style="margin-top:-4px;margin-bottom:8px"></p>
+<button class="idbtn" id="randomCommunityId" style="width:100%;margin-bottom:2px" title="Jump to a random cell that MICrONS never predicted but the community has since identified — useful for reviewing, confirming or challenging other people's calls">Random community-identified cell &mdash; review someone's call</button>
+</div>
+<!-- SHUT BY DEFAULT, since 2026-09-20 (Søren: "the coordinate should be expandable and
+     hidden by default"). Its old <label> is the summary now -- wrapping it and keeping the label
+     would have put the same sentence on two lines, one above the other. Remembered by the same
+     persistDetailsOpen the panels below it use, so opening it once keeps it open.
+     NOTHING MOVED IN THE JAVASCRIPT: #x, #y, #z, #go and #nearestLine keep their ids, and
+     getElementById reaches into a closed <details> exactly as it reaches anywhere else. -->
+<details class="rv-panel" id="coordPanel">
+<summary>Or jump to a coordinate <span style="font-weight:400;color:var(--mut);font-size:12px">&mdash; paste one from Neuroglancer to see what cell type you are looking at</span></summary>
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x" title="Paste a whole coordinate here — “x, y, z” in one go, from Neuroglancer or anywhere else — and it splits itself across the three boxes."></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Jump to this coordinate, build the Neuroglancer link and enable identification">&#8594;</button></div>
 <!-- 2026-09-18 (Søren: "the nearest nucleus line should be just below the coordinate window after
      looking up a coordinate") -- the receipt for the lookup you just did: which nucleus it landed
@@ -672,6 +721,7 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
      identity panel, under three diagrams. Empty and zero-height until setNearestLine() fills it,
      so this card is unchanged before anybody types. -->
 <div class="meta" id="nearestLine" style="display:none;margin-top:6px"></div>
+</details>
 <!-- 2026-08-10 (Søren: "a search function for a root ID or a nucleus ID below the coordinates
      input, which is possible to expand or collapse and is collapsed by default, but the user
      choice is remembered") -- native <details>/<summary> (same element "Recently viewed cells"
@@ -694,22 +744,8 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <summary>Recently viewed cells</summary>
 <div class="rv-list" id="recentlyViewedList"></div>
 </details>
-<!-- 2026-08-10 (Søren: "'Or browse a random cell' can also be collapsed by default and remembered
-     if expanded by user") -- same <details>/toggle-persistence pattern as the Root/Nucleus ID
-     search panel above (see its own comment); wiring is in the same place. -->
-<details class="rv-panel" id="randomCellPanel" style="margin-top:14px">
-<summary>Or browse a random cell</summary>
-<button class="idbtn" id="randomUnclassified" style="width:100%;margin-bottom:8px;margin-top:8px">Random unassigned cell &mdash; help identify one</button>
-<p class="hint" id="unclCount" style="margin-top:-4px;margin-bottom:8px"></p>
-<button class="idbtn" id="randomCommunityId" style="width:100%;margin-bottom:8px" title="Jump to a random cell that MICrONS never predicted but the community has since identified — useful for reviewing, confirming or challenging other people's calls">Random community-identified cell &mdash; review someone's call</button>
-<div class="row" style="gap:8px">
-<select id="randomTypeSelect" style="flex:1 1 auto"></select>
-<!-- 2026-09-18 (Søren: "This could be a mouse-over for the random button instead of taking
-     space.") -- the sentence described what pressing THIS button is for, which is what a title on
-     this button is, and it ran to three lines at narrow widths. -->
-<button class="idbtn" id="randomOfType" title="Great for learning what a cell type looks like (a new random example loads each click), or for quickly finding a cell that still needs a first identification.">Random example</button>
-</div>
-</details>
+<!-- "Or browse a random cell" lived here until 2026-09-20; it is the first thing in this
+     card now, always visible. See the block above the coordinate box. -->
 <!-- 2026-09-18 (Søren: "these layer options could go under the advanced viewer, just beneath
      the viewer") -- these three ticks are set once if ever, and the hint under them says why they
      barely matter at all: identifying a cell switches both segmentation layers on regardless. A
@@ -3967,7 +4003,11 @@ function persistDetailsOpen(id,storageKey){
   det.addEventListener("toggle",()=>{try{localStorage.setItem(storageKey,det.open?"1":"0");}catch(e){}});
 }
 persistDetailsOpen("rootNucSearchPanel","ujump_rootnuc_search_open");
-persistDetailsOpen("randomCellPanel","ujump_random_panel_open");
+/* #randomCellPanel stopped being a <details> on 2026-09-20 (Søren: "the cell should be always
+   visible"), so there is nothing left to remember about it. The coordinate box took its place as
+   the collapsible one and takes its own key -- not the old one, whose stored value means the
+   opposite of what it would now be read as. */
+persistDetailsOpen("coordPanel","ujump_coord_panel_open");
 /* 2026-08-30 Filter-and-show restructuring -- each filter dimension is now its own collapsed-by-
    default <details>, remembered independently via the same persistDetailsOpen() every other
    collapsible panel in this file already uses (see the doc comment above the HTML block itself). */
@@ -4108,6 +4148,26 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
   /* "Blood cells" sits after the vessel wall and before the perivascular space, following the
      tree's own route: lumen (q2 -> l1/l2) -> wall (w1/w2) -> perivascular space (p1). */
   const CAT_SEQ=["Excitatory neurons","Inhibitory neurons","Neurons","Glia","Vascular cells","Blood cells","Immune & perivascular cells","Leptomeninges","Other"];
+  /* One entry per CAT_SEQ name, pointing at the tokens defined beside .dot in the stylesheet. Kept
+     next to the sequence it mirrors so a category added to one and not the other is visible rather
+     than silently grey. */
+  /* THE CLOSED CONTROL TAKES THE COLOUR OF WHAT IS IN IT. Without this the list is coloured and
+     the thing you are actually looking at is not, which is the half you see most of the time. */
+  const syncTypeColour=function(){
+    const o=randomTypeSelect.selectedOptions&&randomTypeSelect.selectedOptions[0];
+    randomTypeSelect.style.color=(o&&o.style.color)||"";
+  };
+  window.__syncTypeColour=syncTypeColour;
+  randomTypeSelect.addEventListener("change",syncTypeColour);
+  const CAT_COLOUR={
+    "Excitatory neurons":"var(--cat-exc)", "Inhibitory neurons":"var(--cat-inh)",
+    "Neurons":"var(--cat-neu)", "Glia":"var(--cat-glia)", "Vascular cells":"var(--cat-vasc)",
+    "Blood cells":"var(--cat-blood)", "Immune & perivascular cells":"var(--cat-immune)",
+    "Leptomeninges":"var(--cat-lepto)", "Other":"var(--cat-other)"
+  };
+  /* One entry per CAT_SEQ name, pointing at the tokens defined beside .dot in the stylesheet. Kept
+     next to the sequence it mirrors so a category added to one and not the other is visible rather
+     than silently grey. */
   /* Per-pick example count, shared by the optgroup label counter just below and the weighted
      random draw in randomOfTypeBtn's click handler further down -- kept as one function so the
      two never silently drift out of sync when a new pick source (like "ms") is added. */
@@ -4127,9 +4187,15 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
        The label goes through escHtml because a community-reported identity string (typed by a
        stranger into the report form, arriving via getCommunityConsensus above) can become a pool
        label; every other field around it is dataset-generated. */
-    opts+='<optgroup label="'+cat+'">'+items.map(p=>{let c=0;p.picks.forEach(pk=>c+=pickCount(pk));c-=(RECLASS_OUT[p.k]||0);if(c<0)c=0;
+    /* THE GROUP CARRIES THE COLOUR AND THE OPTIONS INHERIT IT, 2026-09-20 (Søren: "if the
+       different cell types could have different colors to make them easier to discern"). Per
+       CATEGORY rather than per type -- see the --cat-* block in the stylesheet for why -- and set
+       inline because the category is decided here, at paint time, and a stylesheet cannot know
+       which optgroup is which. */
+    const catCol=CAT_COLOUR[cat]||"var(--cat-other)";
+    opts+='<optgroup label="'+cat+'" style="color:'+catCol+'">'+items.map(p=>{let c=0;p.picks.forEach(pk=>c+=pickCount(pk));c-=(RECLASS_OUT[p.k]||0);if(c<0)c=0;
       const lab=(typeof escHtml==="function")?escHtml(p.label):p.label;
-      return '<option value="'+p.k+'"'+(c?"":' disabled title="No cell of this type has been identified in this dataset yet — identify one and it appears here."')+'>'+lab+' ('+c+')</option>';}).join("")+'</optgroup>';
+      return '<option value="'+p.k+'" style="color:'+catCol+'"'+(c?"":' disabled title="No cell of this type has been identified in this dataset yet — identify one and it appears here."')+'>'+lab+' ('+c+')</option>';}).join("")+'</optgroup>';
   }
   /* THE CHOSEN TYPE SURVIVES THE REBUILD, 2026-09-18 (Søren: "When having pressed random cell, it
      switches back to l2/3 pyramidal neuron. It should stay on the selected cell type.").
@@ -4149,6 +4215,7 @@ const catFor=(raw,cls)=>{const l=String(raw).toLowerCase();if(cls==="excitatory_
     }
   }
   window.RAND_POOLS=RP;
+  syncTypeColour();
   };
   paintTypeSelect();
   try{
