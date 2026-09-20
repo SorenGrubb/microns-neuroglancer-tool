@@ -1245,12 +1245,47 @@ function loadCommunityReports(nid,cellPos){
    reporterInput/gsiButton/idfThanks -- those are already taken by the result screen when it's
    showing its own identity block, and duplicate ids would mean only one of the two ever gets
    wired correctly. */
-function organelleFlagHtml(){
-  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Log an organelle here <span class="idf-back" id="idfOrganelleToggle" style="margin:0">Log one &rarr;</span></span>'
-    +'<div id="organelleInlineBody" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
+/* ── WHOSE CELL IS THIS, IN THE HOST'S OWN WORDS ───────────────────────────────  2026-09-20
+   Every tool that loads this file had one nucleus and one root until ηJump joined. H01 has
+   neither: it has a cell_bodies object and a c3 segment, in two different id spaces, and a form
+   that prints "nucleus" over one of them is telling the reporter something untrue about their own
+   dataset.
+
+   A host MAY define UJ.panel.cellIds(ID_CTX) and return {nucId, root, nucLabel, rootLabel}.
+   Undefined -- which is every tool but ηJump -- this reads ID_CTX.nucId/ID_CTX.root and says
+   "nucleus"/"root", exactly as the three call sites did when they read ID_CTX directly.
+
+   READ IN THREE PLACES, and they have to agree: the line the form prints, the groupId that ties
+   one submission's rows together, and the nucleusId/rootId that actually go to the sheet. A form
+   that shows the cell body id and files against an empty nucleus id is worse than either. */
+function panelCellIds(){
+  var c = (typeof ID_CTX !== "undefined" && ID_CTX) ? ID_CTX : {};
+  var o = null;
+  if (typeof UJ !== "undefined" && UJ.panel && typeof UJ.panel.cellIds === "function"){
+    try { o = UJ.panel.cellIds(c); } catch (_e){ o = null; }
+  }
+  o = o || {};
+  return { nucId: o.nucId !== undefined ? (o.nucId || "") : (c.nucId || ""),
+           root:  o.root  !== undefined ? (o.root  || "") : (c.root  || ""),
+           nucLabel: o.nucLabel || "nucleus",
+           rootLabel: o.rootLabel || "root" };
 }
-function wireOrganelleFlag(slug){
-  const toggle=document.getElementById("idfOrganelleToggle"),body=document.getElementById("organelleInlineBody");
+/* ── AN OPTIONAL PREFIX, BECAUSE ηJUMP MOUNTS THIS TWICE ───────────────────────  2026-09-20
+   #nucpanel (the cell card) and #idfpanel (the guided-ID result) are both in the DOM at once on
+   ηJump, so a single fixed toggle id leaves one of the two dead -- whichever wired last wins.
+
+   NO PREFIX MEANS TODAY'S IDS, to the byte: #idfOrganelleToggle and #organelleInlineBody. Both
+   are named in this file's own host contract at the top, and reached by five pages and four
+   checks; renaming them to something symmetrical would have been tidier and would have broken all
+   of it for nothing. */
+function organelleFlagHtml(pfx){
+  var tog = (pfx || "idf") + "OrganelleToggle";
+  var bod = pfx ? pfx + "OrganelleInlineBody" : "organelleInlineBody";
+  return '<div class="idf-organelle" style="margin-top:10px"><span class="hint">Log an organelle here <span class="idf-back" id="'+tog+'" style="margin:0">Log one &rarr;</span></span>'
+    +'<div id="'+bod+'" style="display:none;margin-top:10px;border-top:1px dashed var(--line);padding-top:10px"></div></div>';
+}
+function wireOrganelleFlag(slug,pfx){
+  const toggle=document.getElementById((pfx||"idf")+"OrganelleToggle"),body=document.getElementById(pfx?pfx+"OrganelleInlineBody":"organelleInlineBody");
   if(!toggle||!body)return;
   let wired=false;
   toggle.addEventListener("click",()=>{
@@ -1313,16 +1348,32 @@ function organellePasteHtml(){
 function organelleFormHtml(slug){
   const name=(slug&&typeof LEAF_NAMES!=="undefined")?LEAF_NAMES[slug]:null;
   let h='<p class="hint">Mark where an organelle or extracellular structure sits on this cell — centriole, primary cilium, or any of the others in the topic-organized list below. Add one row per structure — mix and match freely, and log more than one of the same kind if the cell has more than one (e.g. two centrioles, or several mitochondria).</p>';
-  h+='<div class="meta">'+(name?"Identified as: <b>"+name+"</b> &middot; ":"")+(ID_CTX.nucId?"nucleus "+ID_CTX.nucId:"no nucleus ID on file")+(ID_CTX.root?" &middot; root "+ID_CTX.root:"")+(ID_CTX.pos?" &middot; voxel ("+coordSpan(ID_CTX.pos[0],ID_CTX.pos[1],ID_CTX.pos[2])+")":"")+'</div>';
+    const ids=panelCellIds();   // "nucleus"/"root" here, "cell body"/"c3 segment" on \u03b7Jump
+  h+='<div class="meta">'+(name?"Identified as: <b>"+name+"</b> &middot; ":"")+(ids.nucId?ids.nucLabel+" "+ids.nucId:"no "+ids.nucLabel+" ID on file")+(ids.root?" &middot; "+ids.rootLabel+" "+ids.root:"")+(ID_CTX.pos?" &middot; voxel ("+coordSpan(ID_CTX.pos[0],ID_CTX.pos[1],ID_CTX.pos[2])+")":"")+'</div>';
   h+=organellePasteHtml();
   h+='<div id="organRows"></div>';
   h+='<button type="button" class="idbtn" id="organAddRow" style="margin-top:8px;padding:6px 10px;font-size:13px;width:auto">+ Add another structure</button>';
   h+='<label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-top:14px">Comments (optional)</label>'
     +'<textarea id="organComment" placeholder="e.g. cilium is short / hard to trace to a clear tip..."></textarea>';
   if(!GOOGLE_VERIFIED){
+  /* ── A NAME BOX ONLY WHERE SOMETHING CAN SAVE WHAT IS TYPED IN IT ───────────────  2026-09-20
+     Both controls below are wired by the HOST -- the field through saveReporterFromInput, the
+     empty div through initGSI -- and three of the six pages that load this file define neither.
+     There, this rendered a box that swallowed the name and an empty slot where the sign-in button
+     was supposed to be, under a line saying sign-in was required. Asking somebody to type their
+     name and then dropping it is worse than not asking.
+
+     The sentence in the other branch is ηJump's own, from the hand-written form this pass
+     retired: those pages sign in from the account chip at the top, and saying so is the whole of
+     what they can honestly offer here. */
+  if(typeof saveReporterFromInput!=="function"&&typeof initGSI!=="function"){
+    h+='<div class="meta" style="margin-top:10px">Reporting anonymously &mdash; sign in with the '
+      +'button at the top of the page first if you want credit for this report.</div>';
+  } else {
   h+='<div class="idf-identity" style="margin-top:10px"><label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:4px">Want credit for this report, or a heads-up if it&rsquo;s confirmed? <span class="gate-note" style="text-transform:none;letter-spacing:normal;color:var(--accent)">— Google sign-in required to submit</span></label>'
     +'<input type="text" id="organReporterInput" placeholder="name or email" value="'+(REPORTER_EMAIL||REPORTER_NAME||"").replace(/"/g,'&quot;')+'" style="width:100%;margin-bottom:6px">'
     +'<div id="organGsiButton"></div></div>';
+  }
   } else {
     h+='<div class="meta" style="margin-top:8px;color:var(--accent)">Submitting as '+escHtml(REPORTER_EMAIL||REPORTER_NAME)+' &mdash; signed in with Google.</div>';
   }
@@ -1400,6 +1451,13 @@ function wireOrganellePaste(container,rowsEl,addRow){
 }
 function wireOrganelleForm(container,slug){
   const name=(slug&&typeof LEAF_NAMES!=="undefined")?LEAF_NAMES[slug]:null;
+  /* THE VOXEL PILL IN THE HEADER ABOVE, which has been dead since this form was written.  2026-09-20
+     coordSpan renders an .idval, and every page wires .idval per render across its CELL PANEL --
+     at the moment the cell is drawn. This form is built later, when the toggle is clicked, so the
+     pass has long since run: the pill keeps the pointer cursor, the hover border and the "click to
+     copy" title, and nothing happens. Scoped to the container it was handed, exactly as
+     loadCommunityReports wires the ones it has just drawn. */
+  container.querySelectorAll(".idval").forEach(sp=>sp.addEventListener("click",()=>{navigator.clipboard&&navigator.clipboard.writeText(sp.dataset.c);const o=sp.textContent;sp.textContent="copied";setTimeout(()=>sp.textContent=o,900);}));
   const rin=container.querySelector("#organReporterInput");
   if(rin){rin.addEventListener("change",()=>{if(typeof saveReporterFromInput==="function")saveReporterFromInput(rin.value.trim());});if(typeof initGSI==="function")initGSI(10,"organGsiButton");}
   const rowsEl=container.querySelector("#organRows");
@@ -1568,19 +1626,44 @@ function wireOrganelleForm(container,slug){
       const blocked=reportGateBlock();
       if(blocked){alert(blocked);return;}
     }
-    const groupId=(ID_CTX.nucId||"nonuc")+"_"+Date.now()+"_org";
+    const sid=panelCellIds();   // the same two ids the form printed, so they cannot disagree
+    const groupId=(sid.nucId||"nonuc")+"_"+Date.now()+"_org";
     submitBtn.disabled=true;submitBtn.textContent="submitting…";
-    subs.forEach((s,i)=>postReport({
+    const posts=subs.map((s,i)=>postReport({
       type:"organelle_location",
       timestamp:new Date().toISOString(),
-      nucleusId:ID_CTX.nucId||"",rootId:ID_CTX.root||"",
+      nucleusId:sid.nucId,rootId:sid.root,
       coord:ID_CTX.pos?ID_CTX.pos.join(","):"",
       groupId,subIndex:i+1,subCount:subs.length,
       kind:s.kind,pointA:s.pointA,pointB:s.pointB,
       identified:(typeof canonSubmitName==="function"?canonSubmitName(name):name)||"",
       comment,path
     }));
-    submitBtn.textContent="submitted";
-    container.querySelector("#organThanks").innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">Thanks — '+subs.length+' structure'+(subs.length>1?"s":"")+' logged against this cell.</div>';
+    /* ── "SUBMITTED" HAS TO MEAN IT WAS ───────────────────────────────────────────  2026-09-20
+       This used to print "submitted" the moment the requests left, which is true of the click and
+       not of the report. A token that lapsed twenty minutes ago is refused before the round trip,
+       and the reporter was told their twelve mitochondria were logged.
+
+       postReport does not answer the same way on every tool, so this reads whichever answer it
+       was given rather than assuming one: µJump returns false outright when it refuses and toasts
+       the server's own sentence later; ηJump returns a promise of {ok,error}. A host whose
+       postReport returns nothing useful keeps exactly the old wording, because there is nothing
+       to wait for and silence is not a failure. */
+    const ok_=()=>{
+      submitBtn.textContent="submitted";
+      container.querySelector("#organThanks").innerHTML='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">Thanks — '+subs.length+' structure'+(subs.length>1?"s":"")+' logged against this cell.</div>';
+      if(typeof loadMyStats==="function"){try{loadMyStats();}catch(_e){}}
+    };
+    const no_=msg=>{
+      submitBtn.disabled=false;submitBtn.textContent="Try again";
+      container.querySelector("#organThanks").innerHTML='<div class="idf-flag" style="border-color:var(--bad);color:var(--bad);margin-top:10px">'+panelEsc(msg||"That was not recorded \u2014 nothing has been logged against this cell.")+'</div>';
+    };
+    const waits=posts.filter(r=>r&&typeof r.then==="function");
+    if(posts.some(r=>r===false)) no_("");
+    else if(!waits.length) ok_();
+    else Promise.all(waits).then(rs=>{
+      const bad=rs.filter(d=>d&&d.ok===false)[0];
+      if(bad) no_(bad.error); else ok_();
+    }).catch(()=>no_(""));
   });
 }

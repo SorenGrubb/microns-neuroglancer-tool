@@ -25,9 +25,12 @@
        all call loadCommunityReports(), so testing the function tests all five -- and testing it in
        isolation means the check does not have to drive five different cell-search UIs to reach the
        same twenty lines.
-     - hjump.html, loaded whole, because ηJump deliberately does NOT load core/panel.js (see
-       hjump-architecture-correction-2026-08-19) and has its own hand-written pair. Its card is
-       driven for real: show a cell, find the toggle, open it, look for the form.
+     - hjump.html, loaded whole. It used to be the tool that did NOT load core/panel.js and kept a
+       hand-written copy of the same four functions; on 2026-09-20 the copy was retired and it
+       joined the other five. It still gets its own section, because it is the only page that
+       mounts the form TWICE and the only one whose cell has no nucleus -- the two things the
+       shared file grew joints for. Its card is driven for real: show a cell, find the toggle,
+       open it, look for the form.
 
    Run: node organcardcheck.js */
 const { JSDOM, VirtualConsole } = require("jsdom");
@@ -148,6 +151,19 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
     ok("...filed against the cell on screen, with no cell-type claim",
        w.ID_CTX && w.ID_CTX.nucId === "864691135" && !/Identified as/.test(body.textContent),
        (w.ID_CTX && w.ID_CTX.nucId) + "  <- looking at a cell is not a claim about what it is");
+    /* THE PILL IN THAT LINE, which was dead for as long as this form has existed. coordSpan
+       renders an .idval, and every page wires .idval per render over its CELL PANEL -- at the
+       moment the cell is drawn. This form is built later, on the toggle, so the pass had long
+       since run: pointer cursor, hover border, "click to copy" title, and nothing happening.
+       Measured on µJump in a real browser on 2026-09-20, found while checking ηJump's new one. */
+    {
+      const pill = body.querySelector(".meta .idval");
+      const was = pill && pill.textContent;
+      if (pill) pill.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
+      ok("...and the voxel pill in that line actually copies",
+         !!pill && pill.textContent === "copied",
+         pill ? was + " -> " + pill.textContent : "no pill at all");
+    }
     /* ── THE PASTE, which is what makes it quick ────────────────────────────────────────
        Søren, 2026-09-03: "I also wanted the option to paste url, like in xJump where you can log
        a lot of organelles of the same type quickly." Typing was the only way in here: three
@@ -253,10 +269,21 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
        "  <- adding a way in must not remove the read-back");
   }
 
-  // ── 3. ηJump, which has its own implementation ──────────────────────────────────────────
-  console.log("\n--- ηJump, which does not load core/panel.js ---");
+  // ── 3. ηJump, the one page that mounts it twice over a cell with no nucleus ─────────────
+  console.log("\n--- ηJump, on the shared form since 2026-09-20 ---");
   {
     let html = fs.readFileSync(page("hjump.html"), "utf8");
+    /* THE POINT OF THE WHOLE PASS, asserted on the file rather than the DOM: ηJump is not keeping
+       its own copy any more. Søren: "ηJump gets nothing automatically - we need to change that."
+       Both halves matter -- a page that loads panel.js AND still declares the four functions
+       lower down silently overrides every one of them, and would pass every behavioural
+       assertion below while being exactly the drift this retires. */
+    ok("ηJump loads the shared panel", /<script src="core\/panel\.js"><\/script>/.test(html));
+    const own = ["organelleFlagHtml", "wireOrganelleFlag", "organelleFormHtml",
+                 "wireOrganelleForm"].filter(f => new RegExp("function\\s+" + f + "\\s*\\(")
+                                                    .test(html));
+    ok("...and declares none of the four itself", own.length === 0,
+       own.join(", ") || "none  <- a later declaration would silently win over the shared one");
     html = html.replace(/<script src="(core\/[A-Za-z0-9_.\-]+\.js)"><\/script>/g, (m, rel) => {
       try { return "<script>\n" + fs.readFileSync(core(rel.slice(5)), "utf8") + "\n</script>"; }
       catch (e) { return m; }
@@ -292,9 +319,24 @@ const M4 = [[10,20,30],[11,21,31],[12,22,32],[13,23,33]];
        top level, which does NOT become a window property -- a check that reached for w.ID_CTX
        would read undefined and be testing nothing. The form prints what it will file against,
        which is the claim worth checking anyway. */
+    /* H01 HAS NO NUCLEUS, and the shared form has to know that. UJ.panel.cellIds is what tells it,
+       and this is the assertion that the hook is actually wired: the shared file's own default
+       would print "nucleus" and "root" here. Both labels, because the hook returns both and
+       getting one right by accident is possible. */
     ok("...filed against the cell, with no cell-type claim",
        /cell body \d/.test(nb.textContent) && !/Identified as/.test(nb.textContent),
        (nb.textContent.match(/cell body \d+/) || ["none"])[0]);
+    ok("...in H01's own words, not µJump's",
+       /c3 segment \d/.test(nb.textContent) && !/nucleus|root \d/i.test(nb.textContent),
+       (nb.textContent.match(/c3 segment \d+/) || ["none"])[0]
+       + "  <- the shared default would say \"nucleus\" and \"root\" over an H01 cell body");
+    /* AND IT INHERITED THIS MORNING'S FIX WITHOUT ANYBODY PORTING IT, which is the whole argument
+       for retiring the fork. The paste box became a shut <details> in core/panel.js on 2026-09-20;
+       ηJump's copy was still the old dashed slab an hour later. */
+    const pasteDet = nb.querySelector("details.organ-paste-box");
+    ok("...and the bulk paste arrived here folded, unported",
+       !!pasteDet && pasteDet.open === false,
+       pasteDet ? "shut <details>" : "still a plain box  <- the fork is back");
     /* THE SAME PASTE, in ηJump's own copy of the form. Its markup mirrors core/panel.js's
        deliberately (see the block comment above organelleFlagHtml in hjump.html) but nothing is
        shared except the ontology and the arithmetic -- so it gets its own check rather than being
