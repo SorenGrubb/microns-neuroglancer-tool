@@ -608,6 +608,12 @@ document.addEventListener("DOMContentLoaded", function(){
 });
 </script>
 <script src="core/mesh.js"></script>
+<!-- Show in 3D, installed onto the .meshdl[data-root] buttons this page already renders. One line,
+     which is all core/mesh3d.js has ever asked of a host — it watches for those buttons and puts
+     its own control beside each. µJump, πJump, βJump and ηJump got this on 2026-09-01 and δJump
+     did not, so the button was here and the renderer was not. After core/mesh.js, which is what
+     hands it {positions, indices}. -->
+<script src="core/mesh3d.js"></script>
 <script src="core/colabexport.js"></script>
 <script src="core/blenderexport.js"></script>
 <script src="core/organellefilter.js"></script>
@@ -662,7 +668,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 19:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 19:52</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -2631,6 +2637,209 @@ const EM_WINDOW = { lo: EM_SHADER_CONTROLS.normalized.range[0],
    chunk 2048×2048×128, and it 404s at its own voxel_offset and at the origin — probed live
    2026-09-20. Its z is 45 nm like the real scales, so emtiles' section filter cannot tell it apart
    and mip 0 would be the dead one. The page knows; the shared module does not. */
+/* @emplane:start */
+/* ── ONE PLANE OF THE EM, BESIDE THE CELL ───────────────────────  2026-09-20
+   Ported from µJump's own @emplane block. Søren, when that was built: *"I would like that there is
+   a single plane of the EM data ... when you view the cell ... but it may slow things down, so it
+   should be possible to turn it off."*
+
+   WHAT IT COSTS, SAID PLAINLY. One 248x134 window at 77.6 nm is about fifteen chunks -- the same
+   count µJump measured for the same 19.2 µm, because V1DD chunks 64³ at its coarse levels just as
+   minnie65 does. Cold, that is a few seconds; afterwards it is free, because core/segread.js
+   caches by URL and range. Which is why this has a switch, and why the switch is REMEMBERED:
+   somebody who turns it off on a slow connection should not meet it again on the next cell.
+
+   NO SEGMENTATION HALF, and for a different reason than λJump's. Lee16 has no segmentation at
+   all; V1DD has one and it is graphene://middleauth+ -- a live CAVE-authenticated volume that
+   core/segread.js cannot read even with a token. Same decision as the tracing card's seg tick.
+   The NUCLEUS volume is public and could be painted; that is left for a change of its own rather
+   than half-filling a control whose label promises the cell as well.
+
+   MIP 3 IS 77.6 nm HERE, AND IT IS A REAL SECTION. µJump needs emtiles' slabOk to reach 64 nm,
+   because minnie65's 64 nm level averages two 40 nm sections. V1DD downsamples in x and y only
+   until 155.2 nm, so all four usable levels keep 45 nm z -- this is one plane, and the caveat
+   µJump has to print does not apply. There is no 64 nm level to ask for, which is why the pixel
+   count moves instead of the level; see EM_PLANE_W.
+
+   A SLOW DRAW MUST NOT PAINT THE PREVIOUS CELL. Every render takes a token and re-checks it at
+   each await, dropping out if a newer cell has been shown since. Without that, stepping through
+   cells paints whichever fetch lands last, and the panel shows the wrong cell -- which it would
+   be. */
+var EM_PLANE_KEY = "djump_panel_emplane", EM_PLANE_TOKEN = 0,
+    EM_PLANE_WIRED = false, EM_PLANE_LAST = null;
+/* 248x134 DRAWN, 260 SHOWN, AND THE WIDTH IS THE TISSUE RATHER THAN THE PIXELS.
+   µJump draws 19.2 µm of cortex here because that is what Søren asked for, and it reaches it with
+   300 px at 64 nm. V1DD has no 64 nm level -- its usable scales are 9.7 / 19.4 / 38.8 / 77.6 -- so
+   the pixel count is what moves: 248 px at 77.6 nm is **the same 19.2 µm**.
+
+   AND THE SAME COST. V1DD chunks 64³ at its coarse levels, the way minnie65 does and unlike
+   Lee16's constant 512x512x16, so 19.2 µm is about fifteen chunks here exactly as it is on µJump.
+   300 px would have been 23.3 µm and about twenty-four. One level finer, 38.8 nm, would be twice
+   as sharp and roughly three times the fetches for the same picture. */
+var EM_PLANE_W = 248, EM_PLANE_H = 134, EM_PLANE_CSS = 260, EM_PLANE_MIP = 3;
+function emPlaneOn(){
+  try { var v = localStorage.getItem(EM_PLANE_KEY); return v === null ? true : v === "1"; }
+  catch (_e) { return true; }
+}
+function emPlaneSay(tok, msg, bad){
+  var el = document.getElementById("emPlaneSay");
+  if (!el || EM_PLANE_TOKEN !== tok) return;
+  el.textContent = msg || "";
+  el.style.color = bad ? "var(--bad)" : "var(--mut)";
+}
+/* WHERE THE IMAGERY IS, FROM THE IMAGERY. µJump carries window.MINNIE65_EM_BB as a constant; this
+   reads the volume's own info, which core/segread.js has already fetched and cached, so there is
+   no second copy of the extents to keep in step with the dataset. Null until the info lands, and
+   a null box means "draw and find out" rather than "refuse" -- the guard exists to give a better
+   message, not to be the only thing standing between a click and an error. */
+/* The one name the block uses for this page's imagery, so the block itself is identical on every
+   page that carries it. λJump keeps it on UJ.cfg.viewer, δJump in the global SRC. */
+var EM_PLANE_SRC = SRC.em;
+var EM_PLANE_BB = null;
+async function emPlaneBB(){
+  if (EM_PLANE_BB) return EM_PLANE_BB;
+  try {
+    var info = await UJ.segread._getInfo(UJ.segread._httpBase(EM_PLANE_SRC));
+    /* THE FIRST LEVEL THAT EXISTS, AND IN NANOMETRES.  2026-09-20
+       This read `info.scales[0]` and compared its voxel box against the tool's coordinate
+       directly, which is right only where the two grids agree — they do here (4 nm and 4 nm) and
+       they do not on δJump, whose frame is 9/9/45 against a 9.7 nm volume whose scales[0] is a
+       dead `placeholder` level. sectionScales() is already the list with that removed. */
+    var us = (UJ.emtiles && UJ.emtiles.sectionScales) ? UJ.emtiles.sectionScales(info) : null;
+    var s = (us && us.length ? us : info.scales)[0], o = s.voxel_offset || [0, 0, 0],
+        r = s.resolution;
+    EM_PLANE_BB = { x: [o[0] * r[0], (o[0] + s.size[0]) * r[0]],
+                    y: [o[1] * r[1], (o[1] + s.size[1]) * r[1]],
+                    z: [o[2] * r[2], (o[2] + s.size[2]) * r[2]], nm: true, res: r };
+  } catch (_e) { EM_PLANE_BB = null; }
+  return EM_PLANE_BB;
+}
+/* IT SAYS WHY IT IS NOT THERE RATHER THAN NOT BEING THERE. These guards used to return "" in the
+   page this came from -- the section simply did not appear, with nothing to suggest it ever
+   should have. A core/*.js that 404s on the server, or a script an extension blocked, looks
+   exactly like a page that never had the feature. */
+function emPlaneBox(pos){
+  var missing = null;
+  if (typeof UJ === "undefined" || !UJ.emtiles || !UJ.segread)
+    missing = "the EM reader did not load \u2014 check that core/emtiles.js and core/segread.js are "
+            + "being served, then reload with Ctrl-Shift-R";
+  var tok = ++EM_PLANE_TOKEN, on = emPlaneOn() && !missing;
+  EM_PLANE_LAST = { pos: pos };
+  if (!missing) setTimeout(function(){ drawPanelEmPlane(tok); }, 0);
+  /* The <label> resets four properties it would inherit from this page's global label rule
+     (display:block, uppercase, letter-spaced, muted). That rule is for the form labels that head
+     a control; this is a caption with a tick in it, and left alone it reads as a section title. */
+  return '<div id="emPlaneBox" data-tok="' + tok + '" style="margin-top:10px">'
+    + '<div class="hint" style="margin:0 0 3px">'
+    + '<label for="emPlaneOn" style="display:inline-flex;align-items:center;gap:5px;margin:0;'
+    + 'cursor:pointer;text-transform:none;letter-spacing:0;font-size:inherit;color:inherit" '
+    + 'title="One plane of the EM at this coordinate, read from the imagery bucket. The first '
+    + 'cell on a cold cache takes a few seconds; turning it off here is remembered.">'
+    + '<input type="checkbox" id="emPlaneOn" style="width:auto;margin:0"' + (on ? " checked" : "")
+    + (missing ? " disabled" : "") + '> '
+    + 'EM section</label> <span id="emPlaneSay" style="color:var(--mut)">'
+    + (missing ? escHtml(missing) : "") + '</span></div>'
+    + '<canvas id="emPlaneCv" width="' + EM_PLANE_W + '" height="' + EM_PLANE_H + '" '
+    + 'style="width:100%;max-width:' + EM_PLANE_CSS + 'px;display:' + (on ? "block" : "none")
+    + ';margin:4px 0 0;background:var(--bg);border:1px solid var(--line);'
+    + 'border-radius:6px"></canvas></div>';
+}
+/* A ROUND NUMBER, NOT A FIXED FRACTION. A bar of "30% of the view" reads 5.76 \u00b5m here and
+   something else on the next cell, and a scale bar whose label needs two decimals is one nobody
+   uses. The largest of 0.5/1/2/5/10/20/50/100 \u00b5m that fits in a third of the width. Drawn last,
+   always, and white on a dark outline because EM is grey everywhere and a bar of one colour
+   disappears somewhere on every section. */
+function emPlaneScaleBar(cv, view){
+  if (!cv || !view) return;
+  var nmPerPx = view.effNmPerPx || view.nmPerPx;
+  if (!(nmPerPx > 0)) return;
+  var NICE = [0.5, 1, 2, 5, 10, 20, 50, 100], want = (view.umAcross || 0) / 3, um = NICE[0], i;
+  for (i = 0; i < NICE.length; i++) if (NICE[i] <= want) um = NICE[i];
+  var px = um * 1000 / nmPerPx;
+  if (!(px > 8) || px > cv.width) return;
+  var ctx = cv.getContext("2d"), x = 12, y = cv.height - 14, h = 4;
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(0,0,0,.85)"; ctx.lineWidth = 3;
+  ctx.strokeRect(x, y, px, h);
+  ctx.fillStyle = "#fff"; ctx.fillRect(x, y, px, h);
+  var label = (um < 1 ? um : Math.round(um)) + " \u00b5m";
+  ctx.font = "600 13px system-ui, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  ctx.strokeStyle = "rgba(0,0,0,.85)"; ctx.lineWidth = 3;
+  ctx.strokeText(label, x + px / 2, y - 5);
+  ctx.fillStyle = "#fff"; ctx.fillText(label, x + px / 2, y - 5);
+  ctx.restore();
+  try { cv.dataset.scaleUm = String(um); } catch (_e) {}
+}
+async function drawPanelEmPlane(tok){
+  var box = document.getElementById("emPlaneBox");
+  if (!box) return;
+  if (tok == null) tok = Number(box.dataset.tok || 0);
+  if (EM_PLANE_TOKEN !== tok) return;
+  var cv = document.getElementById("emPlaneCv");
+  if (!cv || !EM_PLANE_LAST) return;
+  if (!emPlaneOn()) { cv.style.display = "none"; emPlaneSay(tok, ""); return; }
+  cv.style.display = "block";
+  var pos = EM_PLANE_LAST.pos;
+  emPlaneSay(tok, "\u2026");
+  /* A quarter second before anything is fetched: stepping through cells should not queue a read
+     per cell you passed through. A newer cell bumps the token and this one drops out here. */
+  await new Promise(function(r){ setTimeout(r, 250); });
+  if (EM_PLANE_TOKEN !== tok) return;
+  try {
+    if (!emConfigure()) { emPlaneSay(tok, "the EM reader did not load", true); return; }
+    var bb = await emPlaneBB();
+    if (EM_PLANE_TOKEN !== tok) return;
+    /* The coordinate in nanometres, because the box is. A page whose frame happens to match the
+       volume's finest scale gets the same answer either way — both sides multiplied by the same
+       number — which is why this was invisible until a page came along where they differ. */
+    var R = (UJ.cfg && UJ.cfg.res) || [4, 4, 40];
+    var pnm = [pos[0] * R[0], pos[1] * R[1], pos[2] * R[2]];
+    if (bb && (pnm[0] < bb.x[0] || pnm[0] > bb.x[1] || pnm[1] < bb.y[0] || pnm[1] > bb.y[1]
+               || pnm[2] < bb.z[0] || pnm[2] > bb.z[1])) {
+      cv.style.display = "none";
+      emPlaneSay(tok, "outside V1DD\u2019s imagery, so there is no section to draw here");
+      return;
+    }
+    emPlaneSay(tok, "reading the EM\u2026");
+    var view = await UJ.emtiles.drawSection(cv, {
+      centre: pos, w: EM_PLANE_W, h: EM_PLANE_H, mip: EM_PLANE_MIP, zoom: 1,
+      lo: EM_WINDOW.lo, hi: EM_WINDOW.hi, tighten: true,
+      onProgress: function(d, n){ emPlaneSay(tok, "reading the EM\u2026 " + d + "/" + n); } });
+    if (EM_PLANE_TOKEN !== tok) return;
+    emPlaneScaleBar(cv, view);
+    /* No slab caveat here, unlike µJump: all four of V1DD's usable scales keep 45 nm sections,
+       so this is one plane at every level of them and saying otherwise would invent a warning. */
+    try {
+      cv.title = view.umAcross.toFixed(1) + " \u00b5m across at " + view.nmPerPx + " nm/px, z="
+        + view.z + ". One 45 nm section. Contrast " + view.lo + "\u2013" + view.hi
+        + (view.tightened
+           ? " (narrowed onto this plane from the " + view.windowAsked[0] + "\u2013"
+             + view.windowAsked[1] + " window, because a downsampled level\u2019s values do not "
+             + "fill it)"
+           : "") + ".";
+    } catch (_t) {}
+    emPlaneSay(tok, "");
+  } catch (e) {
+    if (EM_PLANE_TOKEN !== tok) return;
+    emPlaneSay(tok, "could not read the imagery: " + String(e && e.message || e), true);
+  }
+}
+/* Delegated once, not wired per render: the box is rebuilt on every cell. */
+function wireEmPlaneToggle(){
+  if (EM_PLANE_WIRED) return;
+  EM_PLANE_WIRED = true;
+  document.addEventListener("change", function(e){
+    var t = e.target;
+    if (!t || t.id !== "emPlaneOn") return;
+    try { localStorage.setItem(EM_PLANE_KEY, t.checked ? "1" : "0"); } catch (_e) {}
+    var box = document.getElementById("emPlaneBox");
+    drawPanelEmPlane(box ? Number(box.dataset.tok || 0) : EM_PLANE_TOKEN);
+  });
+}
+wireEmPlaneToggle();
+/* @emplane:end */
 function emConfigure(){
   if (typeof UJ === "undefined" || !UJ.emtiles || !UJ.segread) return false;
   if (!UJ.emtiles.configured())
@@ -3455,32 +3664,54 @@ function buildLayerAnnotationLayers(pos,opts){
    "which cortical layer" (depth, local to this x/z) and "where in the dataset" (this coordinate's
    absolute x/z position) at once, addressing that the layer diagram alone only ever showed depth. */
 function renderTopViewDiagram(vx,vy,vz){
-  const BB65=window.MINNIE65_EM_BB,BB35=window.MINNIE35_EM_BB;
-  if(!BB65||!BB35)return "";
+  const BB=window.MINNIE65_EM_BB;
+  if(!BB)return "";
   const nx=vx*UJ_RX,nz=vz*UJ_RZ;
+  /* ONE BOX, NOT TWO. MINNIE35_EM_BB is the same rectangle as MINNIE65_EM_BB on this page, so
+     drawing both put one dashed outline exactly on top of another under the name of a volume this
+     tool does not contain. The constants keep their minnie-shaped names because the region-filter
+     diagram reads them too. */
   const extents=[
-    {name:"V1DD volume",color:"#b388ff",a0:BB65.xmin,a1:BB65.xmax,b0:BB65.zmin,b1:BB65.zmax}
+    {name:"V1DD imaged extent",short:"V1DD",color:"#b388ff",
+     a0:BB.xmin,a1:BB.xmax,b0:BB.zmin,b1:BB.zmax}
   ];
   const rawA0=Math.min(...extents.map(e=>e.a0)),rawA1=Math.max(...extents.map(e=>e.a1));
   const rawB0=Math.min(...extents.map(e=>e.b0)),rawB1=Math.max(...extents.map(e=>e.b1));
   const marginA=(rawA1-rawA0)*0.06,marginB=(rawB1-rawB0)*0.06;
   const fullA0=rawA0-marginA,fullA1=rawA1+marginA,fullB0=rawB0-marginB,fullB1=rawB1+marginB;
-  const W=260,H=140,pad=6;
+  /* THE FIGURE CARRIES ITS OWN CAPTION, 2026-09-18 on \u00b5Jump and 2026-09-20 here. S\u00f8ren:
+     "have Top view as a title in the diagram and then img35 and img65 written in the diagram ...
+     they should have the same colors as the regions they represent. Then we can remove the top
+     line". TOP is a title band inside the SVG and the plot band is inset by it, so the map's
+     usable height stays the 128 px it always was and every rectangle and the dot land exactly
+     where they did. */
+  const TOP=15;
+  const W=260,H=140+TOP,pad=6;
   const sx=v=>pad+(v-fullA0)/(fullA1-fullA0)*(W-2*pad);
-  const sy=v=>pad+(v-fullB0)/(fullB1-fullB0)*(H-2*pad);
+  const sy=v=>TOP+pad+(v-fullB0)/(fullB1-fullB0)*(H-TOP-2*pad);
   let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:var(--bg);border:1px solid var(--line);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
+  svg+='<text x="'+pad+'" y="11" font-size="9.5" font-family="monospace" style="fill:var(--mut)">Top view (X &rarr;, Z &darr;)</text>';
   for(const e of extents){
     const ex0=sx(e.a0),ex1=sx(e.a1),ey0=sy(e.b0),ey1=sy(e.b1);
-    svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"/>';
+    svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"><title>'+e.name+'</title></rect>';
+    /* Inside its own rectangle and in its own colour, which is also what lets the dot be read
+       without a key: the dot is drawn in the colour of the extent it is in. The short name,
+       because this is a label on a 260 px drawing; the long one is in the <title>. */
+    svg+='<text x="'+(ex0+4).toFixed(1)+'" y="'+(ey1-4).toFixed(1)+'" font-size="9" font-family="monospace" font-weight="bold" fill="'+e.color+'">'+e.short+'<title>'+e.name+'</title></text>';
   }
-  const inside65=nx>=BB65.xmin&&nx<=BB65.xmax&&nz>=BB65.zmin&&nz<=BB65.zmax;
-  const inside35=nx>=BB35.xmin&&nx<=BB35.xmax&&nz>=BB35.zmin&&nz<=BB35.zmax;
-  const dotColor=inside65?"#58a6ff":(inside35?"#f0883e":"#fff200");
+  /* THE DOT TAKES THE EXTENT'S COLOUR. It used to take \u00b5Jump's Img65 blue whatever this page's
+     rectangle was drawn in -- on \u03b4Jump a purple box with a blue dot inside it, and nothing to say
+     the two were about the same volume. Yellow when it is in none of them. */
+  const inside=nx>=BB.xmin&&nx<=BB.xmax&&nz>=BB.zmin&&nz<=BB.zmax;
+  const dotColor=inside?extents[0].color:"#fff200";
   svg+='<circle cx="'+sx(nx).toFixed(1)+'" cy="'+sy(nz).toFixed(1)+'" r="5" fill="'+dotColor+'" stroke="#0d1117" stroke-width="1"/>';
   svg+='</svg>';
-  const legend=extents.map(e=>'<span style="color:'+e.color+'">&#9633;</span> '+e.name).join('&nbsp;&nbsp;&nbsp;');
-  const where=inside65?"within Img65’s imaged extent":inside35?"within Img35’s imaged extent, outside Img65":"outside both datasets’ imaged extent";
-  return '<div class="hint" style="margin-bottom:3px">Top view (X &rarr;, Z &darr;) &mdash; '+legend+'</div>'+svg+'<p class="hint" style="margin-top:4px">'+where+'</p>';
+  /* NOTHING ABOVE THE FIGURE ANY MORE: the title and the dataset's name are inside it.
+     AND THE NOTE BELOW ONLY APPEARS WHEN IT HAS SOMETHING TO SAY. "Within the imaged extent" is
+     true of very nearly every cell in this roster, so it was a line spent telling somebody
+     nothing. Outside it, there is no imagery at the point at all, which is worth a sentence. */
+  const where=inside?"":"outside V1DD\u2019s imaged extent";
+  return svg+(where?'<p class="hint" style="margin-top:4px">'+where+'</p>':'');
 }
 /* Combines the depth/layer diagram with the top-down dataset-extent diagram side by side, so
    a single coordinate shows both where it sits among cortical layers AND where it sits in the
@@ -4486,6 +4717,9 @@ function showNucleus(pos){
      moves under the step-through card while stepping, so there is exactly one identity/voting/
      correction UI, not two to keep in sync. Nothing needs to happen here any more. */
   h+=renderLocationDiagram(pos);
+  /* The section goes under the layer diagram and the top view, which is the slot µJump uses:
+     the reader is already asking where this cell is rather than what it is. */
+  h+=emPlaneBox(pos);
   h+='<div class="meta">nearest nucleus at voxel '+coordSpan(NX[i],NY[i],NZ[i])+' &middot; '+(r.dist/1000).toFixed(2)+' &micro;m from query</div>';
   /* nearest() has no distance cap, so a query point that MICrONS's automatic nucleus detector
      never picked up at all (a real cell it simply missed) still silently returns whatever

@@ -583,7 +583,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 19:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 19:52</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3303,35 +3303,54 @@ function buildLayerAnnotationLayers(pos,opts){
    "which cortical layer" (depth, local to this x/z) and "where in the dataset" (this coordinate's
    absolute x/z position) at once, addressing that the layer diagram alone only ever showed depth. */
 function renderTopViewDiagram(vx,vy,vz){
-  const BB65=window.MINNIE65_EM_BB,BB35=window.MINNIE35_EM_BB;
-  if(!BB65||!BB35)return "";
+  const BB=window.MINNIE65_EM_BB;
+  if(!BB)return "";
   const nx=vx*UJ_RX,nz=vz*UJ_RZ;
+  /* ONE BOX, NOT TWO. MINNIE35_EM_BB is the same rectangle as MINNIE65_EM_BB on this page, so
+     drawing both put one dashed outline exactly on top of another under the name of a volume this
+     tool does not contain. The constants keep their minnie-shaped names because the region-filter
+     diagram reads them too. */
   const extents=[
-    /* One box, not two: BB35 is the same rectangle as BB65 in πJump, so drawing both
-       put one dashed outline exactly on top of another under two names for volumes this
-       tool does not contain. */
-    {name:"pinky100 imaged extent",color:"#58a6ff",a0:BB65.xmin,a1:BB65.xmax,b0:BB65.zmin,b1:BB65.zmax}
+    {name:"pinky100 imaged extent",short:"pinky100",color:"#58a6ff",
+     a0:BB.xmin,a1:BB.xmax,b0:BB.zmin,b1:BB.zmax}
   ];
   const rawA0=Math.min(...extents.map(e=>e.a0)),rawA1=Math.max(...extents.map(e=>e.a1));
   const rawB0=Math.min(...extents.map(e=>e.b0)),rawB1=Math.max(...extents.map(e=>e.b1));
   const marginA=(rawA1-rawA0)*0.06,marginB=(rawB1-rawB0)*0.06;
   const fullA0=rawA0-marginA,fullA1=rawA1+marginA,fullB0=rawB0-marginB,fullB1=rawB1+marginB;
-  const W=260,H=140,pad=6;
+  /* THE FIGURE CARRIES ITS OWN CAPTION, 2026-09-18 on \u00b5Jump and 2026-09-20 here. S\u00f8ren:
+     "have Top view as a title in the diagram and then img35 and img65 written in the diagram ...
+     they should have the same colors as the regions they represent. Then we can remove the top
+     line". TOP is a title band inside the SVG and the plot band is inset by it, so the map's
+     usable height stays the 128 px it always was and every rectangle and the dot land exactly
+     where they did. */
+  const TOP=15;
+  const W=260,H=140+TOP,pad=6;
   const sx=v=>pad+(v-fullA0)/(fullA1-fullA0)*(W-2*pad);
-  const sy=v=>pad+(v-fullB0)/(fullB1-fullB0)*(H-2*pad);
+  const sy=v=>TOP+pad+(v-fullB0)/(fullB1-fullB0)*(H-TOP-2*pad);
   let svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:260px;display:block;margin:6px auto;background:var(--bg);border:1px solid var(--line);border-radius:6px" xmlns="http://www.w3.org/2000/svg">';
+  svg+='<text x="'+pad+'" y="11" font-size="9.5" font-family="monospace" style="fill:var(--mut)">Top view (X &rarr;, Z &darr;)</text>';
   for(const e of extents){
     const ex0=sx(e.a0),ex1=sx(e.a1),ey0=sy(e.b0),ey1=sy(e.b1);
-    svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"/>';
+    svg+='<rect x="'+ex0.toFixed(1)+'" y="'+ey0.toFixed(1)+'" width="'+(ex1-ex0).toFixed(1)+'" height="'+(ey1-ey0).toFixed(1)+'" fill="none" stroke="'+e.color+'" stroke-width="1.3" stroke-dasharray="3,3"><title>'+e.name+'</title></rect>';
+    /* Inside its own rectangle and in its own colour, which is also what lets the dot be read
+       without a key: the dot is drawn in the colour of the extent it is in. The short name,
+       because this is a label on a 260 px drawing; the long one is in the <title>. */
+    svg+='<text x="'+(ex0+4).toFixed(1)+'" y="'+(ey1-4).toFixed(1)+'" font-size="9" font-family="monospace" font-weight="bold" fill="'+e.color+'">'+e.short+'<title>'+e.name+'</title></text>';
   }
-  const inside65=nx>=BB65.xmin&&nx<=BB65.xmax&&nz>=BB65.zmin&&nz<=BB65.zmax;
-  const inside35=nx>=BB35.xmin&&nx<=BB35.xmax&&nz>=BB35.zmin&&nz<=BB35.zmax;
-  const dotColor=inside65?"#58a6ff":(inside35?"#f0883e":"#fff200");
+  /* THE DOT TAKES THE EXTENT'S COLOUR. It used to take \u00b5Jump's Img65 blue whatever this page's
+     rectangle was drawn in -- on \u03b4Jump a purple box with a blue dot inside it, and nothing to say
+     the two were about the same volume. Yellow when it is in none of them. */
+  const inside=nx>=BB.xmin&&nx<=BB.xmax&&nz>=BB.zmin&&nz<=BB.zmax;
+  const dotColor=inside?extents[0].color:"#fff200";
   svg+='<circle cx="'+sx(nx).toFixed(1)+'" cy="'+sy(nz).toFixed(1)+'" r="5" fill="'+dotColor+'" stroke="#0d1117" stroke-width="1"/>';
   svg+='</svg>';
-  const legend=extents.map(e=>'<span style="color:'+e.color+'">&#9633;</span> '+e.name).join('&nbsp;&nbsp;&nbsp;');
-  const where=inside65?"within pinky100’s imaged extent":"outside pinky100’s imaged extent";
-  return '<div class="hint" style="margin-bottom:3px">Top view (X &rarr;, Z &darr;) &mdash; '+legend+'</div>'+svg+'<p class="hint" style="margin-top:4px">'+where+'</p>';
+  /* NOTHING ABOVE THE FIGURE ANY MORE: the title and the dataset's name are inside it.
+     AND THE NOTE BELOW ONLY APPEARS WHEN IT HAS SOMETHING TO SAY. "Within the imaged extent" is
+     true of very nearly every cell in this roster, so it was a line spent telling somebody
+     nothing. Outside it, there is no imagery at the point at all, which is worth a sentence. */
+  const where=inside?"":"outside pinky100\u2019s imaged extent";
+  return svg+(where?'<p class="hint" style="margin-top:4px">'+where+'</p>':'');
 }
 /* Combines the depth/layer diagram with the top-down dataset-extent diagram side by side, so
    a single coordinate shows both where it sits among cortical layers AND where it sits in the

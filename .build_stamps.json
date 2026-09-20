@@ -6,8 +6,8 @@
  },
  "djump.html": {
   "core": "47ac665f7e",
-  "hash": "a71ff353c7de5c4d2d99ca1649b0b564b44356147b767130fa5d870a07175a61",
-  "stamp": "2026-09-20 19:27"
+  "hash": "360d938b5d594e98ecb2b3d2132c8bc3048e7d34d88e0222ab399f8af84ca7ec",
+  "stamp": "2026-09-20 19:52"
  },
  "hjump.html": {
   "core": "47ac665f7e",
@@ -21,13 +21,13 @@
  },
  "ljump.html": {
   "core": "47ac665f7e",
-  "hash": "c0cacd8245f919ec85364097b334f93ce8781dde076ab79c859c59ba7bd25683",
-  "stamp": "2026-09-20 19:27"
+  "hash": "1a2d77074844e735212684a37bb8cb1351dfbb3e62370a1003af27da2383a8f5",
+  "stamp": "2026-09-20 19:52"
  },
  "pjump.html": {
   "core": "47ac665f7e",
-  "hash": "8dbe55f5b5c02ef92ebee31c9b573b5bf49f9bfcf4432be439db8e33c1c48c09",
-  "stamp": "2026-09-20 19:27"
+  "hash": "1df501f5ba93c37fd3ed83ac4724aec308114e756c1861c6729c0fc778352467",
+  "stamp": "2026-09-20 19:52"
  },
  "ujump.html": {
   "core": "47ac665f7e",

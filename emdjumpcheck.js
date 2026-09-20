@@ -322,6 +322,143 @@ const CELL = [70556, 70763, 10196];
        + "  <- emtiles' default 86–172 is three times as wide as this stain");
   }
 
+  /* ── ONE PLANE OF THE EM ON THE CELL CARD ──────────────────  2026-09-20
+     Søren: *"Looks great, but I don't see the EM preview in dJump."* Stage E gave the page the EM
+     stack and the tracing card; the cell card itself still had no section on it. The block is
+     λJump's, read out of its page rather than retyped, with a table of measured differences. */
+  console.log("\nand the cell card shows one plane of it");
+  {
+    const got = await p.evaluate(async (CELL) => {
+      showNucleus(CELL);
+      await new Promise(r => setTimeout(r, 4500));
+      const cv = document.getElementById("emPlaneCv");
+      let stats = null;
+      if (cv) {
+        const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+        let min = 255, max = 0;
+        for (let i = 0; i < d.length; i += 4) { const v = d[i]; if (v < min) min = v; if (v > max) max = v; }
+        stats = { w: cv.width, h: cv.height, min, max, title: cv.title,
+                  scaleUm: cv.dataset ? cv.dataset.scaleUm : null };
+      }
+      return { box: !!document.getElementById("emPlaneBox"),
+               tick: !!document.getElementById("emPlaneOn"),
+               /* V1DD's segmentation is graphene behind a CAVE login, so there is no second tick
+                  here any more than there is on λJump — for a different reason, same decision. */
+               segTick: !!document.getElementById("emPlaneSeg"),
+               say: (document.getElementById("emPlaneSay") || {}).textContent,
+               key: typeof EM_PLANE_KEY !== "undefined" ? EM_PLANE_KEY : null,
+               stats };
+    }, CELL);
+    ok(got.box && got.tick, "the card carries the section, with its own switch",
+       "box:" + got.box + " tick:" + got.tick);
+    ok(!got.segTick, "...and NOT a segmentation tick", got.segTick
+       + "  <- V1DD's segmentation is graphene behind a CAVE login; segread cannot read it");
+    ok(got.key === "djump_panel_emplane", "...remembered under this page's own key", got.key);
+    if (!got.stats) { ok(false, "the canvas is there", "no #emPlaneCv"); }
+    else {
+      ok(got.stats.min !== got.stats.max, "...drawn, with real pixels on it",
+         got.stats.min + "–" + got.stats.max);
+      /* 248 px at 77.6 nm is 19.2 µm — the same tissue µJump shows, at the same ~15 chunks.
+         300 px, λJump's number, would have been 23.3 µm and about 24. */
+      ok(got.stats.w === 248 && got.stats.h === 134,
+         "...248x134, which is 19.2 µm of tissue at this volume's 77.6 nm level",
+         got.stats.w + "x" + got.stats.h
+         + "  <- V1DD has no 64 nm level, so the pixel count moves instead of the mip");
+      ok(/19\.2 µm across at 77\.6 nm\/px/.test(got.stats.title || ""),
+         "...and says so", (got.stats.title || "").slice(0, 46));
+      /* 45 nm, not 40, and still ONE section: all four usable V1DD levels keep 45 nm z. */
+      ok(/One 45 nm section\./.test(got.stats.title || "")
+         && !/averages/.test(got.stats.title || ""),
+         "...one 45 nm section, with no slab caveat because none is true here",
+         "  <- µJump must warn that its 64 nm level averages two 40 nm sections");
+      ok(got.stats.scaleUm === "5", "...under a round scale bar", got.stats.scaleUm + " µm");
+    }
+    ok(!got.say, "...and nothing left to say once it is drawn", JSON.stringify(got.say));
+  }
+
+  /* ── THE TOP VIEW ───────────────────────────────────  2026-09-20
+     Søren: *"the top view could be updated the same way as uJump."* Two of these are layout, which
+     he asked for; two are things that were simply wrong and visible in the screenshot he sent. */
+  console.log("\nand its top view says what µJump's says");
+  {
+    const got = await p.evaluate(() => {
+      const box = document.getElementById("nucpanel");
+      const svg = [...box.querySelectorAll("svg")]
+                    .find(s => /Top view/.test(s.textContent || "")) || null;
+      const texts = svg ? [...svg.querySelectorAll("text")].map(t => ({
+                            s: t.textContent,
+                            first: t.firstChild ? t.firstChild.nodeValue : null,
+                            fill: t.getAttribute("fill") })) : [];
+      const rect = svg ? svg.querySelector("rect") : null;
+      const dot = svg ? svg.querySelector("circle") : null;
+      return {
+        inSvg: !!svg,
+        /* the line that used to sit above the figure, carrying title and legend */
+        legendLine: /Top view \(X \u2192, Z \u2193\) \u2014/.test(box.innerHTML)
+                    || /Top view \(X &rarr;, Z &darr;\) &mdash;/.test(box.innerHTML),
+        title: texts.length ? texts[0].s : null,
+        /* firstChild, NOT textContent: the label carries a nested <title> with the long name
+           for the tooltip, and textContent concatenates the two into "V1DDV1DD imaged extent".
+           µJump's figure is built the same way, so this is the figure being right and the first
+           version of this assertion reading it wrong. */
+        label: texts.length > 1 ? texts[1].first : null,
+        labelFill: texts.length > 1 ? texts[1].fill : null,
+        rectStroke: rect ? rect.getAttribute("stroke") : null,
+        dotFill: dot ? dot.getAttribute("fill") : null,
+        /* SCOPED TO THE FIGURE AND ITS CAPTION, which is what this change touched. Asked of the
+           whole cell panel it also catches the root/nucleus-ID proposal block, whose text reads
+           "an Img65 or Img35 segment ID" — minnie65's vocabulary on a V1DD page, pre-existing,
+           real, and a separate change. An assertion that fails for a reason it was not written
+           for is one nobody can act on. */
+        img65: /Img65|Img35/.test((svg ? svg.parentNode.textContent : "") || "")
+      };
+    });
+    ok(got.inSvg, "the title is inside the figure", got.inSvg);
+    ok(!got.legendLine, "...and the line above it is gone", !got.legendLine
+       + "  <- it wrapped to two lines at panel width; the band inside costs 15 px of that back");
+    ok(/^Top view/.test(got.title || ""), "...reading Top view", got.title);
+    ok(got.label === "V1DD" && got.labelFill === got.rectStroke,
+       "...with the extent named inside its own rectangle, in its colour",
+       got.label + " in " + got.labelFill + ", rectangle " + got.rectStroke);
+    /* IT WAS A PURPLE BOX WITH A BLUE DOT IN IT. dotColor picked µJump's Img65 blue whatever this
+       page drew its rectangle in, so nothing said the two were about the same volume. */
+    ok(got.dotFill === got.rectStroke,
+       "...and the dot in the colour of the extent it is in", "dot " + got.dotFill
+       + ", rectangle " + got.rectStroke);
+    /* "within Img65's imaged extent" — on a V1DD page, about a volume this tool does not have. */
+    ok(!got.img65, "...and the figure and its caption name no minnie65 volume", got.img65
+       + "  <- the caption read \"within Img65\u2019s imaged extent\" under a V1DD cell");
+  }
+
+  /* ── SHOW IN 3D ─────────────────────────────────────  2026-09-20
+     Søren: *"Also, the show in 3D is missing from dJump."* core/mesh3d.js installs itself onto
+     `.meshdl[data-root]` buttons, and its own header names δJump as one of the three pages that
+     render exactly that button. µJump, πJump, βJump and ηJump got the script tag on 2026-09-01
+     and δJump did not, so the button was here and the renderer was not — which looks precisely
+     like a page that was never meant to have the feature.
+
+     ASSERTED AS "the module is loaded and the button it installs onto exists", not as a rendered
+     canvas: this browser has no WebGL worth the name and mesh3d bails without it, exactly as it
+     does in jsdom. What can fail silently here is the wiring, and that is what is read. */
+  console.log("\nand the cell card can show the cell in 3D");
+  {
+    const got = await p.evaluate(() => ({
+      mod: !!(window.UJ && UJ.mesh3d && typeof UJ.mesh3d.show === "function"),
+      prepare: !!(window.UJ && UJ.mesh3d && typeof UJ.mesh3d.prepare === "function"),
+      /* the control the module watches for -- ηJump's bug in 2026-09-01 was that its own button
+         carried the class and not this attribute, so the selector never matched it */
+      buttons: document.querySelectorAll("button.meshdl[data-root]").length,
+      meshCfg: !!(UJ.cfg.mesh && (UJ.cfg.mesh.meshBase || UJ.cfg.mesh.meshBaseAlt))
+    }));
+    ok(got.mod && got.prepare, "core/mesh3d.js is loaded",
+       "show:" + got.mod + " prepare:" + got.prepare
+       + "  <- one script tag, which is all this module has ever asked of a host");
+    ok(got.buttons > 0, "...and the .meshdl[data-root] buttons it installs onto are rendered",
+       got.buttons + " button(s)");
+    ok(got.meshCfg, "...against a mesh source this page actually has", got.meshCfg
+       + "  <- the manifest needs a CAVE token, the same one the .glb download beside it needs");
+  }
+
   ok(errors.length === 0, "the page still loads with no new errors",
      errors.length ? errors[0] : "none");
 

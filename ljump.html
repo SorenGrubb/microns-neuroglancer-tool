@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 19:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 19:52</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1014,14 +1014,25 @@ function emPlaneSay(tok, msg, bad){
    no second copy of the extents to keep in step with the dataset. Null until the info lands, and
    a null box means "draw and find out" rather than "refuse" -- the guard exists to give a better
    message, not to be the only thing standing between a click and an error. */
+/* The one name the block uses for this page's imagery, so the block itself is identical on every
+   page that carries it. λJump keeps it on UJ.cfg.viewer, δJump in the global SRC. */
+var EM_PLANE_SRC = UJ.cfg.viewer.em;
 var EM_PLANE_BB = null;
 async function emPlaneBB(){
   if (EM_PLANE_BB) return EM_PLANE_BB;
   try {
-    var info = await UJ.segread._getInfo(UJ.segread._httpBase(UJ.cfg.viewer.em));
-    var s = info.scales[0], o = s.voxel_offset || [0, 0, 0];
-    EM_PLANE_BB = { x: [o[0], o[0] + s.size[0]], y: [o[1], o[1] + s.size[1]],
-                    z: [o[2], o[2] + s.size[2]], res: s.resolution };
+    var info = await UJ.segread._getInfo(UJ.segread._httpBase(EM_PLANE_SRC));
+    /* THE FIRST LEVEL THAT EXISTS, AND IN NANOMETRES.  2026-09-20
+       This read `info.scales[0]` and compared its voxel box against the tool's coordinate
+       directly, which is right only where the two grids agree — they do here (4 nm and 4 nm) and
+       they do not on δJump, whose frame is 9/9/45 against a 9.7 nm volume whose scales[0] is a
+       dead `placeholder` level. sectionScales() is already the list with that removed. */
+    var us = (UJ.emtiles && UJ.emtiles.sectionScales) ? UJ.emtiles.sectionScales(info) : null;
+    var s = (us && us.length ? us : info.scales)[0], o = s.voxel_offset || [0, 0, 0],
+        r = s.resolution;
+    EM_PLANE_BB = { x: [o[0] * r[0], (o[0] + s.size[0]) * r[0]],
+                    y: [o[1] * r[1], (o[1] + s.size[1]) * r[1]],
+                    z: [o[2] * r[2], (o[2] + s.size[2]) * r[2]], nm: true, res: r };
   } catch (_e) { EM_PLANE_BB = null; }
   return EM_PLANE_BB;
 }
@@ -1102,8 +1113,13 @@ async function drawPanelEmPlane(tok){
     if (!emConfigure()) { emPlaneSay(tok, "the EM reader did not load", true); return; }
     var bb = await emPlaneBB();
     if (EM_PLANE_TOKEN !== tok) return;
-    if (bb && (pos[0] < bb.x[0] || pos[0] > bb.x[1] || pos[1] < bb.y[0] || pos[1] > bb.y[1]
-               || pos[2] < bb.z[0] || pos[2] > bb.z[1])) {
+    /* The coordinate in nanometres, because the box is. A page whose frame happens to match the
+       volume's finest scale gets the same answer either way — both sides multiplied by the same
+       number — which is why this was invisible until a page came along where they differ. */
+    var R = (UJ.cfg && UJ.cfg.res) || [4, 4, 40];
+    var pnm = [pos[0] * R[0], pos[1] * R[1], pos[2] * R[2]];
+    if (bb && (pnm[0] < bb.x[0] || pnm[0] > bb.x[1] || pnm[1] < bb.y[0] || pnm[1] > bb.y[1]
+               || pnm[2] < bb.z[0] || pnm[2] > bb.z[1])) {
       cv.style.display = "none";
       emPlaneSay(tok, "outside Lee16\u2019s imagery, so there is no section to draw here");
       return;
