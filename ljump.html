@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 15:59</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-20 16:14</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -898,6 +898,31 @@ UJ.cfg.viewer = {
   em:   "precomputed://s3://open-neurodata/lee/lee16/image"
 };
 
+/* ── THE EM WINDOW, MEASURED ON THIS TISSUE ──────────────────────  2026-09-20
+   core/emtiles.js stretches [lo,hi] to black-white, and defaults to 86/172 -- minnie65's numbers,
+   sitting in a shared file as though they were every dataset's. Lee16 is a far brighter stain, so
+   that window would clip more than half of it to white.
+
+   Measured rather than guessed: three sections at 30%, 50% and 70% depth, 480,000 pixels, drawn
+   with no stretch at all and histogrammed.
+
+       0.5% → 16     2% → 44     5% → 68     median 189     95% → 233     98% → 238
+
+   A 2-98% stretch is 44 → 238. Same constant name µJump uses, so the pad code reads identically
+   on both pages and the difference between the two datasets stays in this one place. */
+const EM_WINDOW = { lo: 44, hi: 238 };
+
+/* The one place the reader is pointed at this dataset. Called before any draw; emtiles keeps ONE
+   configured source, so configuring twice is harmless and configuring nowhere is a blank canvas.
+   Guarded because every other card on this page works without the tracing stack, and a page that
+   loses one script should lose one card rather than the cell. */
+function emConfigure(){
+  if (typeof UJ === "undefined" || !UJ.emtiles || !UJ.segread) return false;
+  if (!UJ.emtiles.configured())
+    UJ.emtiles.configure({ em: UJ.cfg.viewer.em, res: UJ.cfg.res });
+  return true;
+}
+
 /* Per-dataset EM/segmentation source for core/colabexport.js's region-download notebook
    (2026-08-31). Bare s3:// path, NOT the "precomputed://" form above: the generated Python
    hands this straight to CloudVolume(path, use_https=True), which resolves open-neurodata's
@@ -997,6 +1022,26 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/matchcount.js"></script>
 <script src="core/gamify.js"></script>
 <script src="core/organelles.js"></script>
+<!-- ── THE TRACING STACK ────────────────────────────────  2026-09-20
+     Eight modules, in µJump's own order. The pad draws one section of EM in the page because no
+     viewer a pasted link can reach has a polygon tool (measured 2026-09-17), so the imagery has to
+     come here: emtiles asks segread to fetch for it, and tracepad / traceloft / tracing sit on
+     top of emtiles.
+
+     Lee16 is the first UNSHARDED volume this reader has drawn a section from -- minnie65 is
+     sharded -- so λJump getting the card first is also what proves segread's other path. Measured
+     before any of this was written: 27/27 chunks readable, 560x460 at 8 nm in 2138 ms cold.
+
+     πJump was meant to be first and cannot be: its EM source serves an info file and no chunks at
+     all. See claude/which-datasets-can-be-traced-on.md. -->
+<script src="core/segread.js"></script>
+<script src="core/segpaint.js"></script>
+<script src="core/organellelink.js"></script>
+<script src="core/emtiles.js"></script>
+<script src="core/tracepad.js"></script>
+<script src="core/traceloft.js"></script>
+<script src="core/nucmesh.js"></script>
+<script src="core/tracing.js"></script>
 <script src="core/ontology.js"></script>
 <!-- The family's chart look, generated from ujump.html by src/core_charts.py. The UJ.charts
      hooks it reads are set in the dashboard section below and read at DRAW time, so tag
