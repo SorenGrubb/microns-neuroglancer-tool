@@ -1,18 +1,18 @@
 {
  "bjump.html": {
-  "core": "55dc78a8ff",
+  "core": "fc09fd1ff5",
   "hash": "7686cacc5fbd0dfae85c14e18dc22de8f11520afa54e793e2e5553a23dc8261b",
-  "stamp": "2026-09-20 17:46"
+  "stamp": "2026-09-20 17:56"
  },
  "djump.html": {
-  "core": "55dc78a8ff",
+  "core": "fc09fd1ff5",
   "hash": "94c8f63dd5104e3865b36943ce4b714dfcf4502ada82a56ada911656f3c4a6ca",
-  "stamp": "2026-09-20 17:46"
+  "stamp": "2026-09-20 17:56"
  },
  "hjump.html": {
-  "core": "55dc78a8ff",
+  "core": "fc09fd1ff5",
   "hash": "b3b00ec0a7c346973d99c10527447274a3e9235fa9d0aae1793ce41a1540cac7",
-  "stamp": "2026-09-20 17:46"
+  "stamp": "2026-09-20 17:56"
  },
  "index.html": {
   "core": "",
@@ -20,18 +20,18 @@
   "stamp": "2026-09-10 21:40"
  },
  "ljump.html": {
-  "core": "55dc78a8ff",
+  "core": "fc09fd1ff5",
   "hash": "9c8a126a0e9fc4a68ab8025c918356e87e0c82bf84f2bae12b114971a6b8fa83",
-  "stamp": "2026-09-20 17:46"
+  "stamp": "2026-09-20 17:56"
  },
  "pjump.html": {
-  "core": "55dc78a8ff",
+  "core": "fc09fd1ff5",
   "hash": "8dbe55f5b5c02ef92ebee31c9b573b5bf49f9bfcf4432be439db8e33c1c48c09",
-  "stamp": "2026-09-20 17:46"
+  "stamp": "2026-09-20 17:56"
  },
  "ujump.html": {
-  "core": "55dc78a8ff",
-  "hash": "1909f627b059300b02e414f92360c40c5f95e2e59607fba1d4168159c2dc176f",
-  "stamp": "2026-09-20 17:46"
+  "core": "fc09fd1ff5",
+  "hash": "20e6767cd4247291ce6b297b0e4e036d143ef2a37fbcbb169c352a721f63084b",
+  "stamp": "2026-09-20 17:56"
  }
 }
