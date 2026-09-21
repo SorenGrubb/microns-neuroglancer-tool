@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-21 14:53</span></p>
+ctrl-shift-R.">build 2026-09-21 15:21</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -1313,6 +1313,8 @@ UJ.organelleData = { source: "core/ontology.js", groups: [{"label": "Not sure wh
 <script src="core/regionbox.js"></script>
 <script src="core/colabexport.js"></script>
 <script src="core/stepthrough.js"></script>
+<!-- Previous / Next of the same type on the cell card -- core/typestep.js, 2026-09-21. -->
+<script src="core/typestep.js"></script>
 <!-- SheetJS, for "Download as Excel". Deferred and null-checked at the call site: the button says
      so rather than doing nothing if the CDN is blocked, and the CSV download beside it needs no
      library at all. -->
@@ -5554,6 +5556,30 @@ UJ.app = (function(){
     if (!NAVIGATING) pushHistory(top.row);
     if (host.scrollIntoView) host.scrollIntoView({ behavior:"smooth", block:"nearest" });
   }
+
+  /* ── PREVIOUS / NEXT OF THE SAME TYPE on the cell card ──────────────────  2026-09-21
+     core/typestep.js draws the row; this says what it walks. The proofread cells, in the list's
+     own order, typed by the name the card prints (headlineOf: the settled community name, else the
+     published label). A cell with no soma position cannot be recognised on the card, so it is not
+     in the walk. Showing one is what "from your history" does. */
+  window.UJ.cfg.typestep = {
+    panel: "find-body",
+    rows: function(){
+      var out = [];
+      seeds().forEach(function(r){
+        if (!r.pos || r.pos.length !== 3) return;
+        var t = String(headlineOf(r) || "").trim();
+        if (!t) return;
+        out.push({ key: t.toLowerCase(), label: cap(t), pos: r.pos, row: r });
+      });
+      return out;
+    },
+    go: function(x){
+      writeCoord(x.row.pos.map(function(v){ return Math.round(v); }));
+      drawMap(x.row.pos);
+      showFound([{ row: x.row, nm: 0 }], "the next " + x.label.toLowerCase());
+    }
+  };
 
   /* ── the three exports, wired the same way wherever they appear ───────────────────────────
      Søren, 2026-09-01: "We should also have a download 3D model, download powerpoint and a compute

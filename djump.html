@@ -686,6 +686,8 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/tree.js"></script>
 <script src="core/report.js"></script>
 <script src="core/stepthrough.js"></script>
+<!-- Previous / Next of the same type on the identity card -- core/typestep.js, 2026-09-21. -->
+<script src="core/typestep.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 </head><body>
@@ -702,7 +704,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 14:22</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 15:22</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -10353,6 +10355,9 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
      always missing for stepthrough.js to reach in. This is the ACTUAL fix; passes 1+2 were
      real bugs but neither could matter until the jump itself started firing. */
   window.rowPos=rowPos;
+  /* And the list it walks, for core/typestep.js's Previous / Next on the identity card (2026-09-21):
+     the same identities, in the same order, the Filter and the step-through use. */
+  window.buildAllIdentities=buildAllIdentities;
   /* Maps each of the 22 guided-ID leaf slugs (LEAF_NAMES, defined earlier in the file) to the
      exact row.type string(s) in ALL_IDENTITIES that represent it, for the "see another example"
      feature on the result screen. own is the exact OWN_TYPE_NAMES string for Søren's verified

@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 14:22</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 15:22</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1129,6 +1129,34 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/tree.js"></script>
 <script src="core/report.js"></script>
 <script src="core/stepthrough.js"></script>
+<!-- Previous / Next of the same type on the identity card -- core/typestep.js, 2026-09-21. -->
+<script src="core/typestep.js"></script>
+<script>
+/* PREVIOUS / NEXT OF THE SAME TYPE on the identity card -- core/typestep.js, 2026-09-21. This
+   dataset has no classifier, so a cell's type is the community's name for it (bjumpIdentityOf), over
+   the page's own cell table. Built once per identity read and per table (an added cell replaces
+   the arrays), not on every look. */
+UJ.cfg.typestep = {
+  panel: "panel",
+  rows: (function(){
+    var memo = { by: null, bx: null, n: -1, rows: null };
+    return function(){
+      if (!IDENTITY_BY_NID){ try { fetchBjumpIdentities(); } catch (e){} return null; }
+      if (memo.by === IDENTITY_BY_NID && memo.bx === BX && memo.n === N) return memo.rows;
+      var out = [];
+      for (var i = 0; i < N; i++){
+        var t = bjumpIdentityOf(i);
+        if (!t) continue;
+        out.push({ key: t.toLowerCase(), label: t.charAt(0).toUpperCase() + t.slice(1),
+                   pos: [BX[i], BY[i], BZ[i]], i: i });
+      }
+      memo = { by: IDENTITY_BY_NID, bx: BX, n: N, rows: out };
+      return out;
+    };
+  })(),
+  go: function(row){ showCell(row.i, null); }
+};
+</script>
 <script>
 /* Tab-bar switching -- see core/stepthrough.js's header comment. Called here (not right after
    the tab bar markup near the top of <body>) because UJ.cfg.tabs (in CONFIG, above) and

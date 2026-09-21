@@ -438,7 +438,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 14:22</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 15:22</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1026,6 +1026,33 @@ document.addEventListener("DOMContentLoaded", function(){
      functions and does nothing, so the merged-nucleus and not-a-nucleus forms it also carries are
      inert on a page that never opens them. -->
 <script src="core/report.js"></script>
+<!-- Previous / Next of the same type on the identity card -- core/typestep.js, 2026-09-21. -->
+<script src="core/typestep.js"></script>
+<script>
+/* ηJump's type is the name its card prints: the community's when there is one, else H01's
+   published type (hjumpCellTypeFor, less its "Unclassified"). Rebuilt when the community's
+   identities arrive, not on every look. */
+UJ.cfg.typestep = {
+  panel: "nucpanel",
+  rows: (function(){
+    var memo = { by: undefined, rows: null };
+    return function(){
+      if (memo.by === HJUMP_IDENTITY_BY_NID && memo.rows) return memo.rows;
+      var out = [];
+      for (var i = 0; i < N; i++){
+        var t = hjumpIdentityOf(i) || longName(typeName(i)) || "";
+        t = String(t).trim();
+        if (!t || /^unclassified$/i.test(t)) continue;
+        out.push({ key: t.toLowerCase(), label: t.charAt(0).toUpperCase() + t.slice(1),
+                   pos: [HX[i], HY[i], HZ[i]], i: i });
+      }
+      memo = { by: HJUMP_IDENTITY_BY_NID, rows: out };
+      return out;
+    };
+  })(),
+  go: function(row){ showCell(row.i, null, false); }
+};
+</script>
 <!-- The family's chart look: palette, layout, and the dot-plot functions, generated from
      ujump.html by src/core_charts.py so the two cannot differ. Loaded after ontology.js and
      before this page's own scripts; the UJ.charts hooks it reads are set below, and read at
