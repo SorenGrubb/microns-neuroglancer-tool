@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 15:58</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 18:56</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -815,6 +815,9 @@ UJ.cfg = {
     draftsKey: "bjump_tracing_drafts_v2",
     draftKey:  "bjump_tracing_draft_v1",
     penKey:    "bjump_tracing_pen_v1",
+    /* The community's proposed root IDs for a nucleus, secgan16 only -- what the 3D model and the
+       viewer already combine. The tracing card's viewer link and pad add them (2026-09-21). */
+    extraRootsFor: function(nuc, root){ return bjumpExtraRootIdsFor(nuc, root); },
     /* Not µJump's sentence alone: here the segmentation covers only about half the imaged block,
        so a cell it does not have is an ordinary thing rather than an exception. */
     intro:     "The segmentation covers only about half of this block, so many cells here are "

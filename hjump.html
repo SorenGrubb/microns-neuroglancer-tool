@@ -441,7 +441,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 15:58</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 18:56</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -869,6 +869,21 @@ UJ.cfg = {
     draftsKey: "hjump_tracing_drafts_v2",
     draftKey:  "hjump_tracing_draft_v1",
     penKey:    "hjump_tracing_pen_v1",
+    /* The community's proposed c3 IDs for a cell body -- the list the extra-ID panel shows and the
+       3D model combines, filtered to the segmentation the viewer paints (2026-09-21). */
+    extraRootsFor: function(body, root){
+      var want = (UJ.cfg.mesh && UJ.cfg.mesh.extraRootSegType) || "c3";
+      return fetch(REPORT_ENDPOINT + "?rootIds=" + encodeURIComponent(body) + "&ds=" + encodeURIComponent(UJ.cfg.backend.ds))
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          var seen = {}; seen[String(root || "")] = 1;
+          return ((d && (d.rootIds || d.proposals)) || []).filter(function(x){
+            var id = x && String(x.rootId || ""), st = x && x.segType;
+            if (!id || seen[id] || (st && st !== want)) return false;
+            seen[id] = 1; return true;
+          }).map(function(x){ return String(x.rootId); });
+        });
+    },
     sources:   function(){ return { em: UJ.cfg.viewer.em, seg: UJ.cfg.viewer.seg }; }
   },
   res: [8, 8, 33]                       // nm per voxel, the H01 viewer's native frame
