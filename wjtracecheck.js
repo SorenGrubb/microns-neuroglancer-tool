@@ -111,6 +111,23 @@ const seg = (x, y, z) => (864691135000000000n + BigInt(x) + 1000n * BigInt(y) + 
      "a uint16 volume is windowed by its own em_range, then drawn 0-255", JSON.stringify(c.u16));
   ok(c.slab, "an isotropic volume may draw slab levels");
 
+  /* THE SEGMENTATION TICK FOLLOWS THE VOLUME, 2026-09-21 -- found live on grubblab.com: the card
+     is built on whichever volume opens first, and a tick trimmed there for want of a segmentation
+     never came back on the WEBKNOSSOS volumes that have one. */
+  console.log("\nthe segmentation tick follows the volume");
+  const tk = await p.evaluate(async () => {
+    const shown = () => { const e = document.getElementById("tracePadSeg"); return !!(e && e.closest("label") && e.closest("label").style.display !== "none"); };
+    UJ.app.selectDataset("jrc_mus-liver"); await new Promise(r => setTimeout(r, 300));
+    const a = shown();
+    UJ.app.selectDataset("wk-mk1-f6-l23"); await new Promise(r => setTimeout(r, 300));
+    const b = shown();
+    UJ.app.selectDataset("jrc_mus-liver"); await new Promise(r => setTimeout(r, 300));
+    const c = shown(), cOn = !!(document.getElementById("tracePadSeg") || {}).checked;
+    return { a, b, c, cOn };
+  });
+  ok(!tk.a && tk.b && !tk.c && !tk.cOn, "offered on a volume with a segmentation, not on one without, both ways",
+     JSON.stringify(tk));
+
   console.log("\nper volume");
   const s = await p.evaluate(async () => {
     UJ.app.selectDataset("wk-mk1-f6-l23");

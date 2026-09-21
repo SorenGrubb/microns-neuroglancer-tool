@@ -101,6 +101,12 @@ function keysOf(file){
   const cre = /(?:const|let|var)\s+([A-Z][A-Z0-9_]*_KEY)\s*=\s*"([^"]*)"/g;
   let m;
   while ((m = cre.exec(src))) { consts[m[1]] = m[2]; keys.add(m[2]); }
+  /* ...and the ones after a comma in the same declaration: var EM_PLANE_KEY="…",EM_PLANE_SEG_KEY="…".
+     2026-09-21 -- the second was reported as an expression nobody could read. */
+  const cre2 = /,\s*([A-Z][A-Z0-9_]*_KEY)\s*=\s*"([^"]*)"/g;
+  while ((m = cre2.exec(src))) { if (!(m[1] in consts)) consts[m[1]] = m[2]; }
+  /* Recorded to RESOLVE a call, not counted as keys here: not every *_KEY is a storage key
+     (ωJump's OFFSET_KEY and PAD3D_KEY are in-memory), so one counts when a storage call uses it. */
 
   /* function someKey(){ return "literal"; } — a third indirection, and a legitimate one: ηJump's
      hjumpStepLsKey() is exactly this. Resolved rather than merely tolerated, so the key it returns
@@ -118,7 +124,8 @@ function keysOf(file){
      core/tracingcard.js's UJ.cfg.tracing.*). Without this the page declares four keys and this
      file sees none of them, which is precisely the state the tracing extraction left it in. */
   const cfgre = /\b([a-z][A-Za-z0-9]*Key)\s*:\s*"([^"]+)"/g;
-  while ((m = cfgre.exec(src))) keys.add(m[2]);
+  const cfgNamed = {};
+  while ((m = cfgre.exec(src))) { keys.add(m[2]); cfgNamed[m[1]] = m[2]; }
 
   /* Every actual call, so nothing can be reached by a route this file does not model. */
   const call = /(?:local|session)Storage\.(?:getItem|setItem|removeItem)\(\s*([^,)]+)/g;
@@ -129,7 +136,14 @@ function keysOf(file){
     if (arg.slice(-1) === "(") arg += ")";
     const lit = /^"([^"]*)"$/.exec(arg);
     if (lit) { keys.add(lit[1]); continue; }
-    if (consts[arg] !== undefined) continue;                 /* a const resolved above */
+    if (consts[arg] !== undefined){ keys.add(consts[arg]); continue; }   /* a const resolved above */
+    /* cond ? A_KEY : B_KEY -- both sides readable constants, 2026-09-21. */
+    const tern = /\?\s*([A-Z][A-Z0-9_]*_KEY)\s*:\s*([A-Z][A-Z0-9_]*_KEY)\s*$/.exec(arg);
+    if (tern && consts[tern[1]] !== undefined && consts[tern[2]] !== undefined){
+      keys.add(consts[tern[1]]); keys.add(consts[tern[2]]); continue; }
+    /* UJ.cfg.<something>.someKey -- the literal this page gave the config as `someKey:"…"`. */
+    const viaCfg = /^UJ\.cfg(?:\.\w+)*\.([a-z][A-Za-z0-9]*Key)$/.exec(arg);
+    if (viaCfg && cfgNamed[viaCfg[1]] !== undefined) continue;
     if (fns[arg] !== undefined) { keys.add(fns[arg]); continue; }   /* a key behind a function */
     if (arg === "storageKey") continue;                      /* persistDetailsOpen's parameter */
     unresolved.push(arg);
@@ -237,8 +251,7 @@ ok("  the dashboard live cache is per-tool",
    caches.join(" | ") + "  <- the one Søren reported");
 
 [["navigation history",   "_nav_history"],
- ["search panel state",   "_rootnuc_search_open"],
- ["random panel state",   "_random_panel_open"]].forEach(function(pair){
+ ["search panel state",   "_rootnuc_search_open"]].forEach(function(pair){
   const [what, suffix] = pair;
   const per = {};
   THREE.forEach(function(f){ per[f] = USED[f].keys.filter(k => k.indexOf(suffix) >= 0); });
@@ -248,6 +261,15 @@ ok("  the dashboard live cache is per-tool",
      && per["pjump.html"].every(k => k.indexOf("pjump_") === 0),
      all.join(" | "));
 });
+
+/* The random panel stopped being a <details> on 2026-09-20 ("the cell should be always visible"),
+   so there is no open/closed state left to keep per tool. What can still go wrong is a page that
+   goes on WRITING the retired key; that is the assertion now. */
+{
+  const still = PAGES.filter(f => USED[f].keys.some(k => k.indexOf("_random_panel_open") >= 0));
+  ok("  the retired random-panel key is written by no page", still.length === 0,
+     still.join(", ") || "#randomCellPanel is always open since 2026-09-20");
+}
 
 /* ── 3: everything else carries its own prefix ────────────────────────────────────────────────*/
 console.log("\n--- and a key belongs to the page that uses it ---");

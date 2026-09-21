@@ -4173,6 +4173,19 @@ function tracingCardHtml(){
 
    ONLY ON MARKUP THIS MODULE BUILT. mount() calls this in the branch that filled an empty
    wrapper, so a page carrying its own copy of the card keeps every control it wrote. */
+/* Show the segmentation tick when the volume open now has a segmentation; hide AND untick it
+   when it has not, so a hidden tick can never keep asking for a volume that is not there. */
+function padSegTickSync(){
+  var box = document.getElementById("tracePadSeg");
+  if (!box) return;
+  var seg = "";
+  try { seg = tracingSources().seg || ""; } catch (_e){ seg = ""; }
+  var lab = (box.closest && box.closest("label")) || box;
+  var say = document.getElementById("tracePadSegSay");
+  lab.style.display = seg ? "" : "none";
+  if (say) say.style.display = seg ? "" : "none";
+  if (!seg) box.checked = false;
+}
 function padTrimForHost(el){
   el = el || document.getElementById("tracingCard") || document;
   var gone = [];
@@ -4189,7 +4202,10 @@ function padTrimForHost(el){
   }
   var seg = "";
   try { seg = tracingSources().seg || ""; } catch (_e){ seg = ""; }
-  if (!seg) drop("tracePadSeg", "tracePadSegSay");   // its own status line goes with it
+  /* A TOOL WHOSE VOLUME CHANGES (scope(), ωJump) keeps the tick and hides it: the next volume may
+     have a segmentation, and datasetChanged() shows it again. 2026-09-21, found live. */
+  if (!seg && tracingCfg().scope) padSegTickSync();
+  else if (!seg) drop("tracePadSeg", "tracePadSegSay");   // its own status line goes with it
   var mesh = null;
   try { mesh = (UJ && UJ.cfg && UJ.cfg.mesh) || null; } catch (_e){ mesh = null; }
   if (!(mesh && (mesh.meshBase || mesh.meshBaseAlt))){
@@ -4334,6 +4350,7 @@ UJ.tracingcard.datasetChanged = function(){
   try { tracingIndexSoon(); } catch (_e){}
   try { draftServerSoon(true); } catch (_e){}
   try { padRelabelMips(); } catch (_e){}
+  try { padSegTickSync(); } catch (_e){}
   return true;
 };
 UJ.tracingcard.wire = function(){
