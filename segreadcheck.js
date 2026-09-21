@@ -343,6 +343,76 @@ console.log("\nthe nucleus near a point, not the nucleus at it");
      "found " + edge.nucleusId);
 }
 
+/* \u2500\u2500 A VOLUME THIS DATASET DOES NOT HAVE \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-09-20
+   \u03b4Jump configures `seg: ""` deliberately \u2014 V1DD's cell segmentation is graphene behind a CAVE
+   login, and configure() above refuses a graphene:// source outright. The empty string used to
+   travel to valueAt, which fetched `"" + "/info"`, got the host's own 404 page and threw
+   `no info at  (404)`. Because resolveAt joined the two volumes with `Promise.all`, that took the
+   NUCLEUS answer down with it \u2014 and the nucleus volume is plain public precomputed and had read
+   perfectly well.
+
+   Measured on the live \u03b4Jump before this was written:
+
+       UJ.segread.configure(tracingSources());          // seg:"", nuc: v1dd_nuclei
+       await UJ.segread.resolveAt([95086,88093,6130]);
+       -> Error: no info at  (404)
+
+   \u2014 note the missing base in the message, because there was no base. */
+console.log("\na volume the dataset does not have");
+{
+  const base = "https://h/x";
+  const info = Buffer.from(JSON.stringify({ type: "segmentation", data_type: "uint32",
+    num_channels: 1, scales: [{ key: "n", size: [64, 64, 64], chunk_sizes: [[64, 64, 64]],
+      voxel_offset: [0, 0, 0], resolution: [64, 64, 40], encoding: "compressed_segmentation",
+      compressed_segmentation_block_size: [8, 8, 8] }] }));
+  const chunk = buildChunkOf([64, 64, 64], [8, 8, 8], 1, [0, 308149], [{ at: [4, 4, 4], slot: 1 }]);
+
+  const { S, hits } = load({ [base + "/info"]: info, [base + "/n/0-64_0-64_0-64"]: chunk });
+  S.configure({ seg: "", nuc: base, res: [64, 64, 40] });
+
+  const seg = await S.segmentAt([4, 4, 4]);
+  ok(seg.rootId === "0" && /no flat cell segmentation/.test(seg.why || ""),
+     "an unconfigured cell volume is REPORTED, not fetched", JSON.stringify(seg));
+  ok(!hits.some(u => /^\/info/.test(u) || u === "/info"),
+     "...so nothing was fetched from an empty base",
+     hits.filter(u => u.indexOf(base) !== 0).join(",") || "nothing off-base");
+
+  const r = await S.resolveAt([4, 4, 4]);
+  ok(Number(r.nucleusId) === 308149,
+     "...and the NUCLEUS still answers, which is the half that was being lost",
+     JSON.stringify({ nucleusId: r.nucleusId, rootId: r.rootId }));
+  ok(/no flat cell segmentation/.test(r.why || ""),
+     "...with the cell half's reason carried out to the caller", JSON.stringify(r.why));
+
+  /* The mirror case, so the fix is not one-sided: a page with a segmentation and no nuclei. The
+     cell volume is uint64 here \u2014 segmentAt reads TWO words, so reusing the uint32 chunk above
+     would assert against a number nobody wrote. */
+  const segBase = "https://h/s";
+  const segInfo = Buffer.from(JSON.stringify({ type: "segmentation", data_type: "uint64",
+    num_channels: 1, scales: [{ key: "s", size: [64, 64, 64], chunk_sizes: [[64, 64, 64]],
+      voxel_offset: [0, 0, 0], resolution: [64, 64, 40], encoding: "compressed_segmentation",
+      compressed_segmentation_block_size: [8, 8, 8] }] }));
+  const segChunk = buildChunkOf([64, 64, 64], [8, 8, 8], 2, ["0", "864691135741608653"],
+                                [{ at: [4, 4, 4], slot: 1 }]);
+  const { S: S2 } = load({ [segBase + "/info"]: segInfo,
+                           [segBase + "/s/0-64_0-64_0-64"]: segChunk });
+  S2.configure({ seg: segBase, nuc: "", res: [64, 64, 40] });
+  const r2 = await S2.resolveAt([4, 4, 4]);
+  ok(String(r2.rootId) === "864691135741608653" && Number(r2.nucleusId) === 0
+     && /no nucleus volume/.test(r2.nucWhy || ""),
+     "...and the same the other way round: no nuclei volume, cell still read",
+     JSON.stringify({ rootId: r2.rootId, nucWhy: r2.nucWhy }));
+
+  /* A volume that is configured and BROKEN is a different thing from one that is absent, and it
+     must not take its partner down either. Nothing is routed for this base, so info 404s. */
+  const { S: S3 } = load({ [base + "/info"]: info, [base + "/n/0-64_0-64_0-64"]: chunk });
+  S3.configure({ seg: "https://h/gone", nuc: base, res: [64, 64, 40] });
+  const r3 = await S3.resolveAt([4, 4, 4]);
+  ok(Number(r3.nucleusId) === 308149 && /could not be read/.test(r3.why || ""),
+     "a configured volume that 404s loses only its own answer",
+     JSON.stringify({ nucleusId: r3.nucleusId, why: (r3.why || "").slice(0, 60) }));
+}
+
 console.log("\nhow a batch is run");
 {
   const { S } = load({});

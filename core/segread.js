@@ -348,11 +348,26 @@ UJ.segread = (function(){
 
   async function nucleusAt(vox){
     if (!CFG) throw new Error("segread.configure() first");
+    if (!CFG.nuc)
+      return { nucleusId: 0, why: "this dataset has no nucleus volume to read" };
     var r = await valueAt(CFG.nuc, 1, vox, CFG.res);
     return { nucleusId: r.value === "0" ? 0 : Number(r.value), why: r.why };
   }
+  /* ── A DATASET WITH NO FLAT CELL SEGMENTATION IS NOT A BROKEN ONE ─────  2026-09-20
+     δJump configures `seg: ""` ON PURPOSE: V1DD's cell segmentation is graphene behind a CAVE
+     login, and configure() above refuses a graphene:// source rather than return supervoxel ids
+     dressed as root ids. The empty string went on to valueAt, which fetched `"" + "/info"` — the
+     host's own 404 page — and threw `no info at  (404)`, with the base missing from the message
+     because there was no base.
+
+     Measured on the live δJump, 2026-09-20. The symptom was two levels away: Søren, *"the cell and
+     nucleus segmentation is missing from the 3D window in the tracing"*. padOpen() resolves the
+     coordinate to fill the two id boxes, this threw, both boxes stayed empty, and the pad's ghosts
+     need an id to be ghosts of. */
   async function segmentAt(vox){
     if (!CFG) throw new Error("segread.configure() first");
+    if (!CFG.seg)
+      return { rootId: "0", why: "this dataset has no flat cell segmentation to read" };
     var r = await valueAt(CFG.seg, 2, vox, CFG.res);
     return { rootId: r.value, why: r.why };
   }
@@ -368,11 +383,28 @@ UJ.segread = (function(){
 
      Deliberately no fallback to "nearest nucleus": a guess that looks like a reading is worse than
      an honest blank, and in a dendrite the nearest nucleus belongs to a different cell. */
+  /* NEITHER HALF MAY COST THE OTHER ITS ANSWER.  2026-09-20. This was a bare `Promise.all`, so
+     one volume rejecting — a bucket moved, a login in the way, a dataset that simply has no cell
+     segmentation — rejected the pair, and the caller learned nothing about the point INCLUDING
+     the half that had read perfectly well. On δJump the nucleus volume is plain public
+     precomputed and answered every time; nobody ever saw it.
+
+     Each half is settled on its own now and its failure becomes its own `why`, so a caller can
+     say what it read and what it could not in the same sentence. */
   async function resolveAt(vox){
-    var pair = await Promise.all([segmentAt(vox), nucleusAt(vox)]);
+    var pair = await Promise.all([
+      segmentAt(vox).catch(function(e){
+        return { rootId: "0",
+                 why: "the cell segmentation could not be read: " + String(e && e.message || e) };
+      }),
+      nucleusAt(vox).catch(function(e){
+        return { nucleusId: 0,
+                 why: "the nucleus volume could not be read: " + String(e && e.message || e) };
+      })
+    ]);
     return { rootId: pair[0].rootId, nucleusId: pair[1].nucleusId,
              inCell: pair[0].rootId !== "0", inNucleus: pair[1].nucleusId !== 0,
-             why: pair[0].why || "" };
+             why: pair[0].why || "", nucWhy: pair[1].why || "" };
   }
 
   /* ── THE NUCLEUS NEAR A POINT, BY READING RATHER THAN GUESSING ───────────────  2026-09-11

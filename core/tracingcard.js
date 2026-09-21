@@ -1480,6 +1480,13 @@ async function pad3DGhostMeshes(){
       else notes.push("nucleus " + ids.nuc + " has no mesh in the nuclei volume");
     } catch (e){ notes.push("the nucleus mesh could not be read: " + String(e && e.message || e)); }
   }
+  /* SILENCE WAS THE WORST OF THE THREE.  2026-09-20. With both id boxes empty this returned an
+     empty list and an empty note, so the preview drew the contours alone and said nothing at all
+     about the surroundings the tick above it had just promised. A tick that is on, and a picture
+     with nothing in it, and no sentence joining them. */
+  if (!out.length && !notes.length)
+    notes.push("no cell or nucleus ID in the boxes above, so there is nothing to draw around it \u2014 "
+             + "type one in, or open the pad from a cell");
   PAD3D_MESHES = out; PAD3D_KEY = ids.key; PAD3D_NOTE = notes.join("; ");
   return out;
 }
@@ -3209,9 +3216,19 @@ async function tracingResolveAt(pos){
                      bits.push("nucleus "+r.nucleusId); }
     if(r.rootId&&r.rootId!=="0"){ if(!rootEl.value.trim())rootEl.value=String(r.rootId);
                                   bits.push("cell "+r.rootId); }
-    say.textContent=bits.length
+    /* WHAT WAS NOT READ, AND WHY, BESIDE WHAT WAS.  2026-09-20. V1DD has no flat cell
+       segmentation this tool may index, so the root ID box stays empty there however good the
+       coordinate is — and an empty box under "nothing is segmented at that coordinate" reads as a
+       fact about the tissue when it is a fact about the dataset. Only the two answers that are
+       about a VOLUME rather than about this point are repeated; "nothing segmented there" is
+       already the sentence above. */
+    const missed=[];
+    if(/no flat cell segmentation|could not be read/.test(r.why||"")) missed.push(r.why);
+    if(/no nucleus volume|could not be read/.test(r.nucWhy||"")) missed.push(r.nucWhy);
+    say.textContent=(bits.length
       ? "At that coordinate: "+bits.join(", ")+" \u2014 filled in below."
-      : "Nothing is segmented at that coordinate, which is usually why you are tracing it.";
+      : "Nothing is segmented at that coordinate, which is usually why you are tracing it.")
+      +(missed.length?" ("+missed.join("; ")+".)":"");
     tracingSuggestType();
   }catch(e){ say.textContent="Could not read the segmentation there: "+String(e&&e.message||e); }
 }
