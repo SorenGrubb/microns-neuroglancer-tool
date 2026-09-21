@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-21 20:33</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-21 20:48</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -10831,7 +10831,7 @@ function tracingRenderList(){
       const g=groups[Number(b.dataset.g)];
       if(g)tracingViewerOpen(g.items.map(function(x){return x.t;}),
         "Opened all "+g.items.length+" of this cell’s kept tracings in the viewer, each in its own colour.",
-        {nuc:g.nuc,root:g.root});
+        {nuc:g.nuc,root:g.root,centre:tracingCellCentre(g.coord,g.nuc)});
     });
   });
   host.querySelectorAll(".tracingcelldrop").forEach(function(b){
@@ -11579,10 +11579,30 @@ function tracingShowCellIn(st, root, nuc){
   } else if (nucLayer){ delete nucLayer.segments; }
   return true;
 }
+/* ── WHERE A CELL IS ─────────────────────────────────────────────────────────  2026-09-21
+   Søren: "for the microglia it should be on its own center." The cell's centre as voxels: its
+   stored centre ("x,y,z"), else the page's own position for its nucleus, else null. */
+function tracingCentreOfNucleus(nuc){
+  nuc = String(nuc || "").replace(/^.*:/, "");
+  if (!nuc || typeof bulkNucIdOf !== "function" || typeof bulkCoordOf !== "function"
+      || typeof N === "undefined") return null;
+  for (var i = 0; i < N; i++){
+    if (String(bulkNucIdOf(i)) !== nuc) continue;
+    var c = String(bulkCoordOf(i) || "").split(",").map(Number);
+    return (c.length === 3 && c.every(isFinite)) ? c.map(Math.round) : null;
+  }
+  return null;
+}
+function tracingCellCentre(coord, nuc){
+  var c = String(coord || "").split(",").map(Number);
+  if (c.length === 3 && c.every(isFinite)) return c.map(Math.round);
+  try { return tracingCentreOfNucleus(nuc); } catch (_e){ return null; }
+}
 function tracingViewerOpen(structs, say, ids){
   structs = (structs || []).filter(function(t){ return t && (t.rings || []).length; });
   if (!structs.length){ tracingSay("Nothing to look at yet — no contours.", true); return; }
-  const pos = tracingCentreOf(structs);
+  /* A CELL opens on the cell (ids.centre), a tracing on the tracing. */
+  const pos = (ids && ids.centre && ids.centre.length === 3) ? ids.centre.slice() : tracingCentreOf(structs);
   if (!pos){ tracingSay("Those contours have no coordinates to centre on.", true); return; }
   let st;
   try { st = buildState(pos); }
@@ -11706,7 +11726,9 @@ function organShowAllInViewer(trs, nid, root, missing){
     + (missing ? " " + missing + " more outline" + (missing === 1 ? " has" : "s have")
                  + " not been read here, so " + (missing === 1 ? "it is" : "they are")
                  + " not on it." : ""),
-    { nuc: nid || "", root: root || "" });
+    { nuc: nid || "", root: root || "",
+      centre: tracingCellCentre((trs || []).map(function(t){ return t && (t.cellCoord || t.cell_coord); })
+                                  .filter(Boolean)[0] || "", nid) });
 }
 function openTracingAt(pt, kind){
   try {
@@ -13184,10 +13206,13 @@ async function tracingCellSharedInViewer(sids, btn){
   const good = got.filter(function(x){ return !x.error; });
   if (!good.length){ tracingSay("Could not open that cell's tracings." + tracingFailedSay(got), true); return; }
   const ids = { nuc: "", root: "" };
+  let coord = "";
   good.forEach(function(x){
     ids.nuc = ids.nuc || x.t.nucleusId || x.st.nucleusId || "";
     ids.root = ids.root || x.t.rootId || x.st.rootId || "";
+    coord = coord || x.t.cellCoord || x.st.cellCoord || "";
   });
+  ids.centre = tracingCellCentre(coord, ids.nuc);
   tracingViewerOpen(good.map(function(x){
       return { name: x.st.name || x.t.name || x.sid, color: x.t.color || x.st.color || "#40e28c", rings: x.st.rings }; }),
     "Opened all " + good.length + " of this cell’s tracings in the viewer, each in its own colour. "
