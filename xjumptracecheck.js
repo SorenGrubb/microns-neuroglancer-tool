@@ -9,7 +9,9 @@
      - the fragment is known to be part of a proofread cell, whose KEY goes in the cell box and
        whose type is offered;
      - the segmentation tick paints the whole cell's fragments, not only the one under the point;
-     - the pad draws the EM, with the 4 nm level skipped (26 MB chunks).
+     - the pad draws the EM, with the 4 nm level skipped (26 MB chunks);
+     - the BULK card (step 3): markers on two fragments of one cell are ONE cell, filed under its
+       key with each marker's own fragment; a marker on a fragment no cell contains cannot be ticked.
 
    Run: node xjumptracecheck.js */
 const { chromium } = require("playwright");
@@ -22,6 +24,8 @@ const ok = (c, what, d) => {
 const BOSS = "https://bossdb-open-data.s3.amazonaws.com/";
 /* pc_0 of the embedded seeds: soma at voxel (110319, 95553, 258). Two of its own fragments. */
 const POS = [110319, 95553, 258], FRAG = "8164402790444", OTHER = "7107617751130";
+/* A fragment in no proofread cell: the seg chunks from x 30000 on hold it. */
+const LOOSE = "123456789";
 const EMINFO = { type: "image", data_type: "uint8", num_channels: 1, scales: [
   { key: "4_4_40",  resolution: [4, 4, 40],  size: [249600, 230400, 1200], voxel_offset: [0, 0, 0], chunk_sizes: [[64, 64, 25]], encoding: "raw" },
   { key: "8_8_40",  resolution: [8, 8, 40],  size: [124800, 115200, 1200], voxel_offset: [0, 0, 0], chunk_sizes: [[64, 64, 25]], encoding: "raw" },
@@ -64,6 +68,10 @@ const SEGINFO = { type: "segmentation", data_type: "uint64", num_channels: 1, sc
       if (!(z0 <= -958 && -958 < z1)){ hits.segWrongZ++; return route.fulfill({ status: 404, headers: cors, body: "" }); }
       const sx = m[2] - m[1], sy = m[4] - m[3], sz = z1 - z0;
       const buf = Buffer.alloc(sx * sy * sz * 8);
+      if (+m[1] >= 30000){
+        for (let i = 0; i < sx * sy * sz; i++) buf.writeBigUInt64LE(BigInt(LOOSE), 8 * i);
+        return route.fulfill({ status: 200, headers: cors, body: buf });
+      }
       for (let i = 0; i < sx * sy * sz; i++)
         buf.writeBigUInt64LE(BigInt((i % sx) < 4 ? OTHER : FRAG), 8 * i);   // a strip of another fragment of the same cell
       return route.fulfill({ status: 200, headers: cors, body: buf });
@@ -142,6 +150,39 @@ const SEGINFO = { type: "segmentation", data_type: "uint64", num_channels: 1, sc
   });
   ok(f.cur && f.cur.length === 3, "looking up a cell sets the coordinate the card follows", JSON.stringify(f.cur));
   ok(f.box === (f.cur || []).join(","), "...and the card's boxes take it", f.box);
+  console.log("\nthe bulk card");
+  const k = await p.evaluate(async (a) => {
+    const [POS, FRAG, OTHER] = a;
+    const st = { dimensions: { x: [4e-9, "m"], y: [4e-9, "m"], z: [4e-8, "m"] }, layers: [
+      { type: "annotation", name: "m", source: "local://annotations", annotations: [
+        { type: "point", id: "a", point: POS },                               // on FRAG
+        { type: "point", id: "b", point: [110084, POS[1], POS[2]] },           // on OTHER, same cell
+        { type: "point", id: "c", point: [130000, POS[1], POS[2]] } ] }] };    // on a loose fragment
+    const det = document.getElementById("bulkOrganPanel"); if (det) det.open = true;
+    document.getElementById("bulkOrganKind").value = "mitochondria";
+    document.getElementById("bulkOrganLink").value = "https://x/#!" + encodeURIComponent(JSON.stringify(st));
+    document.getElementById("bulkOrganResolve").click();
+    const t0 = Date.now();
+    while (Date.now() - t0 < 20000 && BULK_ORGAN_ROWS.length < 3) await new Promise(r => setTimeout(r, 200));
+    const rows = BULK_ORGAN_ROWS.map(r => ({ use: r.use, key: r.cellKey, root: r.rootId, warn: r.warn,
+                                             cell: r.i >= 0 ? bulkNucIdOf(r.i) : "" }));
+    const posts = [];
+    window.postReport = function(pl){ posts.push(pl); return true; };
+    document.getElementById("bulkOrganSubmit").click();
+    return { rows, posts: posts.map(x => ({ nuc: x.nucleusId, root: x.rootId, g: x.groupId, n: x.subCount, kind: x.kind })),
+             table: document.getElementById("bulkOrganTable").textContent };
+  }, [POS, FRAG, OTHER]);
+  ok(k.rows.length === 3, "three markers read", k.rows.length);
+  ok(k.rows[0].use && k.rows[1].use && k.rows[0].key === k.rows[1].key && k.rows[0].cell === "cb2/htem/pc_0",
+     "two markers on two fragments of pc_0 are ONE cell", JSON.stringify(k.rows.slice(0, 2)));
+  ok(!k.rows[2].use && !k.rows[2].key && /not part of any cell/.test(k.rows[2].warn),
+     "a marker on a fragment no cell contains cannot be ticked, and says why", k.rows[2].warn);
+  ok(/1 cell\b/.test(k.table), "...and the summary counts one cell", (k.table.match(/\d+ of \d+[^.]*/) || [""])[0]);
+  ok(k.posts.length === 2 && k.posts.every(x => x.nuc === "cb2/htem/pc_0" && x.n === 2 && x.kind === "mitochondria")
+     && k.posts[0].g === k.posts[1].g,
+     "submitted as one group, filed under the cell's key", JSON.stringify(k.posts));
+  ok(k.posts.length === 2 && k.posts[0].root === FRAG && k.posts[1].root === OTHER,
+     "...each row with its own fragment", k.posts.map(x => x.root).join(", "));
   ok(errors.length === 0, "no page errors", errors.join(" | ") || "none");
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");

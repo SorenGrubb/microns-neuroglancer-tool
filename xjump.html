@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-21 11:36</span></p>
+ctrl-shift-R.">build 2026-09-21 11:55</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -535,6 +535,8 @@ ctrl-shift-R.">build 2026-09-21 11:36</span></p>
 <!-- Trace a cell or organelle -- core/tracingcard.js, the card µJump, δJump, λJump,
      βJump and ηJump carry. Empty on purpose: the module builds it. -->
 <div class="card" id="tracingCard"></div>
+<!-- Bulk organelle annotation -- core/bulkorgan.js, as on five other tools. 2026-09-21. -->
+<div class="card" id="bulkOrganCard"></div>
 
 <div class="card">
   <div id="backend-note"></div>
@@ -9260,7 +9262,8 @@ function xjumpCellOf(key, seg){
   for (i = 0; i < cells.length && !c; i++) if (seg && (cells[i].segments || []).indexOf(seg) >= 0) c = cells[i];
   if (c){
     var nm = X.settledLabel(c) || "";
-    return { key: c.id, name: nm, how: "assembled here", segs: (c.segments || []).slice() };
+    return { key: c.id, name: nm, how: "assembled here", segs: (c.segments || []).slice(),
+             pos: (c.position && c.position.length === 3) ? c.position.slice() : null };
   }
   var r = null;
   if (key && X.isSeedKey(key)){
@@ -9271,7 +9274,7 @@ function xjumpCellOf(key, seg){
   if (!r) return null;
   return { key: r.key, name: r.label.charAt(0).toUpperCase() + r.label.slice(1),
            how: "proofread by the Lee lab (Nguyen et al., Nature 2023)",
-           segs: X.seedSegments(r) };
+           segs: X.seedSegments(r), pos: r.pos ? r.pos.slice() : null };
 }
 UJ.cfg.tracing = {
   lsKey:     "xjump_tracings_v1",
@@ -9301,10 +9304,31 @@ UJ.cfg.tracing = {
   },
   cellIdsFor: function(rootIn){ var c = xjumpCellOf("", rootIn); return c ? c.segs : []; }
 };
+/* THE BULK CARD'S CELLS. core/bulkorgan.js works in row indices into a page's cell table; χJump's
+   cells are assemblies and seeds, so the rows are handed out as cells are found, and stay put. */
+var XJ_BULK_ROWS = [], XJ_BULK_AT = {};
+function xjumpBulkRow(c){
+  if (!c) return -1;
+  if (!(c.key in XJ_BULK_AT)){ XJ_BULK_AT[c.key] = XJ_BULK_ROWS.length; XJ_BULK_ROWS.push(c); }
+  return XJ_BULK_AT[c.key];
+}
+UJ.cfg.bulk = {
+  sources: function(){ var s = UJ.cfg.tracing.sources(); s.nuc = ""; s.res = UJ.cfg.res; return s; },
+  indexOfRoot:    function(r){ return xjumpBulkRow(xjumpCellOf("", r)); },
+  indexOfNucleus: function(){ return -1; },          /* no nucleus volume on cb2 */
+  nucIdOf: function(i){ return XJ_BULK_ROWS[i].key; },
+  coordOf: function(i){ return XJ_BULK_ROWS[i].pos ? XJ_BULK_ROWS[i].pos.join(",") : ""; },
+  name:    function(i){ return XJ_BULK_ROWS[i].name || "unnamed"; },
+  label:   function(i){ var c = XJ_BULK_ROWS[i];
+    return escHtml(c.name || "unnamed") + " &middot; " + escHtml(c.key); },
+  groupByRow: true,
+  needsCell: "this fragment is not part of any cell yet — build the cell around it first, then paste again"
+};
 /* The card's viewer links, from χJump's own builder: its EM window, its segmentation shifted onto
    the tissue, its background. The card selects the cell into it. */
 function buildState(pos){ return UJ.xjump.buildState([], pos); }
 </script>
 <script src="core/tracingcard.js"></script>
+<script src="core/bulkorgan.js"></script>
 
 </body></html>

@@ -14,6 +14,8 @@
        coordOf:        (row) -> "x,y,z" it is filed at                          (NX, NY, NZ)
        label:          (row) -> HTML for the Cell column              ("Nucleus N · <name>")
        name:           (row) -> the cell's type, for that label      (own / community / MICrONS)
+       groupByRow:     true -> markers group by CELL (row), not by segment  (off)   2026-09-21
+       needsCell:      "why" -> a segment in no cell cannot be ticked       (off)   2026-09-21
      }
 
    A DATASET WITH NO NUCLEUS VOLUME has no rung 3 — see the ladder.
@@ -165,6 +167,9 @@ async function bulkOrganResolveRow(row){
     let i=bulkIndexOfRoot(hit.r.rootId);
     if(i<0&&hit.r.nucleusId)i=bulkIndexOfNucleus(hit.r.nucleusId);
     out.i=i; out.cellKey=hit.r.rootId;
+    /* A CELL OF MANY SEGMENTS IS ONE CELL, 2026-09-21 -- χJump, where the segment is a fragment. */
+    if(i>=0&&bulkCfg().groupByRow)out.cellKey="row:"+i;
+    if(i<0&&bulkCfg().needsCell){ out.cellKey=""; out.warn=String(bulkCfg().needsCell); return out; }
     if(i>=0&&hit.r.nucleusId&&bulkNucIdOf(i)!==String(hit.r.nucleusId)){
       /* Two segmentations disagreeing about one voxel is worth showing, not resolving by
          preference: it usually means the marker sits on a boundary. */
@@ -357,7 +362,7 @@ function bulkOrganSubmit(){
       if(postReport({
         type:"organelle_location",
         timestamp:new Date().toISOString(),
-        nucleusId:nucId,rootId:rootId,coord:coord,
+        nucleusId:nucId,rootId:(r.rootId&&r.rootId!=="0")?r.rootId:rootId,coord:coord,
         groupId:groupId,subIndex:si+1,subCount:rows.length,
         kind:r.kind,
         pointA:r.a.map(Math.round).join(","),
