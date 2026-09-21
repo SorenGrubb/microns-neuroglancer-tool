@@ -1667,6 +1667,15 @@ function pad3DWanted(){
                                         && TRACING_PENDING.rings.length)
                                    : PAD3D_ON;
 }
+/* "with the cell and nucleus, see-through" under the kept tracings is the PASTED link's preview
+   tick; shown only when that preview is the one drawing (2026-09-21, Søren: "What is the purpose
+   of the ... tick down there?"). The pad has its own. */
+function tracingPasteGhostsSync(){
+  var t = document.getElementById("tracingPasteGhosts");
+  if (!t) return;
+  var l = (t.closest && t.closest("label")) || t;
+  l.style.display = (pad3DTarget() === "paste") ? "flex" : "none";
+}
 function pad3DWantGhosts(){
   var t = document.getElementById(pad3DTarget() === "paste" ? "tracingPasteGhosts"
                                                             : "tracePadGhosts");
@@ -2553,9 +2562,35 @@ function tracingIndexSoon(){
   try {
     fetch(REPORT_ENDPOINT + "?tracings=1" + tracingDsQS())
       .then(function(r){ return r.json(); })
-      .then(function(d){ if (d && d.tracings) TRACING_SHARED = tracingInScope(d.tracings); })
+      .then(function(d){ if (d && d.tracings){ TRACING_SHARED = tracingInScope(d.tracings);
+                                               tracingReconcileKept(); } })
       .catch(function(){});
   } catch (e){}
+}
+
+/* ── "IN THE DATASET" IS CHECKED AGAINST THE DATASET ───────────────────────  2026-09-21
+   Søren's three lysosomes on πJump all said "in the dataset"; the dataset had one (the backend lost
+   two rows to a race on a new tab -- backend/src_a_new_tab_is_made_once.py). Whenever the dataset's
+   list is read, a kept tracing marked as in it that the list does not have goes back on the queue
+   and is sent again. One sent in the last minute is left alone: its row may not be readable yet. */
+function tracingReconcileKept(){
+  var have = {};
+  (TRACING_SHARED || []).forEach(function(t){ if (t && t.structureId) have[String(t.structureId)] = 1; });
+  var now = Date.now(), back = [];
+  (TRACINGS_KEPT || []).forEach(function(t){
+    if (!t || !t.id || t.pending_share || have[String(t.id)]) return;
+    var at = Date.parse(t.shared_at || "");
+    if (isFinite(at) && now - at < 60000) return;
+    t.pending_share = true; t.shared_at = ""; back.push(t);
+  });
+  if (!back.length) return 0;
+  tracingWrite(TRACINGS_KEPT); tracingRenderList();
+  tracingSay(back.map(function(t){ return "\u201c" + (t.name || "a tracing") + "\u201d"; }).join(", ")
+    + (back.length === 1 ? " was" : " were") + " marked as in the dataset, and the dataset does not have "
+    + (back.length === 1 ? "it" : "them") + ". Sending " + (back.length === 1 ? "it" : "them")
+    + " again \u2014 signed in, that happens now.", true);
+  tracingFlushSoon();
+  return back.length;
 }
 
 async function tracingBrowse(){
@@ -2572,6 +2607,7 @@ async function tracingBrowse(){
     const d = await r.json();
     TRACING_SHARED = tracingInScope((d && d.tracings) || []);
     tracingRenderShared();
+    if (d && Array.isArray(d.tracings)) tracingReconcileKept();
   } catch (e){
     host.innerHTML = '<p class="hint" style="color:var(--bad)">Could not read them: '
       + escHtml(String(e && e.message || e)) + ". If the backend has not been redeployed since "
@@ -3114,6 +3150,7 @@ function tracingSeedKinds(){
    writes through without a rebuild for the same reason. */
 var TRACING_EACH_SIG = null;
 function tracingEachRender(force){
+  try { tracingPasteGhostsSync(); } catch (_e){}
   const box = document.getElementById("tracingEachList");
   const one = document.getElementById("tracingWhatRow");
   const lbl = document.getElementById("tracingWhatLabel");
@@ -3569,6 +3606,7 @@ function padPaint(){
    mean "Undo until it is gone" -- that is the difference between correcting a tracing and starting
    it again. */
 function padRings(){
+  try { tracingPasteGhostsSync(); } catch (_e){}
   /* The preview and the draft both follow the contours from here: this is called after every close,
      every delete and every reload of a section, which is every way the set of rings can change. */
   pad3DSoon();

@@ -648,7 +648,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 19:49</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 20:13</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3692,10 +3692,13 @@ function renderLocationDiagram(pos,under){
   const topSvg=renderTopViewDiagram(vx,vy,vz);
   under=under||"";
   if(!layerSvg&&!topSvg&&!under)return "";
-  /* The EM section goes under the top view (2026-09-21), as on δJump. */
+  /* SIDE BY SIDE, 2026-09-21. Søren: "These could be next to each other". pinky100 has no layer
+     diagram, so stacking the section under the top view (δJump's layout) left it alone in one
+     column. Each figure is its own item now, and they wrap only on a narrow card. */
   return '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-top:10px">'
     +(layerSvg?'<div style="flex:1 1 200px;min-width:180px">'+layerSvg+'</div>':'')
-    +((topSvg||under)?'<div style="flex:1 1 200px;min-width:180px">'+topSvg+under+'</div>':'')
+    +(topSvg?'<div style="flex:1 1 200px;min-width:180px">'+topSvg+'</div>':'')
+    +(under?'<div style="flex:0 1 260px;min-width:200px">'+under+'</div>':'')
     +'</div>';
 }
 
@@ -6032,7 +6035,12 @@ function postReport(payload,okMsg){
   if(GOOGLE_EXP&&Date.now()/1000>GOOGLE_EXP-90){handleGoogleExpiry();alert("Your Google sign-in has expired. Please sign in with Google again, then resubmit.");return false;}
   payload.reporterName=REPORTER_NAME||"";payload.reporterEmail=REPORTER_EMAIL||"";
   payload.credential=GOOGLE_CREDENTIAL;
-  postAndRead(payload).then(function(res){
+  /* THE ANSWER IS HANDED BACK, 2026-09-21: a promise of {ok,error}, truthy, so every
+     `if(postReport(...))` reads as before -- and the tracing card can hear a refusal. It returned
+     `true` before the server had answered, which is how three lysosomes said "in the dataset"
+     when two had been lost. See src/the_card_hears_where_a_tracing_is.py. */
+  const answer=postAndRead(payload);
+  answer.then(function(res){
     if(res.ok){showSubmitToast(true,okMsg||"Submitted — thank you. Your identification was sent.");return;}
     if(res.offline){showSubmitToast(false,"Could not reach the server — your report was NOT submitted. Check your connection and try again.");return;}
     /* THE CASE THIS PAGE COULD NOT SEE UNTIL TODAY: the request arrived and the backend said no.
@@ -6053,7 +6061,7 @@ function postReport(payload,okMsg){
   // for NEW_CELL_REPORTS_CACHE/MERGED_SUB_REPORTS_CACHE specifically, which previously had no
   // invalidation at all -- see invalidateNewCellAndMergedSubCaches()'s own comment.
   if(window.invalidateNewCellAndMergedSubCaches)setTimeout(()=>window.invalidateNewCellAndMergedSubCaches(),2500);
-  return true;
+  return answer;
 }
 
 /* Community input: read back reports already logged for this nucleus (via a GET to the same

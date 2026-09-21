@@ -176,6 +176,20 @@ const CELL = [48000, 73540, 1531];
        "...at 64 nm, one 40 nm section", got.stats && got.stats.title.slice(0, 80));
   }
 
+  /* Søren, 2026-09-21: "These could be next to each other" -- the section beside the top view. */
+  console.log("\nthe section sits beside the top view");
+  {
+    const laid = await p.evaluate(() => {
+      const box = document.getElementById("emPlaneBox");
+      const svg = [...document.querySelectorAll("#nucpanel svg")].filter(s => /Top view/.test(s.textContent))[0];
+      if (!box || !svg) return { skip: (!box ? "no section" : "no top view") };
+      const a = svg.getBoundingClientRect(), c = box.getBoundingClientRect();
+      return { topRight: Math.round(a.right), boxLeft: Math.round(c.left), topTop: Math.round(a.top), boxTop: Math.round(c.top) };
+    });
+    ok(!laid.skip && laid.boxLeft >= laid.topRight && Math.abs(laid.boxTop - laid.topTop) < 60,
+       "the section is to the right of the top view, on the same row", JSON.stringify(laid));
+  }
+
   ok(errors.length === 0, "no page errors", errors.join(" | ").slice(0, 300) || "none");
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");

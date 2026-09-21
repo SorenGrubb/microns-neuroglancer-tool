@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-21 15:34</span></p>
+ctrl-shift-R.">build 2026-09-21 20:14</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -9237,6 +9237,9 @@ function postReport(payload, okMsg){
   payload.reporterName = REPORTER_NAME || "";
   payload.reporterEmail = REPORTER_EMAIL || "";
   payload.credential = GOOGLE_CREDENTIAL;
+  /* THE ANSWER, 2026-09-21: read and handed back where the tracing card's reader is loaded, so a
+     refusal can be heard. See src/xjump_postreport_hands_back_the_answer.py. */
+  if (typeof tracingPost === "function") return tracingPost(payload);
   fetch(REPORT_ENDPOINT, { method:"POST", mode:"no-cors",
                            body: JSON.stringify(payload) }).catch(function(){});
   return true;
