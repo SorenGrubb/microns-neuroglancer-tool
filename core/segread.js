@@ -105,6 +105,16 @@ UJ.segread = (function(){
          + encodeURIComponent(rest.slice(cut + 1)) + "?alt=media";
   }
 
+  /* ── A VOLUME WHOSE INFO LIVES ELSEWHERE, AND ONE THAT IS DISPLACED ─────────  2026-09-21
+     χJump's cb2 segmentation: its chunks are public and CORS-open, its own `info` is not readable
+     from a page, and the mesh store's info describes it exactly. And it sits 1,216 sections below
+     the EM, so a point read at the tool's own z answers for tissue 48 µm away. Per base, like
+     useJsonApi, so segpaint -- which reads through _getInfo/_chunkBuf -- sees the same geometry. */
+  var INFO_FROM = {}, OFFSET_NM = {};
+  function borrowInfo(base, infoBase){ if (base && infoBase) INFO_FROM[base] = httpBase(infoBase); }
+  function setOffsetNm(base, nm){ if (base && nm) OFFSET_NM[base] = [+nm[0] || 0, +nm[1] || 0, +nm[2] || 0]; }
+  function offsetNm(base){ return OFFSET_NM[base] || [0, 0, 0]; }
+
   /* ── caches ──────────────────────────────────────────────────────────────────────────────
      Keyed by the exact thing fetched, so nothing can be served for the wrong coordinate. Held
      for the life of the page: the volumes are immutable published data. */
@@ -115,7 +125,7 @@ UJ.segread = (function(){
 
   function getInfo(base){
     if (!infoCache[base])
-      infoCache[base] = fetch(urlOf(base, "info"), { cache: "force-cache" }).then(function(r){
+      infoCache[base] = fetch(urlOf(INFO_FROM[base] || base, "info"), { cache: "force-cache" }).then(function(r){
         if (!r.ok) throw new Error("no info at " + base + " (" + r.status + ")");
         return r.json();
       });
@@ -161,6 +171,26 @@ UJ.segread = (function(){
     if (words === 1) return String(d[table + idx] >>> 0);
     var lo = d[table + idx * 2] >>> 0, hi = d[table + idx * 2 + 1] >>> 0;
     return (BigInt(hi) * 4294967296n + BigInt(lo)).toString();
+  }
+
+  /* ── raw ─────────────────────────────────────────────────────────────────  2026-09-21
+     x fastest, then y, then z, little-endian, one or two uint32 words per voxel -- indexed with
+     the chunk's REAL shape. An edge chunk is clipped to the volume; indexed with the nominal
+     chunk size every voxel in it reads a neighbour's value, plausibly, and nothing says so. */
+  function realShape(at){ return [0, 1, 2].map(function(i){ return at.end[i] - at.start[i]; }); }
+  function rawAt(buf, shape, local, words){
+    var d = new Uint32Array(buf);
+    var n = shape[0] * shape[1] * shape[2] * words;
+    if (d.length < n) throw new Error("a raw chunk of " + buf.byteLength + " bytes, expected " + n * 4);
+    var i = local[0] + shape[0] * (local[1] + shape[1] * local[2]);
+    if (words === 1) return String(d[i] >>> 0);
+    var lo = d[2 * i] >>> 0, hi = d[2 * i + 1] >>> 0;
+    return (BigInt(hi) * 4294967296n + BigInt(lo)).toString();
+  }
+  /* One voxel of a chunk, whichever encoding the scale declares. */
+  function valueIn(buf, scale, at, words){
+    if (scale.encoding === "raw") return rawAt(buf, realShape(at), at.local, words);
+    return decodeAt(buf, at.shape, scale.compressed_segmentation_block_size, at.local, words);
   }
 
   /* ── ONE WHOLE Z-PLANE, TESTED AGAINST A FEW IDS ────────────────────────────────  2026-09-17
@@ -238,6 +268,30 @@ UJ.segread = (function(){
         }
       }
     }
+    return out;
+  }
+
+  /* A plane of either encoding, always in the NOMINAL chunk layout (chunk_sizes[0]) that
+     core/segpaint.js walks -- a clipped raw edge chunk is written into the top-left of it. */
+  function planeOf(buf, scale, start, end, lz, words, wanted){
+    var ch = scale.chunk_sizes[0];
+    if (scale.encoding !== "raw")
+      return planeMatch(buf, ch, scale.compressed_segmentation_block_size, lz, words, wanted);
+    var sh = [end[0] - start[0], end[1] - start[1], end[2] - start[2]];
+    var out = new Uint8Array(ch[0] * ch[1]);
+    var nw = wanted.length;
+    if (!nw || lz < 0 || lz >= sh[2]) return out;
+    var d = new Uint32Array(buf);
+    if (d.length < sh[0] * sh[1] * sh[2] * words) return out;
+    var z0 = sh[0] * sh[1] * lz;
+    for (var y = 0; y < sh[1]; y++)
+      for (var x = 0; x < sh[0]; x++){
+        var i = z0 + x + sh[0] * y, lo, hi;
+        if (words === 1){ lo = d[i] >>> 0; hi = 0; } else { lo = d[2 * i] >>> 0; hi = d[2 * i + 1] >>> 0; }
+        if (!lo && !hi) continue;
+        for (var k = 0; k < nw; k++)
+          if (wanted[k].lo === lo && wanted[k].hi === hi){ out[y * ch[0] + x] = k + 1; break; }
+      }
     return out;
   }
 
@@ -349,15 +403,19 @@ UJ.segread = (function(){
     /* The caller's voxel is in the TOOL's grid (µJump: 4/4/40 nm). Every volume here has its own,
        so convert through nanometres rather than assuming they agree -- the nucleus volume is
        64/64/40 and the segmentation 8/8/40, and neither is the tool's. */
+    /* ...and through the volume's own displacement, if it has one: see OFFSET_NM. */
+    var sh = offsetNm(base);
     var v = [0, 1, 2].map(function(i){
-      return Math.floor(vox[i] * res[i] / scale.resolution[i]);
+      return Math.floor((vox[i] * res[i] + sh[i]) / scale.resolution[i]);
     });
     var at = chunkOf(scale, v);
     if (!at) return { value: "0", why: "outside the volume" };
     var buf = scale.sharding ? await shardedChunk(base, scale, at)
                              : await unshardedChunk(base, scale, at);
     if (!buf) return { value: "0", why: "nothing segmented there" };
-    var val = decodeAt(buf, at.shape, scale.compressed_segmentation_block_size, at.local, words);
+    /* A raw volume says how wide its values are in its info; compressed ones are the caller's. */
+    if (scale.encoding === "raw" && info.data_type) words = /64/.test(info.data_type) ? 2 : 1;
+    var val = valueIn(buf, scale, at, words);
     return { value: val, why: val === "0" ? "nothing segmented there" : "" };
   }
 
@@ -367,6 +425,8 @@ UJ.segread = (function(){
       throw new Error("segread cannot read a graphene:// source: indexing one returns supervoxel "
                     + "ids, not the root ids this tool shows. Point it at a flat segmentation.");
     CFG = { seg: httpBase(cfg.seg), nuc: httpBase(cfg.nuc), res: cfg.res || [4, 4, 40] };
+    if (CFG.seg){ borrowInfo(CFG.seg, cfg.segInfo); setOffsetNm(CFG.seg, cfg.segOffsetNm); }
+    if (CFG.nuc){ borrowInfo(CFG.nuc, cfg.nucInfo); setOffsetNm(CFG.nuc, cfg.nucOffsetNm); }
     return CFG;
   }
   function configured(){ return !!CFG; }
@@ -484,8 +544,9 @@ UJ.segread = (function(){
     if (!CFG) throw new Error("segread.configure() first");
     var cap = capNm || 1000;
     var info = await getInfo(CFG.nuc), scale = info.scales[0];
+    var nsh = offsetNm(CFG.nuc);
     var v = [0, 1, 2].map(function(i){
-      return Math.floor(vox[i] * CFG.res[i] / scale.resolution[i]);
+      return Math.floor((vox[i] * CFG.res[i] + nsh[i]) / scale.resolution[i]);
     });
     var offs = offsetsWithin(scale.resolution, cap);
     var held = null, heldBuf = null;
@@ -501,8 +562,8 @@ UJ.segread = (function(){
         heldBuf = held ? await chunkBuf(CFG.nuc, scale, held) : null;
       }
       if (!held || !heldBuf) continue;              // outside the volume, or an unwritten chunk
-      var id = decodeAt(heldBuf, held.shape, scale.compressed_segmentation_block_size,
-                        [p[0] - held.start[0], p[1] - held.start[1], p[2] - held.start[2]], 1);
+      var id = valueIn(heldBuf, scale, { start: held.start, end: held.end, shape: held.shape,
+                        local: [p[0] - held.start[0], p[1] - held.start[1], p[2] - held.start[2]] }, 1);
       if (id === "0") continue;
       if (!first){
         first = Number(id); firstD = o[3];
@@ -545,6 +606,8 @@ UJ.segread = (function(){
            /* exported for the check, which drives the real decoder over real bytes */
            _decodeAt: decodeAt, _compressedMorton: compressedMorton,
            _chunkOf: chunkOf, _httpBase: httpBase, _planeMatch: planeMatch,
+           /* 2026-09-21: either encoding, and a volume's own displacement, for core/segpaint.js */
+           _planeOf: planeOf, _offsetNm: offsetNm, borrowInfo: borrowInfo, setOffsetNm: setOffsetNm,
            /* ── and for core/emtiles.js ──────────────────────────────────────────  2026-09-17
               The EM volume is in the same bucket, with the same sharding, and its chunks are
               `raw` uint8 -- so reading one is this file's job already, and emtiles has no fetch

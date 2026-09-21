@@ -80,11 +80,16 @@ UJ.segpaint = (function(){
     var words = /uint64/.test(String(info.data_type || "")) ? 2 : 1;
     var res = scale.resolution, ch = scale.chunk_sizes[0], off = scale.voxel_offset || [0, 0, 0];
     var bs = scale.compressed_segmentation_block_size;
-    if (!bs) return { chunks: 0, painted: 0, why: "not a compressed_segmentation volume" };
+    if (!bs && scale.encoding !== "raw")
+      return { chunks: 0, painted: 0, why: "neither a compressed_segmentation nor a raw volume" };
 
     /* The window, in nanometres, from the mapping the pad actually drew with. */
     var t0 = view.toolAt(0, 0);
-    var nmX0 = t0[0] * CFG.res[0], nmY0 = t0[1] * CFG.res[1], nmZ = view.z * CFG.res[2];
+    /* In the VOLUME's frame: a displaced volume (χJump's cb2 segmentation, 1,216 sections below
+       its EM) is read where the tissue is. Zero for every other volume. */
+    var vsh = UJ.segread._offsetNm ? UJ.segread._offsetNm(base) : [0, 0, 0];
+    var nmX0 = t0[0] * CFG.res[0] + vsh[0], nmY0 = t0[1] * CFG.res[1] + vsh[1],
+        nmZ = view.z * CFG.res[2] + vsh[2];
     var perPx = view.effNmPerPx;
     var sx0 = Math.floor(nmX0 / res[0]), sy0 = Math.floor(nmY0 / res[1]);
     var sx1 = Math.ceil((nmX0 + view.w * perPx) / res[0]);
@@ -108,9 +113,9 @@ UJ.segpaint = (function(){
     var painted = 0;
     await UJ.segread.mapPool(want, 6, async function(cc){
       var start = [off[0] + cc[0] * ch[0], off[1] + cc[1] * ch[1], off[2] + cc[2] * ch[2]];
+      var end = [0, 1, 2].map(function(i){ return Math.min(start[i] + ch[i], off[i] + scale.size[i]); });
       var buf = await UJ.segread._chunkBuf(base, scale, {
-        c: cc, grid: grid, start: start,
-        end: [0, 1, 2].map(function(i){ return Math.min(start[i] + ch[i], off[i] + scale.size[i]); }),
+        c: cc, grid: grid, start: start, end: end,
         local: [0, 0, 0], shape: ch
       });
       if (onChunk) try { onChunk(); } catch (_e){}
@@ -119,7 +124,8 @@ UJ.segpaint = (function(){
       if (!buf) return;
       var lz = sz - start[2];
       if (lz < 0 || lz >= ch[2]) return;
-      var mask = UJ.segread._planeMatch(buf, ch, bs, lz, words, wantIds);
+      var mask = UJ.segread._planeOf ? UJ.segread._planeOf(buf, scale, start, end, lz, words, wantIds)
+                                     : UJ.segread._planeMatch(buf, ch, bs, lz, words, wantIds);
       for (var yy = 0; yy < ch[1]; yy++){
         var row = yy * ch[0];
         var pyTop = Math.round(((start[1] + yy) * res[1] - nmY0) / perPx);

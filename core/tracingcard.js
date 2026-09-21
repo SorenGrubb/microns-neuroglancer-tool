@@ -58,7 +58,7 @@
 
    DOM IDS THIS MODULE READS/WRITES — a host page must use these names:
      #tracingCard #tracingPanel #tracingX/Y/Z #tracingOpen #tracePadOpen #tracePad #tracePadWrap
-     #tracePadMip #tracePadPrev #tracePadNext #tracePadStep #tracePadUndo #tracePadPen
+     #tracePadMip #tracePadPrev #tracePadNext #tracePadStep #tracePadUndo #tracePadPen #tracePadPan
      #tracePadSeg #tracePadSegSay #tracePadZ #tracePadSay #tracePadRings #tracePadVol
      #tracePadInsts #tracePadNewInst #tracePadHelp #tracingLink #tracingLayer #tracingRead
      #tracingStatus #tracingFound #tracingLayers #tracingWhat #tracingType #tracingColor
@@ -2467,6 +2467,8 @@ async function tracingOpenShared(sid, btn){
    DOM; this half draws, and turns a click into a tool voxel through the view core/emtiles.js
    returns. Vertices are stored in TOOL voxels, so changing the zoom or panning never moves one. */
 var PAD = null, PAD_VIEW = null, PAD_BUSY = false, PAD_HOVER = null, PAD_CENTRE = null;
+/* A move asked for while a section is loading: padDraw draws again when it is done. */
+var PAD_REDRAW = false;
 
 /* ── SEVERAL OF THE SAME THING, EACH ITS OWN COLOUR ─────────────────────────────  2026-09-17
    Søren: *"I want the option to draw more than one organelle of the same type, the extra added
@@ -2808,8 +2810,9 @@ async function padSegOverlay(){
 async function padDraw(){
   if (!PAD_CENTRE) return;
   const cv = document.getElementById("tracePad");
-  if (PAD_BUSY) return;
+  if (PAD_BUSY){ PAD_REDRAW = true; return; }
   PAD_BUSY = true;
+  PAD_REDRAW = false;
   const sel = document.getElementById("tracePadMip");
   const pick = String(sel.value).split(":");
   const mip = +pick[0], zoom = +(pick[1] || 1);
@@ -2848,7 +2851,8 @@ async function padDraw(){
       + (PAD.pending.length ? PAD.pending.length + " vertices on this one \u2014 click the ring to close it"
                             : "click each vertex round the cell")
       + (PAD_SAY_NEXT ? " " + PAD_SAY_NEXT : ""));
-    PAD_SAY_NEXT = "";
+    /* Kept while another draw is queued behind this one: the note is about where the pad is going. */
+    if (!PAD_REDRAW) PAD_SAY_NEXT = "";
   }catch(e){
     /* Spent unsaid rather than carried: a note about a move that did not finish would turn
        up appended to the next section that does, out of nowhere. */
@@ -2860,6 +2864,19 @@ async function padDraw(){
   }
   PAD_BUSY = false;
   padZLabel();
+  if (PAD_REDRAW){ PAD_REDRAW = false; padDraw(); }
+}
+
+/* ── HALF A SCREEN AT A TIME ─────────────────────────────────────────────────  2026-09-21
+   fx, fy are fractions of what is on the pad: -0.5 is half a screen left (or up). Measured off
+   the view actually drawn, so it is half the screen at every zoom and every voxel size. */
+function padPan(fx, fy){
+  if (!PAD_VIEW || !PAD_CENTRE) return;
+  const a = PAD_VIEW.toolAt(0, 0), b = PAD_VIEW.toolAt(PAD_VIEW.w, PAD_VIEW.h);
+  const dx = Math.round((b[0] - a[0]) * fx), dy = Math.round((b[1] - a[1]) * fy);
+  PAD_CENTRE = [PAD_CENTRE[0] + dx, PAD_CENTRE[1] + dy, PAD.z];
+  PAD_SAY_NEXT = "Moved to " + PAD_CENTRE[0] + ", " + PAD_CENTRE[1] + ".";
+  padDraw();
 }
 
 /* ── THE EM IS CAPTURED BY THE ONE FUNCTION THAT KNOWS IT IS FRESH ──────────────  2026-09-17
@@ -3281,6 +3298,13 @@ function wirePad(){
   if (!cv) return;
   document.getElementById("tracePadOpen").addEventListener("click", padOpen);
   document.getElementById("tracePadPrev").addEventListener("click", function(){ padStep(-1); });
+  [].slice.call(document.querySelectorAll("#tracePadPan .padpan")).forEach(function(bt){
+    bt.addEventListener("click", function(e){
+      e.preventDefault(); e.stopPropagation();
+      const f = String(bt.dataset.pan).split(",");
+      padPan(+f[0], +f[1]);
+    });
+  });
   document.getElementById("tracePadNext").addEventListener("click", function(){ padStep(1); });
   document.getElementById("tracePadMip").addEventListener("change", function(){
     padDraw();
@@ -3819,6 +3843,21 @@ function tracingCardHtml(){
     "</div>",
     "<div style=\"position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111\">",
     "<canvas id=\"tracePad\" width=\"560\" height=\"460\" style=\"display:block;cursor:crosshair;touch-action:none\"></canvas>",
+    "<!-- FOUR BUTTONS THAT MOVE THE PICTURE.  2026-09-21. Søren: \"we need to have some buttons to move the",
+    "     image up, down, left or right. It should move half a screen every time... Then you can also",
+    "     navigate around using a phone or tablet.\" Over the picture, in its corner, because on a phone",
+    "     the toolbar above wraps out of sight. -->",
+    "<div id=\"tracePadPan\" style=\"position:absolute;right:8px;bottom:8px;display:grid;grid-template-columns:repeat(3,38px);grid-template-rows:repeat(3,38px);gap:3px;opacity:.9\">",
+    "<span></span>",
+    "<button type=\"button\" class=\"padpan\" data-pan=\"0,-0.5\" style=\"padding:0;width:38px;height:38px;font-size:16px;line-height:1;border-radius:7px;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer\" title=\"Move the picture half a screen up\" aria-label=\"Move up\">&#9650;</button>",
+    "<span></span>",
+    "<button type=\"button\" class=\"padpan\" data-pan=\"-0.5,0\" style=\"padding:0;width:38px;height:38px;font-size:16px;line-height:1;border-radius:7px;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer\" title=\"Move the picture half a screen left\" aria-label=\"Move left\">&#9664;</button>",
+    "<span></span>",
+    "<button type=\"button\" class=\"padpan\" data-pan=\"0.5,0\" style=\"padding:0;width:38px;height:38px;font-size:16px;line-height:1;border-radius:7px;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer\" title=\"Move the picture half a screen right\" aria-label=\"Move right\">&#9654;</button>",
+    "<span></span>",
+    "<button type=\"button\" class=\"padpan\" data-pan=\"0,0.5\" style=\"padding:0;width:38px;height:38px;font-size:16px;line-height:1;border-radius:7px;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.4);cursor:pointer\" title=\"Move the picture half a screen down\" aria-label=\"Move down\">&#9660;</button>",
+    "<span></span>",
+    "</div>",
     "</div>",
     "<!-- SEVERAL OF THE SAME THING.  2026-09-17. Søren: \"I want the option to draw more than one",
     "     organelle of the same type, the extra added organelles should have different colors.\" Under",

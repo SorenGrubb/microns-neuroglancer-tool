@@ -467,6 +467,79 @@ console.log("\na volume the dataset does not have");
      JSON.stringify({ nucleusId: r3.nucleusId, why: (r3.why || "").slice(0, 60) }));
 }
 
+/* ── A RAW VOLUME, READ WHERE IT REALLY IS ───────────────────────────────────────  2026-09-21
+   χJump's cb2 cell segmentation, measured from grubblab.com: `raw` uint64 at 16/16/40 nm, chunks
+   256x256x16, voxel_offset z -1280 -- and its `info` is not beside its chunks (the seg/ folder has
+   none that the browser may read) but in the mesh store, mesh/nguyen_thomas2022/cb2/info. It also
+   sits 1,216 sections below the EM: read at the tool's own z it answers for tissue 48 um away.
+   Nine proofread cells read back their own fragment ids at z - 1216, and four of them did NOT at
+   z - 1280 (which the metadata implies), so the shift is the viewer's number, not a derived one.
+
+   Three things this reader did not do: decode a raw chunk, take its geometry from another info,
+   and read a volume that is displaced from the tool's frame. Each is pinned below on bytes written
+   here -- including an EDGE chunk, which a raw reader must index with the chunk's real, clipped
+   shape and not the nominal one, or every voxel in it reads its neighbour's value. */
+function rawChunk(shape, plants){
+  const b = Buffer.alloc(shape[0] * shape[1] * shape[2] * 8);
+  for (const [x, y, z, id] of plants)
+    b.writeBigUInt64LE(BigInt(id), 8 * (x + shape[0] * (y + shape[1] * z)));
+  return b;
+}
+console.log("\na raw volume, read where it really is");
+{
+  const scale = { key: "16_16_40", size: [6, 4, 8], chunk_sizes: [[4, 4, 4]],
+                  voxel_offset: [0, 0, -32], resolution: [16, 16, 40], encoding: "raw" };
+  const info = Buffer.from(JSON.stringify({ type: "segmentation", data_type: "uint64",
+                                            num_channels: 1, scales: [scale] }));
+  const ID = "8164402790444", EDGE = "19929873776729";
+  const routes = {
+    "https://h/meshstore/info": info,
+    /* chunk 0: x 0-4, y 0-4, z -32..-28 -- a negative range is written "-32--28" */
+    "https://h/seg/16_16_40/0-4_0-4_-32--28": rawChunk([4, 4, 4], [[1, 2, 3, ID]]),
+    /* the edge chunk: x 4-6 is TWO wide, not four */
+    "https://h/seg/16_16_40/4-6_0-4_-32--28": rawChunk([2, 4, 4], [[1, 3, 2, EDGE]])
+  };
+  const { S } = load(routes);
+  /* The tool's frame is 4/4/40; the volume is 16/16/40 and 30 sections below it. */
+  S.configure({ seg: "precomputed://https://h/seg", segInfo: "https://h/meshstore",
+                segOffsetNm: [0, 0, -30 * 40], nuc: "", res: [4, 4, 40] });
+  /* volume voxel (1,2,-29)  <-  tool voxel (4..7, 8..11, 1) */
+  const a = await S.segmentAt([5, 9, 1]);
+  ok(a.rootId === ID, "a raw uint64 chunk is decoded", a.rootId + (a.why ? " (" + a.why + ")" : ""));
+  const bg = await S.segmentAt([5, 9, 2]);
+  ok(bg.rootId === "0", "...and the next section is background, not the same id", bg.rootId);
+  /* volume voxel (5,3,-30) is local (1,3,2) of the 2-wide edge chunk */
+  const e = await S.segmentAt([21, 13, 0]);
+  ok(e.rootId === EDGE, "an EDGE chunk is indexed with its real, clipped width", e.rootId);
+  const { S: S0 } = load(routes);
+  S0.configure({ seg: "precomputed://https://h/seg", segInfo: "https://h/meshstore",
+                 nuc: "", res: [4, 4, 40] });
+  const shifted = await S0.segmentAt([5, 9, 1]);
+  ok(shifted.rootId !== ID, "without the offset the same point reads somewhere else entirely",
+     shifted.rootId + " / " + shifted.why);
+  const { S: S1 } = load(routes);
+  S1.configure({ seg: "precomputed://https://h/seg", segOffsetNm: [0, 0, -1200],
+                 nuc: "", res: [4, 4, 40] });
+  const noInfo = await S1.segmentAt([5, 9, 1]).catch(e => ({ rootId: "threw", why: e.message }));
+  ok(noInfo.rootId !== ID, "...and without the borrowed info there is no geometry to read with",
+     noInfo.why);
+
+  /* The plane, for painting: the same two ids, found in one pass over each chunk. */
+  const buf = routes["https://h/seg/16_16_40/0-4_0-4_-32--28"];
+  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length);
+  const m = S._planeOf(ab, scale, [0, 0, -32], [4, 4, -28], 3, 2,
+                       [{ lo: Number(BigInt(ID) & 0xffffffffn), hi: Number(BigInt(ID) >> 32n) }]);
+  ok(m.length === 16 && m[1 + 4 * 2] === 1 && m.reduce((a, b) => a + b, 0) === 1,
+     "a raw plane is matched against the wanted ids, one voxel lit", m.length + " px");
+  const buf2 = routes["https://h/seg/16_16_40/4-6_0-4_-32--28"];
+  const ab2 = buf2.buffer.slice(buf2.byteOffset, buf2.byteOffset + buf2.length);
+  const m2 = S._planeOf(ab2, scale, [4, 0, -32], [6, 4, -28], 2, 2,
+                        [{ lo: Number(BigInt(EDGE) & 0xffffffffn), hi: Number(BigInt(EDGE) >> 32n) }]);
+  ok(m2.length === 16 && m2[1 + 4 * 3] === 1,
+     "...and an edge chunk's plane comes back in the NOMINAL layout the painter walks",
+     m2.length + " px, lit at " + m2.indexOf(1));
+}
+
 console.log("\nhow a batch is run");
 {
   const { S } = load({});
