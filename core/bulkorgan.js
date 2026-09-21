@@ -16,7 +16,12 @@
        name:           (row) -> the cell's type, for that label      (own / community / MICrONS)
        groupByRow:     true -> markers group by CELL (row), not by segment  (off)   2026-09-21
        needsCell:      "why" -> a segment in no cell cannot be ticked       (off)   2026-09-21
+       prepare:        (say) -> Promise, awaited before the markers are read  (off)   2026-09-21
+       cellNear:       (point) -> Promise<{i, distNm, others} | {i:-1, why}>  (off)   2026-09-21
+                       rung 3b: the host's nearest cell, UNTICKED with its distance
+       afterSubmit:    (sent) -> what postReport returned for each row       (off)   2026-09-21
      }
+   bulkOrganReset() clears the card, for a host whose volume changes under it.
 
    A DATASET WITH NO NUCLEUS VOLUME has no rung 3 — see the ladder.
 
@@ -93,7 +98,9 @@ function bulkCellLabel(i){
 const BULK_ORGAN_ENVELOPE={nuclear_pore:1,nucleoplasmic_reticulum_1:1,nucleoplasmic_reticulum_2:1};
 const BULK_ORGAN_NUCLEOPLASM=(function(){
   const out={};
-  (typeof ORGANELLE_GROUPS!=="undefined"?ORGANELLE_GROUPS:[]).forEach(function(g){
+  /* ωJump ships the generated copy at UJ.organelles.GROUPS rather than the global. 2026-09-21 */
+  (typeof ORGANELLE_GROUPS!=="undefined"?ORGANELLE_GROUPS
+   :(typeof UJ!=="undefined"&&UJ.organelles&&UJ.organelles.GROUPS)?UJ.organelles.GROUPS:[]).forEach(function(g){
     if(g.label!=="Nucleus")return;
     (g.kinds||[]).forEach(function(k){ if(!BULK_ORGAN_ENVELOPE[k.value])out[k.value]=1; });
   });
@@ -203,6 +210,30 @@ async function bulkOrganResolveRow(row){
     if(!n.nucleusId)continue;
     if(!near||n.distanceNm<near.distanceNm){ near=n; near.via=e[0]; }
   }
+  /* ── rung 3b: the host's own nearest cell ──  2026-09-21
+     ωJump's cells are nucleus POINTS and most of its volumes have no segmentation, so rungs 1-3
+     have nothing to read. The nearest found nucleus is evidence, not proof -- the row starts
+     unticked with the distance on it, and two candidates close together are not offered at all. */
+  if(!near&&bulkCfg().cellNear){
+    let best=null,why="";
+    for(const e of ends){
+      const c=await bulkCfg().cellNear(e[1]);
+      if(!c||!(c.i>=0)){ if(c&&c.why)why=c.why; continue; }
+      if(!best||c.distNm<best.distNm){ best=c; best.via=e[0]; }
+    }
+    if(!best){ out.warn=why||lastWhy||"no cell found near this marker"; return out; }
+    out.via=best.via; out.distNm=Math.round(best.distNm);
+    if(best.others&&best.others.length){
+      out.i=-1;
+      out.warn="between "+bulkOrganCellName(best.i)+" and "+best.others.join(", ")
+        +" \u2014 too close to call";
+      return out;
+    }
+    out.i=best.i; out.cellKey="row:"+best.i;
+    out.warn="no segmentation to confirm it \u2014 the nearest nucleus found is "
+      +(best.distNm/1000).toFixed(1)+" \u00b5m away. Tick it if this is its cell.";
+    return out;
+  }
   if(!near){
     out.warn=lastWhy||"no cell and no nucleus within "
       +(BULK_ORGAN_NEAR_NM/1000).toFixed(1)+" \u00b5m";
@@ -300,6 +331,10 @@ async function bulkOrganFindCells(){
     UJ.segread.configure(bulkSources());
   }catch(e){bulkOrganSetStatus(e.message,true);return;}
   btn.disabled=true;
+  if(bulkCfg().prepare){
+    try{ await bulkCfg().prepare(function(m){ bulkOrganSetStatus(m); }); }
+    catch(e){ btn.disabled=false; bulkOrganSetStatus(String(e&&e.message||e),true); return; }
+  }
   const t0=Date.now();
   bulkOrganSetStatus("Reading the segmentation for "+built.rows.length+" marker"
     +(built.rows.length===1?"":"s")+"\u2026");
@@ -346,6 +381,7 @@ function bulkOrganSubmit(){
   picked.forEach(function(r){(byCell[r.cellKey]=byCell[r.cellKey]||[]).push(r);});
   const stamp=Date.now();
   let posted=0;
+  const sent=[];
   Object.keys(byCell).forEach(function(cellKey,ci){
     const rows=byCell[cellKey];
     const i=rows[0].i;
@@ -359,7 +395,7 @@ function bulkOrganSubmit(){
     rows.forEach(function(r,si){
       /* Counts what actually WENT OUT, not what was attempted -- which is the difference between
          "3 structures logged" and a green message about nothing. */
-      if(postReport({
+      const back=postReport({
         type:"organelle_location",
         timestamp:new Date().toISOString(),
         nucleusId:nucId,rootId:(r.rootId&&r.rootId!=="0")?r.rootId:rootId,coord:coord,
@@ -368,7 +404,9 @@ function bulkOrganSubmit(){
         pointA:r.a.map(Math.round).join(","),
         pointB:r.b?r.b.map(Math.round).join(","):"",
         identified:"",comment:comment,path:"bulk paste"
-      })!==false)posted++;
+      });
+      sent.push(back);
+      if(back!==false)posted++;
     });
   });
   /* A button that cannot be pressed is only honest once the work is actually done. If nothing
@@ -385,6 +423,20 @@ function bulkOrganSubmit(){
     '<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">'
     +"Thanks \u2014 "+posted+" structure"+(posted===1?"":"s")+" logged across "
     +Object.keys(byCell).length+" cell"+(Object.keys(byCell).length===1?"":"s")+".</div>";
+  if(bulkCfg().afterSubmit){ try{ bulkCfg().afterSubmit(sent); }catch(_e){} }
+}
+
+/* Empty the card: rows, table, messages and the pasted link. For a host whose volume changes under
+   it -- markers pasted for one volume are coordinates in another's voxels on the next. 2026-09-21 */
+function bulkOrganReset(){
+  BULK_ORGAN_ROWS=[];
+  ["bulkOrganLink","bulkOrganComment"].forEach(function(id){
+    const e=document.getElementById(id); if(e)e.value=""; });
+  ["bulkOrganStatus","bulkOrganThanks"].forEach(function(id){
+    const e=document.getElementById(id); if(e)e.innerHTML=""; });
+  const b=document.getElementById("bulkOrganSubmit");
+  if(b){ b.disabled=false; b.textContent="Submit"; }
+  bulkOrganRender();
 }
 
 function wireBulkOrgan(){

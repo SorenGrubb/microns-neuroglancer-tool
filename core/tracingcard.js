@@ -137,7 +137,8 @@ function tracingSources(){
   return { em: o.em || "", seg: o.seg || "", nuc: o.nuc || "", res: res,
            skipScales: o.skipScales || [],
            segInfo: o.segInfo || "", nucInfo: o.nucInfo || "",
-           segOffsetNm: o.segOffsetNm || null, nucOffsetNm: o.nucOffsetNm || null };
+           segOffsetNm: o.segOffsetNm || null, nucOffsetNm: o.nucOffsetNm || null,
+           u16: o.u16 || null };
 }
 /* ── THIS DATASET'S CONTRAST, NOT minnie65's ──────────────  2026-09-20
    core/emtiles.js stretches [lo,hi] to black-white and defaults to 86/172. Those are minnie65's
@@ -158,6 +159,12 @@ function tracingSources(){
    file is parsed 2,000 lines before that line runs — `typeof` does not protect against a temporal
    dead zone, it throws like any other read. Called at draw time, so in practice it is long
    initialised; the try is for the page that loads the card and never defines one. */
+/* May the pad draw a level whose sections are thicker than the finest? Only where the host says so
+   -- see src/one_card_many_volumes.py. */
+function tracingSlabOk(){
+  try { var f = tracingCfg().slabOk; return !!(typeof f === "function" ? f() : f); }
+  catch (_e){ return false; }
+}
 function tracingWindow(){
   var w = null;
   try { w = (UJ && UJ.cfg && UJ.cfg.tracing) ? UJ.cfg.tracing.window : null; } catch (_e){ w = null; }
@@ -190,13 +197,66 @@ function tracingCfg(){
   try { return (UJ && UJ.cfg && UJ.cfg.tracing) || {}; } catch (_e){ return {}; }
 }
 const TRACING_KEY = tracingCfg().lsKey || "ujump_tracings_v1";
+/* ── ONE CARD, MANY VOLUMES ───────────────────────────────────────  2026-09-21
+   UJ.cfg.tracing.scope(): the volume open now, on a page that holds several (ωJump). "" everywhere
+   else, and then every function below returns exactly what it did before. See
+   src/one_card_many_volumes.py. */
+function tracingScope(){
+  try { var f = tracingCfg().scope; return f ? String(typeof f === "function" ? f() : f) : ""; }
+  catch (_e){ return ""; }
+}
+/* THE ONE STORE, 2026-09-21. localStorage, unless the host says keepLocal: false -- then an object
+   in memory for the life of the page. See src/the_card_can_keep_nothing_in_the_browser.py. */
+var TRACING_MEM = {};
+var TRACING_MEM_STORE = {
+  getItem: function(k){ return Object.prototype.hasOwnProperty.call(TRACING_MEM, k) ? TRACING_MEM[k] : null; },
+  setItem: function(k, v){ TRACING_MEM[k] = String(v); },
+  removeItem: function(k){ delete TRACING_MEM[k]; }
+};
+function tracingKeepsLocal(){
+  try { var v = tracingCfg().keepLocal; return v === undefined ? true : !!v; } catch (_e){ return true; }
+}
+function tracingStore(){
+  if (!tracingKeepsLocal()) return TRACING_MEM_STORE;
+  try { return window.localStorage || TRACING_MEM_STORE; } catch (_e){ return TRACING_MEM_STORE; }
+}
+/* THE ONE STORE, 2026-09-21. localStorage, unless the host says keepLocal: false -- then an object
+   in memory for the life of the page. See src/the_card_can_keep_nothing_in_the_browser.py. */
+var TRACING_MEM = {};
+var TRACING_MEM_STORE = {
+  getItem: function(k){ return Object.prototype.hasOwnProperty.call(TRACING_MEM, k) ? TRACING_MEM[k] : null; },
+  setItem: function(k, v){ TRACING_MEM[k] = String(v); },
+  removeItem: function(k){ delete TRACING_MEM[k]; }
+};
+function tracingKeepsLocal(){
+  try { var v = tracingCfg().keepLocal; return v === undefined ? true : !!v; } catch (_e){ return true; }
+}
+function tracingStore(){
+  if (!tracingKeepsLocal()) return TRACING_MEM_STORE;
+  try { return window.localStorage || TRACING_MEM_STORE; } catch (_e){ return TRACING_MEM_STORE; }
+}
+function tracingScopedKey(k){ var s = tracingScope(); return s ? k + ":" + s : k; }
+/* A cell id filed under this volume: "<scope>:<id>", or "<scope>:" with no cell named. An id that
+   already carries the scope -- ωJump's nucleusKeys do -- is left as it is. */
+function tracingScoped(id){
+  var s = tracingScope(); id = String(id || "");
+  if (!s || id.indexOf(s + ":") === 0) return id;
+  return s + ":" + id;
+}
+function tracingInScope(list){
+  var s = tracingScope();
+  if (!s) return list || [];
+  return (list || []).filter(function(t){
+    return String((t && (t.nucleusId || t.nucId || t.nucleus_id)) || "").indexOf(s + ":") === 0;
+  });
+}
 let TRACINGS_KEPT=[];
 function tracingRead(){
-  try{ const v=JSON.parse(localStorage.getItem(TRACING_KEY)||"[]"); return Array.isArray(v)?v:[]; }
+  try{ const v=JSON.parse(tracingStore().getItem(tracingScopedKey(TRACING_KEY))||"[]"); return Array.isArray(v)?v:[]; }
   catch(_e){ return []; }
 }
 function tracingWrite(list){
-  try{ localStorage.setItem(TRACING_KEY,JSON.stringify(list)); }catch(_e){}
+  try{ tracingStore().setItem(tracingScopedKey(TRACING_KEY),JSON.stringify(list)); }catch(_e){}
 }
 function tracingSay(msg,bad){
   const el=document.getElementById("tracingStatus");
@@ -1283,7 +1343,7 @@ function tracingPublish(t,quiet){
   const gid="trace_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,7);
   const sub=UJ.tracing.toSubmission(t.rings,{structureId:t.id,name:t.name,kind:t.kind||"",
                                              cellType:t.type,color:t.color,
-                                             nucleusId:t.nucleus_id||"",rootId:t.root_id||"",
+                                             nucleusId:tracingScoped(t.nucleus_id||""),rootId:t.root_id||"",
                                              /* the size goes with it -- Søren, 2026-09-17: "add the
                                                 volumes to the data for the cell when submitting" */
                                              instanceIndex:t.instance_index,
@@ -1817,7 +1877,7 @@ var draftStore = (function(){
   function readAll(){
     var out = [];
     try {
-      var raw = JSON.parse(localStorage.getItem(TRACING_DRAFTS_KEY) || "null");
+      var raw = JSON.parse(tracingStore().getItem(tracingScopedKey(TRACING_DRAFTS_KEY)) || "null");
       if (raw && Array.isArray(raw.drafts)) out = raw.drafts.filter(function(d){
         return d && Array.isArray(d.rings);
       });
@@ -1826,7 +1886,7 @@ var draftStore = (function(){
       /* MIGRATION, ONE WAY. The single-slot draft becomes the first entry in the list; the old key
          keeps its copy, because nothing good has ever come of a migration that also deletes. */
       try {
-        var one = JSON.parse(localStorage.getItem(TRACING_DRAFT_KEY) || "null");
+        var one = JSON.parse(tracingStore().getItem(tracingScopedKey(TRACING_DRAFT_KEY)) || "null");
         if (one && Array.isArray(one.rings) && one.rings.length){
           if (!one.id) one.id = "migrated";
           if (!one.title) one.title = "Unfinished tracing";
@@ -1838,7 +1898,7 @@ var draftStore = (function(){
     return out;
   }
   function writeAll(list){
-    try { localStorage.setItem(TRACING_DRAFTS_KEY, JSON.stringify({ v: 2, drafts: list })); return true; }
+    try { tracingStore().setItem(tracingScopedKey(TRACING_DRAFTS_KEY), JSON.stringify({ v: 2, drafts: list })); return true; }
     catch (_e){
       padSay("This browser refused to keep the draft \u2014 it is out of storage. Your contours "
         + "are still on the pad.", true);
@@ -1955,7 +2015,7 @@ function draftPush(d, force){
       contours: (d.rings || []).length, sections: Object.keys(zs).length,
       structures: Object.keys(insts).length,
       x: (d.centre && d.centre[0]) || 0, y: (d.centre && d.centre[1]) || 0, z: d.z || 0,
-      nucleusId: d.nucId || "", rootId: d.rootId || "", editId: d.editId || "",
+      nucleusId: tracingScoped(d.nucId || ""), rootId: d.rootId || "", editId: d.editId || "",
       draft: JSON.stringify(d) }).then(function(){ draftServerSoon(true); }, function(){});
   } catch (_e){ return false; }
   return true;
@@ -1979,7 +2039,7 @@ function draftServerSoon(force){
   fetch(REPORT_ENDPOINT + "?drafts=" + encodeURIComponent(GOOGLE_CREDENTIAL) + tracingDsQS())
     .then(function(r){ return r.json(); })
     .then(function(j){
-      if (j && j.ok && j.drafts){ DRAFT_SERVER = j.drafts; draftRender(); }
+      if (j && j.ok && j.drafts){ DRAFT_SERVER = tracingInScope(j.drafts); draftRender(); }
     })
     .catch(function(){});
 }
@@ -2088,7 +2148,13 @@ function draftSave(explicit){
      making sure is precisely what the two-minute timer does not do. */
   if (explicit) draftPush(d, true);
   draftRender();
-  if (explicit) padSay(draftSignedIn()
+  if (explicit) padSay(!tracingKeepsLocal()
+    ? (draftSignedIn()
+       ? "Draft saved on your account, so you can carry on later or from another machine. This "
+         + "tool keeps no work in the browser itself."
+       : "Draft kept on this page only \u2014 this tool keeps no work in the browser. Sign in and "
+         + "it is saved to your account; close the page without signing in and it is gone.")
+    : draftSignedIn()
     ? "Draft saved \u2014 in this browser and on your account, so you can carry on from another "
       + "machine. The pad reopens where you left it, on the same section."
     : "Draft saved in this browser. Close the page if you like \u2014 the pad reopens where you "
@@ -2285,7 +2351,7 @@ function tracingIndexSoon(){
   try {
     fetch(REPORT_ENDPOINT + "?tracings=1" + tracingDsQS())
       .then(function(r){ return r.json(); })
-      .then(function(d){ if (d && d.tracings) TRACING_SHARED = d.tracings; })
+      .then(function(d){ if (d && d.tracings) TRACING_SHARED = tracingInScope(d.tracings); })
       .catch(function(){});
   } catch (e){}
 }
@@ -2302,7 +2368,7 @@ async function tracingBrowse(){
   try {
     const r = await fetch(REPORT_ENDPOINT + "?tracings=1" + tracingDsQS());
     const d = await r.json();
-    TRACING_SHARED = (d && d.tracings) || [];
+    TRACING_SHARED = tracingInScope((d && d.tracings) || []);
     tracingRenderShared();
   } catch (e){
     host.innerHTML = '<p class="hint" style="color:var(--bad)">Could not read them: '
@@ -2845,7 +2911,7 @@ async function padDraw(){
        tracingWindow's header for what that did to Lee16. */
     var PAD_WIN = tracingWindow();
     PAD_VIEW = await UJ.emtiles.drawSection(cv, {
-      centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height,
+      centre: PAD_CENTRE, mip: mip, zoom: zoom, w: wide, h: cv.height, slabOk: tracingSlabOk(),
       lo: PAD_WIN.lo, hi: PAD_WIN.hi,
       onProgress: function(d, n){ if (d < n) padSay("Loading the section\u2026 " + d + "/" + n); }
     });
@@ -3343,9 +3409,9 @@ function wirePad(){
      the theme; it is a preference about the hand doing the drawing, not about the tracing. */
   const pen = document.getElementById("tracePadPen");
   if (pen){
-    try { pen.checked = localStorage.getItem(TRACING_PEN_KEY) === "1"; } catch (_e){}
+    try { pen.checked = tracingStore().getItem(TRACING_PEN_KEY) === "1"; } catch (_e){}
     pen.addEventListener("change", function(){
-      try { localStorage.setItem(TRACING_PEN_KEY, pen.checked ? "1" : "0"); } catch (_e){}
+      try { tracingStore().setItem(TRACING_PEN_KEY, pen.checked ? "1" : "0"); } catch (_e){}
       padSay(pen.checked
         ? "Freehand on — press and draw all the way round the structure, then lift. Shift+drag "
           + "pans while this is on."
@@ -3451,7 +3517,7 @@ function wirePad(){
     if (!drawFreehand() && e.pointerType === "pen"){
       const box = document.getElementById("tracePadPen");
       if (box){ box.checked = true;
-        try { localStorage.setItem(TRACING_PEN_KEY, "1"); } catch (_e){}
+        try { tracingStore().setItem(TRACING_PEN_KEY, "1"); } catch (_e){}
         padSay("Pen detected — freehand drawing is on. Draw all the way round the structure "
           + "and lift. Untick “draw freehand” to go back to clicking each vertex."); }
     }
@@ -4130,18 +4196,19 @@ async function padRelabelMips(){
     var o = sel.options[i], parts = String(o.value).split(":");
     var mip = parseInt(parts[0], 10) || 0, zoom = Math.max(1, parseInt(parts[1], 10) || 1);
     var got;
-    try { got = await UJ.emtiles.scaleAt(mip); } catch (_e){ return false; }
+    try { got = await UJ.emtiles.scaleAt(mip, tracingSlabOk()); } catch (_e){ return false; }
     if (!got || !got.scale) return false;
-    var nm = got.scale.resolution[0], um = w * nm / zoom / 1000;
+    var nm = +got.scale.resolution[0].toFixed(2), um = w * got.scale.resolution[0] / zoom / 1000;
     /* 18, 9, 4.5, 2.2, 1.1, 0.6 — whole numbers stay whole, the rest keep one decimal, which is
        exactly how the hand-written labels were written. */
     var head = (um >= 10 ? Math.round(um) : Math.round(um * 10) / 10) + " \u00b5m"
-             + (i === 0 ? " across" : "") + " \u2014 " + nm + " nm data";
+             + (i === 0 ? " across" : "") + " \u2014 " + nm + " nm data"
+             + (got.slab > 1 ? " (" + got.slab + "-section slab)" : "");
     o.textContent = o.textContent.replace(
       /* [\d.]+ FOR THE NANOMETRES TOO. `\d+` matches minnie65's 16 and 32 and Lee16's 4 and 8,
          and not V1DD's 19.4 — so on V1DD this replaced once, put a decimal into the string, and
          then never matched again. A relabel that runs on every draw has to be idempotent. */
-      /^[\d.]+ \u00b5m( across)? \u2014 [\d.]+ nm data/, head);
+      /^[\d.]+ \u00b5m( across)? \u2014 [\d.]+ nm data( \(\d+-section slab\))?/, head);
     try {
       var cs = got.scale.chunk_sizes && got.scale.chunk_sizes[0];
       if (i === 0) chunk0 = (cs && cs[0]) || 0;
@@ -4195,6 +4262,39 @@ UJ.tracingcard.mount = function(el){
      race it, and the first scale fetch must not hold up a card that is otherwise ready. */
   try { padRelabelMips(); } catch (_e){}
   return ok;
+};
+/* ── THE VOLUME CHANGES UNDER THE CARD (ωJump's menu) ───────────────  2026-09-21
+   Two calls, in order: datasetChanging() while the OLD volume is still what scope() returns -- the
+   pad closes and its work is saved as a draft under that volume's key -- then, once the host has
+   switched, datasetChanged(), which points the readers at the new volume and reads its lists. */
+UJ.tracingcard.datasetChanging = function(){
+  try {
+    var wrap = document.getElementById("tracePadWrap");
+    if (wrap && wrap.style.display !== "none"){
+      var close = document.getElementById("tracePadClose");
+      if (close) close.click();
+    }
+  } catch (_e){}
+  return true;
+};
+UJ.tracingcard.datasetChanged = function(){
+  PAD = null; PAD_VIEW = null; PAD_CENTRE = null;
+  TRACING_DRAFT_ID = "";
+  ["tracingNucId", "tracingRootId", "tracingX", "tracingY", "tracingZ"].forEach(function(id){
+    var e = document.getElementById(id); if (e) e.value = "";
+  });
+  try { TRACING_POS_AUTO = ""; } catch (_e){}
+  var src = tracingSources();
+  try { UJ.emtiles.configure(src); } catch (_e){}
+  try { if (src.seg || src.nuc) UJ.segread.configure(src); } catch (_e){}
+  try { if (UJ.segpaint && (src.seg || src.nuc)) UJ.segpaint.configure(src); } catch (_e){}
+  TRACING_SHARED = []; TRACING_INDEX_AT = 0; DRAFT_SERVER = []; DRAFT_SERVER_AT = 0;
+  try { tracingRenderList(); } catch (_e){}
+  try { draftRender(); } catch (_e){}
+  try { tracingIndexSoon(); } catch (_e){}
+  try { draftServerSoon(true); } catch (_e){}
+  try { padRelabelMips(); } catch (_e){}
+  return true;
 };
 UJ.tracingcard.wire = function(){
   if (UJ.tracingcard._wired) return false;
