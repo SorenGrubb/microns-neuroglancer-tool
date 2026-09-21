@@ -189,13 +189,25 @@ function loadProfileTotals(cb){
 }
 function profileTotalsHtml(t){
   if(!t) return "";
+  /* ── A GRID, NOT A HOPE ABOUT WIDTHS ────────────────────────────────────────────  2026-09-19
+     Søren: *"This looked good on a phone, but looks bad on a computer screen."* These were
+     inline-blocks with min-width:150px and NO separator, which is a list only while every one of
+     them is wider than the line — true at 360 px, false on a laptop, where it came out as
+     "MICrONS minnie65 1488ηJump — H01 human cortex 5βJump — ...".
+     One column on a phone, two or three on a laptop, the name left and the points right in every
+     cell so the numbers line up down the column. Names are allowed to wrap rather than be cut:
+     "χJump — cb2 cerebellum (fragment assembly)" is exactly the kind of thing an ellipsis eats. */
   var per=perList(t).map(function(p){
-    return '<span style="display:inline-block;min-width:150px">'+escHtml(p.label||p.ds)+' <b>'+pointsText(p.points)+'</b></span>';
+    return '<div style="display:flex;gap:10px;align-items:baseline;min-width:0">'
+      +'<span style="flex:1 1 auto;min-width:0">'+escHtml(p.label||p.ds)+'</span>'
+      +'<b style="flex:0 0 auto;font-variant-numeric:tabular-nums">'+pointsText(p.points)+'</b>'
+      +'</div>';
   }).join("");
   var when=t.updated?new Date(t.updated):null;
   return '<h3>Across all datasets</h3>'
     +'<div style="font-size:13px"><b>'+pointsText(t.combinedPoints)+'</b> points in total</div>'
-    +'<div style="font-size:12px;color:var(--mut,#8b949e);margin-top:4px">'+per+'</div>'
+    +'<div style="font-size:12px;color:var(--mut,#8b949e);margin-top:6px;display:grid;'
+      +'grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:3px 22px">'+per+'</div>'
     +'<div style="font-size:11px;color:var(--mut,#8b949e);margin-top:4px">Combined total as of '
     +escHtml(when&&!isNaN(when.getTime())?when.toLocaleString("en-GB"):"the last rebuild")
     +' &mdash; this page&rsquo;s own numbers above update immediately.</div>';
