@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-21 10:49</span></p>
+ctrl-shift-R.">build 2026-09-21 11:36</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -532,6 +532,9 @@ ctrl-shift-R.">build 2026-09-21 10:49</span></p>
   <div id="stats" style="margin-bottom:10px"></div>
   <div id="cells"></div>
 </div>
+<!-- Trace a cell or organelle -- core/tracingcard.js, the card µJump, δJump, λJump,
+     βJump and ηJump carry. Empty on purpose: the module builds it. -->
+<div class="card" id="tracingCard"></div>
 
 <div class="card">
   <div id="backend-note"></div>
@@ -5519,6 +5522,10 @@ UJ.app = (function(){
     }
     var top = hits[0], rest = hits.slice(1);
     SHOWN = { row: top.row, nm: top.nm };
+    /* The tracing card's coordinate boxes follow the cell on screen -- core/tracingcard.js watches
+       this one global, on every tool. 2026-09-21. */
+    try { if (top.row && top.row.pos && top.row.pos.length === 3) window.CUR_POS = top.row.pos.slice(); }
+    catch (e){}
     host.innerHTML = foundPanelHtml(top.row, top.nm)
       + (rest.length
           ? "<div class='neigh'><h4>" + rest.length + " nearest neighbouring cells</h4>"
@@ -9223,4 +9230,81 @@ function handleGoogleCred(resp){
    a chip that says "sign in" is a better failure than no chip at all. */
 if (GOOGLE_CLIENT_ID) gamifyInit(12);
 </script>
+<!-- ── THE TRACING CARD ───────────────────────────────────────────────  2026-09-21
+     core/tracingcard.js and the modules it is built on. See src/xjump_gets_the_tracing_card.py. -->
+<script src="core/segread.js"></script>
+<script src="core/segpaint.js"></script>
+<script src="core/organellelink.js"></script>
+<script src="core/emtiles.js"></script>
+<script src="core/tracepad.js"></script>
+<script src="core/traceloft.js"></script>
+<script src="core/nucmesh.js"></script>
+<script src="core/tracing.js"></script>
+<script>
+/* x, y, z nm per voxel, in the order the card and the links use. UJ.cfg.volume.res_nm is Z,Y,X. */
+UJ.cfg.res = UJ.xjump.resXYZ();
+/* The card's cell-type list. χJump has no identification tree, so these are the proofread types'
+   own labels -- the words the cell card already uses. */
+var LEAF_NAMES = (function(){
+  var o = {};
+  UJ.xjump.seedTypes().forEach(function(t){ o[t.type] = t.label.charAt(0).toUpperCase() + t.label.slice(1); });
+  return o;
+})();
+/* THE CELL A FRAGMENT OR A KEY BELONGS TO. An assembly built here first -- it is the community's
+   later word -- then a Lee-lab proofread cell. */
+function xjumpCellOf(key, seg){
+  key = String(key || "").trim(); seg = String(seg || "").trim();
+  var X = UJ.xjump, cells = (UJ.app && UJ.app.state) ? (UJ.app.state().cells || []) : [];
+  var c = null, i;
+  for (i = 0; i < cells.length && !c; i++) if (key && cells[i].id === key) c = cells[i];
+  for (i = 0; i < cells.length && !c; i++) if (seg && (cells[i].segments || []).indexOf(seg) >= 0) c = cells[i];
+  if (c){
+    var nm = X.settledLabel(c) || "";
+    return { key: c.id, name: nm, how: "assembled here", segs: (c.segments || []).slice() };
+  }
+  var r = null;
+  if (key && X.isSeedKey(key)){
+    var all = X.seedListAll();
+    for (i = 0; i < all.length && !r; i++) if (all[i].key === key) r = all[i];
+  }
+  if (!r && seg) r = X.seedOwnerOf(seg);
+  if (!r) return null;
+  return { key: r.key, name: r.label.charAt(0).toUpperCase() + r.label.slice(1),
+           how: "proofread by the Lee lab (Nguyen et al., Nature 2023)",
+           segs: X.seedSegments(r) };
+}
+UJ.cfg.tracing = {
+  lsKey:     "xjump_tracings_v1",
+  draftsKey: "xjump_tracing_drafts_v2",
+  draftKey:  "xjump_tracing_draft_v1",
+  penKey:    "xjump_tracing_pen_v1",
+  intro:     "cb2 publishes fragments, not cells, so a cell here is whatever has been assembled "
+           + "from them — and a piece the segmentation merged with its neighbour, or never cut out "
+           + "at all, is one you outline yourself.",
+  window:    function(){ var r = UJ.cfg.volume.em_range || [29, 233]; return { lo: r[0], hi: r[1] }; },
+  sources:   function(){
+    var v = UJ.cfg.volume;
+    return { em: v.em, seg: v.seg, nuc: "",
+             /* 26 MB chunks; the pad draws 8 nm larger instead. */
+             skipScales: ["4_4_40"],
+             /* seg/info is not readable from a page; the mesh store's describes the same volume. */
+             segInfo: String(v.mesh).replace(/^precomputed:\/\//, "").replace(/\/mesh\/?$/, ""),
+             segOffsetNm: [0, 0, -(v.segTranslateZ || 0) * UJ.cfg.res[2]] };
+  },
+  idLabels:  { nuc: "Cell &mdash; its key here", root: "Fragment &mdash; the segment at this point",
+               nucNumeric: false },
+  identityFor: function(nucIn, rootIn){
+    var c = xjumpCellOf(nucIn, rootIn);
+    if (!c) return null;
+    return { name: c.name, how: c.how, via: rootIn ? "fragment " + rootIn : "cell " + nucIn,
+             nucleusId: c.key, rootId: String(rootIn || "") };
+  },
+  cellIdsFor: function(rootIn){ var c = xjumpCellOf("", rootIn); return c ? c.segs : []; }
+};
+/* The card's viewer links, from χJump's own builder: its EM window, its segmentation shifted onto
+   the tissue, its background. The card selects the cell into it. */
+function buildState(pos){ return UJ.xjump.buildState([], pos); }
+</script>
+<script src="core/tracingcard.js"></script>
+
 </body></html>

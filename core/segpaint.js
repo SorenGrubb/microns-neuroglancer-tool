@@ -45,6 +45,12 @@ UJ.segpaint = (function(){
   function configure(cfg){
     CFG = { seg: UJ.segread._httpBase(cfg.seg), nuc: UJ.segread._httpBase(cfg.nuc),
             res: cfg.res || [4, 4, 40] };
+    /* Where each volume's info lives and how far it sits from the tool's frame, registered with
+       segread -- whose _getInfo and _chunkBuf this file reads through. 2026-09-21, χJump. */
+    if (UJ.segread.borrowInfo){
+      if (CFG.seg){ UJ.segread.borrowInfo(CFG.seg, cfg.segInfo); UJ.segread.setOffsetNm(CFG.seg, cfg.segOffsetNm); }
+      if (CFG.nuc){ UJ.segread.borrowInfo(CFG.nuc, cfg.nucInfo); UJ.segread.setOffsetNm(CFG.nuc, cfg.nucOffsetNm); }
+    }
     return CFG;
   }
   function configured(){ return !!CFG; }
@@ -178,8 +184,11 @@ UJ.segpaint = (function(){
     var out = { ok: true, cell: null, nucleus: null };
     var chunks = 0, total = 0;
     var tick = function(){ chunks++; if (o.onProgress) try { o.onProgress(chunks, total); } catch (_e){} };
+    /* o.rootAlso: the cell's OTHER segments, same colour -- χJump, where a cell is 100-300
+       fragments and the root box holds one. 2026-09-21. */
+    var cellIds = root ? [root].concat((o.rootAlso || []).map(idPair).filter(Boolean)) : [];
     if (root)
-      out.cell = await layer(img.data, view, SEG, [root], [CELL_COLOR], alpha, tick);
+      out.cell = await layer(img.data, view, SEG, cellIds, [CELL_COLOR], alpha, tick);
     if (nuc)
       out.nucleus = await layer(img.data, view, CFG.nuc, [nuc], [NUC_COLOR], alpha, tick);
     ctx.putImageData(img, 0, 0);

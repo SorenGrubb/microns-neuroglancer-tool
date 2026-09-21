@@ -131,8 +131,13 @@ function tracingSources(){
      whether δJump's mip 0 is real depended on whether the cell card or the pad configured emtiles
      first: open the pad before looking at a cell and the section is a flat grey rectangle, with no
      chunks fetched and nothing in the console. */
+  /* segInfo/nucInfo and segOffsetNm/nucOffsetNm too, 2026-09-21: χJump's cb2 segmentation
+     keeps its info elsewhere and sits 1,216 sections below its EM. Dropped here, every configure
+     the card makes would read it at the EM's z. See core/segread.js. */
   return { em: o.em || "", seg: o.seg || "", nuc: o.nuc || "", res: res,
-           skipScales: o.skipScales || [] };
+           skipScales: o.skipScales || [],
+           segInfo: o.segInfo || "", nucInfo: o.nucInfo || "",
+           segOffsetNm: o.segOffsetNm || null, nucOffsetNm: o.nucOffsetNm || null };
 }
 /* ── THIS DATASET'S CONTRAST, NOT minnie65's ──────────────  2026-09-20
    core/emtiles.js stretches [lo,hi] to black-white and defaults to 86/172. Those are minnie65's
@@ -901,6 +906,12 @@ function tracingShowCellIn(st, root, nuc){
       st.layers.push(cellLayer);
     }
     cellLayer.segments = [String(root)];
+    /* Every segment of the cell, where a cell is many (χJump); see padSegOverlay. */
+    try {
+      const f = UJ.cfg && UJ.cfg.tracing && UJ.cfg.tracing.cellIdsFor;
+      if (typeof f === "function") (f(String(root)) || []).forEach(function(x){
+        x = String(x); if (x && cellLayer.segments.indexOf(x) < 0) cellLayer.segments.push(x); });
+    } catch (_e){}
     cellLayer.objectAlpha = 0.35;
   } else if (cellLayer){ delete cellLayer.segments; }
   if (nuc){
@@ -2782,7 +2793,14 @@ async function padSegOverlay(){
       UJ.segpaint.configure(tracingSources());
     const cv = document.getElementById("tracePad");
     padSegSay("Reading the segmentation…");
-    const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, nuc: nuc, alpha: 0.4,
+    /* THE WHOLE CELL, where a cell is many segments.  2026-09-21. On χJump the root box holds
+       one fragment and the cell is every fragment of its assembly; the host says which. */
+    let also = [];
+    try {
+      const f = UJ.cfg && UJ.cfg.tracing && UJ.cfg.tracing.cellIdsFor;
+      if (root && typeof f === "function") also = (f(root) || []).map(String).filter(function(x){ return x && x !== root; });
+    } catch (_e){ also = []; }
+    const got = await UJ.segpaint.paint(cv, PAD_VIEW, { root: root, rootAlso: also, nuc: nuc, alpha: 0.4,
       onProgress: function(d){ padSegSay("Reading the segmentation… " + d + " chunk(s)"); } });
     /* PER VOLUME, because "nothing appeared" has two causes that need different answers: the cell
        is not in this window, or the cell is not in the segmentation at all -- which is the whole
@@ -2793,7 +2811,8 @@ async function padSegOverlay(){
       return what + " " + id + ": " + (r.painted ? r.painted.toLocaleString() + " px" : "nothing here")
         + " (" + r.chunks + " chunk" + (r.chunks === 1 ? "" : "s") + " at " + r.nmPerVoxel + " nm)";
     };
-    const said = [part("root", root, got && got.cell), part("nucleus", nuc, got && got.nucleus)]
+    const said = [part(also.length ? "cell (" + (also.length + 1) + " segments)" : "root",
+                       root, got && got.cell), part("nucleus", nuc, got && got.nucleus)]
                    .filter(Boolean).join(" · ");
     if (got && got.ok && !got.painted)
       padSegSay(said + " — nothing on this section. Either it is not in this window, or this "
@@ -4139,6 +4158,21 @@ async function padRelabelMips(){
   return true;
 }
 
+/* ── WHAT THE TWO ID BOXES ARE CALLED HERE ─────────────────────────  2026-09-21
+   UJ.cfg.tracing.idLabels = {nuc, root, nucNumeric, rootNumeric}. On χJump the first box holds a
+   cell's key -- "cb2/htem/pc_0", not a number -- and the second a fragment. */
+function tracingLabelIds(el){
+  var L = null;
+  try { L = UJ.cfg.tracing.idLabels; } catch (_e){ L = null; }
+  if (!L) return;
+  [["tracingNucId", L.nuc, L.nucNumeric], ["tracingRootId", L.root, L.rootNumeric]].forEach(function(t){
+    var inp = el.querySelector("#" + t[0]);
+    if (!inp) return;
+    var lab = inp.parentNode && inp.parentNode.parentNode ? inp.parentNode.parentNode.querySelector("label") : null;
+    if (t[1] && lab) lab.innerHTML = t[1];
+    if (t[2] === false) inp.removeAttribute("inputmode");
+  });
+}
 UJ.tracingcard = UJ.tracingcard || {};
 /* ── FILL THE WRAPPER, THEN WIRE WHAT WAS FILLED ───────────────────  2026-09-20
    A host supplies an empty `<div class="card" id="tracingCard"></div>` wherever the card belongs
@@ -4154,6 +4188,7 @@ UJ.tracingcard.mount = function(el){
     catch (e){ try { console.warn("tracingcard: mount", e); } catch (_c){} return false; }
     /* Only what this module built is trimmed — see padTrimForHost's header. */
     try { padTrimForHost(el); } catch (_e){}
+    try { tracingLabelIds(el); } catch (_e){}
   }
   var ok = UJ.tracingcard.wire();
   /* AFTER wiring, and not awaited. The menu's listener is already on by then, so a relabel cannot

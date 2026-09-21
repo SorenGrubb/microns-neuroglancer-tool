@@ -283,14 +283,24 @@ UJ.segread = (function(){
     if (!nw || lz < 0 || lz >= sh[2]) return out;
     var d = new Uint32Array(buf);
     if (d.length < sh[0] * sh[1] * sh[2] * words) return out;
+    /* By the low word: a χJump cell is up to ~300 ids, and 300 comparisons per voxel is the
+       quarter-million-voxel stall this function exists to avoid. */
+    var byLo = new Map();
+    for (var q = 0; q < nw; q++){
+      var L = byLo.get(wanted[q].lo);
+      if (!L) byLo.set(wanted[q].lo, L = []);
+      L.push(q);
+    }
     var z0 = sh[0] * sh[1] * lz;
     for (var y = 0; y < sh[1]; y++)
       for (var x = 0; x < sh[0]; x++){
         var i = z0 + x + sh[0] * y, lo, hi;
         if (words === 1){ lo = d[i] >>> 0; hi = 0; } else { lo = d[2 * i] >>> 0; hi = d[2 * i + 1] >>> 0; }
         if (!lo && !hi) continue;
-        for (var k = 0; k < nw; k++)
-          if (wanted[k].lo === lo && wanted[k].hi === hi){ out[y * ch[0] + x] = k + 1; break; }
+        var cand = byLo.get(lo);
+        if (!cand) continue;
+        for (var k = 0; k < cand.length; k++)
+          if (wanted[cand[k]].hi === hi){ out[y * ch[0] + x] = cand[k] + 1; break; }
       }
     return out;
   }
