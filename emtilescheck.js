@@ -440,6 +440,51 @@ console.log("\nand a scale the page says is not really there is not counted");
      "...and a page that names nothing is exactly as it was", E.sectionScales(INFO).length);
 }
 
+/* ── A JPEG CHUNK ──────────────────────────────────────────────────────────────────────  2026-09-21
+   H01's imagery is JPEG: a 128x128x64 chunk is one grey image 128 wide and 8192 tall, slice z at
+   rows [128z, 128z+128) — measured on the live bucket. There is no JPEG codec in this sandbox, so
+   the decoder is replaced by one that returns exactly that geometry, and what is under test is
+   the LAYOUT: that pixel (x, y + ny*z) becomes voxel (x, y, z), which is what the draw reads. A
+   swapped axis here puts slice 1 where slice 0 should be, and the pad shows the wrong section. */
+console.log("\na JPEG chunk, read in the raw layout");
+{
+  const f = (x, y, z) => (x * 3 + y * 5 + z * 29) & 255;
+  const stacked = (nx, ny, nz) => {
+    const d = new Uint8Array(nx * ny * nz);
+    for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++)
+      d[(z * ny + y) * nx + x] = f(x, y, z);
+    return d;
+  };
+  let calls = 0, next = null;
+  E.configure({ em: "precomputed://https://example/em", res: [8, 8, 33],
+                decodeJpeg: async () => { calls++; return next; } });
+  const sc = { key: "16.0x16.0x33.0", encoding: "jpeg", chunk_sizes: [[8, 8, 4]] };
+  next = { data: stacked(8, 8, 4), width: 8, height: 32 };
+  const full = await E._decodeChunk(new ArrayBuffer(4), sc, [8, 8, 4], [8, 8, 4]);
+  let bad = 0;
+  for (let z = 0; z < 4; z++) for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++)
+    if (full[x + 8 * (y + 8 * z)] !== f(x, y, z)) bad++;
+  ok(bad === 0, "every voxel of a stacked JPEG lands at (x, y, z)", bad + " wrong of 256");
+
+  /* At the volume's edge the chunk is smaller than chunk_sizes, and the image says so. Read with
+     the full stride, row y of slice 1 would come from slice 0. */
+  next = { data: stacked(5, 6, 4), width: 5, height: 24 };
+  const edge = await E._decodeChunk(new ArrayBuffer(4), sc, [8, 8, 4], [5, 6, 4]);
+  bad = 0;
+  for (let z = 0; z < 4; z++) for (let y = 0; y < 6; y++) for (let x = 0; x < 5; x++)
+    if (edge[x + 8 * (y + 8 * z)] !== f(x, y, z)) bad++;
+  ok(bad === 0 && edge.length === 256, "...and an edge chunk is re-laid, not read with the wrong stride",
+     bad + " wrong, " + edge.length + " voxels");
+
+  const rawSc = { key: "k", encoding: "raw", chunk_sizes: [[2, 2, 1]] };
+  const rawBuf = new Uint8Array([1, 2, 3, 4]).buffer;
+  const before = calls;
+  const r = await E._decodeChunk(rawBuf, rawSc, [2, 2, 1], [2, 2, 1]);
+  ok(calls === before && r[3] === 4, "a raw chunk is not handed to the decoder at all",
+     (calls - before) + " decode(s)");
+  E.configure({ em: "precomputed://https://example/em", res: [4, 4, 40] });
+}
+
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
 process.exit(fails ? 1 : 0);
 
