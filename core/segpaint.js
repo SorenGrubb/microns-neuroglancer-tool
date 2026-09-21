@@ -162,7 +162,10 @@ UJ.segpaint = (function(){
        source becomes the base "", and "" + "/info" is the host's own 404 page — the fault
        core/segread.js stopped making on 2026-09-20. A caller handing an id for a volume the
        dataset lacks (βJump's nucleus box holds a Hoechst blob number) gets "nothing to show". */
-    var root = CFG.seg ? idPair(o.root) : null, nuc = CFG.nuc ? idPair(o.nuc) : null;
+    /* o.seg: THIS CALL'S cell segmentation, 2026-09-21. βJump has two, and each cell's id belongs
+       to one of them; the configured volume is the tracing pad's. Absent, it is CFG.seg as ever. */
+    var SEG = o.seg ? UJ.segread._httpBase(o.seg) : CFG.seg;
+    var root = SEG ? idPair(o.root) : null, nuc = CFG.nuc ? idPair(o.nuc) : null;
     if (!root && !nuc) return { ok: false, why: "no root ID or nucleus ID to show" };
     var ctx = canvas.getContext("2d");
     var img = ctx.getImageData(0, 0, view.w, view.h);
@@ -170,7 +173,7 @@ UJ.segpaint = (function(){
     var chunks = 0, total = 0;
     var tick = function(){ chunks++; if (o.onProgress) try { o.onProgress(chunks, total); } catch (_e){} };
     if (root)
-      out.cell = await layer(img.data, view, CFG.seg, [root], [CELL_COLOR], alpha, tick);
+      out.cell = await layer(img.data, view, SEG, [root], [CELL_COLOR], alpha, tick);
     if (nuc)
       out.nucleus = await layer(img.data, view, CFG.nuc, [nuc], [NUC_COLOR], alpha, tick);
     ctx.putImageData(img, 0, 0);

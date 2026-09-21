@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 05:55</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 06:16</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1356,6 +1356,9 @@ if (window.UJ && UJ.segread && UJ.segread.useJsonApi) UJ.segread.useJsonApi("vcl
    levels of what the viewer shows, and keeps a downsampled plane from looking washed out. The pad
    reads this too, through core/tracingcard.js's tracingWindow(). */
 const EM_WINDOW = { lo: 10, hi: 244 };
+/* How solid the cell is over the EM section. µJump's number, for µJump's reason: dark enough to
+   read the boundary against grey tissue, light enough to see the membrane through it. */
+const EM_SEG_ALPHA = 0.32;
 
 /* The one place the reader is pointed at this dataset. No skipScales: all four of the finer levels
    answered at three cells from this page's own table, so there is no dead level to name. */
@@ -1392,6 +1395,7 @@ function emConfigure(){
    each await, dropping out if a newer cell has been shown since. Without that, stepping through
    cells paints whichever fetch lands last, and the panel shows the wrong cell -- which it would
    be. */
+var EM_PLANE_SEG_KEY = "bjump_panel_emseg";
 var EM_PLANE_KEY = "bjump_panel_emplane", EM_PLANE_TOKEN = 0,
     EM_PLANE_WIRED = false, EM_PLANE_LAST = null;
 /* 300x162 DRAWN, 260 SHOWN, AT THE 64 nm LEVEL -- µJump's numbers exactly, because this pyramid
@@ -1401,6 +1405,12 @@ var EM_PLANE_KEY = "bjump_panel_emplane", EM_PLANE_TOKEN = 0,
 var EM_PLANE_W = 300, EM_PLANE_H = 162, EM_PLANE_CSS = 260, EM_PLANE_MIP = 3;
 function emPlaneOn(){
   try { var v = localStorage.getItem(EM_PLANE_KEY); return v === null ? true : v === "1"; }
+  catch (_e) { return true; }
+}
+/* On by default, like the section: somebody who has asked for the EM has asked to see which
+   cell the card is about. Remembered. */
+function emPlaneSegOn(){
+  try { var v = localStorage.getItem(EM_PLANE_SEG_KEY); return v === null ? true : v === "1"; }
   catch (_e) { return true; }
 }
 function emPlaneSay(tok, msg, bad){
@@ -1440,13 +1450,13 @@ async function emPlaneBB(){
    page this came from -- the section simply did not appear, with nothing to suggest it ever
    should have. A core/*.js that 404s on the server, or a script an extension blocked, looks
    exactly like a page that never had the feature. */
-function emPlaneBox(pos){
+function emPlaneBox(pos, segId, segSrc){
   var missing = null;
   if (typeof UJ === "undefined" || !UJ.emtiles || !UJ.segread)
     missing = "the EM reader did not load \u2014 check that core/emtiles.js and core/segread.js are "
             + "being served, then reload with Ctrl-Shift-R";
   var tok = ++EM_PLANE_TOKEN, on = emPlaneOn() && !missing;
-  EM_PLANE_LAST = { pos: pos };
+  EM_PLANE_LAST = { pos: pos, seg: segId ? String(segId) : "", src: segSrc || "" };
   if (!missing) setTimeout(function(){ drawPanelEmPlane(tok); }, 0);
   /* The <label> resets four properties it would inherit from this page's global label rule
      (display:block, uppercase, letter-spaced, muted). That rule is for the form labels that head
@@ -1459,7 +1469,19 @@ function emPlaneBox(pos){
     + 'cell on a cold cache takes a few seconds; turning it off here is remembered.">'
     + '<input type="checkbox" id="emPlaneOn" style="width:auto;margin:0"' + (on ? " checked" : "")
     + (missing ? " disabled" : "") + '> '
-    + 'EM section</label> <span id="emPlaneSay" style="color:var(--mut)">'
+    + 'EM section</label>'
+    /* ── THE CELL ────────────────────────────────────────────────────────────────  2026-09-21
+       Named for what it paints, as δJump's "nucleus" is. There is no nucleus volume here —
+       βJump's nuclei are Hoechst detections — and a nucleus with no segment gets no tick at all:
+       its card already says "no segment". */
+    + (missing || !EM_PLANE_LAST.seg ? "" :
+       ' <label for="emPlaneSeg" style="display:inline-flex;align-items:center;gap:5px;'
+     + 'margin:0 0 0 9px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:inherit;'
+     + 'color:inherit" title="Paints segment ' + escHtml(EM_PLANE_LAST.seg) + ' over the section '
+     + 'in magenta, from the segmentation it belongs to. One more fetch; remembered.">'
+     + '<input type="checkbox" id="emPlaneSeg" style="width:auto;margin:0"'
+     + (emPlaneSegOn() ? " checked" : "") + '> cell</label>')
+    + ' <span id="emPlaneSay" style="color:var(--mut)">'
     + (missing ? escHtml(missing) : "") + '</span></div>'
     + '<canvas id="emPlaneCv" width="' + EM_PLANE_W + '" height="' + EM_PLANE_H + '" '
     + 'style="width:100%;max-width:' + EM_PLANE_CSS + 'px;display:' + (on ? "block" : "none")
@@ -1546,6 +1568,24 @@ async function drawPanelEmPlane(tok){
              + "fill it)"
            : "") + ".";
     } catch (_t) {}
+    /* ── AND THE CELL ON TOP OF IT ─────────────────────────────────────────────────  2026-09-21
+       From the volume this cell's id belongs to — a segment id means nothing outside it — passed
+       per call, so the pad's configured volume is never touched. */
+    var segId = (EM_PLANE_LAST && EM_PLANE_LAST.seg) || "";
+    if (emPlaneSegOn() && segId && EM_PLANE_LAST.src && UJ.segpaint) {
+      if (!UJ.segpaint.configured())
+        UJ.segpaint.configure({ seg: UJ.cfg.viewer.seg, nuc: "", res: UJ.cfg.res });
+      emPlaneSay(tok, "reading the segmentation\u2026");
+      var got = await UJ.segpaint.paint(cv, view, { root: segId, seg: EM_PLANE_LAST.src,
+                                                    alpha: EM_SEG_ALPHA });
+      if (EM_PLANE_TOKEN !== tok) return;
+      /* After the overlay, because segpaint rewrites the whole canvas. */
+      emPlaneScaleBar(cv, view);
+      if (got && got.ok && !got.painted) {
+        emPlaneSay(tok, "the cell is not on this plane");
+        return;
+      }
+    }
     emPlaneSay(tok, "");
   } catch (e) {
     if (EM_PLANE_TOKEN !== tok) return;
@@ -1558,8 +1598,11 @@ function wireEmPlaneToggle(){
   EM_PLANE_WIRED = true;
   document.addEventListener("change", function(e){
     var t = e.target;
-    if (!t || t.id !== "emPlaneOn") return;
-    try { localStorage.setItem(EM_PLANE_KEY, t.checked ? "1" : "0"); } catch (_e) {}
+    if (!t || (t.id !== "emPlaneOn" && t.id !== "emPlaneSeg")) return;
+    try {
+      if (t.id === "emPlaneSeg") localStorage.setItem(EM_PLANE_SEG_KEY, t.checked ? "1" : "0");
+      else localStorage.setItem(EM_PLANE_KEY, t.checked ? "1" : "0");
+    } catch (_e) {}
     var box = document.getElementById("emPlaneBox");
     drawPanelEmPlane(box ? Number(box.dataset.tok || 0) : EM_PLANE_TOKEN);
   });
@@ -1947,7 +1990,7 @@ function showCell(i, distNm){
 
   /* One plane of the EM, under the two "where is this?" diagrams — the slot µJump uses, where
      the reader is already asking where the cell is rather than what it is. */
-  h+=emPlaneBox(pos);
+  h+=emPlaneBox(pos, seg, src===1 ? UJ.cfg.viewer.seg : src===2 ? UJ.cfg.viewer.seg32 : "");
   h+='<div class="meta">nucleus '+copyCode(BID[i])
     +(seg?' &middot; segment '+copyCode(seg)+' <span class="hint">('+SRC_NAME[src]+')</span>':'')
     +' &middot; voxel '+copyCode(pos.join(", "))+'</div>';

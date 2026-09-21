@@ -138,6 +138,82 @@ function buildLevelShard(scale, lo, hi){
                            body: buf.slice(Number(rg[1]), Number(rg[2]) + 1) });
   });
 
+  /* ── THE TWO SEGMENTATIONS ───────────────────────────────────────────────────  2026-09-21
+     Their real shapes, read through the JSON API: uint64, compressed_segmentation, sharded. Every
+     chunk of a volume is written here as that volume's cell id — `fill[volume]`, set by the test
+     before it shows a cell — so painting from the RIGHT volume lands and painting from the other
+     paints a stranger, which reads as "not on this plane". Counted per volume, so which one the
+     card asked is a fact this file records rather than infers. */
+  const SEG_VOLS = {
+    segmentation_secgan_16nm: [[16, 16, 30], [28672, 27648, 864], [128, 128, 64], [8, 8, 4]],
+    segmentation_32nm:        [[32, 32, 30], [14336, 13824, 864], [64, 64, 64], [8, 8, 8]]
+  };
+  const segInfo = v => {
+    const r0 = SEG_VOLS[v];
+    const lv = [{ key: r0[0].map(x => x.toFixed(1)).join("x"), resolution: r0[0], size: r0[1],
+                  chunk_sizes: [r0[2]], compressed_segmentation_block_size: r0[3] },
+                { key: "64.0x64.0x60.0", resolution: [64, 64, 60], size: [7168, 6912, 432],
+                  chunk_sizes: [[64, 64, 64]], compressed_segmentation_block_size: [8, 8, 8] }];
+    return { type: "segmentation", data_type: "uint64", num_channels: 1,
+             scales: lv.map(l => Object.assign(l, { encoding: "compressed_segmentation",
+                                                    sharding: SH0 })) };
+  };
+  function csegChunk(shape, block, id){
+    const grid = [0, 1, 2].map(i => Math.ceil(shape[i] / block[i]));
+    const nB = grid[0] * grid[1] * grid[2], nV = block[0] * block[1] * block[2];
+    const valWords = Math.ceil(nV / 32), chan = 1, vb = chan + 2 * nB, tb = vb + nB * valWords;
+    const d = new Uint32Array(tb + 2);
+    d[0] = chan;
+    for (let b = 0; b < nB; b++){ d[chan + 2 * b] = (tb - chan) | (1 << 24); d[chan + 2 * b + 1] = vb + b * valWords - chan; }
+    const B = BigInt(id);
+    d[tb] = Number(B & 0xffffffffn) >>> 0; d[tb + 1] = Number(B >> 32n) >>> 0;
+    return Buffer.from(d.buffer);
+  }
+  const segHits = {}, fill = {}, segShards = {};
+  /* Every answer carries the header Google's JSON API sends, because that header is the whole
+     reason this route exists: without it the browser drops the bytes, exactly as it does live. */
+  const ACAO = { "access-control-allow-origin": "*" };
+  await p.route(/\/storage\/v1\/b\/vclem-xh\/o\/alzheimers%2Fsegmentation_/, async route => {
+    const u = new URL(route.request().url());
+    const name = decodeURIComponent(u.pathname.slice("/storage/v1/b/vclem-xh/o/".length));
+    const m = /^alzheimers\/(segmentation_[^/]+)\/(.+)$/.exec(name);
+    if (!m || !SEG_VOLS[m[1]]) return route.fulfill({ status: 404, body: "" });
+    const vol = m[1], rest = m[2];
+    segHits[vol] = (segHits[vol] || 0) + 1;
+    const info = segInfo(vol);
+    if (rest === "info")
+      return route.fulfill({ status: 200, contentType: "application/json", headers: ACAO,
+                             body: JSON.stringify(info) });
+    const sm = /^([^/]+)\/0\.shard$/.exec(rest);
+    const sc = sm && info.scales.find(x => x.key === sm[1]);
+    if (!sc || !cellVox || !fill[vol]) return route.fulfill({ status: 404, body: "" });
+    const k = vol + "|" + sc.key + "|" + fill[vol] + "|" + cellVox.join(",");
+    if (!segShards[k]){
+      const ch = sc.chunk_sizes[0], grid = [0, 1, 2].map(i => Math.ceil(sc.size[i] / ch[i]));
+      const v = [0, 1, 2].map(i => Math.floor(cellVox[i] * [8, 8, 30][i] / sc.resolution[i]));
+      const c = [0, 1, 2].map(i => Math.floor(v[i] / ch[i]));
+      const entries = [];
+      for (let y = c[1] - 3; y <= c[1] + 3; y++) for (let x = c[0] - 4; x <= c[0] + 4; x++)
+        entries.push({ key: SR._compressedMorton([x, y, c[2]], grid),
+                       data: zlib.gzipSync(csegChunk(ch, sc.compressed_segmentation_block_size, fill[vol])) });
+      entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      const payload = Buffer.concat(entries.map(e => e.data)), n = entries.length;
+      const mi = Buffer.alloc(n * 24); let prev = 0n, at = 0, cur = 0;
+      for (let i = 0; i < n; i++){ u64(mi, i, entries[i].key - prev); prev = entries[i].key; }
+      for (let i = 0; i < n; i++){ u64(mi, n + i, at - cur); cur = at + entries[i].data.length;
+                                   u64(mi, 2 * n + i, entries[i].data.length); at += entries[i].data.length; }
+      const miGz = zlib.gzipSync(mi);
+      const sh = Buffer.concat([Buffer.alloc(16), payload, miGz]);
+      sh.writeBigUInt64LE(BigInt(payload.length), 0);
+      sh.writeBigUInt64LE(BigInt(payload.length + miGz.length), 8);
+      segShards[k] = sh;
+    }
+    const buf = segShards[k];
+    const rg = /bytes=(\d+)-(\d+)/.exec(route.request().headers()["range"] || "");
+    if (!rg) return route.fulfill({ status: 200, headers: ACAO, body: buf });
+    return route.fulfill({ status: 206, headers: ACAO, body: buf.slice(Number(rg[1]), Number(rg[2]) + 1) });
+  });
+
   await p.goto("file://" + page_("bjump.html"));
   await p.waitForTimeout(6000);
 
@@ -158,6 +234,7 @@ function buildLevelShard(scale, lo, hi){
     ok(got.url === JAPI + encodeURIComponent(OBJ + "info") + "?alt=media",
        "vclem-xh is read through the JSON API from the moment the page loads", got.url);
     cellVox = got.cell;
+    fill.segmentation_secgan_16nm = await p.evaluate(() => String(BSEG[0] || ""));
   }
 
   console.log("\nthe levels, off the volume's own info");
@@ -192,7 +269,9 @@ function buildLevelShard(scale, lo, hi){
         await new Promise(r => setTimeout(r, 200));
         cv = document.getElementById("emPlaneCv");
         say = (document.getElementById("emPlaneSay") || {}).textContent;
-        if (cv && cv.title) break;
+        /* Until the overlay is done too: the title is set when the EM lands, and the cell is
+           painted after it. */
+        if (cv && cv.title && !/reading|\u2026/.test(say || "")) break;
       }
       if (!cv) return { none: true };
       const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
@@ -215,6 +294,87 @@ function buildLevelShard(scale, lo, hi){
       ok(got.key === "bjump_panel_emplane", "...remembered under this page's own key", got.key);
       ok(got.after === "meta", "...placed under the location diagrams, above the ids", got.after);
     }
+  }
+
+  console.log("\nand the section paints the cell, from the segmentation its id belongs to");
+  {
+    const pick = await p.evaluate(() => {
+      let a = -1, b = -1;
+      for (let i = 0; i < BID.length; i++){
+        if (a < 0 && BSEG[i] && BSRC[i] === 1) a = i;
+        if (b < 0 && BSEG[i] && BSRC[i] === 2) b = i;
+      }
+      let none = -1;
+      for (let i = 0; i < BID.length; i++) if (!BSEG[i]){ none = i; break; }
+      /* A second secgan cell far enough away that none of its chunks are ones the page has
+         already cached for the first — segread keeps every decoded chunk by URL, so the negative
+         case has to ask for bytes nobody has asked for yet. */
+      let far = -1;
+      for (let i = 0; i < BID.length; i++)
+        if (a >= 0 && BSEG[i] && BSRC[i] === 1 && BSEG[i] !== BSEG[a]
+            && (Math.abs(BX[i] - BX[a]) > 12000 || Math.abs(BY[i] - BY[a]) > 12000)){ far = i; break; }
+      return { a, b, none, far,
+               F: far >= 0 ? { vox: [BX[far], BY[far], BZ[far]] } : null,
+               A: a >= 0 ? { seg: String(BSEG[a]), vox: [BX[a], BY[a], BZ[a]] } : null,
+               B: b >= 0 ? { seg: String(BSEG[b]), vox: [BX[b], BY[b], BZ[b]] } : null };
+    });
+    const show = async (i) => p.evaluate(async (i) => {
+      showCell(i);
+      const t0 = Date.now(); let cv, say, done = false;
+      while (Date.now() - t0 < 20000){
+        await new Promise(r => setTimeout(r, 200));
+        cv = document.getElementById("emPlaneCv");
+        say = (document.getElementById("emPlaneSay") || {}).textContent;
+        if (cv && cv.title && !/reading/.test(say || "") && say !== "\u2026"){ done = true; break; }
+      }
+      const tick = document.getElementById("emPlaneSeg");
+      const lab = tick ? tick.closest("label").textContent.trim() : null;
+      let magenta = 0;
+      if (cv){
+        const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+        for (let k = 0; k < d.length; k += 4) if (d[k] - d[k + 1] > 25 && d[k + 2] - d[k + 1] > 25) magenta++;
+      }
+      return { done, say, tick: !!tick, lab, magenta, total: cv ? cv.width * cv.height : 0 };
+    }, i);
+
+    if (pick.A){
+      fill.segmentation_secgan_16nm = pick.A.seg; fill.segmentation_32nm = "999";
+      cellVox = pick.A.vox; shards = {}; const before = Object.assign({}, segHits);
+      const got = await show(pick.a);
+      ok(got.tick && got.lab === "cell", "a segmented cell gets a tick, named for what it paints",
+         JSON.stringify(got.lab));
+      ok(got.magenta > got.total * 0.5, "...and the section is painted with it",
+         got.magenta + " of " + got.total + " px magenta  <- segment " + pick.A.seg + ", secgan16");
+      /* Totals, not a before/after: the card above already drew this same cell, and segread
+         serves a repeat from its cache without asking the network again. */
+      ok((segHits.segmentation_secgan_16nm || 0) > 0 && !(segHits.segmentation_32nm || 0),
+         "...read from secgan16, the volume its id belongs to", JSON.stringify(segHits));
+      ok(!got.say, "...and nothing left to say", JSON.stringify(got.say));
+    }
+    if (pick.B){
+      fill.segmentation_32nm = pick.B.seg; fill.segmentation_secgan_16nm = "999";
+      cellVox = pick.B.vox; shards = {}; const before = Object.assign({}, segHits);
+      const got = await show(pick.b);
+      /* THE ONE THAT MATTERS: the page's own table says this segment lives in segmentation_32nm.
+         Painted from secgan16 it would be a stranger's id — here, "999" — and read as absent. */
+      ok(got.magenta > got.total * 0.5 && (segHits.segmentation_32nm || 0) > (before.segmentation_32nm || 0),
+         "a cell whose segment is in segmentation_32nm is painted from THAT volume",
+         got.magenta + " px  <- segment " + pick.B.seg + ", " + JSON.stringify(segHits));
+    } else ok(true, "(no cell in this table is from segmentation_32nm)");
+    if (pick.F){
+      fill.segmentation_secgan_16nm = "999"; cellVox = pick.F.vox; shards = {};
+      const got = await show(pick.far);
+      ok(got.magenta === 0 && /not on this plane/.test(got.say || ""),
+         "a volume that does not hold the id paints nothing, and says so", JSON.stringify(got.say));
+    }
+    if (pick.none >= 0){
+      const got = await p.evaluate(async (i) => { showCell(i); await new Promise(r => setTimeout(r, 300));
+        return !!document.getElementById("emPlaneSeg"); }, pick.none);
+      ok(!got, "a nucleus with no segment gets no tick");
+    }
+    /* Put the cell the later sections expect back where it was. */
+    cellVox = await p.evaluate(() => [BX[0], BY[0], BZ[0]]); shards = {};
+    fill.segmentation_secgan_16nm = await p.evaluate(() => String(BSEG[0] || ""));
   }
 
   console.log("\nthe tracing card, with the segmentation this dataset can read");
