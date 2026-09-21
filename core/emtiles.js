@@ -72,6 +72,10 @@ UJ.emtiles = (function(){
                cost a round trip per level to learn something the page already knows. So the page
                names the keys, beside the source it is describing. Skip nothing by default. */
             skipScales: (cfg.skipScales || []).slice(),
+            /* A uint16 volume's window, in its own counts, applied before anything else sees it:
+               the rest of this module is 8-bit. 2026-09-21, ωJump's two uint16 OpenOrganelle
+               blocks, whose tissue is a band ~2,000 counts wide at ~33,000. */
+            u16: cfg.u16 || null,
             /* A replacement JPEG decoder, (ArrayBuffer) -> Promise<{data, width, height}> with one
                byte per pixel. For a check running where there is no browser; a page passes none. */
             decodeJpeg: cfg.decodeJpeg || null };
@@ -100,8 +104,32 @@ UJ.emtiles = (function(){
   }
   /* -> a Uint8Array laid out exactly as a raw chunk of `ch` would be. `shape` is the chunk's real
      extent (smaller than ch at the volume's edge), which a JPEG's own width and height report. */
+  var RAW_SEEN = (typeof WeakMap !== "undefined") ? new WeakMap() : null;
   async function decodeChunk(buf, scale, ch, shape){
-    if (String(scale.encoding || "raw") !== "jpeg") return new Uint8Array(buf);
+    if (String(scale.encoding || "raw") !== "jpeg"){
+      /* RAW, AT THE NOMINAL STRIDE. 2026-09-21. An edge chunk is clipped to the volume, and the
+         section reads every chunk with the nominal stride -- so an edge chunk read as it came
+         sheared every row. Laid back into the nominal chunk here, as a JPEG edge chunk is below. */
+      var src;
+      if (scale.data_type === "uint16"){
+        var w = (CFG && CFG.u16) || [0, 65535], lo16 = w[0], sp = Math.max(1, w[1] - w[0]);
+        var s16 = new Uint16Array(buf);
+        src = new Uint8Array(s16.length);
+        for (var q = 0; q < s16.length; q++){
+          var v8 = (s16[q] - lo16) * 255 / sp;
+          src[q] = v8 < 0 ? 0 : v8 > 255 ? 255 : v8;
+        }
+      } else src = new Uint8Array(buf);
+      if (shape[0] === ch[0] && shape[1] === ch[1] && shape[2] === ch[2]) return src;
+      if (RAW_SEEN && RAW_SEEN.has(buf)) return RAW_SEEN.get(buf);
+      var full = new Uint8Array(ch[0] * ch[1] * ch[2]);
+      for (var zz = 0; zz < shape[2]; zz++)
+        for (var yy = 0; yy < shape[1]; yy++)
+          full.set(src.subarray((zz * shape[1] + yy) * shape[0], (zz * shape[1] + yy + 1) * shape[0]),
+                   (zz * ch[1] + yy) * ch[0]);
+      if (RAW_SEEN) RAW_SEEN.set(buf, full);
+      return full;
+    }
     if (JPEG_SEEN && JPEG_SEEN.has(buf)) return JPEG_SEEN.get(buf);
     var img = await ((CFG && CFG.decodeJpeg) || browserJpeg)(buf);
     var nx = img.width, ny = shape[1], nz = Math.round(img.height / Math.max(1, ny));

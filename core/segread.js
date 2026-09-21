@@ -73,6 +73,11 @@ UJ.segread = (function(){
   /* gs://bucket/path and precomputed://... are the forms the tool's own SRC constants use; the
      browser needs an https one. Kept here so no caller has to know the rule. */
   function httpBase(src){
+    /* ZARR KEEPS ITS MARK, 2026-09-21 -- core/zarrread.js reads it; see isZarrBase. */
+    if (/^zarr[23]?:/.test(String(src || ""))){
+      var zs = String(src).replace(/^zarr:(?!\/\/)/, "");
+      return "zarr:" + ((window.UJ && UJ.zarrread) ? UJ.zarrread.httpOf(zs) : zs.replace(/^zarr[23]?:\/\//, ""));
+    }
     var s = String(src || "").replace(/^precomputed:\/\//, "");
     if (s.indexOf("gs://") === 0) s = "https://storage.googleapis.com/" + s.slice(5);
     if (s.indexOf("s3://") === 0) s = "https://" + s.slice(5).replace(/^([^/]+)\//, "$1.s3.amazonaws.com/");
@@ -123,7 +128,16 @@ UJ.segread = (function(){
   var shardEntry = {};     // url|minishard   -> Promise<{start,end}|null>
   var miniIndex  = {};     // url|minishard   -> Promise<index|null>
 
+  function isZarrBase(base){ return String(base || "").indexOf("zarr:") === 0; }
+  function zarr(){
+    if (!(window.UJ && UJ.zarrread)) throw new Error("a Zarr volume, and core/zarrread.js is not loaded");
+    return UJ.zarrread;
+  }
   function getInfo(base){
+    if (isZarrBase(base)){
+      if (!infoCache[base]) infoCache[base] = zarr().info(base);
+      return infoCache[base];
+    }
     if (!infoCache[base])
       infoCache[base] = fetch(urlOf(INFO_FROM[base] || base, "info"), { cache: "force-cache" }).then(function(r){
         if (!r.ok) throw new Error("no info at " + base + " (" + r.status + ")");
@@ -178,18 +192,28 @@ UJ.segread = (function(){
      the chunk's REAL shape. An edge chunk is clipped to the volume; indexed with the nominal
      chunk size every voxel in it reads a neighbour's value, plausibly, and nothing says so. */
   function realShape(at){ return [0, 1, 2].map(function(i){ return at.end[i] - at.start[i]; }); }
-  function rawAt(buf, shape, local, words){
-    var d = new Uint32Array(buf);
-    var n = shape[0] * shape[1] * shape[2] * words;
-    if (d.length < n) throw new Error("a raw chunk of " + buf.byteLength + " bytes, expected " + n * 4);
+  /* Bytes per voxel: the scale's own data_type where it has one (a Zarr level does), else the
+     caller's word count -- a precomputed info says it once, at the top. */
+  var BPV = { uint8: 1, int8: 1, uint16: 2, int16: 2, uint32: 4, int32: 4, uint64: 8 };
+  function bpvOf(scale, words){ return BPV[scale && scale.data_type] || words * 4; }
+  /* The two uint32 halves of voxel i, for any width. */
+  function rawPair(buf, i, bpv){
+    if (bpv === 8){ var d8 = new Uint32Array(buf); return [d8[2 * i] >>> 0, d8[2 * i + 1] >>> 0]; }
+    if (bpv === 4) return [new Uint32Array(buf)[i] >>> 0, 0];
+    if (bpv === 2) return [new Uint16Array(buf)[i], 0];
+    return [new Uint8Array(buf)[i], 0];
+  }
+  function rawAt(buf, shape, local, bpv){
+    var n = shape[0] * shape[1] * shape[2] * bpv;
+    if (buf.byteLength < n) throw new Error("a raw chunk of " + buf.byteLength + " bytes, expected " + n);
     var i = local[0] + shape[0] * (local[1] + shape[1] * local[2]);
-    if (words === 1) return String(d[i] >>> 0);
-    var lo = d[2 * i] >>> 0, hi = d[2 * i + 1] >>> 0;
-    return (BigInt(hi) * 4294967296n + BigInt(lo)).toString();
+    var p = rawPair(buf, i, bpv);
+    if (bpv < 8) return String(p[0]);
+    return (BigInt(p[1]) * 4294967296n + BigInt(p[0])).toString();
   }
   /* One voxel of a chunk, whichever encoding the scale declares. */
   function valueIn(buf, scale, at, words){
-    if (scale.encoding === "raw") return rawAt(buf, realShape(at), at.local, words);
+    if (scale.encoding === "raw") return rawAt(buf, realShape(at), at.local, bpvOf(scale, words));
     return decodeAt(buf, at.shape, scale.compressed_segmentation_block_size, at.local, words);
   }
 
@@ -281,8 +305,10 @@ UJ.segread = (function(){
     var out = new Uint8Array(ch[0] * ch[1]);
     var nw = wanted.length;
     if (!nw || lz < 0 || lz >= sh[2]) return out;
-    var d = new Uint32Array(buf);
-    if (d.length < sh[0] * sh[1] * sh[2] * words) return out;
+    var bpv = bpvOf(scale, words);
+    if (buf.byteLength < sh[0] * sh[1] * sh[2] * bpv) return out;
+    var d = bpv === 1 ? new Uint8Array(buf) : bpv === 2 ? new Uint16Array(buf) : new Uint32Array(buf);
+    words = bpv === 8 ? 2 : 1;
     /* By the low word: a χJump cell is up to ~300 ids, and 300 comparisons per voxel is the
        quarter-million-voxel stall this function exists to avoid. */
     var byLo = new Map();
@@ -336,6 +362,7 @@ UJ.segread = (function(){
 
   /* ── unsharded: one GET ──────────────────────────────────────────────────────────────────── */
   async function unshardedChunk(base, scale, at){
+    if (isZarrBase(base)) return await zarr().chunk(base, scale, at);
     var url = urlOf(base, scale.key + "/"
             + at.start[0] + "-" + at.end[0] + "_"
             + at.start[1] + "-" + at.end[1] + "_"
@@ -618,6 +645,7 @@ UJ.segread = (function(){
            _chunkOf: chunkOf, _httpBase: httpBase, _planeMatch: planeMatch,
            /* 2026-09-21: either encoding, and a volume's own displacement, for core/segpaint.js */
            _planeOf: planeOf, _offsetNm: offsetNm, borrowInfo: borrowInfo, setOffsetNm: setOffsetNm,
+           _rawAt: rawAt,
            /* ── and for core/emtiles.js ──────────────────────────────────────────  2026-09-17
               The EM volume is in the same bucket, with the same sharding, and its chunks are
               `raw` uint8 -- so reading one is this file's job already, and emtiles has no fetch
