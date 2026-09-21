@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-21 12:03</span></p>
+ctrl-shift-R.">build 2026-09-21 14:53</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -9302,6 +9302,9 @@ UJ.cfg.tracing = {
   draftsKey: "xjump_tracing_drafts_v2",
   draftKey:  "xjump_tracing_draft_v1",
   penKey:    "xjump_tracing_pen_v1",
+  /* No work in the browser -- this page's rule (2026-09-21, as on ωJump): tracings go to the
+     dataset, drafts to the account when signed in, and to this page only when not. */
+  keepLocal: false,
   intro:     "cb2 publishes fragments, not cells, so a cell here is whatever has been assembled "
            + "from them — and a piece the segmentation merged with its neighbour, or never cut out "
            + "at all, is one you outline yourself.",

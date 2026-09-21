@@ -11,7 +11,9 @@
      - the segmentation tick paints the whole cell's fragments, not only the one under the point;
      - the pad draws the EM, with the 4 nm level skipped (26 MB chunks);
      - the BULK card (step 3): markers on two fragments of one cell are ONE cell, filed under its
-       key with each marker's own fragment; a marker on a fragment no cell contains cannot be ticked.
+       key with each marker's own fragment; a marker on a fragment no cell contains cannot be ticked;
+     - NOTHING in localStorage but the theme and the open tab -- the build's rule, which it cannot
+       see the card keep, because the card's store is behind tracingStore().
 
    Run: node xjumptracecheck.js */
 const { chromium } = require("playwright");
@@ -183,6 +185,26 @@ const SEGINFO = { type: "segmentation", data_type: "uint64", num_channels: 1, sc
      "submitted as one group, filed under the cell's key", JSON.stringify(k.posts));
   ok(k.posts.length === 2 && k.posts[0].root === FRAG && k.posts[1].root === OTHER,
      "...each row with its own fragment", k.posts.map(x => x.root).join(", "));
+
+  /* NOTHING IN THE BROWSER, 2026-09-21. χJump's build allows two localStorage keys, the theme and
+     the open tab, because no work may live in the browser. The card keeps its store behind
+     tracingStore(), which the build's literal scan cannot see -- so it is checked here, by use. */
+  console.log("\nnothing in the browser");
+  const nb = await p.evaluate(async (POS) => {
+    ["tracingX", "tracingY", "tracingZ"].forEach((id, k) => document.getElementById(id).value = POS[k]);
+    if (document.getElementById("tracePadWrap").style.display === "none") document.getElementById("tracePadOpen").click();
+    const t0 = Date.now();
+    while (Date.now() - t0 < 20000 && !(PAD_VIEW && !PAD_BUSY)) await new Promise(r => setTimeout(r, 200));
+    PAD.rings.push({ z: POS[2], points: [[POS[0], POS[1]], [POS[0] + 40, POS[1]], [POS[0] + 40, POS[1] + 40]], inst: 0 });
+    draftSave(true);
+    const keys = []; for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    return { keys, say: document.getElementById("tracePadSay").textContent, drafts: draftStore.list().length,
+             keep: UJ.cfg.tracing.keepLocal };
+  }, POS);
+  ok(nb.keys.every(k => k === "ujump_theme" || k === "xjump_active_tab"),
+     "localStorage holds the theme and the open tab, and nothing else", nb.keys.join(",") || "empty");
+  ok(nb.drafts >= 1, "...while the draft is kept on the page", nb.drafts + " draft(s)");
+  ok(/keeps no work in the browser/.test(nb.say), "and the card says where it went", nb.say.slice(0, 90));
   ok(errors.length === 0, "no page errors", errors.join(" | ") || "none");
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
