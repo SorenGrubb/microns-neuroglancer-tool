@@ -32,6 +32,9 @@ const LINK = /hjump/.test(PAGE);   // ηJump: #filterViewer is an <a>, its match
 /* βJump and λJump: a nucleus table (BID), built their "Open all" on 2026-09-21 in core/openall.js.
    λJump has no segmentation, so its second cell is found and filed by nucleus too. */
 const TABLE = /bjump|ljump/.test(PAGE);
+/* χJump: a cell is an assembly, named by its KEY, which is what a tracing there is filed under
+   (nucleusId). Both test tracings are filed by key; χJump's matches carry no root id. */
+const XJ = /xjump/.test(PAGE);
 
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
@@ -58,7 +61,7 @@ const TABLE = /bjump|ljump/.test(PAGE);
 
   /* THE CELLS COME FROM THE FILTER, not from the file: a cell the preview did not match has no
      business in the view, and taking one from the table blames the product for leaving it out. */
-  const cells = await p.evaluate(async ([LINK, TABLE]) => {
+  const cells = await p.evaluate(async ([LINK, TABLE, XJ]) => {
     document.getElementById("filterRun").click();
     const t0 = Date.now();
     while (Date.now() - t0 < 60000){
@@ -79,6 +82,11 @@ const TABLE = /bjump|ljump/.test(PAGE);
     }
     const m = UJ.stepthrough.currentMatches() || [];
     let A = null, B = null;
+    if (XJ){
+      const keys = m.map(x => x.row && x.row.key).filter(Boolean);
+      return { A: keys[0] ? { nuc: keys[0], root: "" } : null, B: keys[1] ? { nuc: keys[1] } : null,
+               n: m.length, ds: (UJ.cfg.backend && UJ.cfg.backend.ds) || "" };
+    }
     if (TABLE){
       const segOf = i => (typeof BSEG !== "undefined" && BSEG[i]) ? String(BSEG[i]) : "";
       for (const x of m){
@@ -101,10 +109,10 @@ const TABLE = /bjump|ljump/.test(PAGE);
       if (A && B) break;
     }
     return { A, B, n: m.length, ds: (UJ.cfg.backend && UJ.cfg.backend.ds) || "" };
-  }, [LINK, TABLE]);
+  }, [LINK, TABLE, XJ]);
   if (!cells.A || !cells.B){ console.log("the preview matched no usable cells: " + JSON.stringify(cells)); process.exit(1); }
   const B_FILED = cells.B.root ? { rootId: cells.B.root } : { nucleusId: cells.B.nuc };
-  const B_BY = cells.B.root ? "ROOT id" : "NUCLEUS id (another cell; this dataset has no segmentation)";
+  const B_BY = cells.B.root ? "ROOT id" : "NUCLEUS id (another cell, filed by its own id)";
   const ring = (z, x0, y0) => ({ z, points: [[x0, y0], [x0 + 40, y0], [x0 + 40, y0 + 40], [x0, y0 + 40]]
                                                .map(q => q.join(",")).join(";") });
   const row = (sid, kind, f, r, extra) => Object.assign({ structureId: sid, kind, instanceOf: kind,
@@ -189,7 +197,7 @@ const TABLE = /bjump|ljump/.test(PAGE);
     if (TABLE){
       ok(all.pts === cells.n, "the view has a point on every matched nucleus", all.pts + " of " + cells.n);
       ok(all.ngroups >= 1, "...in one layer per community identity", all.ngroups + " layer(s)");
-      if (/bjump/.test(PAGE))
+      if (/bjump/.test(PAGE) && !XJ)
         ok(all.segs.some(x => /^Segmentation \(SECGAN 16nm\) \(\d+\):\d+$/.test(x)),
            "...and the matched cells' segments", all.segs.join(" | "));
     }

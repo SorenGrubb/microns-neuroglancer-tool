@@ -12,6 +12,13 @@
    Needs REPORT_ENDPOINT, core/tracing.js (rowsToStructures) and, for the kind labels,
    core/ontology.js's ORGANELLE_KIND_BY_VALUE. Reads name UJ.cfg.backend.ds. */
 var UJ = UJ || {};
+/* A kind's short name where the page has no ORGANELLE_KIND_BY_VALUE (χJump), from the same
+   vocabulary through core/organelles.js. 2026-09-21. */
+function tracedOutlinesKindName(k){
+  try { if (window.UJ && UJ.organelles && UJ.organelles.shortOf) return UJ.organelles.shortOf(k); }
+  catch (_e){}
+  return k;
+}
 function tracedOutlinesDsQS(){
   try { if (UJ && UJ.cfg && UJ.cfg.backend && UJ.cfg.backend.ds)
           return "&ds=" + encodeURIComponent(UJ.cfg.backend.ds); } catch (_e){}
@@ -61,7 +68,7 @@ async function fillOrganSegKinds(){
     sel.options[1].textContent="All outlined organelles ("+kinds.reduce(function(a,k){return a+n[k];},0)+")";
     kinds.forEach(function(k){
       const label=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined"&&ORGANELLE_KIND_BY_VALUE[k])
-                 ?(ORGANELLE_KIND_BY_VALUE[k].short||ORGANELLE_KIND_BY_VALUE[k].label||k):k;
+                 ?(ORGANELLE_KIND_BY_VALUE[k].short||ORGANELLE_KIND_BY_VALUE[k].label||k):tracedOutlinesKindName(k);
       const o=document.createElement("option");
       o.value=k;
       o.textContent=label.charAt(0).toUpperCase()+label.slice(1)+" ("+n[k]+" outlined)";
@@ -148,7 +155,7 @@ async function buildTracedOrganelleLayers(ids,want,say){
     });
     if(!anns.length)return;
     const label=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined"&&ORGANELLE_KIND_BY_VALUE[k])
-               ?(ORGANELLE_KIND_BY_VALUE[k].short||ORGANELLE_KIND_BY_VALUE[k].label||k):k;
+               ?(ORGANELLE_KIND_BY_VALUE[k].short||ORGANELLE_KIND_BY_VALUE[k].label||k):tracedOutlinesKindName(k);
     layers.push({type:"annotation",source:"local://annotations",tab:"annotations",
                  name:"traced "+label+" ("+byKind[k].length+")",
                  annotationColor:byKind[k][0].t.color||"#40e28c",

@@ -449,7 +449,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-21 11:55</span></p>
+ctrl-shift-R.">build 2026-09-21 12:03</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -711,6 +711,18 @@ matched cell, as points in their own layer."><input type="checkbox" id="filterOr
       <label style="font-size:12px"><input type="checkbox" id="filterNucOn"> The nuclei marked
         here</label>
     </div>
+<!-- THE OTHER HALF OF AN ORGANELLE.  2026-09-18. Søren: "In the filter and show, it should also be
+     possible to select include organelles segmentations of a specific kind or all organelle
+     segmentations for the filtered cells." The boxes above draw where organelles were LOGGED; this
+     draws what has been OUTLINED, which is the same organelles with a shape and a volume. -->
+<div class="row" style="gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+<label style="font-size:12px;flex:0 0 auto;text-transform:none;letter-spacing:normal" for="filterOrganSeg" title="Hand-traced organelle outlines for the matched cells, drawn into the 3D view as contours &mdash; one layer per kind, in the colour each was drawn in. The outlines live in Drive and are read one file each, so this costs a moment per outline and is capped; the organelle points beside it cost nothing extra.">Traced organelle outlines</label>
+<select id="filterOrganSeg" style="flex:1 1 200px;min-width:0">
+<option value="">None &mdash; points only</option>
+<option value="__all">All outlined organelles</option>
+</select>
+</div>
+
   </details>
 
   <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
@@ -7986,6 +7998,15 @@ UJ.app = (function(){
     o.markers = (el("filterMarkOn") && el("filterMarkOn").checked)
       ? us.map(function(u){ return { pos: u.pos, name: u.name }; }) : null;
     o.markerName = us.length.toLocaleString() + " matched cells";
+    /* THE MATCHED CELLS' TRACED OUTLINES, 2026-09-21 -- core/tracedoutlines.js through
+       core/openall.js, as on βJump and λJump. By cell KEY: the tracing card files a tracing under
+       it. With no kind picked, or on the demo page which has neither module, exactly as before. */
+    var pick = el("filterOrganSeg");
+    if (pick && pick.value && typeof tracedOutlinesOpen === "function"){
+      tracedOutlinesOpen(UJ.cfg.viewer.base, X.buildState([], us[0].pos, o),
+        { nuc: us.map(function(u){ return u.key; }), root: [] }, el("filterViewerAll"));
+      return;
+    }
     window.open(X.viewerUrl([], us[0].pos, o), "_blank", "noopener");
   }
 
@@ -9330,5 +9351,9 @@ function buildState(pos){ return UJ.xjump.buildState([], pos); }
 </script>
 <script src="core/tracingcard.js"></script>
 <script src="core/bulkorgan.js"></script>
+<!-- The traced-outline layer for "Open all matches", and the synchronous-state opener it goes
+     through -- core/openall.js, as on βJump and λJump. -->
+<script src="core/tracedoutlines.js"></script>
+<script src="core/openall.js"></script>
 
 </body></html>
