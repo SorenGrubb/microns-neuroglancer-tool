@@ -170,7 +170,11 @@ const SEGINFO = { type: "segmentation", data_type: "uint64", num_channels: 1, sc
                                              cell: r.i >= 0 ? bulkNucIdOf(r.i) : "" }));
     const posts = [];
     window.postReport = function(pl){ posts.push(pl); return true; };
+    /* Signed in for the submit: since 2026-09-21 the card asks the sign-in gate first on every
+       tool (refusedsavecheck.js), and a signed-out press sends nothing. Signed out again after. */
+    GOOGLE_VERIFIED = true; GOOGLE_CREDENTIAL = "tok";
     document.getElementById("bulkOrganSubmit").click();
+    GOOGLE_VERIFIED = false; GOOGLE_CREDENTIAL = "";
     return { rows, posts: posts.map(x => ({ nuc: x.nucleusId, root: x.rootId, g: x.groupId, n: x.subCount, kind: x.kind })),
              table: document.getElementById("bulkOrganTable").textContent };
   }, [POS, FRAG, OTHER]);

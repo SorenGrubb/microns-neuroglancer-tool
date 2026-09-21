@@ -69,6 +69,31 @@
    name anywhere on the page is a SyntaxError that silently kills that whole block. Before wiring a
    new tool to this file, check the page for its own TRACING_*, PAD_*, DRAFT_* declarations. */
 var UJ = UJ || {};
+/* ── THE SIGN-IN GATE, FOR A PAGE THAT HAS NONE ──────────────────────────────────  2026-09-21
+   core/bulkorgan.js, core/panel.js's organelle form and this card ask reportGateBlock() before
+   they send anything: "" to go ahead, or the reason not to, with Google's prompt already offered.
+   µJump and ωJump define their own; the other six did not, so the question was skipped and a
+   signed-out submission went out to be refused. Defined HERE because this file is on every tool,
+   and only when the page has not got one -- a page's own `function reportGateBlock` in a later
+   script replaces this. GOOGLE_EXP is seconds on µJump and milliseconds elsewhere; both are read. */
+if (typeof window !== "undefined" && typeof window.reportGateBlock !== "function"){
+  window.reportGateBlock = function(){
+    var cred = (typeof GOOGLE_CREDENTIAL !== "undefined") ? GOOGLE_CREDENTIAL : null;
+    var ver  = (typeof GOOGLE_VERIFIED !== "undefined") ? GOOGLE_VERIFIED : false;
+    var exp  = (typeof GOOGLE_EXP !== "undefined") ? Number(GOOGLE_EXP) || 0 : 0;
+    var expMs = exp > 1e12 ? exp : exp * 1000;
+    var expired = !!cred && expMs > 0 && Date.now() > expMs - 60000;
+    if (ver && cred && !expired) return "";
+    try { if (window.google && google.accounts && google.accounts.id) google.accounts.id.prompt(); } catch (_e){}
+    return expired
+      ? "Your Google sign-in has expired \u2014 they last about an hour. Sign in again with the "
+        + "account button in the top-right corner, then press Submit again.\n\nNothing has been "
+        + "sent, so your work is still here."
+      : "Please sign in with Google before submitting \u2014 use the account button in the "
+        + "top-right corner, then try again.\n\nNothing has been sent, so your work is still here: "
+        + "sign in and press Submit again.";
+  };
+}
 /* ── TRACING A CELL THE SEGMENTATION DOES NOT HAVE ──────────────────────────────  2026-09-16
    Paste a link of contours, keep it, and it rides into the Blender export as an ordinary cell.
 
@@ -1359,6 +1384,21 @@ function tracingPublish(t,quiet){
   if(ok===false)return false;
   t.pending_share=false;
   t.shared_at=new Date().toISOString();
+  /* A PROMISE IS NOT A YES, 2026-09-21. λJump, βJump, ηJump and ωJump answer with a promise of
+     {ok, error}; the backend can still refuse (a token that lapsed in flight, a deployment that
+     does not know the type). A refused tracing goes back on the queue it would otherwise have been
+     taken off, so it is sent on the next sign-in, and the card says why it was not. */
+  if(ok&&typeof ok.then==="function"){
+    ok.then(function(d){
+      if(!(d&&d.ok===false))return;
+      t.pending_share=true; t.shared_at="";
+      tracingWrite(TRACINGS_KEPT); tracingRenderList();
+      tracingSay("\u201c"+(t.name||"The tracing")+"\u201d did NOT reach the dataset: "
+        +String(d.error||"the server refused it")+" It is kept here and goes up on its own once "
+        +"you are signed in.");
+      tracingFlushSoon();
+    },function(){});
+  }
   /* AFTER the tracing, and only if the tracing went: an annotation pointing at an outline that was
      refused would be a coordinate with nothing behind it. Once per tracing, not once per press, so
      a queued one registers its centre when it finally goes out too.

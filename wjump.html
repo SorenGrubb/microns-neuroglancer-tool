@@ -28,13 +28,14 @@ try{var _t=localStorage.getItem("ujump_theme");
    lose to the media query. */
  :root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ee;--mut:#9aa4b2;--line:#262c35;
        --accent:#fbbf24;--on-accent:#2a1f04;
-       --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;
+       --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--danger:var(--bad);--inset:#0b0f14;
+       --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
        --shadow:rgba(0,0,0,.4)}
  @media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f7f9;--card:#fff;
        --ink:#16181d;--mut:#5b6472;--line:#e3e6ea;--accent:#854d0e;
-       --on-accent:#ffffff;--shadow:rgba(140,149,159,.25)}}
+       --on-accent:#ffffff;--inset:#ffffff;--shadow:rgba(140,149,159,.25)}}
  :root[data-theme="light"]{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mut:#5b6472;
-       --line:#e3e6ea;--accent:#854d0e;--on-accent:#ffffff;
+       --line:#e3e6ea;--accent:#854d0e;--on-accent:#ffffff;--inset:#ffffff;
        --shadow:rgba(140,149,159,.25)}
  #themeToggleBtn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12px;
    color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:20px;
@@ -119,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-21 14:22</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-21 15:35</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -10486,6 +10487,31 @@ function buildState(pos){
    name anywhere on the page is a SyntaxError that silently kills that whole block. Before wiring a
    new tool to this file, check the page for its own TRACING_*, PAD_*, DRAFT_* declarations. */
 var UJ = UJ || {};
+/* ── THE SIGN-IN GATE, FOR A PAGE THAT HAS NONE ──────────────────────────────────  2026-09-21
+   core/bulkorgan.js, core/panel.js's organelle form and this card ask reportGateBlock() before
+   they send anything: "" to go ahead, or the reason not to, with Google's prompt already offered.
+   µJump and ωJump define their own; the other six did not, so the question was skipped and a
+   signed-out submission went out to be refused. Defined HERE because this file is on every tool,
+   and only when the page has not got one -- a page's own `function reportGateBlock` in a later
+   script replaces this. GOOGLE_EXP is seconds on µJump and milliseconds elsewhere; both are read. */
+if (typeof window !== "undefined" && typeof window.reportGateBlock !== "function"){
+  window.reportGateBlock = function(){
+    var cred = (typeof GOOGLE_CREDENTIAL !== "undefined") ? GOOGLE_CREDENTIAL : null;
+    var ver  = (typeof GOOGLE_VERIFIED !== "undefined") ? GOOGLE_VERIFIED : false;
+    var exp  = (typeof GOOGLE_EXP !== "undefined") ? Number(GOOGLE_EXP) || 0 : 0;
+    var expMs = exp > 1e12 ? exp : exp * 1000;
+    var expired = !!cred && expMs > 0 && Date.now() > expMs - 60000;
+    if (ver && cred && !expired) return "";
+    try { if (window.google && google.accounts && google.accounts.id) google.accounts.id.prompt(); } catch (_e){}
+    return expired
+      ? "Your Google sign-in has expired \u2014 they last about an hour. Sign in again with the "
+        + "account button in the top-right corner, then press Submit again.\n\nNothing has been "
+        + "sent, so your work is still here."
+      : "Please sign in with Google before submitting \u2014 use the account button in the "
+        + "top-right corner, then try again.\n\nNothing has been sent, so your work is still here: "
+        + "sign in and press Submit again.";
+  };
+}
 /* ── TRACING A CELL THE SEGMENTATION DOES NOT HAVE ──────────────────────────────  2026-09-16
    Paste a link of contours, keep it, and it rides into the Blender export as an ordinary cell.
 
@@ -11776,6 +11802,21 @@ function tracingPublish(t,quiet){
   if(ok===false)return false;
   t.pending_share=false;
   t.shared_at=new Date().toISOString();
+  /* A PROMISE IS NOT A YES, 2026-09-21. λJump, βJump, ηJump and ωJump answer with a promise of
+     {ok, error}; the backend can still refuse (a token that lapsed in flight, a deployment that
+     does not know the type). A refused tracing goes back on the queue it would otherwise have been
+     taken off, so it is sent on the next sign-in, and the card says why it was not. */
+  if(ok&&typeof ok.then==="function"){
+    ok.then(function(d){
+      if(!(d&&d.ok===false))return;
+      t.pending_share=true; t.shared_at="";
+      tracingWrite(TRACINGS_KEPT); tracingRenderList();
+      tracingSay("\u201c"+(t.name||"The tracing")+"\u201d did NOT reach the dataset: "
+        +String(d.error||"the server refused it")+" It is kept here and goes up on its own once "
+        +"you are signed in.");
+      tracingFlushSoon();
+    },function(){});
+  }
   /* AFTER the tracing, and only if the tracing went: an annotation pointing at an outline that was
      refused would be a coordinate with nothing behind it. Once per tracing, not once per press, so
      a queued one registers its centre when it finally goes out too.
@@ -14830,24 +14871,13 @@ var WJ_BULK_SEG = {};           // "<volume>|<key>|<x,y,z>" -> the segment under
     label:   function(i){ var n = WJ_BULK_ROWS[i], s = nameOf(n);
       return "Nucleus " + escHtml(n.id) + " &middot; " + (s ? escHtml(s) : "<span class='hint'>not named yet</span>"); },
 
-    /* ωJump's store answers with a promise per row. Say which did not arrive, then reread the map so
-       the nuclei's organelle counts include what was just sent. */
+    /* Once the answers are in, re-read the map, so the nuclei's organelle counts include what was
+       just sent. Saying which rows the sheet refused is core/bulkorgan.js's job since 2026-09-21. */
     afterSubmit: function(sent){
-      Promise.all(sent.map(function(p){
-        return Promise.resolve(p).then(function(d){ return d && d.ok === false ? (d.error || "refused") : ""; },
-                                       function(e){ return String(e && e.message || e); });
-      })).then(function(errs){
-        var bad = errs.filter(Boolean);
-        if (bad.length){
-          var t = document.getElementById("bulkOrganThanks");
-          if (t) t.innerHTML = "<div class='idf-flag' style='margin-top:10px;color:var(--bad)'>"
-            + (errs.length - bad.length) + " of " + errs.length + " reached the sheet; " + bad.length
-            + " did not: " + escHtml(bad[0]) + "</div>";
-          var b = document.getElementById("bulkOrganSubmit");
-          if (b){ b.disabled = false; b.textContent = "Submit"; }
-        }
-        return UJ.app.store().load().then(function(){ UJ.app.renderList(); });
-      }).catch(function(){});
+      Promise.all(sent.map(function(p){ return Promise.resolve(p).catch(function(){}); }))
+        .then(function(){ return UJ.app.store().load(); })
+        .then(function(){ UJ.app.renderList(); })
+        .catch(function(){});
     }
   };
 })();
@@ -15287,10 +15317,35 @@ function bulkOrganSubmit(){
     return;
   }
   btn.disabled=true;btn.textContent="submitted";
-  document.getElementById("bulkOrganThanks").innerHTML=
-    '<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">'
-    +"Thanks \u2014 "+posted+" structure"+(posted===1?"":"s")+" logged across "
-    +Object.keys(byCell).length+" cell"+(Object.keys(byCell).length===1?"":"s")+".</div>";
+  const nCells=Object.keys(byCell).length;
+  const thanks=function(n){
+    document.getElementById("bulkOrganThanks").innerHTML=
+      '<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">'
+      +"Thanks \u2014 "+n+" structure"+(n===1?"":"s")+" logged across "
+      +nCells+" cell"+(nCells===1?"":"s")+".</div>";
+  };
+  /* A PROMISE IS NOT A YES, 2026-09-21. Where postReport answers with a promise of {ok, error}
+     (λJump, βJump, ηJump, ωJump), the thanks waits for the answers, and a refusal is said -- with
+     the server's own reason and Submit live again -- rather than counted. µJump's family answers
+     true and reports each post in its own toast, so it is thanked at once as before. */
+  const pending=sent.filter(function(x){return x&&typeof x.then==="function";});
+  if(!pending.length){ thanks(posted); }
+  else{
+    btn.textContent="sending\u2026";
+    Promise.all(sent.map(function(x){
+      if(!(x&&typeof x.then==="function"))return x===false?"not sent":"";
+      return x.then(function(d){return d&&d.ok===false?String(d.error||"refused"):"";},
+                    function(e){return String(e&&e.message||e||"could not reach the server");});
+    })).then(function(errs){
+      const bad=errs.filter(Boolean);
+      if(!bad.length){ btn.textContent="submitted"; thanks(errs.length); return; }
+      btn.disabled=false; btn.textContent="Submit";
+      document.getElementById("bulkOrganThanks").innerHTML=
+        '<div class="idf-flag" style="margin-top:10px;color:var(--bad)">'
+        +(errs.length-bad.length)+" of "+errs.length+" reached the sheet; "+bad.length
+        +" did not \u2014 "+escHtml(bad[0])+" Your rows are still here: press Submit again.</div>";
+    });
+  }
   if(bulkCfg().afterSubmit){ try{ bulkCfg().afterSubmit(sent); }catch(_e){} }
 }
 

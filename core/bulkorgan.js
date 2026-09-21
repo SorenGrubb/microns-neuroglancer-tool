@@ -419,10 +419,35 @@ function bulkOrganSubmit(){
     return;
   }
   btn.disabled=true;btn.textContent="submitted";
-  document.getElementById("bulkOrganThanks").innerHTML=
-    '<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">'
-    +"Thanks \u2014 "+posted+" structure"+(posted===1?"":"s")+" logged across "
-    +Object.keys(byCell).length+" cell"+(Object.keys(byCell).length===1?"":"s")+".</div>";
+  const nCells=Object.keys(byCell).length;
+  const thanks=function(n){
+    document.getElementById("bulkOrganThanks").innerHTML=
+      '<div class="idf-flag" style="border-color:var(--accent);color:var(--accent);margin-top:10px">'
+      +"Thanks \u2014 "+n+" structure"+(n===1?"":"s")+" logged across "
+      +nCells+" cell"+(nCells===1?"":"s")+".</div>";
+  };
+  /* A PROMISE IS NOT A YES, 2026-09-21. Where postReport answers with a promise of {ok, error}
+     (λJump, βJump, ηJump, ωJump), the thanks waits for the answers, and a refusal is said -- with
+     the server's own reason and Submit live again -- rather than counted. µJump's family answers
+     true and reports each post in its own toast, so it is thanked at once as before. */
+  const pending=sent.filter(function(x){return x&&typeof x.then==="function";});
+  if(!pending.length){ thanks(posted); }
+  else{
+    btn.textContent="sending\u2026";
+    Promise.all(sent.map(function(x){
+      if(!(x&&typeof x.then==="function"))return x===false?"not sent":"";
+      return x.then(function(d){return d&&d.ok===false?String(d.error||"refused"):"";},
+                    function(e){return String(e&&e.message||e||"could not reach the server");});
+    })).then(function(errs){
+      const bad=errs.filter(Boolean);
+      if(!bad.length){ btn.textContent="submitted"; thanks(errs.length); return; }
+      btn.disabled=false; btn.textContent="Submit";
+      document.getElementById("bulkOrganThanks").innerHTML=
+        '<div class="idf-flag" style="margin-top:10px;color:var(--bad)">'
+        +(errs.length-bad.length)+" of "+errs.length+" reached the sheet; "+bad.length
+        +" did not \u2014 "+escHtml(bad[0])+" Your rows are still here: press Submit again.</div>";
+    });
+  }
   if(bulkCfg().afterSubmit){ try{ bulkCfg().afterSubmit(sent); }catch(_e){} }
 }
 

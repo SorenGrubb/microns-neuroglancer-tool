@@ -46,6 +46,9 @@ try{if(localStorage.getItem("djump_theme")==="light")document.documentElement.se
    to every already-rendered chart via Plotly.relayout() whenever the theme is toggled, so open
    charts update in place without a full page reload. */
 :root{--bg:#0d1117;--panel:#161b22;--line:#2a313c;--ink:#e6edf3;--mut:#8b949e;--accent:#b388ff;--accent-dim:#4a2d80;--on-accent:#1a0b2e;--warn:#e3b341;--exc:#f0883e;--inh:#58a6ff;--non:#8957e5;--ok:#3fb950;--danger:#f85149;--gold:#e8b923;--inset:#0b0f14;--disabled:#21262d;--shadow:rgba(0,0,0,.3);--scrim:rgba(0,0,0,.45);--mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,monospace}
+/* The shared code colours an error var(--bad); this page's red is --danger. An alias, so it
+   follows the theme. 2026-09-21 -- until then every refusal printed in the body colour. */
+:root{--bad:var(--danger)}
 /* LIGHT THEME -- chosen for readability on screen AND on paper: near-black text on white
    (~16:1 contrast, well past WCAG AAA), every accent/status color independently checked to stay
    readable at normal text size on white (all >=4.5:1), no pure-saturated neon hues (the dark
@@ -704,7 +707,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 15:22</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 15:36</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
