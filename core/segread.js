@@ -80,6 +80,31 @@ UJ.segread = (function(){
   }
   function isGraphene(src){ return /^graphene:\/\//.test(String(src || "")); }
 
+  /* ── A BUCKET WITHOUT CORS ───────────────────────────────────────────────────  2026-09-21
+     gs://vclem-xh (βJump's Alzheimer's vCLEM, and ηJump's H01) sends no CORS headers, so the
+     browser refuses the ordinary public URL: `TypeError: Failed to fetch`. Google's JSON API serves
+     the same object WITH them, and honours Range — measured 206 on a 113 MB shard.
+
+     THE WHOLE OBJECT NAME IS ONE ENCODED SEGMENT there, `/b/<bucket>/o/<a%2Fb%2Fc>?alt=media`, and
+     this file appends `/key/shard` to a base — which is why this is a URL BUILDER that sees the full
+     path, and not a second base string like βJump's meshBaseAlt. A probe that encoded only the
+     base drew a flat grey canvas from zero chunks.
+
+     Named per BUCKET, because CORS is a bucket's property. Module-wide, because core/emtiles.js
+     reads through this file's fetchers without ever configuring it. Default: no bucket, and
+     urlOf() is `base + "/" + path`, byte for byte what the three call sites built before. */
+  var GCS = "https://storage.googleapis.com/";
+  var JSON_API = {};
+  function useJsonApi(bucket){ if (bucket) JSON_API[String(bucket)] = true; }
+  function urlOf(base, path){
+    var full = base + "/" + path;
+    if (full.indexOf(GCS) !== 0 || full.indexOf(GCS + "storage/v1/") === 0) return full;
+    var rest = full.slice(GCS.length), cut = rest.indexOf("/");
+    if (cut < 0 || !JSON_API[rest.slice(0, cut)]) return full;
+    return GCS + "storage/v1/b/" + rest.slice(0, cut) + "/o/"
+         + encodeURIComponent(rest.slice(cut + 1)) + "?alt=media";
+  }
+
   /* ── caches ──────────────────────────────────────────────────────────────────────────────
      Keyed by the exact thing fetched, so nothing can be served for the wrong coordinate. Held
      for the life of the page: the volumes are immutable published data. */
@@ -90,7 +115,7 @@ UJ.segread = (function(){
 
   function getInfo(base){
     if (!infoCache[base])
-      infoCache[base] = fetch(base + "/info", { cache: "force-cache" }).then(function(r){
+      infoCache[base] = fetch(urlOf(base, "info"), { cache: "force-cache" }).then(function(r){
         if (!r.ok) throw new Error("no info at " + base + " (" + r.status + ")");
         return r.json();
       });
@@ -247,10 +272,10 @@ UJ.segread = (function(){
 
   /* ── unsharded: one GET ──────────────────────────────────────────────────────────────────── */
   async function unshardedChunk(base, scale, at){
-    var url = base + "/" + scale.key + "/"
+    var url = urlOf(base, scale.key + "/"
             + at.start[0] + "-" + at.end[0] + "_"
             + at.start[1] + "-" + at.end[1] + "_"
-            + at.start[2] + "-" + at.end[2];
+            + at.start[2] + "-" + at.end[2]);
     if (!chunkCache[url]) chunkCache[url] = (async function(){
       var r = await fetch(url);
       if (!r.ok) return null;                      // never written == all background
@@ -266,8 +291,8 @@ UJ.segread = (function(){
     var hashed = key >> BigInt(sh.preshift_bits);          // identity hash
     var mini  = Number(hashed & ((1n << BigInt(sh.minishard_bits)) - 1n));
     var shard = Number((hashed >> BigInt(sh.minishard_bits)) & ((1n << BigInt(sh.shard_bits)) - 1n));
-    var url = base + "/" + scale.key + "/"
-            + shard.toString(16).padStart(Math.ceil(sh.shard_bits / 4), "0") + ".shard";
+    var url = urlOf(base, scale.key + "/"
+            + shard.toString(16).padStart(Math.ceil(sh.shard_bits / 4), "0") + ".shard");
     var indexEnd = (1 << sh.minishard_bits) * 16;          // offsets below are past this
     var ek = url + "|" + mini;
 
@@ -513,7 +538,8 @@ UJ.segread = (function(){
     return out;
   }
 
-  return { configure: configure, configured: configured,
+  return { configure: configure, configured: configured, useJsonApi: useJsonApi,
+           _urlOf: urlOf,
            nucleusAt: nucleusAt, segmentAt: segmentAt, resolveAt: resolveAt,
            nearestNucleus: nearestNucleus, mapPool: mapPool,
            /* exported for the check, which drives the real decoder over real bytes */

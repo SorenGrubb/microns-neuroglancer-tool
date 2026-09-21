@@ -158,7 +158,11 @@ UJ.segpaint = (function(){
     if (!CFG) throw new Error("segpaint.configure() first");
     o = o || {};
     var alpha = o.alpha == null ? 0.4 : o.alpha;
-    var root = idPair(o.root), nuc = idPair(o.nuc);
+    /* A layer whose volume is not configured is skipped, not fetched.  2026-09-21. An empty
+       source becomes the base "", and "" + "/info" is the host's own 404 page — the fault
+       core/segread.js stopped making on 2026-09-20. A caller handing an id for a volume the
+       dataset lacks (βJump's nucleus box holds a Hoechst blob number) gets "nothing to show". */
+    var root = CFG.seg ? idPair(o.root) : null, nuc = CFG.nuc ? idPair(o.nuc) : null;
     if (!root && !nuc) return { ok: false, why: "no root ID or nucleus ID to show" };
     var ctx = canvas.getContext("2d");
     var img = ctx.getImageData(0, 0, view.w, view.h);

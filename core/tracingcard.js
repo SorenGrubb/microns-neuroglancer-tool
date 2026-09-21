@@ -1462,16 +1462,24 @@ async function pad3DGhostMeshes(){
   const ids = pad3DIds();
   if (PAD3D_MESHES && PAD3D_KEY === ids.key) return PAD3D_MESHES;
   const out = [], notes = [];
-  if (ids.root && ids.root !== "0" && typeof MeshDL !== "undefined" && MeshDL.fetchCombinedMesh){
+  /* core/mesh.js BY ITS OWN NAME FIRST.  2026-09-21. This looked only for a page global `MeshDL`,
+     which µJump and δJump define as `const MeshDL = UJ.mesh;` and βJump never has — it calls the
+     module UJ.mesh throughout. So the see-through cell could never load on βJump, and the note
+     below would then have said there was no ID in a box that had one. */
+  const MESH = (window.UJ && UJ.mesh && UJ.mesh.fetchCombinedMesh) ? UJ.mesh
+             : ((typeof MeshDL !== "undefined" && MeshDL && MeshDL.fetchCombinedMesh) ? MeshDL : null);
+  if (ids.root && ids.root !== "0" && MESH){
     try {
-      const m = await MeshDL.fetchCombinedMesh(ids.root, function(f, msg){
+      const m = await MESH.fetchCombinedMesh(ids.root, function(f, msg){
         pad3DNote("fetching the cell’s mesh… " + (msg || Math.round((f || 0) * 100) + "%"));
       });
       if (m && m.positions && m.positions.length) out.push({ what: "cell", mesh: m });
       else notes.push("the cell has no mesh to draw");
     } catch (e){ notes.push("the cell’s mesh could not be read: " + String(e && e.message || e)); }
   }
-  if (ids.nuc && UJ.nucmesh){
+  /* Only where the dataset HAS a nucleus volume. On βJump the box holds a Hoechst blob number,
+     and a reader configured with no volume fetches the host's own 404 page as "/info". */
+  if (ids.nuc && UJ.nucmesh && tracingSources().nuc){
     try {
       if (!UJ.nucmesh.configured()) UJ.nucmesh.configure({ nuc: tracingSources().nuc });
       pad3DNote("fetching the nucleus’ mesh…");
@@ -2729,8 +2737,11 @@ async function padSegOverlay(){
   const box = document.getElementById("tracePadSeg");
   if (!box || !box.checked){ padSegSay(""); return null; }
   if (!PAD_VIEW){ padSegSay("No section on the pad yet.", true); return null; }
-  const root = (document.getElementById("tracingRootId").value || "").trim();
-  const nuc = (document.getElementById("tracingNucId").value || "").trim();
+  /* Each id only where the dataset has the volume to paint it from, 2026-09-21 — on βJump the
+     nucleus box holds a Hoechst blob number and there is no nucleus segmentation behind it. */
+  const SRCS = tracingSources();
+  const root = SRCS.seg ? (document.getElementById("tracingRootId").value || "").trim() : "";
+  const nuc = SRCS.nuc ? (document.getElementById("tracingNucId").value || "").trim() : "";
   if (!root && !nuc){
     padSegSay("Nothing to paint — fill in this cell's root ID or nucleus ID below the pad, "
       + "then tick this again.", true);
@@ -3222,9 +3233,13 @@ async function tracingResolveAt(pos){
        fact about the tissue when it is a fact about the dataset. Only the two answers that are
        about a VOLUME rather than about this point are repeated; "nothing segmented there" is
        already the sentence above. */
+    /* Only for a box this left EMPTY, 2026-09-21: on βJump the nucleus box is always filled from
+       the cell, and "no nucleus volume" after every coordinate would explain nothing. */
     const missed=[];
-    if(/no flat cell segmentation|could not be read/.test(r.why||"")) missed.push(r.why);
-    if(/no nucleus volume|could not be read/.test(r.nucWhy||"")) missed.push(r.nucWhy);
+    if(/no flat cell segmentation|could not be read/.test(r.why||"")&&!rootEl.value.trim())
+      missed.push(r.why);
+    if(/no nucleus volume|could not be read/.test(r.nucWhy||"")&&!nucEl.value.trim())
+      missed.push(r.nucWhy);
     say.textContent=(bits.length
       ? "At that coordinate: "+bits.join(", ")+" \u2014 filled in below."
       : "Nothing is segmented at that coordinate, which is usually why you are tracing it.")

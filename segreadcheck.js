@@ -358,6 +358,60 @@ console.log("\nthe nucleus near a point, not the nucleus at it");
        -> Error: no info at  (404)
 
    \u2014 note the missing base in the message, because there was no base. */
+/* ── A BUCKET WITHOUT CORS ────────────────────────────────────────────────────────  2026-09-21
+   gs://vclem-xh sends no CORS headers; Google's JSON API serves the same objects with them and
+   honours Range (206 on a 113 MB shard, measured from grubblab.com). The JSON API wants the WHOLE
+   object name as one percent-encoded segment — a probe that encoded only the base and appended
+   `/16.0x16.0x30.0/07.shard` drew a flat grey canvas from zero chunks. So this routes the real
+   sharded reader to ONLY the JSON-API URLs and makes it find both chunks: a reader that built any
+   URL the old way would get 404, which here means empty space, which reads 0. */
+console.log("\na bucket without CORS");
+{
+  const { S } = load({});
+  const plain = "https://storage.googleapis.com/vclem-xh/alzheimers/em_clahe";
+  ok(S._urlOf(plain, "info") === plain + "/info",
+     "no bucket named: the URL is exactly what it always was", S._urlOf(plain, "info"));
+  S.useJsonApi("vclem-xh");
+  const u = S._urlOf(plain, "16.0x16.0x30.0/07.shard");
+  ok(u === "https://storage.googleapis.com/storage/v1/b/vclem-xh/o/"
+         + "alzheimers%2Fem_clahe%2F16.0x16.0x30.0%2F07.shard?alt=media",
+     "a named bucket goes through the JSON API, with the WHOLE object name encoded", u);
+  ok(S._urlOf("https://storage.googleapis.com/v1dd_imagery/image", "info")
+       === "https://storage.googleapis.com/v1dd_imagery/image/info",
+     "...and only that bucket — V1DD's has CORS and keeps its plain URL");
+  const already = "https://storage.googleapis.com/storage/v1/b/vclem-xh/o/x%2Fy";
+  ok(S._urlOf(already, "info") === already + "/info",
+     "a URL already on the JSON API is left alone, not encoded twice");
+  ok(S._urlOf("https://bossdb-open-data.s3.amazonaws.com/v", "info")
+       === "https://bossdb-open-data.s3.amazonaws.com/v/info",
+     "...as is anything not on storage.googleapis.com");
+
+  const base = "https://storage.googleapis.com/vclem-xh/a/seg";
+  const J = k => "https://storage.googleapis.com/storage/v1/b/vclem-xh/o/"
+               + encodeURIComponent("a/seg/" + k) + "?alt=media";
+  const sharding = { "@type": "neuroglancer_uint64_sharded_v1", data_encoding: "gzip",
+                     hash: "identity", minishard_bits: 1, minishard_index_encoding: "gzip",
+                     preshift_bits: 1, shard_bits: 4 };
+  const scale = { key: "8.0x8.0x40.0", size: [16, 8, 8], chunk_sizes: [[8, 8, 8]],
+                  voxel_offset: [0, 0, 0], resolution: [8, 8, 40],
+                  compressed_segmentation_block_size: [8, 8, 8], sharding };
+  const info = Buffer.from(JSON.stringify({ data_type: "uint64", num_channels: 1, scales: [scale] }));
+  const A = zlib.gzipSync(buildChunk([8, 8, 8], [8, 8, 8], 2, [1, 1, 1], "864691135741608653", "0"));
+  const B = zlib.gzipSync(buildChunk([8, 8, 8], [8, 8, 8], 2, [2, 2, 2], "864691136090135607", "0"));
+  const shard = buildShard([{ key: 0n, data: A }, { key: 1n, data: B }], 1);
+
+  const { S: S2, hits } = load({ [J("info")]: info, [J("8.0x8.0x40.0/0.shard")]: shard });
+  S2.useJsonApi("vclem-xh");
+  S2.configure({ seg: "precomputed://gs://vclem-xh/a/seg", nuc: "", res: [8, 8, 40] });
+  const a = await S2.segmentAt([1, 1, 1]);
+  const b = await S2.segmentAt([8 + 2, 2, 2]);
+  ok(a.rootId === "864691135741608653" && b.rootId === "864691136090135607",
+     "a SHARDED volume reads through the JSON API — both chunks, so Range works on it too",
+     a.rootId + " / " + b.rootId);
+  ok(hits.length > 0 && hits.every(h => h.indexOf("/storage/v1/b/vclem-xh/o/") > 0),
+     "...and every request went that way", hits.length + " request(s)");
+}
+
 console.log("\na volume the dataset does not have");
 {
   const base = "https://h/x";
