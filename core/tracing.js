@@ -424,6 +424,9 @@ UJ.tracing = (function(){
     var out = { type: "traced_structure", structureId: id,
                 name: meta.name || "", kind: meta.kind || "", cellType: meta.cellType || "",
                 color: meta.color || "", nucleusId: meta.nucleusId || "", rootId: meta.rootId || "",
+                /* The cell's centre, "x,y,z" in voxels (2026-09-21): a cell is also a place, and on
+                   a dataset with no segmentation it may be the only name it has. */
+                cellCoord: meta.cellCoord || "",
                 comment: meta.comment || "",
                 sections: Object.keys(perZ).length, contours: contours };
     /* ── HOW BIG IT IS, CARRIED WITH IT ───────────────────────────────────────────  2026-09-17
@@ -490,7 +493,7 @@ UJ.tracing = (function(){
       if (!s.name && r.name) s.name = r.name;
       /* Metadata follows the geometry: a later share that named the cell type fills in what an
          earlier one left blank, and never blanks what was there. */
-      ["kind", "cellType", "color", "nucleusId", "rootId"].forEach(function(f){
+      ["kind", "cellType", "color", "nucleusId", "rootId", "cellCoord"].forEach(function(f){
         if (!s[f] && r[f]) s[f] = r[f];
       });
       /* The VOLUME follows the newest share rather than the first, because it is a property of the

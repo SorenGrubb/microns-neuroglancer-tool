@@ -296,28 +296,35 @@ let TRACING_PENDING=null;
    would like is that they are organized as sub-elements of the cell they were traced in". A series
    is per cell, so two cells each having a Lysosome 1 is right; the flat list hid the cell. See
    src/the_tracings_group_by_cell.py. */
-function tracingCellKeyOf(nuc, root){
-  nuc = String(nuc || ""); root = String(root || "");
-  return nuc ? "n:" + nuc : (root ? "r:" + root : "");
+function tracingCellKeyOf(nuc, root, coord){
+  nuc = String(nuc || ""); root = String(root || ""); coord = String(coord || "");
+  return nuc ? "n:" + nuc : (root ? "r:" + root : (coord ? "c:" + coord : ""));
 }
 /* The cell's own line: its type, its nucleus, its root, how many. */
-function tracingCellHead(nuc, root, type, n){
+function tracingCellHead(nuc, root, type, n, coord){
   const bits = [];
   if (type && type !== "traced") bits.push("<b>" + escHtml(type) + "</b>");
   if (nuc) bits.push("nucleus " + escHtml(nuc));
   if (root) bits.push("root " + escHtml(root));
-  if (!nuc && !root) bits.push("<b>Not filed against a cell</b>");
+  if (coord) bits.push((nuc || root ? "centre " : "cell at ") + escHtml(tracingCoordShow(coord)));
+  if (!nuc && !root && !coord) bits.push("<b>Not filed against a cell</b>");
   return '<span class="tracingcellhead" style="flex:1 1 200px;min-width:0">' + bits.join(" &middot; ")
     + ' <span style="opacity:.6">&middot; ' + n + " tracing" + (n === 1 ? "" : "s") + "</span></span>";
 }
 /* Groups in the order their first member comes, so the list does not jump when one is added. */
-function tracingGroupByCell(list, nucOf, rootOf){
+function tracingGroupByCell(list, nucOf, rootOf, coordOf){
   const by = {}, order = [];
+  coordOf = coordOf || function(){ return ""; };
+  /* ωJump files a tracing with no nucleus as "<volume>:" -- a scope, not a cell (2026-09-21). */
+  const nucOf0 = nucOf;
+  nucOf = function(t){ const v = String(nucOf0(t) || ""); return /:$/.test(v) ? "" : v; };
   list.forEach(function(t, i){
-    const k = tracingCellKeyOf(nucOf(t), rootOf(t));
-    if (!by[k]){ by[k] = { key: k, nuc: String(nucOf(t) || ""), root: String(rootOf(t) || ""), items: [] }; order.push(k); }
+    const k = tracingCellKeyOf(nucOf(t), rootOf(t), coordOf(t));
+    if (!by[k]){ by[k] = { key: k, nuc: String(nucOf(t) || ""), root: String(rootOf(t) || ""),
+                           coord: String(coordOf(t) || ""), items: [] }; order.push(k); }
     const g = by[k];
     if (!g.root && rootOf(t)) g.root = String(rootOf(t));
+    if (!g.coord && coordOf(t)) g.coord = String(coordOf(t));
     g.items.push({ t: t, i: i });
   });
   /* No cell last: it is the group nobody is looking for. */
@@ -348,12 +355,13 @@ function tracingRenderList(){
       +'Blender download from this page until you remove it.</p>';
     return;
   }
-  const groups=tracingGroupByCell(TRACINGS_KEPT,function(t){return t.nucleus_id;},function(t){return t.root_id;});
+  const groups=tracingGroupByCell(TRACINGS_KEPT,function(t){return t.nucleus_id;},function(t){return t.root_id;},
+                                  function(t){return t.cell_coord;});
   host.innerHTML='<label>Kept tracings, by cell &mdash; these go into the 3D export</label>'
     +groups.map(function(g,gi){
       const type=(g.items.filter(function(x){return x.t.type&&x.t.type!=="traced";})[0]||{t:{}}).t.type||"";
       return '<div '+TRACING_CELL_BOX+' data-g="'+gi+'">'
-        +'<div '+TRACING_CELL_ROW+'>'+tracingCellHead(g.nuc,g.root,type,g.items.length)
+        +'<div '+TRACING_CELL_ROW+'>'+tracingCellHead(g.nuc,g.root,type,g.items.length,g.coord)
         +'<button class="idbtn tracingcellngl" data-g="'+gi+'" '+TRACING_BTN+' title="All of this '
         +'cell&rsquo;s kept tracings in the viewer, each in its own colour, with the cell.">Neuroglancer</button>'
         +'<button class="idbtn tracingcelldrop" data-g="'+gi+'" '+TRACING_BTN+' title="Take all of '
@@ -411,7 +419,7 @@ function tracingRenderList(){
       if(!g)return;
       tracingArm(b,"Click again to remove "+g.items.length,function(){
         const waiting=g.items.filter(function(x){return x.t.pending_share;}).length;
-        TRACINGS_KEPT=TRACINGS_KEPT.filter(function(t){return tracingCellKeyOf(t.nucleus_id,t.root_id)!==g.key;});
+        TRACINGS_KEPT=TRACINGS_KEPT.filter(function(t){return tracingCellKeyOf(t.nucleus_id,t.root_id,t.cell_coord)!==g.key;});
         tracingWrite(TRACINGS_KEPT);tracingRenderList();
         tracingSay("Removed "+g.items.length+" tracing"+(g.items.length===1?"":"s")+" of that cell from this page. "
           +(waiting?waiting+" had not reached the dataset yet and are gone. ":"")
@@ -840,6 +848,8 @@ function tracingCurrentAll(){
       t.areas=vol.perSection.map(function(q){return {z:q.z,areaUm2:q.areaUm2};});
     }
     if(nid)t.nucleus_id=nid;
+    const cat=tracingCellAtVal();
+    if(cat)t.cell_coord=cat;
     if(rid)t.root_id=rid;
     /* The pad's own index, not the published number: see the header. The first structure keeps the
        bare id, so editing a shared tracing and adding it back is still a version of THAT tracing;
@@ -1527,6 +1537,7 @@ function tracingPublish(t,quiet){
   const sub=UJ.tracing.toSubmission(t.rings,{structureId:t.id,name:t.name,kind:t.kind||"",
                                              cellType:t.type,color:t.color,
                                              nucleusId:tracingScoped(t.nucleus_id||""),rootId:t.root_id||"",
+                                             cellCoord:t.cell_coord||"",
                                              /* the size goes with it -- Søren, 2026-09-17: "add the
                                                 volumes to the data for the cell when submitting" */
                                              instanceIndex:t.instance_index,
@@ -2317,6 +2328,7 @@ function draftNow(){
            used: !!(found && found.style.display !== "none"),
            what: val("tracingWhat"), name: val("tracingName"), type: val("tracingType"),
            color: val("tracingColor"), nucId: val("tracingNucId"), rootId: val("tracingRootId"),
+           cellAt: val("tracingCellAt"),
            typeTouched: !!TRACING_TYPE_TOUCHED,
            /* SEVERAL STRUCTURES ARE PART OF THE DRAFT TOO. Resuming with the contours back but the
               colours re-dealt and the types forgotten would be a worse draft than none: the work
@@ -2517,6 +2529,7 @@ function draftResumeFrom(d){
   set("tracePadMip", d.mip); set("tracePadStep", d.step);
   set("tracingWhat", d.what); set("tracingName", d.name); set("tracingType", d.type);
   set("tracingColor", d.color); set("tracingNucId", d.nucId); set("tracingRootId", d.rootId);
+  set("tracingCellAt", d.cellAt);
   TRACING_TYPE_TOUCHED = !!d.typeTouched;
   PAD_INST_COLOUR = d.instColour || {};
   PAD_INST_KIND = d.instKind || {};
@@ -2629,7 +2642,7 @@ function tracingRenderShared(){
     return;
   }
   const groups = tracingGroupByCell(TRACING_SHARED, function(t){ return t.nucleusId; },
-                                    function(t){ return t.rootId; });
+                                    function(t){ return t.rootId; }, function(t){ return t.cellCoord; });
   const newest = function(g){ return g.items.reduce(function(m, x){
     const s = String(x.t.timestamp || ""); return s > m ? s : m; }, ""); };
   groups.sort(function(a, b){
@@ -2650,7 +2663,7 @@ function tracingRenderShared(){
     + groups.map(function(g, gi){
         const type = (g.items.filter(function(x){ return x.t.cellType; })[0] || { t: {} }).t.cellType || "";
         return '<div ' + TRACING_CELL_BOX + ' data-g="' + gi + '">'
-          + '<div ' + TRACING_CELL_ROW + '>' + tracingCellHead(g.nuc, g.root, type, g.items.length)
+          + '<div ' + TRACING_CELL_ROW + '>' + tracingCellHead(g.nuc, g.root, type, g.items.length, g.coord)
           + '<button class="idbtn tracingcellpad" data-g="' + gi + '" ' + TRACING_BTN + ' title="Every '
             + 'tracing of this cell onto the pad, each as its own numbered structure. Adding them back '
             + 'is the next version of each.">Open all in the pad</button>'
@@ -2815,6 +2828,7 @@ async function tracingOpenCellShared(sids, btn){
     if (what) what.value = PAD_INST_KIND["0"].value;
     set("tracingNucId", first.st.nucleusId || first.t.nucleusId);
     set("tracingRootId", first.st.rootId || first.t.rootId);
+    set("tracingCellAt", tracingCoordShow(first.st.cellCoord || first.t.cellCoord || ""));
     const typeSel = document.getElementById("tracingType");
     const ct = first.st.cellType || first.t.cellType;
     if (typeSel && ct && [].slice.call(typeSel.options).some(function(o){ return o.value === ct; })){
@@ -2876,7 +2890,8 @@ async function tracingCellZip(g, btn){
     const got = await tracingFetchCell(g.items.map(function(x){ return x.t.structureId; }), btn);
     if (btn){ btn.disabled = true; btn.textContent = "zipping…"; }
     const res = (window.UJ && UJ.cfg && UJ.cfg.res) || [4, 4, 40];
-    const cell = tracingSafeName(g.nuc ? "nucleus_" + g.nuc : (g.root ? "root_" + g.root : "no_cell"));
+    const cell = tracingSafeName(g.nuc ? "nucleus_" + g.nuc : (g.root ? "root_" + g.root
+                                 : (g.coord ? "cell_at_" + g.coord.split(",").join("_") : "no_cell")));
     const zip = new JSZip(), dir = zip.folder(cell);
     const index = { nucleusId: g.nuc, rootId: g.root, dataset: (UJ.cfg && UJ.cfg.backend && UJ.cfg.backend.ds) || "",
                     exported: new Date().toISOString(), voxelSizeNm: res, tracings: [], failed: [] };
@@ -2886,7 +2901,8 @@ async function tracingCellZip(g, btn){
       const base = tracingSafeName(name) + "__" + tracingSafeName(x.sid);
       const meta = { structureId: x.sid, name: name, kind: st.kind || t.kind || "", cellType: t.cellType || st.cellType || "",
                      color: t.color || st.color || "", nucleusId: t.nucleusId || st.nucleusId || "",
-                     rootId: t.rootId || st.rootId || "", instanceIndex: t.instanceIndex, instanceOf: t.instanceOf || "",
+                     rootId: t.rootId || st.rootId || "", cellCoord: t.cellCoord || st.cellCoord || "",
+                     instanceIndex: t.instanceIndex, instanceOf: t.instanceOf || "",
                      volumeUm3: t.volumeUm3, contributors: t.contributors || [], versions: t.versions || 1,
                      tracedBy: t.tracedBy || "", timestamp: t.timestamp || "", fileUrl: t.fileUrl || "",
                      voxelSizeNm: res, units: "tool voxels (x, y) and section (z)" };
@@ -3009,6 +3025,16 @@ async function tracingOpenShared(sid, btn){
     if (st.color) document.getElementById("tracingColor").value = st.color;
     if (st.nucleusId) document.getElementById("tracingNucId").value = st.nucleusId;
     if (st.rootId) document.getElementById("tracingRootId").value = st.rootId;
+    { const ca = document.getElementById("tracingCellAt"), cc = st.cellCoord || t.cellCoord;
+      if (ca && cc) ca.value = tracingCoordShow(cc); }
+    /* FILED AGAINST NO CELL: opened, it looks for one -- the nearest nucleus to where it was drawn --
+       so adding it again files the next version under the cell. How Søren's λJump lysosome, traced
+       before the card could read λJump's nuclei, gets its cell (2026-09-21). */
+    if (!st.nucleusId && !st.rootId && !(st.cellCoord || t.cellCoord)){
+      const nucBox = document.getElementById("tracingNucId");
+      if (nucBox) nucBox.value = "";
+      try { tracingFillCell(PAD_CENTRE); } catch (_e){}
+    }
     const typeSel = document.getElementById("tracingType");
     if (typeSel && st.cellType){
       const opt = [].slice.call(typeSel.options).filter(function(o){ return o.value === st.cellType; })[0];
@@ -3848,13 +3874,54 @@ function tracingSuggestType(){
    It never overwrites something already typed, and it SAYS what it found: a prefilled id with no
    explanation is a number to distrust, and "nothing is segmented there" is itself the answer when
    the reason for tracing is that the segmentation has missed the cell. */
+/* ── THE CELL, FROM THE PAGE'S OWN NUCLEUS LIST ──────────────────────────  2026-09-21
+   Where there is no segmentation to read (λJump), or as well as it: the nearest nucleus the page
+   knows -- detected or added -- within 10 µm, the bulk card's own radius. A host with its own idea
+   of a cell answers UJ.cfg.tracing.cellAt(pos) -> {nucleusId, coord:[x,y,z], distNm, label}. */
+function tracingCellAtVal(){
+  var e = document.getElementById("tracingCellAt");
+  var n = String(e ? e.value : "").split(/[\s,;]+/).filter(Boolean).map(Number);
+  return (n.length === 3 && n.every(isFinite)) ? n.map(Math.round).join(",") : "";
+}
+function tracingCoordShow(c){ return String(c || "").split(",").join(", "); }
+function tracingNearestCell(pos){
+  var h = UJ.cfg && UJ.cfg.tracing && UJ.cfg.tracing.cellAt;
+  if (typeof h === "function") return h(pos) || null;
+  if (typeof nearest !== "function" || typeof bulkNucIdOf !== "function"
+      || typeof bulkCoordOf !== "function") return null;
+  var r = nearest(pos[0], pos[1], pos[2]);
+  if (!r || !(r.i >= 0) || !(r.dist <= 10000)) return null;
+  var c = String(bulkCoordOf(r.i) || "").split(",").map(Number);
+  if (c.length !== 3 || !c.every(isFinite)) return null;
+  var lab = "";
+  try { lab = (UJ.cfg.bulk && typeof UJ.cfg.bulk.name === "function") ? String(UJ.cfg.bulk.name(r.i) || "") : ""; }
+  catch (_e){ lab = ""; }
+  return { nucleusId: String(bulkNucIdOf(r.i)), coord: c.map(Math.round), distNm: r.dist, label: lab };
+}
+/* Fills the nucleus box when it is empty and the centre box when it is empty -- never over
+   something typed, and never a centre for a DIFFERENT nucleus than the one in the box. */
+function tracingFillCell(pos){
+  var nucEl = document.getElementById("tracingNucId"), atEl = document.getElementById("tracingCellAt");
+  if (!atEl) return "";
+  var c = null;
+  try { c = tracingNearestCell(pos); } catch (_e){ c = null; }
+  if (!c) return "";
+  var have = nucEl ? nucEl.value.trim() : "";
+  if (have && c.nucleusId && have !== String(c.nucleusId)) return "";
+  if (nucEl && !have && c.nucleusId) nucEl.value = String(c.nucleusId);
+  if (!atEl.value.trim()) atEl.value = c.coord.join(", ");
+  try { tracingSuggestType(); } catch (_e){}
+  return "Nearest nucleus: " + (c.label || c.nucleusId) + ", " + (c.distNm / 1000).toFixed(1)
+    + " \u00b5m away \u2014 its id and centre are filled in below.";
+}
+
 async function tracingResolveAt(pos){
   const say=document.getElementById("tracingAtSay");
   const nucEl=document.getElementById("tracingNucId"), rootEl=document.getElementById("tracingRootId");
   if(!say||!nucEl||!rootEl)return;
   try{
     UJ.segread.configure(tracingSources());
-  }catch(e){say.textContent="";return;}
+  }catch(e){say.textContent=tracingFillCell(pos);return;}
   say.textContent="Reading what is at "+pos.join(", ")+"\u2026";
   try{
     const r=await UJ.segread.resolveAt(pos);
@@ -3876,12 +3943,14 @@ async function tracingResolveAt(pos){
       missed.push(r.why);
     if(/no nucleus volume|could not be read/.test(r.nucWhy||"")&&!nucEl.value.trim())
       missed.push(r.nucWhy);
+    const near=tracingFillCell(pos);
     say.textContent=(bits.length
-      ? "At that coordinate: "+bits.join(", ")+" \u2014 filled in below."
-      : "Nothing is segmented at that coordinate, which is usually why you are tracing it.")
+      ? "At that coordinate: "+bits.join(", ")+" \u2014 filled in below."+(near?" "+near:"")
+      : (near||"Nothing is segmented at that coordinate, which is usually why you are tracing it."))
       +(missed.length?" ("+missed.join("; ")+".)":"");
     tracingSuggestType();
-  }catch(e){ say.textContent="Could not read the segmentation there: "+String(e&&e.message||e); }
+  }catch(e){ say.textContent="Could not read the segmentation there: "+String(e&&e.message||e)
+                +" "+tracingFillCell(pos); }
 }
 
 function wirePad(){
@@ -4348,7 +4417,7 @@ function wireTracing(){
   });
   /* Everything you fill in is part of the draft: a resumed tracing that had forgotten which cell it
      was of would have to be identified twice. */
-  ["tracingWhat","tracingName","tracingType","tracingColor","tracingNucId","tracingRootId"]
+  ["tracingWhat","tracingName","tracingType","tracingColor","tracingNucId","tracingRootId","tracingCellAt"]
     .forEach(function(id){
       const el=document.getElementById(id);
       if(el)el.addEventListener("change",function(){ if(PAD)draftSoon(); });
@@ -4568,6 +4637,13 @@ function tracingCardHtml(){
     "<label style=\"margin:0 0 4px\">Root ID &mdash; the cell</label>",
     "<div class=\"coord\"><input type=\"text\" id=\"tracingRootId\" inputmode=\"numeric\" placeholder=\"none at this coordinate\"></div>",
     "</div>",
+    "</div>",
+    "<!-- A CELL IS ALSO A PLACE.  2026-09-21. Søren: \"we also need to associate the organelles with",
+    "     the cell centroid coordinates and not just the nucleus IDs and root IDs\". Filled with the",
+    "     nearest nucleus's centre; editable, because a cell somebody has just added is where they say. -->",
+    "<div style=\"margin-top:8px\">",
+    "<label style=\"margin:0 0 4px\">Cell centre &mdash; x, y, z in voxels</label>",
+    "<div class=\"coord\"><input type=\"text\" id=\"tracingCellAt\" placeholder=\"the centre of its nucleus, e.g. 102016, 21037, 763\"></div>",
     "</div>",
     "<p class=\"hint\" id=\"tracingAtSay\" style=\"margin-top:4px\"></p>",
     "<p class=\"hint\" id=\"tracingVolSay\" style=\"margin-top:4px\"></p>",
@@ -4802,7 +4878,7 @@ UJ.tracingcard.datasetChanging = function(){
 UJ.tracingcard.datasetChanged = function(){
   PAD = null; PAD_VIEW = null; PAD_CENTRE = null;
   TRACING_DRAFT_ID = "";
-  ["tracingNucId", "tracingRootId", "tracingX", "tracingY", "tracingZ"].forEach(function(id){
+  ["tracingNucId", "tracingRootId", "tracingCellAt", "tracingX", "tracingY", "tracingZ"].forEach(function(id){
     var e = document.getElementById(id); if (e) e.value = "";
   });
   try { TRACING_POS_AUTO = ""; } catch (_e){}

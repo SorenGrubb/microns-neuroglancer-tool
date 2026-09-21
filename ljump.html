@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 20:13</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 20:32</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1729,6 +1729,9 @@ function absorbAddedNuclei(){
   N=N_DET+list.length;
   /* The identity dropdown counts by walking 0..N-1, so it has to be told the range moved. */
   try{ if(typeof window.__ljumpBuildIdentityDropdown==="function")window.__ljumpBuildIdentityDropdown(); }catch(_e){}
+  /* ...and so does "Browse a cell" (2026-09-21): it was built once, before the added cells came,
+     so a cell the community added was never in it. */
+  try{ if(typeof populateRandomTypeSelect==="function")populateRandomTypeSelect(); }catch(_e2){}
 }
 function newNucIdOptionsHtml(){
   try{
