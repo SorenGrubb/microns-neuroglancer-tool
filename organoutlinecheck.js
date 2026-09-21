@@ -29,6 +29,9 @@ const ok = (c, what, d) => {
 };
 const PAGE = process.argv[2] || "ujump.html";
 const LINK = /hjump/.test(PAGE);   // ηJump: #filterViewer is an <a>, its matches are FILTER.rows
+/* βJump and λJump: a nucleus table (BID), built their "Open all" on 2026-09-21 in core/openall.js.
+   λJump has no segmentation, so its second cell is found and filed by nucleus too. */
+const TABLE = /bjump|ljump/.test(PAGE);
 
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
@@ -55,7 +58,7 @@ const LINK = /hjump/.test(PAGE);   // ηJump: #filterViewer is an <a>, its match
 
   /* THE CELLS COME FROM THE FILTER, not from the file: a cell the preview did not match has no
      business in the view, and taking one from the table blames the product for leaving it out. */
-  const cells = await p.evaluate(async (LINK) => {
+  const cells = await p.evaluate(async ([LINK, TABLE]) => {
     document.getElementById("filterRun").click();
     const t0 = Date.now();
     while (Date.now() - t0 < 60000){
@@ -76,6 +79,18 @@ const LINK = /hjump/.test(PAGE);   // ηJump: #filterViewer is an <a>, its match
     }
     const m = UJ.stepthrough.currentMatches() || [];
     let A = null, B = null;
+    if (TABLE){
+      const segOf = i => (typeof BSEG !== "undefined" && BSEG[i]) ? String(BSEG[i]) : "";
+      for (const x of m){
+        const i = x.row.i;
+        if (!A && BID[i]){ A = { nuc: String(BID[i]), root: segOf(i) }; continue; }
+        if (A && !B){
+          if (segOf(i) && segOf(i) !== A.root){ B = { root: segOf(i) }; break; }
+          if (typeof BSEG === "undefined" && BID[i] && String(BID[i]) !== A.nuc){ B = { nuc: String(BID[i]) }; break; }
+        }
+      }
+      return { A, B, n: m.length, ds: (UJ.cfg.backend && UJ.cfg.backend.ds) || "" };
+    }
     /* The filter's own rule for a row's two ids (rowNucId/rowRootId live in its closure). */
     const nucOf = r => r.space === "MS" ? (r.subRef.nucleusId || "") : (r.space === "N" ? String(NID[r.i]) : "");
     const rootOf = r => r.space === "MS" ? (r.subRef.subRootId || "") : (r.space === "N" ? (rootId(r.i) || "") : "");
@@ -86,22 +101,24 @@ const LINK = /hjump/.test(PAGE);   // ηJump: #filterViewer is an <a>, its match
       if (A && B) break;
     }
     return { A, B, n: m.length, ds: (UJ.cfg.backend && UJ.cfg.backend.ds) || "" };
-  }, LINK);
+  }, [LINK, TABLE]);
   if (!cells.A || !cells.B){ console.log("the preview matched no usable cells: " + JSON.stringify(cells)); process.exit(1); }
+  const B_FILED = cells.B.root ? { rootId: cells.B.root } : { nucleusId: cells.B.nuc };
+  const B_BY = cells.B.root ? "ROOT id" : "NUCLEUS id (another cell; this dataset has no segmentation)";
   const ring = (z, x0, y0) => ({ z, points: [[x0, y0], [x0 + 40, y0], [x0 + 40, y0 + 40], [x0, y0 + 40]]
                                                .map(q => q.join(",")).join(";") });
   const row = (sid, kind, f, r, extra) => Object.assign({ structureId: sid, kind, instanceOf: kind,
       name: kind + " 1", color: "#ff0000", z: r.z, points: r.points, ringIndex: 0 }, f, extra || {});
   INDEX = [
     { structureId: "s1", kind: "lysosome", instanceOf: "lysosome", nucleusId: cells.A.nuc, color: "#ff0000" },
-    { structureId: "s2", kind: "mitochondria", instanceOf: "mitochondria", rootId: cells.B.root, color: "#00ff00" },
+    Object.assign({ structureId: "s2", kind: "mitochondria", instanceOf: "mitochondria", color: "#00ff00" }, B_FILED),
     { structureId: "s3", kind: "lysosome", instanceOf: "lysosome", nucleusId: "999999999", color: "#ff0000" },
     { structureId: "s4", kind: "cell", nucleusId: cells.A.nuc }
   ];
   ROWS = {
     s1: [row("s1", "lysosome", { nucleusId: cells.A.nuc }, ring(100, 1000, 2000))],
-    s2: [row("s2", "mitochondria", { rootId: cells.B.root }, ring(200, 3000, 4000)),
-         row("s2", "mitochondria", { rootId: cells.B.root }, ring(201, 3000, 4000), { ringIndex: 1 })]
+    s2: [row("s2", "mitochondria", B_FILED, ring(200, 3000, 4000)),
+         row("s2", "mitochondria", B_FILED, ring(201, 3000, 4000), { ringIndex: 1 })]
   };
 
   console.log(PAGE + "\n\nthe picker");
@@ -146,7 +163,12 @@ const LINK = /hjump/.test(PAGE);   // ηJump: #filterViewer is an <a>, its match
     while (Date.now() - t1 < 60000 && !window.__opened) await new Promise(r => setTimeout(r, 200));
     if (!window.__opened) return { none: true };
     const st = JSON.parse(decodeURIComponent(window.__opened.split("#!")[1]));
-    return { layers: st.layers.filter(l => /^traced /.test(l.name || "")).map(l => ({
+    const own = st.layers.filter(l => !/^traced /.test(l.name || ""));
+    const pts = own.filter(l => l.type === "annotation")
+                   .reduce((a, l) => a + (l.annotations || []).filter(x => x.type === "point").length, 0);
+    const segs = own.filter(l => l.type === "segmentation").map(l => l.name + ":" + (l.segments || []).length);
+    return { pts, segs, ngroups: own.filter(l => / \u2014 nuclei \(/.test(l.name || "")).length,
+             layers: st.layers.filter(l => /^traced /.test(l.name || "")).map(l => ({
       name: l.name, n: (l.annotations || []).length, color: l.annotationColor,
       types: [...new Set((l.annotations || []).map(a => a.type))].join(",") })) };
   }, [want, LINK]);
@@ -161,9 +183,16 @@ const LINK = /hjump/.test(PAGE);   // ηJump: #filterViewer is an <a>, its match
     ok(!!lys && lys.n === 4 && lys.types === "line" && lys.color === "#ff0000",
        "the lysosome filed by NUCLEUS id is drawn: one ring, four lines, in its colour",
        JSON.stringify(lys || null));
-    ok(!!mit && mit.n === 8, "the mitochondrion filed by ROOT id is drawn: two rings, eight lines",
+    ok(!!mit && mit.n === 8, "the mitochondrion filed by " + B_BY + " is drawn: two rings, eight lines",
        JSON.stringify(mit || null));
     ok(all.layers.length === 2, "...one layer per kind, and nothing else", all.layers.map(l => l.name).join(" | "));
+    if (TABLE){
+      ok(all.pts === cells.n, "the view has a point on every matched nucleus", all.pts + " of " + cells.n);
+      ok(all.ngroups >= 1, "...in one layer per community identity", all.ngroups + " layer(s)");
+      if (/bjump/.test(PAGE))
+        ok(all.segs.some(x => /^Segmentation \(SECGAN 16nm\) \(\d+\):\d+$/.test(x)),
+           "...and the matched cells' segments", all.segs.join(" | "));
+    }
   }
   const sids = reads.map(r => r.sid);
   ok(sids.includes("s1") && sids.includes("s2"), "both were read", sids.join(","));

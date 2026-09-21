@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 08:16</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 10:28</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -648,6 +648,17 @@ recorded.</p>
 <label style="font-size:12px" title="Structures the community has reported inside or around each nucleus, from the same 61-kind list µJump uses. Matching is OR across every ticked kind. A count of 0 means nobody has reported that structure in this dataset — not that it is absent from the tissue.">Organelles &amp; extracellular structures</label>
 <div id="fOrganellesBox"></div>
 </div>
+<!-- THE OTHER HALF OF AN ORGANELLE.  2026-09-18. Søren: "In the filter and show, it should also be
+     possible to select include organelles segmentations of a specific kind or all organelle
+     segmentations for the filtered cells." The boxes above draw where organelles were LOGGED; this
+     draws what has been OUTLINED, which is the same organelles with a shape and a volume. -->
+<div class="row" style="gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+<label style="font-size:12px;flex:0 0 auto;text-transform:none;letter-spacing:normal" for="filterOrganSeg" title="Hand-traced organelle outlines for the matched cells, drawn into the 3D view as contours &mdash; one layer per kind, in the colour each was drawn in. The outlines live in Drive and are read one file each, so this costs a moment per outline and is capped.">Traced organelle outlines</label>
+<select id="filterOrganSeg" style="flex:1 1 200px;min-width:0">
+<option value="">None &mdash; points only</option>
+<option value="__all">All outlined organelles</option>
+</select>
+</div>
 
 <!-- Cells near another cell type (2026-08-31, Søren: "bJump should have Filtering options for
      organelles and bounding boxes and cells near other cells"). µJump has had this since
@@ -684,6 +695,9 @@ a plain spatial cutout and do not.</p>
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
 <button class="idbtn" id="filterDownload" disabled title="Click &quot;Preview matches&quot; first" style="flex:1">Download as Excel</button>
+</div>
+<div class="row" style="margin-top:8px;gap:10px">
+<button class="idbtn" id="filterViewerAll" disabled title="Click &quot;Preview matches&quot; first &mdash; Opens a zoomed-out 3D view sized to fit every matching nucleus: a point on each, one colour-coded layer per community identity, and each one&rsquo;s segment in the same colour where the segmentation has it (it covers about half of this block). Region boxes and any traced organelle outlines picked above come as extra layers." style="flex:1">Open all matches in Neuroglancer (3D)</button>
 </div>
 
 <div class="card" id="stepThroughCard" style="margin-top:14px;display:none">
@@ -1101,6 +1115,9 @@ document.addEventListener("DOMContentLoaded", function(){
 <!-- The tracing card, shared with µJump, λJump and δJump. After the modules it is built on, before
      this page's own script, which supplies the host contract its header lists. -->
 <script src="core/tracingcard.js"></script>
+<!-- "Open all matches in Neuroglancer (3D)" and its traced-outline layer, 2026-09-21. -->
+<script src="core/tracedoutlines.js"></script>
+<script src="core/openall.js"></script>
 <script src="core/ontology.js"></script>
 <!-- Bulk organelle annotation, shared with µJump since 2026-09-21. After ontology.js,
      whose Nucleus group it reads; it builds the card into #bulkOrganCard. -->
@@ -4206,6 +4223,7 @@ function buildColumnsBjump(){
     lastMatches=null;
     dlBtn.disabled=true;
     dlBtn.title="Click \"Preview matches\" first";
+    const vab=document.getElementById("filterViewerAll"); if(vab)vab.disabled=true;
     statusEl.textContent="";
     MC().idle();
     UJ.stepthrough.initStepThrough(null);
@@ -4218,6 +4236,7 @@ function buildColumnsBjump(){
       n.toLocaleString()+" matching "+(n===1?"nucleus":"nuclei")+" found.";
     dlBtn.disabled=n===0;
     dlBtn.title=n===0?"No matches to download":"";
+    const vab=document.getElementById("filterViewerAll"); if(vab)vab.disabled=n===0;
     UJ.stepthrough.initStepThrough(lastMatches);
   }
   /* Preview never waits on the identity fetch: the #fIdentity <select> is only added to the DOM
@@ -4226,6 +4245,33 @@ function buildColumnsBjump(){
      "not filtering by this yet" behaviour. Gating this button on the fetch would instead make
      ALL filter dimensions wait on a slow or unreachable backend, not just the identity one. */
   runBtn.addEventListener("click",runPreview);
+  /* OPEN ALL MATCHES IN NEUROGLANCER (3D), 2026-09-21 -- see core/openall.js. The segments are the
+     ids this page's own single-cell view selects, each in the layer of the volume it came from. */
+  (function(){
+    const vab=document.getElementById("filterViewerAll");
+    if(!vab||typeof matchesViewState!=="function")return;
+    vab.addEventListener("click",function(){
+      if(!lastMatches||!lastMatches.length||vab.dataset.busy)return;
+      const rows=lastMatches.map(function(m){return m.row.i;});
+      const V=UJ.cfg.viewer;
+      const state=matchesViewState({
+        res:UJ.cfg.res, rows:rows, noun:"nuclei",
+        posOf:function(i){return [BX[i],BY[i],BZ[i]];},
+        groupOf:function(i){return bjumpIdentityOf(i);},
+        images:[{type:"image",source:V.em,tab:"source",name:"EM (CLAHE)"},
+                {type:"image",source:V.emSecgan,tab:"source",name:"EM (SECGAN 16nm)",visible:false}],
+        segs:[{source:V.seg,name:"Segmentation (SECGAN 16nm)",
+               idOf:function(i){return BSRC[i]===1&&BSEG[i]?String(BSEG[i]):"";}},
+              {source:V.seg32,name:"Segmentation (32nm)",
+               idOf:function(i){return BSRC[i]===2&&BSEG[i]?String(BSEG[i]):"";}}],
+        boxes:BJ_REGION?BJ_REGION.getBoxesNM():[], bg:ngBgColor()});
+      vab.dataset.busy="1";
+      tracedOutlinesOpen(V.base,state,
+        {nuc:rows.map(function(i){return String(BID[i]);}),
+         root:rows.map(function(i){return BSEG[i]?String(BSEG[i]):"";})},vab)
+        .then(function(){delete vab.dataset.busy;},function(){delete vab.dataset.busy;});
+    });
+  })();
   dlBtn.addEventListener("click",function(){
     if(!lastMatches||!lastMatches.length||typeof XLSX==="undefined")return;
     const cols=buildColumnsBjump();
@@ -4239,7 +4285,8 @@ function buildColumnsBjump(){
   // A filter input changing invalidates the previous preview, same UX as µJump's filter tab.
   document.querySelectorAll("#filterCard input, #filterCard select").forEach(function(el){
     el.addEventListener("change",function(){
-      if(el===runBtn||el===dlBtn)return;
+      /* The outline picker changes what the view SHOWS, not which cells match. */
+      if(el===runBtn||el===dlBtn||el.id==="filterOrganSeg")return;
       invalidatePreview();
     });
   });
