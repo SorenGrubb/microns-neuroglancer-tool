@@ -406,6 +406,16 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
    They mean the same thing on both pages, and a cell tagged "excitatory" must not change colour
    depending on which dataset you happen to be looking at. */
 :root{--accent:#ffb454;--accent-dim:#4a2f10;--on-accent:#241503}
+/* The category palette the Browse picker is painted from -- µJump's, 2026-09-21. References, so
+   every theme resolves them. */
+:root{--cat-exc:var(--exc);--cat-inh:var(--inh);--cat-neu:var(--accent);--cat-glia:var(--ok);
+  --cat-vasc:var(--warn);--cat-blood:var(--danger);--cat-immune:var(--non);--cat-other:var(--mut)}
+#randomTypeSelect optgroup{font-weight:600}
+/* The category palette the Browse picker is painted from -- µJump's, 2026-09-21. References, so
+   every theme resolves them. */
+:root{--cat-exc:var(--exc);--cat-inh:var(--inh);--cat-neu:var(--accent);--cat-glia:var(--ok);
+  --cat-vasc:var(--warn);--cat-blood:var(--danger);--cat-immune:var(--non);--cat-other:var(--mut)}
+#randomTypeSelect optgroup{font-weight:600}
 :root[data-theme="light"]{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}
 @media print{:root{--accent:#9a3412;--accent-dim:#fdece2;--on-accent:#ffffff}}
 
@@ -441,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 20:47</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 21:09</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -569,10 +579,25 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <div class="tabpanel active" data-tabpanel="jump">
 
 <div class="card">
-<label>Coordinate <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; in <span id="unitres"></span> voxels; jump to it in H01, identify the nearest cell body and its neighbours, and load the cell in 3D</span></label>
+<!-- 2026-09-21 -- µJump's card, as δJump, πJump, λJump and βJump have it. Browsing first and
+     always visible, the type picker above the two random buttons; the coordinate box a fold,
+     shut. Every id is ηJump's own, so nothing that reaches them had to change. -->
+<div id="randomCellPanel">
+<label>Browse a cell <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mut);font-size:12px">&mdash; pick a type and draw an example, or take a random one</span></label>
+<div class="row" style="gap:8px;margin-top:2px">
+<select id="randomTypeSelect" style="flex:1 1 auto"></select>
+<button class="idbtn" id="randomOfType" title="Good for learning what a cell type looks like &mdash; a new random example loads each click.">Random example</button>
+</div>
+<button class="idbtn" id="randomUnassigned" style="width:100%;margin:10px 0 8px" title="Cells H01 could not confidently type — these are where a community identification is worth most">Random unassigned cell &mdash; help identify one</button>
+<p class="hint" id="unassignedCount" style="margin:-4px 0 8px"></p>
+<button class="idbtn" id="randomCommunity" style="width:100%;margin-bottom:8px" title="Jump to a cell someone has already identified — useful for reviewing, confirming or challenging another person's call">Random community-identified cell &mdash; review someone&rsquo;s call</button>
+</div>
+<details class="rv-panel" id="coordPanel">
+<summary>Or jump to a coordinate <span style="font-weight:400;color:var(--mut);font-size:12px">&mdash; in <span id="unitres"></span> voxels; jump to it in H01, identify the nearest cell body and its neighbours, and load the cell in 3D</span></summary>
 <div class="row"><div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div><div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div><div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div><button class="go inline" id="go" title="Find the nearest classified cell body">&#8594;</button></div>
 <p class="hint">Or paste <code>x, y, z</code> into the x field &mdash; it splits automatically.
   <button id="rand" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font:inherit">Show me a random cell</button></p>
+</details>
 
 <!-- Same collapsed-by-default <details> pattern µJump uses for its own Root/Nucleus ID search. -->
 <details class="rv-panel" id="idSearchPanel">
@@ -593,17 +618,7 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 <div class="rv-list" id="recentlyViewedList"></div>
 </details>
 
-<details class="rv-panel" id="randomCellPanel">
-<summary>Or browse a random cell</summary>
-<button class="idbtn" id="randomUnassigned" style="width:100%;margin:8px 0" title="Cells H01 could not confidently type — these are where a community identification is worth most">Random unassigned cell &mdash; help identify one</button>
-<p class="hint" id="unassignedCount" style="margin:-4px 0 8px"></p>
-<button class="idbtn" id="randomCommunity" style="width:100%;margin-bottom:8px" title="Jump to a cell someone has already identified — useful for reviewing, confirming or challenging another person's call">Random community-identified cell &mdash; review someone&rsquo;s call</button>
-<div class="row" style="gap:8px">
-<select id="randomTypeSelect" style="flex:1 1 auto"></select>
-<button class="idbtn" id="randomOfType">Random example</button>
-</div>
-<p class="hint">Good for learning what a cell type looks like &mdash; a new random example loads each click.</p>
-</details>
+<!-- "Or browse a random cell" lived here until 2026-09-21; it is the first thing in this card now. -->
 </div>
 
 <!-- Same wrapper µJump uses, not just the same stylesheet: .nuc stays display:none until
@@ -2608,15 +2623,26 @@ function renderTypeCheckboxes(){
   }).join("");
   [].slice.call(box.querySelectorAll(".ftype")).forEach(function(e){ if(was.has(e.value)) e.checked=true; });
 }
+/* By CATEGORY, as on µJump (2026-09-21): ηJump's groups onto µJump's --cat-* tokens. */
+const TYPE_GROUP_COLOUR={"Neurons — excitatory":"var(--cat-exc)","Neurons — inhibitory":"var(--cat-inh)",
+  "Glia":"var(--cat-glia)","Vascular":"var(--cat-vasc)","No confident call":"var(--cat-other)"};
+function syncTypeColour(){
+  const s=document.getElementById("randomTypeSelect"); if(!s)return;
+  const o=s.selectedOptions&&s.selectedOptions[0];
+  s.style.color=(o&&o.style.color)||"";
+}
 function renderRandomTypeSelect(){
   const sel=document.getElementById("randomTypeSelect"); if(!sel)return;
   const was=sel.value;
   sel.innerHTML=TYPE_GROUPS.map(function(g){
+    const col=TYPE_GROUP_COLOUR[g.label]||"var(--cat-other)";
     const opts=g.types.filter(function(t){ return IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length; })
-      .map(function(t){ return '<option value="'+escHtml(t)+'">'+escHtml(longName(t))+' ('+fmt(IDX_BY_TYPE[t].length)+')</option>'; }).join("");
-    return opts?'<optgroup label="'+escHtml(g.label)+'">'+opts+'</optgroup>':"";
+      .map(function(t){ return '<option value="'+escHtml(t)+'" style="color:'+col+'">'+escHtml(longName(t))+' ('+fmt(IDX_BY_TYPE[t].length)+')</option>'; }).join("");
+    return opts?'<optgroup label="'+escHtml(g.label)+'" style="color:'+col+'">'+opts+'</optgroup>':"";
   }).join("");
   if(was) sel.value=was;
+  syncTypeColour();
+  if(!sel.dataset.colourWired){ sel.dataset.colourWired="1"; sel.addEventListener("change",syncTypeColour); }
 }
 function pickRandom(a){ return (a&&a.length)?a[Math.floor(Math.random()*a.length)]:-1; }
 
@@ -3290,7 +3316,9 @@ function renderContactRows(i,rows,thresholdNm,clusterNm){
   renderRandomTypeSelect();
   const rt=$("randomOfType");
   if(rt) rt.addEventListener("click",function(){
-    const t=(sel||{}).value; const pool=IDX_BY_TYPE[t]||[];
+    /* It read an undeclared `sel` and threw on every click (2026-09-21, Søren: "why does
+       nothing happen when I choose a random microglia?"). */
+    const t=($("randomTypeSelect")||{}).value; const pool=IDX_BY_TYPE[t]||[];
     if(!pool.length){ fail("No cells of that type."); return; }
     fail(""); jumpToIndex(pickRandom(pool));
   });

@@ -322,10 +322,13 @@ const INFO = {
        said "32 nm data" while drawing 16. Computed now from this volume's own scale list.
        µJump's labels come out of the same arithmetic byte-identical to the typed ones, which is
        what says this is the same calculation and not a second opinion. */
-    ok(/^9 µm across — 16 nm data/.test(got.mips[0] || ""),
+    /* 2026-09-21: the pad reaches Lee16's 32 nm too -- its widest was 9 µm, and a view under
+       15 µm gains the next single-section level (src/the_pad_reaches_the_coarsest_section.py). */
+    ok(/^18 µm across — 32 nm data/.test(got.mips[0] || ""),
        "the widest zoom level says what this volume actually is", got.mips[0]);
-    ok(/^4\.5 µm — 8 nm data/.test(got.mips[1] || "") && /^2\.2 µm — 4 nm data/.test(got.mips[2] || ""),
-       "...and so do the rest", (got.mips[1] || "") + " | " + (got.mips[2] || ""));
+    ok(/^9 µm — 16 nm data/.test(got.mips[1] || "") && /^4\.5 µm — 8 nm data/.test(got.mips[2] || "")
+       && /^2\.2 µm — 4 nm data/.test(got.mips[3] || ""),
+       "...and so do the rest", (got.mips[1] || "") + " | " + (got.mips[2] || "") + " | " + (got.mips[3] || ""));
     /* ", slower to load" is a fact about minnie65's chunk geometry: 64 px wide at 32 nm against
        128 at 16. Lee16 chunks 512 at every scale, so its widest view is not slower and the
        warning would be untrue. Checked against the chunk sizes, not assumed. */

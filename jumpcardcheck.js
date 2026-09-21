@@ -58,11 +58,14 @@ const ok = (c, what, d) => {
                shown: !!(rp && rp.getClientRects().length),
                selShown: !!document.getElementById("randomTypeSelect").getClientRects().length,
                btnShown: !!document.getElementById("randomOfType").getClientRects().length,
-               unclShown: !!document.getElementById("randomUnclassified").getClientRects().length,
-               commShown: !!document.getElementById("randomCommunityId").getClientRects().length,
+               /* ηJump names its two buttons randomUnassigned/randomCommunity (2026-09-21). */
+               unclShown: !!(document.getElementById("randomUnclassified") || document.getElementById("randomUnassigned")).getClientRects().length,
+               /* λJump and βJump have no community button; where there is one it is on screen. */
+               commShown: (function(){ const e = document.getElementById("randomCommunityId") || document.getElementById("randomCommunity");
+                                       return !e || !!e.getClientRects().length; })(),
                /* His mock put the picker above the two buttons. */
                pickerFirst: !!(document.getElementById("randomTypeSelect")
-                 .compareDocumentPosition(document.getElementById("randomUnclassified")) & 4) };
+                 .compareDocumentPosition(document.getElementById("randomUnclassified") || document.getElementById("randomUnassigned")) & 4) };
     });
     ok(got.tag === "DIV", "the browse block is not a fold at all", got.tag);
     ok(got.shown && got.selShown && got.btnShown && got.unclShown && got.commShown,
@@ -118,18 +121,52 @@ const ok = (c, what, d) => {
     const got = await p.evaluate(async () => {
       /* Any three numbers: what is under test is that a shut <details> still hands its boxes to
          code that was not touched, not whether this dataset has a cell there. */
-      document.getElementById("x").value = "200000";
-      document.getElementById("y").value = "150000";
-      document.getElementById("z").value = "18000";
+      /* A real cell where the page can say where one is -- ηJump reports a coordinate far from
+         every cell body as an error, which is right, and not what is under test here. */
+      let c = ["200000", "150000", "18000"];
+      try { if (!document.getElementById("url") && typeof bulkCoordOf === "function") c = String(bulkCoordOf(0)).split(","); } catch (e){}
+      document.getElementById("x").value = c[0];
+      document.getElementById("y").value = c[1];
+      document.getElementById("z").value = c[2];
       document.getElementById("go").click();
       await new Promise(r => setTimeout(r, 1200));
-      return { url: (document.getElementById("url").textContent || "").slice(0, 40),
-               shown: document.getElementById("out").className,
+      /* ηJump shows the cell rather than a link box (2026-09-21); either is "it jumped". */
+      const u = document.getElementById("url"), o = document.getElementById("out");
+      return { url: u ? (u.textContent || "").slice(0, 40) : null,
+               shown: o ? o.className : (document.getElementById("nucpanel") || {}).className,
                err: document.getElementById("err").style.display };
     });
-    ok(/#!|http/.test(got.url), "a viewer link is built from a shut box", got.url || "(none)");
-    ok(/show/.test(got.shown), "...and shown", got.shown);
+    if (got.url !== null) ok(/#!|http/.test(got.url), "a viewer link is built from a shut box", got.url || "(none)");
+    ok(/show/.test(got.shown), got.url === null ? "a cell is shown from a shut box" : "...and shown", got.shown);
     ok(got.err !== "block", "...with no error", got.err || "none");
+  }
+
+  /* Søren, 2026-09-21 on ηJump: "why does nothing happen when I choose a random microglia?" --
+     the click handler read an undeclared `sel` and threw. Every type, on every tool. */
+  console.log("\nRandom example shows a cell of the chosen type");
+  {
+    const got = await p.evaluate(async () => {
+      const s = document.getElementById("randomTypeSelect");
+      for (let i = 0; i < 60 && !s.options.length; i++) await new Promise(r => setTimeout(r, 100));
+      /* A type that has cells: "(0)" types answer with an alert, which is right. */
+      const has = o => o.value && !/\(0\)\s*$/.test(o.textContent) && /\([\d,]+\)\s*$/.test(o.textContent);
+      const vals = [].slice.call(s.options).filter(has).map(o => o.value);
+      if (!vals.length) return { skip: true };
+      const want = vals.filter(v => /microglia/i.test(v))[0] || vals[0];
+      s.value = want;
+      const before = (document.getElementById("nucpanel") || {}).innerHTML || "";
+      window.__errs = [];
+      const onErr = e => window.__errs.push(String(e.message || e));
+      window.addEventListener("error", onErr);
+      document.getElementById("randomOfType").click();
+      await new Promise(r => setTimeout(r, 1500));
+      window.removeEventListener("error", onErr);
+      const after = (document.getElementById("nucpanel") || {}).innerHTML || "";
+      return { want, changed: after !== before && after.length > 0, errs: window.__errs };
+    });
+    if (got.skip) ok(true, "(no type with cells on this page without its backend)");
+    else ok(got.changed && !got.errs.length, "choosing " + got.want + " and pressing it shows a cell",
+       got.errs.join(" | ") || (got.changed ? "shown" : "nothing happened"));
   }
 
   console.log("\nthe types are coloured by category, not by type");
