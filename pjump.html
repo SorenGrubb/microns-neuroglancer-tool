@@ -563,6 +563,18 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/gamify.js"></script>
 <script src="core/organelles.js"></script>
 <script src="core/ontology.js"></script>
+<!-- The segmentation reader. pinky100_v185/seg and the Princeton nuclei are both plain
+     precomputed and CORS-clean: resolveAt read rootId(i) and NID[i] exactly at five of five
+     cells, 2026-09-21. The EM is not readable (see which-datasets-can-be-traced-on), the
+     segmentation is. -->
+<script src="core/segread.js"></script>
+<!-- Reads a tracing's rows into rings, for the traced-outline layer in "Open all matches". -->
+<script src="core/tracing.js"></script>
+<!-- Bulk organelle annotation, shared with µJump since 2026-09-21. After ontology.js,
+     whose Nucleus group it reads; it builds the card into #bulkOrganCard. -->
+<script src="core/bulkorgan.js"></script>
+<!-- The traced-outline layer for "Open all matches", shared with µJump since 2026-09-21. -->
+<script src="core/tracedoutlines.js"></script>
 <script src="core/panel.js"></script>
 <script src="core/tree.js"></script>
 <script src="core/report.js"></script>
@@ -583,7 +595,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 07:29</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 08:16</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -757,6 +769,10 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div class="out" id="out" style="display:none"><label>Neuroglancer state URL</label><div class="urlbox" id="url"></div>
 <div class="actions"><button class="copy" id="copy">Copy link</button></div></div>
 </div>
+<!-- ── BULK ORGANELLE ANNOTATION ─────────────────────────────────────  2026-09-21
+     One paste of markers, one structure type, as many cells as you marked — the same card µJump
+     has, in the same place. core/bulkorgan.js fills it. -->
+<div class="card" id="bulkOrganCard"></div>
 </div>
 <div class="tabpanel" data-tabpanel="filter">
 <div class="card" id="filterCard">
@@ -895,6 +911,17 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <div style="margin-top:14px">
 <label style="font-size:12px" title="Draws organelle/extracellular-structure point annotations for the cells matched above — one independently-toggleable layer per kind you check here, colour-coded per kind, organized by topic. Sourced from the community 'report an organelle' data; centriole and primary cilium also draw from Søren's own-verified dataset. No point for a given cell just means nobody has logged one there yet, not a confirmed biological absence. The two vector checkboxes (under Centriole &amp; cilium) draw an additional 3D arrow on top of the plain points — check a point checkbox on its own to show the organelle's location without the vector.">Organelles and extracellular structures</label>
 <div id="filterOrganellesBox" style="max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px"></div>
+<!-- THE OTHER HALF OF AN ORGANELLE.  2026-09-18. Søren: "In the filter and show, it should also be
+     possible to select include organelles segmentations of a specific kind or all organelle
+     segmentations for the filtered cells." The boxes above draw where organelles were LOGGED; this
+     draws what has been OUTLINED, which is the same organelles with a shape and a volume. -->
+<div class="row" style="gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+<label style="font-size:12px;flex:0 0 auto;text-transform:none;letter-spacing:normal" for="filterOrganSeg" title="Hand-traced organelle outlines for the matched cells, drawn into the 3D view as contours &mdash; one layer per kind, in the colour each was drawn in. The outlines live in Drive and are read one file each, so this costs a moment per outline and is capped; the points above cost nothing extra.">Traced organelle outlines</label>
+<select id="filterOrganSeg" style="flex:1 1 200px;min-width:0">
+<option value="">None &mdash; points only</option>
+<option value="__all">All outlined organelles</option>
+</select>
+</div>
 </div>
 </div>
 </details>
@@ -12110,6 +12137,16 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     const centVecOn=document.getElementById("filterCentVec")&&document.getElementById("filterCentVec").checked;
     const cilVecOn=document.getElementById("filterCilVec")&&document.getElementById("filterCilVec").checked;
     if(centVecOn||cilVecOn||orgPointKinds.length){viewAllBtn.textContent="Fetching organelle reports…";window.ORG_MAP=await fetchAllOrganelles();}else{window.ORG_MAP={};}
+    /* THE MATCHED CELLS' TRACED OUTLINES, 2026-09-21 — µJump's, from core/tracedoutlines.js:
+       one layer per kind, pushed onto the state after it is built, so nothing about which cells
+       matched or what the Excel holds is touched. Both ids, by this filter's own rule for a row. */
+    const organSegSel=document.getElementById("filterOrganSeg");
+    const organSegLayers=(typeof buildTracedOrganelleLayers==="function")
+      ? await buildTracedOrganelleLayers(
+          {nuc:lastResult.matches.map(function(m){return rowNucId(m.row);}),
+           root:lastResult.matches.map(function(m){return rowRootId(m.row);})},
+          organSegSel&&organSegSel.value,function(msg){viewAllBtn.textContent=msg;})
+      : [];
     viewAllBtn.textContent="Fetching proposed segmentation IDs…";
     window.ALL_ROOTID_PROPOSALS=await fetchAllRootIdProposals();
     viewAllBtn.textContent="Building view…";
@@ -12117,6 +12154,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     viewAllBtn.disabled=false;viewAllBtn.textContent=orig;
     if(!state)return;
     if(vascTraceLayers.length)state.layers.push(...vascTraceLayers);
+    if(organSegLayers.length)state.layers.push(...organSegLayers);
     const url=document.getElementById("viewer").value+"#!"+encodeURIComponent(JSON.stringify(state));
     if(url.length>VASC_URL_WARN_LENGTH){
       const mb=(url.length/1024/1024).toFixed(1);

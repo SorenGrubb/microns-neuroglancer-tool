@@ -417,7 +417,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 07:29</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 08:16</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -548,6 +548,10 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 
      EMPTY ON PURPOSE. core/tracingcard.js fills it on load: where the card sits is this page's
      decision, what is inside it is the module's. -->
+<!-- ── BULK ORGANELLE ANNOTATION ─────────────────────────────────────  2026-09-21
+     One paste of markers, one structure type, as many cells as you marked — the same card µJump
+     has, in the same place. core/bulkorgan.js fills it. -->
+<div class="card" id="bulkOrganCard"></div>
 <div class="card" id="tracingCard"></div>
 
 <div class="card">
@@ -803,6 +807,31 @@ UJ.cfg = {
   res: [8, 8, 30]                       // nm per voxel, this viewer's native frame
 };
 var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
+/* ── BULK ORGANELLE ANNOTATION ON THIS TABLE ──────────────────────  2026-09-21
+   The cell is segmentation_secgan_16nm — resolveAt returned BSEG[i] at six of eight cells. No
+   nucleus volume (the nuclei are Hoechst detections), so only rung 1 of the ladder applies.
+   A structure is filed under this page's own ids: the Hoechst nucleus number and the segment,
+   exactly as the organelle form on a cell's card files it. A secgan segment that no nucleus in
+   the table owns is still accepted and filed by its segment id alone. */
+UJ.cfg.bulk = {
+  sources: function(){ return { seg: UJ.cfg.viewer.seg, nuc: "", res: UJ.cfg.res }; },
+  indexOfRoot: function(r){
+    if (!UJ.cfg.bulk._byRoot){
+      var m = {};
+      for (var i = 0; i < BSEG.length; i++) if (BSEG[i] && BSRC[i] === 1 && !(BSEG[i] in m)) m[BSEG[i]] = i;
+      UJ.cfg.bulk._byRoot = m;
+    }
+    var k = UJ.cfg.bulk._byRoot[String(r)];
+    return k == null ? -1 : k;
+  },
+  indexOfNucleus: function(){ return -1; },
+  nucIdOf: function(i){ return String(BID[i]); },
+  coordOf: function(i){ return [BX[i], BY[i], BZ[i]].join(","); },
+  label: function(i){
+    var who = (typeof bjumpIdentityOf === "function") ? bjumpIdentityOf(i) : null;
+    return "Nucleus " + BID[i] + " &middot; " + escHtml(who || "unclassified");
+  }
+};
 UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
 UJ.toVox = function(p){ return [p[0]/UJ_RX, p[1]/UJ_RY, p[2]/UJ_RZ]; };
 
@@ -1073,6 +1102,9 @@ document.addEventListener("DOMContentLoaded", function(){
      this page's own script, which supplies the host contract its header lists. -->
 <script src="core/tracingcard.js"></script>
 <script src="core/ontology.js"></script>
+<!-- Bulk organelle annotation, shared with µJump since 2026-09-21. After ontology.js,
+     whose Nucleus group it reads; it builds the card into #bulkOrganCard. -->
+<script src="core/bulkorgan.js"></script>
 <!-- The family's chart look, generated from ujump.html by src/core_charts.py. The UJ.charts hooks
      it reads are set below and read at DRAW time, so tag order does not matter. -->
 <script src="core/charts.js"></script>

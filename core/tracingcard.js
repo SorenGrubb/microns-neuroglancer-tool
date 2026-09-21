@@ -1245,8 +1245,7 @@ function tracingRegisterCentre(t){
       reporterEmail: (typeof REPORTER_EMAIL !== "undefined" && REPORTER_EMAIL) || "",
       credential: (typeof GOOGLE_CREDENTIAL !== "undefined" && GOOGLE_CREDENTIAL) || "" };
     if (typeof noteSaveResult === "function") noteSaveResult(payload);
-    else if (typeof postAndRead === "function") postAndRead(payload);
-    else return false;
+    else tracingPost(payload);
     /* The panel caches the annotations for a minute; this one should be in the next draw of the
        section it belongs to rather than a minute later. */
     try { if (typeof PANEL_TRACINGS !== "undefined") PANEL_TRACINGS_AT = 0; } catch (_e){}
@@ -1901,6 +1900,33 @@ var draftStore = (function(){
    draws, and a Drive write per second per tracer is a quota mail. Two minutes, plus every explicit
    save. The backend generator says the same thing at its end, because a throttle enforced in one
    place and assumed in the other is a thing that gets changed in ignorance. */
+/* ── WHICH DATASET'S SHEET ───────────────────────────────────────────────────────  2026-09-21
+   The backend reads µJump's spreadsheet for any request that does not name a dataset. δJump and
+   πJump wrap window.fetch to add one; λJump, βJump and ηJump add it in their own call sites — so a
+   read made from THIS file carried none there, and their tracing lists, numbering and account
+   drafts were µJump's. Built exactly as core/panel.js's panelDsQS builds it. */
+function tracingDsQS(){
+  try { if (UJ && UJ.cfg && UJ.cfg.backend && UJ.cfg.backend.ds)
+          return "&ds=" + encodeURIComponent(UJ.cfg.backend.ds); } catch (_e){}
+  return "";
+}
+/* The page's postAndRead where it has one; otherwise the same POST, with the dataset in the body,
+   answering {ok, error} the way postAndRead does. λJump, βJump and ηJump have no postAndRead, so
+   the account-draft save and delete below did nothing there at all. */
+function tracingPost(payload){
+  if (typeof postAndRead === "function") return postAndRead(payload);
+  var p = {};
+  for (var k in payload) p[k] = payload[k];
+  try { if (!p.ds && UJ.cfg.backend.ds) p.ds = UJ.cfg.backend.ds; } catch (_e){}
+  return fetch(REPORT_ENDPOINT, { method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(p) })
+    .then(function(r){ return r.text(); })
+    .then(function(t){
+      var d = null; try { d = JSON.parse(t); } catch (_pe){}
+      return (d && (d.ok === true || d.status === "ok")) ? { ok: true }
+           : { ok: false, error: (d && d.error) || String(t || "").slice(0, 200) };
+    }, function(e){ return { ok: false, offline: true, error: String(e && e.message || e) }; });
+}
 var DRAFT_PUSH_AT = 0, DRAFT_PUSH_EVERY = 120000, DRAFT_SERVER = [], DRAFT_SERVER_AT = 0;
 function draftSignedIn(){
   return !!(typeof GOOGLE_VERIFIED !== "undefined" && GOOGLE_VERIFIED
@@ -1913,7 +1939,7 @@ function draftPush(d, force){
   const zs = {}, insts = {};
   (d.rings || []).forEach(function(r){ zs[r.z] = 1; insts[r.inst || 0] = 1; });
   try {
-    postAndRead({ type: "tracing_draft", action: "save", credential: GOOGLE_CREDENTIAL,
+    tracingPost({ type: "tracing_draft", action: "save", credential: GOOGLE_CREDENTIAL,
       draftId: d.id, title: d.title || "", updated: d.at || new Date().toISOString(),
       contours: (d.rings || []).length, sections: Object.keys(zs).length,
       structures: Object.keys(insts).length,
@@ -1926,7 +1952,7 @@ function draftPush(d, force){
 function draftPushDelete(id){
   if (!draftSignedIn() || !id) return;
   try {
-    postAndRead({ type: "tracing_draft", action: "delete",
+    tracingPost({ type: "tracing_draft", action: "delete",
                   credential: GOOGLE_CREDENTIAL, draftId: id }).then(function(){
       DRAFT_SERVER = DRAFT_SERVER.filter(function(x){ return x.draftId !== id; });
       draftRender();
@@ -1939,7 +1965,7 @@ function draftServerSoon(force){
   if (!draftSignedIn()) return;
   if (!force && Date.now() - DRAFT_SERVER_AT < 30000) return;
   DRAFT_SERVER_AT = Date.now();
-  fetch(REPORT_ENDPOINT + "?drafts=" + encodeURIComponent(GOOGLE_CREDENTIAL))
+  fetch(REPORT_ENDPOINT + "?drafts=" + encodeURIComponent(GOOGLE_CREDENTIAL) + tracingDsQS())
     .then(function(r){ return r.json(); })
     .then(function(j){
       if (j && j.ok && j.drafts){ DRAFT_SERVER = j.drafts; draftRender(); }
@@ -2149,7 +2175,7 @@ function draftResume(id){
   const stale = d && d.staler;
   if ((!d || d.remote || stale) && id && draftSignedIn()){
     padSay("Fetching that tracing from your account\u2026");
-    fetch(REPORT_ENDPOINT + "?drafts=" + encodeURIComponent(GOOGLE_CREDENTIAL)
+    fetch(REPORT_ENDPOINT + "?drafts=" + encodeURIComponent(GOOGLE_CREDENTIAL) + tracingDsQS()
           + "&draftId=" + encodeURIComponent(id))
       .then(function(r){ return r.json(); })
       .then(function(j){
@@ -2246,7 +2272,7 @@ function tracingIndexSoon(){
   if (Date.now() - TRACING_INDEX_AT < 60000) return;
   TRACING_INDEX_AT = Date.now();
   try {
-    fetch(REPORT_ENDPOINT + "?tracings=1")
+    fetch(REPORT_ENDPOINT + "?tracings=1" + tracingDsQS())
       .then(function(r){ return r.json(); })
       .then(function(d){ if (d && d.tracings) TRACING_SHARED = d.tracings; })
       .catch(function(){});
@@ -2263,7 +2289,7 @@ async function tracingBrowse(){
   }
   host.innerHTML = '<p class="hint">Reading the dataset’s tracings…</p>';
   try {
-    const r = await fetch(REPORT_ENDPOINT + "?tracings=1");
+    const r = await fetch(REPORT_ENDPOINT + "?tracings=1" + tracingDsQS());
     const d = await r.json();
     TRACING_SHARED = (d && d.tracings) || [];
     tracingRenderShared();
@@ -2331,7 +2357,8 @@ async function tracingSharedInViewer(sid, btn){
   const label = btn ? btn.textContent : "";
   if (btn){ btn.disabled = true; btn.textContent = "opening…"; }
   try {
-    const r = await fetch(REPORT_ENDPOINT + "?tracings=1&structureId=" + encodeURIComponent(sid));
+    const r = await fetch(REPORT_ENDPOINT + "?tracings=1&structureId=" + encodeURIComponent(sid)
+                          + tracingDsQS());
     const d = await r.json();
     const t = ((d && d.tracings) || [])[0];
     if (!t) throw new Error("the dataset has no tracing with that id any more");
@@ -2355,7 +2382,8 @@ async function tracingOpenShared(sid, btn){
   const label = btn ? btn.textContent : "";
   if (btn){ btn.disabled = true; btn.textContent = "opening…"; }
   try {
-    const r = await fetch(REPORT_ENDPOINT + "?tracings=1&structureId=" + encodeURIComponent(sid));
+    const r = await fetch(REPORT_ENDPOINT + "?tracings=1&structureId=" + encodeURIComponent(sid)
+                          + tracingDsQS());
     const d = await r.json();
     const t = ((d && d.tracings) || [])[0];
     if (!t) throw new Error("the dataset has no tracing with that id any more");

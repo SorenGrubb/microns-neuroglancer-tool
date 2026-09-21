@@ -438,7 +438,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 07:29</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 08:16</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -619,6 +619,10 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
      agglomeration split off or missed — the reason this page already has an extra-id panel.
 
      EMPTY ON PURPOSE. core/tracingcard.js fills it on load. -->
+<!-- ── BULK ORGANELLE ANNOTATION ─────────────────────────────────────  2026-09-21
+     One paste of markers, one structure type, as many cells as you marked — the same card µJump
+     has, in the same place. core/bulkorgan.js fills it. -->
+<div class="card" id="bulkOrganCard"></div>
 <div class="card" id="tracingCard"></div>
 
 <div class="card">
@@ -672,6 +676,17 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
      reports (see bJump's identical addition the same day for the full reasoning). -->
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="Reads the Organelle locations sheet -- every organelle/extracellular structure the community has reported via 'Report an organelle' on the result screen. Checking one or more boxes keeps a cell if AT LEAST ONE checked kind has been reported on it. Fetched once per page load and cached.">Organelles &amp; extracellular structures (community-reported)</div>
 <div style="max-height:230px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterOrganelles"><p class="hint" style="margin:0">Loading community organelle reports&hellip;</p></div>
+<!-- THE OTHER HALF OF AN ORGANELLE.  2026-09-18. Søren: "In the filter and show, it should also be
+     possible to select include organelles segmentations of a specific kind or all organelle
+     segmentations for the filtered cells." The boxes above draw where organelles were LOGGED; this
+     draws what has been OUTLINED, which is the same organelles with a shape and a volume. -->
+<div class="row" style="gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+<label style="font-size:12px;flex:0 0 auto;text-transform:none;letter-spacing:normal" for="filterOrganSeg" title="Hand-traced organelle outlines for the matched cells, drawn into the 3D view as contours &mdash; one layer per kind, in the colour each was drawn in. The outlines live in Drive and are read one file each, so this costs a moment per outline and is capped.">Traced organelle outlines</label>
+<select id="filterOrganSeg" style="flex:1 1 200px;min-width:0">
+<option value="">None &mdash; points only</option>
+<option value="__all">All outlined organelles</option>
+</select>
+</div>
 
 <div class="row" style="margin-top:18px;gap:10px;padding-top:14px;border-top:1px solid var(--line)">
 <button class="idbtn" id="filterRun" style="flex:1">Preview matches</button>
@@ -856,6 +871,29 @@ UJ.cfg = {
   res: [8, 8, 33]                       // nm per voxel, the H01 viewer's native frame
 };
 var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
+/* ── BULK ORGANELLE ANNOTATION ON H01 ────────────────────────────  2026-09-21
+   The cell is c3 — resolveAt returned c3Id(i) at eight of eight cells. H01 has no nucleus
+   volume, so only rung 1 of the ladder applies. A structure is filed as the organelle form on a
+   cell's card files it (UJ.panel.cellIds): the cell body id where µJump puts a nucleus, and the
+   c3 segment as the root. c3 ids exceed 32 bits, so they are compared as decimal strings. */
+UJ.cfg.bulk = {
+  sources: function(){ return { seg: UJ.cfg.viewer.seg, nuc: "", res: UJ.cfg.res }; },
+  indexOfRoot: function(r){
+    if (!UJ.cfg.bulk._byRoot){
+      var m = new Map();
+      for (var i = 0; i < N; i++){ var c = c3Id(i); if (!m.has(c)) m.set(c, i); }
+      UJ.cfg.bulk._byRoot = m;
+    }
+    var k = UJ.cfg.bulk._byRoot.get(String(r));
+    return k == null ? -1 : k;
+  },
+  indexOfNucleus: function(){ return -1; },
+  nucIdOf: function(i){ return String(HSB[i]); },
+  coordOf: function(i){ return [HX[i], HY[i], HZ[i]].join(","); },
+  label: function(i){
+    return "Cell body " + HSB[i] + " &middot; " + escHtml(longName(typeName(i)));
+  }
+};
 UJ.toNm  = function(v){ return [v[0]*UJ_RX, v[1]*UJ_RY, v[2]*UJ_RZ]; };
 UJ.toVox = function(p){ return [p[0]/UJ_RX, p[1]/UJ_RY, p[2]/UJ_RZ]; };
 
@@ -957,6 +995,11 @@ document.addEventListener("DOMContentLoaded", function(){
      on, before this page's own script, which supplies the host contract its header lists. -->
 <script src="core/tracingcard.js"></script>
 <script src="core/ontology.js"></script>
+<!-- Bulk organelle annotation, shared with µJump since 2026-09-21. After ontology.js,
+     whose Nucleus group it reads; it builds the card into #bulkOrganCard. -->
+<script src="core/bulkorgan.js"></script>
+<!-- The traced-outline layer for "Open all in Neuroglancer", shared with µJump since 2026-09-21. -->
+<script src="core/tracedoutlines.js"></script>
 <!-- ── core/panel.js, from 2026-09-20 ────────────────────────────────────────────────────────
      Søren: "ηJump gets nothing automatically - we need to change that."
 
@@ -3709,6 +3752,7 @@ function renderFilterResults(){
   const CAP=200;
   if(rows.length){
     const shown=rows.slice(0,CAP);
+    FILTER.shown=shown;   /* the rows the link was built for -- its traced outlines are theirs */
     vb.href=filterViewerUrl(shown);
     vb.style.pointerEvents=""; vb.style.opacity="";
     vb.title=rows.length>CAP
@@ -3731,6 +3775,44 @@ function renderFilterResults(){
     ? ""
     : '<div class="nsub" style="margin-top:8px">Nothing matches. Try loosening a filter.</div>';
 }
+
+/* THE MATCHED CELLS' TRACED OUTLINES, 2026-09-21 -- µJump's picker and core/tracedoutlines.js.
+   The link above is written when the preview finishes, before a kind is picked, and reading one
+   Drive file per outline on every preview would be wrong; so the outlines are read when the link is
+   PRESSED, and only if a kind is picked. The tab is opened first, synchronously -- one opened after
+   an await is a popup -- and sent to the finished view. Both ids of each row: a tracing on this
+   page is filed with the cell body as its nucleusId and the c3 segment as its rootId. */
+(function(){
+  const vb=document.getElementById("filterViewer");
+  if(!vb)return;
+  vb.addEventListener("click",function(e){
+    const sel=document.getElementById("filterOrganSeg");
+    const want=sel&&sel.value;
+    const rows=FILTER.shown||[];
+    if(!want||!rows.length||typeof buildTracedOrganelleLayers!=="function"||!vb.href)return;
+    e.preventDefault();
+    const href=vb.href, label=vb.textContent;
+    let win=null;
+    try{ win=window.open("","_blank"); }catch(_e){}
+    buildTracedOrganelleLayers(
+      {nuc:rows.map(function(i){ return String(HSB[i]); }),
+       root:rows.map(function(i){ return c3Id(i); })},
+      want,function(msg){ vb.textContent=msg; })
+    .catch(function(err){ console.warn("[hJump filter] traced outlines unavailable",err); return []; })
+    .then(function(layers){
+      vb.textContent=label;
+      let url=href;
+      if(layers.length){
+        const k=href.indexOf("#!");
+        const st=JSON.parse(decodeURIComponent(href.slice(k+2)));
+        st.layers.push.apply(st.layers,layers);
+        url=href.slice(0,k)+"#!"+encodeURIComponent(JSON.stringify(st));
+      }
+      if(win){ try{ win.opener=null; }catch(_e){} win.location.href=url; }
+      else window.open(url,"_blank","noopener");
+    });
+  });
+})();
 
 /* One segmentation layer per cell type, each its own colour, so a mixed result set is readable
    rather than one undifferentiated blob. */
