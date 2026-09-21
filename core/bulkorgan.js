@@ -20,7 +20,10 @@
        cellNear:       (point) -> Promise<{i, distNm, others} | {i:-1, why}>  (off)   2026-09-21
                        rung 3b: the host's nearest cell, UNTICKED with its distance
        afterSubmit:    (sent) -> what postReport returned for each row       (off)   2026-09-21
+       intro:          "html" -> the card's first paragraph, for a host whose cells are not
+                       found by a segmentation                               (off)   2026-09-21
      }
+   bulkOrganNearest(point, o) is rung 3b's arithmetic for a host whose cells are points -- see it.
    bulkOrganReset() clears the card, for a host whose volume changes under it.
 
    A DATASET WITH NO NUCLEUS VOLUME has no rung 3 — see the ladder.
@@ -336,13 +339,15 @@ async function bulkOrganFindCells(){
     catch(e){ btn.disabled=false; bulkOrganSetStatus(String(e&&e.message||e),true); return; }
   }
   const t0=Date.now();
-  bulkOrganSetStatus("Reading the segmentation for "+built.rows.length+" marker"
+  /* "the segmentation" only where there is one: λJump reads a table of nucleus positions. */
+  const readWhat=(bulkSources().seg||bulkSources().nuc)?"the segmentation":"the nearest nucleus";
+  bulkOrganSetStatus("Reading "+readWhat+" for "+built.rows.length+" marker"
     +(built.rows.length===1?"":"s")+"\u2026");
   /* Six at a time: a cold read is three round trips and a paste of two hundred markers should not
      open two hundred sockets. Everything the reader fetches is cached, so markers in one cell
      after the first are effectively free. */
   const done=await UJ.segread.mapPool(built.rows,6,bulkOrganResolveRow,function(n,total){
-    bulkOrganSetStatus("Reading the segmentation \u2014 "+n+" of "+total+"\u2026");
+    bulkOrganSetStatus("Reading "+readWhat+" \u2014 "+n+" of "+total+"\u2026");
   });
   btn.disabled=false;
   BULK_ORGAN_ROWS=done.map(function(r,i){
@@ -451,6 +456,32 @@ function bulkOrganSubmit(){
   if(bulkCfg().afterSubmit){ try{ bulkCfg().afterSubmit(sent); }catch(_e){} }
 }
 
+/* ── THE NEAREST CELL, for a host whose cells are POINTS ─────────────────────────  2026-09-21
+   Rung 3b's arithmetic, written once: ωJump (found nuclei) and λJump (Lee16's nucleus table) both
+   answer cellNear with it. o = { n, posOf(i) -> voxel | null, res, nearUm, tooClose, name(i) }.
+
+   Distances in nanometres through the page's own voxel size. Nothing beyond nearUm is offered. A
+   second cell within tooClose x the nearest one's distance makes the call a coin toss, and the row
+   names both rather than picking -- and that second cell is NOT capped at nearUm: a neighbour just
+   outside the radius competes exactly as much as one just inside it. */
+function bulkOrganNearest(p, o){
+  var r = o.res || [1, 1, 1], best = -1, d1 = Infinity, ds = [];
+  for (var i = 0; i < o.n; i++){
+    var v = o.posOf(i);
+    if (!v){ ds.push(Infinity); continue; }
+    var d = Math.sqrt(Math.pow((p[0] - v[0]) * r[0], 2) + Math.pow((p[1] - v[1]) * r[1], 2)
+                    + Math.pow((p[2] - v[2]) * r[2], 2));
+    ds.push(d);
+    if (d < d1){ d1 = d; best = i; }
+  }
+  if (best < 0 || d1 > o.nearUm * 1000)
+    return { i: -1, why: "no nucleus found within " + o.nearUm + " \u00b5m of this marker" };
+  var others = [];
+  for (var k = 0; k < ds.length; k++)
+    if (k !== best && ds[k] <= d1 * o.tooClose) others.push(o.name ? o.name(k) : String(k));
+  return { i: best, distNm: d1, others: others };
+}
+
 /* Empty the card: rows, table, messages and the pasted link. For a host whose volume changes under
    it -- markers pasted for one volume are coordinates in another's voxels on the next. 2026-09-21 */
 function bulkOrganReset(){
@@ -497,7 +528,12 @@ function bulkOrganHtml(){
 function bulkOrganMount(){
   var w = document.getElementById("bulkOrganCard");
   if (!w) return false;
-  if (!w.firstElementChild) w.innerHTML = bulkOrganHtml();
+  if (!w.firstElementChild){
+    w.innerHTML = bulkOrganHtml();
+    /* The default paragraph says each marker is looked up in the segmentation. A host whose cells
+       are found another way says how, rather than letting the card say something untrue. */
+    if (bulkCfg().intro){ var h = w.querySelector("p.hint"); if (h) h.innerHTML = bulkCfg().intro; }
+  }
   wireBulkOrgan();
   return true;
 }

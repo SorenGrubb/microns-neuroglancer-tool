@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 15:36</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 15:49</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -553,6 +553,12 @@ function toggleTheme(){setTheme(currentTheme()==="light"?"dark":"light");}
 
 <div id="panel"></div>
 
+<!-- ── BULK ORGANELLE ANNOTATION ─────────────────────────────────────  2026-09-21
+     One paste of markers, one structure type, as many cells as you marked -- the card the other
+     tools have, in the same place. Lee16 has no segmentation, so a marker goes to the NEAREST
+     NUCLEUS in this page's table, offered unticked with its distance for you to confirm.
+     core/bulkorgan.js fills it; UJ.cfg.bulk below says what a cell is here. -->
+<div class="card" id="bulkOrganCard"></div>
 <!-- ── TRACE A CELL THIS DATASET HAS NO SEGMENTATION FOR ─────────────  2026-09-20
      On µJump this card is for the cells minnie65's segmentation missed. Here it is for ALL of
      them: the Lee16 public release is image only, so every cell in this volume is a cell you have
@@ -1316,6 +1322,39 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/tracedoutlines.js"></script>
 <script src="core/openall.js"></script>
 <script src="core/ontology.js"></script>
+<script>
+/* THE BULK CARD'S CELLS, 2026-09-21. Lee16 is image only, so a marker is matched to the nearest
+   nucleus in this page's table -- detected and added cells alike, filed under BID, which is what
+   λJump's own identifications use -- within 10 µm, and offered UNTICKED with the distance: a
+   dendrite's mitochondrion can sit nearer a stranger's nucleus than its own, and only the person
+   who marked it can tell. A second nucleus within 1.5x the distance makes it "too close to call". */
+UJ.cfg.bulk = {
+  sources: function(){ return { seg: "", nuc: "", res: UJ.cfg.res }; },
+  indexOfRoot:    function(){ return -1; },
+  indexOfNucleus: function(){ return -1; },
+  cellNear: function(p){
+    return Promise.resolve(bulkOrganNearest(p, {
+      n: N, res: UJ.cfg.res, nearUm: 10, tooClose: 1.5,
+      posOf: function(i){ return [BX[i], BY[i], BZ[i]]; },
+      name:  function(i){ return UJ.cfg.bulk.name(i); } }));
+  },
+  nucIdOf: function(i){ return String(BID[i]); },
+  coordOf: function(i){ return [BX[i], BY[i], BZ[i]].join(","); },
+  name:    function(i){ var t = ljumpIdentityOf(i);
+    return (BADDED[i] ? "added cell " : "nucleus ") + BID[i] + (t ? " (" + t + ")" : ""); },
+  label:   function(i){ var t = ljumpIdentityOf(i);
+    return (BADDED[i] ? "Added cell " : "Nucleus ") + escHtml(String(BID[i])) + " &middot; "
+      + (t ? escHtml(t) : "<span class='hint'>not named yet</span>"); },
+  groupByRow: true,
+  intro: "Mark the same kind of structure in as many cells as you like in Neuroglancer &mdash; a "
+       + "point, or a <b>line</b> for anything with two ends like a cilium or an NR type II &mdash; "
+       + "then paste the whole address bar here. Lee16 has no segmentation, so each marker is "
+       + "matched to the <b>nearest nucleus</b> within 10&nbsp;&micro;m and offered <b>unticked</b>, "
+       + "with the distance: tick the ones that are in that nucleus&rsquo;s cell. A marker nearly as "
+       + "close to two nuclei cannot be ticked."
+};
+</script>
+<script src="core/bulkorgan.js"></script>
 <!-- The family's chart look, generated from ujump.html by src/core_charts.py. The UJ.charts
      hooks it reads are set in the dashboard section below and read at DRAW time, so tag
      order does not matter. -->
