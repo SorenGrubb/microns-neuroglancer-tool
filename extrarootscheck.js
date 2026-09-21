@@ -47,8 +47,14 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
 
   /* Only where there is a cell segmentation to select them in, and a tracing card to open from:
      δJump's cells are CAVE-gated (nucleus volume only), πJump has no tracing card. */
+  /* A cell segmentation in the VIEWER counts, not only one the card can read: δJump's card has none
+     (V1DD is behind CAVE) but its links carry v1dd_public, and that is where Søren looked. */
   const where = await p.evaluate(() => ({ card: typeof tracingViewerOpen === "function",
-    seg: typeof tracingSources === "function" && !!tracingSources().seg,
+    padSeg: typeof tracingSources === "function" && !!tracingSources().seg,
+    seg: (typeof tracingSources === "function" && !!tracingSources().seg)
+      || (typeof buildState === "function" && (() => { try {
+            return (buildState([1000, 1000, 100]).layers || []).some(l => l && l.type === "segmentation"
+              && !/nucle/i.test(String(l.name || "") + " " + String(l.source || ""))); } catch (e){ return false; } })()),
     lists: !!((UJ.cfg && UJ.cfg.tracing && UJ.cfg.tracing.extraRootsFor) || typeof fetchExtraRootIdsFor === "function") }));
   /* χJump keeps no proposals: its cell is its assembly, which cellIdsFor already selects. */
   if (where.card && where.seg && !where.lists){
@@ -95,7 +101,8 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   HANG = false;
 
   console.log("\nthe pad's segmentation");
-  const pad = await p.evaluate(async () => {
+  if (!where.padSeg) console.log("  (the card reads no segmentation here -- the pad paints none)");
+  const pad = !where.padSeg ? "skip" : await p.evaluate(async () => {
     let got = null;
     PAD_VIEW = PAD_VIEW || { x0: 0, y0: 0, w: 10, h: 10, z: 1, mip: 0 };
     const saved = UJ.segpaint.paint;
@@ -108,7 +115,7 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
     UJ.segpaint.paint = saved;
     return got ? { root: got.root, also: got.rootAlso || [] } : null;
   });
-  ok(pad && pad.also.indexOf("864691135000000111") >= 0 && pad.also.indexOf("864691135000000222") >= 0,
+  ok(pad === "skip" || pad && pad.also.indexOf("864691135000000111") >= 0 && pad.also.indexOf("864691135000000222") >= 0,
      "the pad paints the proposed fragments with the root", JSON.stringify(pad));
   ok(errors.length === 0, "no page errors", errors.join(" | ") || "none");
   await b.close();

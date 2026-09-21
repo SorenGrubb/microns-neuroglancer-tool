@@ -441,6 +441,40 @@ UJ.cfg = {
   /* The dataset reference drawn small at the bottom of a Blender video. Separate from `label`,
      which is a UI string that has to stay short in headings. */
   datasetCredit: "MICrONS pinky100 \u00b7 microns-explorer.org",
+  /* ── THE TRACING CARD ─────────────────────────────  2026-09-21
+     core/tracingcard.js. Everything per-dataset about it is these lines.
+
+     THE FOUR KEYS ARE LITERALS AND THEY ARE πJUMP'S OWN: localStorage is one store for every page
+     on grubblab.com, and unset they fall back to µJump's, so the two tools would share one list
+     of tracings. storagekeycheck.js reads them, which is why they are not built from `id`.
+
+     sources IS A FUNCTION, so it is read after SRC exists further down. ALL THREE VOLUMES: unlike
+     δJump's, this segmentation and nucleus volume are plain public precomputed that
+     core/segread.js reads, so the pad's "show the segmentation" tick paints the cell. */
+  tracing: {
+    lsKey:     "pjump_tracings_v1",
+    draftsKey: "pjump_tracing_drafts_v2",
+    draftKey:  "pjump_tracing_draft_v1",
+    penKey:    "pjump_tracing_pen_v1",
+    sources:   function(){ return { em: SRC.em, seg: SRC.seg, nuc: SRC.nuc }; }
+  },
+  /* ── THE TRACING CARD ─────────────────────────────  2026-09-21
+     core/tracingcard.js. Everything per-dataset about it is these lines.
+
+     THE FOUR KEYS ARE LITERALS AND THEY ARE πJUMP'S OWN: localStorage is one store for every page
+     on grubblab.com, and unset they fall back to µJump's, so the two tools would share one list
+     of tracings. storagekeycheck.js reads them, which is why they are not built from `id`.
+
+     sources IS A FUNCTION, so it is read after SRC exists further down. ALL THREE VOLUMES: unlike
+     δJump's, this segmentation and nucleus volume are plain public precomputed that
+     core/segread.js reads, so the pad's "show the segmentation" tick paints the cell. */
+  tracing: {
+    lsKey:     "pjump_tracings_v1",
+    draftsKey: "pjump_tracing_drafts_v2",
+    draftKey:  "pjump_tracing_draft_v1",
+    penKey:    "pjump_tracing_pen_v1",
+    sources:   function(){ return { em: SRC.em, seg: SRC.seg, nuc: SRC.nuc }; }
+  },
   res: [4, 4, 40]           // nm per voxel, x/y/z
 };
 var UJ_RX = UJ.cfg.res[0], UJ_RY = UJ.cfg.res[1], UJ_RZ = UJ.cfg.res[2];
@@ -522,7 +556,10 @@ UJ.cfg.mesh = {
    future tool with a differently-shaped Neuroglancer source string (e.g. one that's already a
    bare gs:// path) shouldn't have to reverse-engineer a "precomputed://" prefix strip here. */
 UJ.cfg.em = {
-  emSource:"gs://microns_public_datasets/pinky100_v0/son_of_alignment_v15_rechunked",
+  /* gs://neuroglancer/..., NOT microns_public_datasets/...: the same volume, but that copy
+     serves an info file and no chunks (404 everywhere, 2026-09-20 and -21). See
+     src/pjump_gets_the_tracing_card.py. */
+  emSource:"gs://neuroglancer/pinky100_v0/son_of_alignment_v15_rechunked",
   segSource:"gs://microns_public_datasets/pinky100_v185/seg",
   /* IT DOES PUBLISH ONE. This block had no nucSource at all until 2026-09-09 and the Blender
      panel passed `nucSource:""` with the comment "pinky100 publishes no nucleus segmentation" --
@@ -568,11 +605,22 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/ontology.js"></script>
 <!-- The segmentation reader. pinky100_v185/seg and the Princeton nuclei are both plain
      precomputed and CORS-clean: resolveAt read rootId(i) and NID[i] exactly at five of five
-     cells, 2026-09-21. The EM is not readable (see which-datasets-can-be-traced-on), the
-     segmentation is. -->
+     cells, 2026-09-21. The EM is readable too, since it is read from gs://neuroglancer/ rather
+     than the copy with no chunks -- see src/pjump_gets_the_tracing_card.py. -->
 <script src="core/segread.js"></script>
+<!-- ── THE EM STACK ───────────────────────────────────  2026-09-21
+     The modules the tracing card is built on, in the order µJump and δJump load them. -->
+<script src="core/segpaint.js"></script>
+<script src="core/organellelink.js"></script>
+<script src="core/emtiles.js"></script>
+<script src="core/tracepad.js"></script>
+<script src="core/traceloft.js"></script>
 <!-- Reads a tracing's rows into rings, for the traced-outline layer in "Open all matches". -->
 <script src="core/tracing.js"></script>
+<!-- The tracing card, shared with every tool that has imagery to draw on since 2026-09-20; here
+     since 2026-09-21. After the modules it is built on, before this page's own script, which
+     supplies the host contract its header lists. -->
+<script src="core/tracingcard.js"></script>
 <!-- Bulk organelle annotation, shared with µJump since 2026-09-21. After ontology.js,
      whose Nucleus group it reads; it builds the card into #bulkOrganCard. -->
 <script src="core/bulkorgan.js"></script>
@@ -600,7 +648,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 18:56</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 19:49</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -778,6 +826,9 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
      One paste of markers, one structure type, as many cells as you marked — the same card µJump
      has, in the same place. core/bulkorgan.js fills it. -->
 <div class="card" id="bulkOrganCard"></div>
+<!-- ── TRACE A CELL OR ORGANELLE ─────────────────────────────  2026-09-21
+     The card µJump has, in the same place. Empty on purpose: core/tracingcard.js fills it. -->
+<div class="card" id="tracingCard"></div>
 </div>
 <div class="tabpanel" data-tabpanel="filter">
 <div class="card" id="filterCard">
@@ -2511,7 +2562,7 @@ document.getElementById("refreshBtn").addEventListener("click",function(){loadLi
 <script type="application/json" id="cildata">{"OV_IDX":"","OV_CILSX":"","OV_CILSY":"","OV_CILSZ":"","OV_CILEX":"","OV_CILEY":"","OV_CILEZ":"","ST_IDX":"","ST_CILSX":"","ST_CILSY":"","ST_CILSZ":"","ST_CILEX":"","ST_CILEY":"","ST_CILEZ":"","MERGED_CIL":{}}</script>
 <script type="application/json" id="organelledata">{"PLUGS":{},"HOLES":{}}</script>
 <script>
-const SRC={em:"precomputed://https://storage.googleapis.com/microns_public_datasets/pinky100_v0/son_of_alignment_v15_rechunked",em35:"precomputed://https://storage.googleapis.com/microns_public_datasets/pinky100_v0/son_of_alignment_v15_rechunked",seg:"precomputed://gs://microns_public_datasets/pinky100_v185/seg",seg35:"precomputed://gs://microns_public_datasets/pinky100_v185/seg",nuc:"precomputed://https://td.princeton.edu/sseung-archive/pinky100-nuclei/seg"};
+const SRC={em:"precomputed://https://storage.googleapis.com/neuroglancer/pinky100_v0/son_of_alignment_v15_rechunked",em35:"precomputed://https://storage.googleapis.com/neuroglancer/pinky100_v0/son_of_alignment_v15_rechunked",seg:"precomputed://gs://microns_public_datasets/pinky100_v185/seg",seg35:"precomputed://gs://microns_public_datasets/pinky100_v185/seg",nuc:"precomputed://https://td.princeton.edu/sseung-archive/pinky100-nuclei/seg"};
 /* The raw EM imagery renders low-contrast by default (Neuroglancer's default shader linearly
    maps the full 0-255 raw intensity range to black-white, but this tissue's actual signal sits
    in a narrower band). This normalizes the default grayscale shader's input range to
@@ -2521,6 +2572,254 @@ const SRC={em:"precomputed://https://storage.googleapis.com/microns_public_datas
    (Søren, 2026-08-27) -- NOT minnie65's [86,172], which is a different scope and stain
    run and renders this tissue wrong without ever looking like a fault in the tool. */
 const EM_SHADER_CONTROLS={normalized:{range:[33,231]}};
+/* ── THE SAME WINDOW THE VIEWER LINKS USE ────────────────  2026-09-21
+   Read off EM_SHADER_CONTROLS -- Søren's [33,231], tuned on this volume in Neuroglancer -- so the
+   pad, the cell card's section and every viewer link stretch pinky100 the same way. */
+const EM_WINDOW = { lo: EM_SHADER_CONTROLS.normalized.range[0],
+                    hi: EM_SHADER_CONTROLS.normalized.range[1] };
+/* How strongly the cell and nucleus are painted over a section: µJump's and δJump's number. */
+const EM_SEG_ALPHA = 0.32;
+/* @emplane:start */
+/* ── ONE PLANE OF THE EM, BESIDE THE CELL ───────────────────────  2026-09-20
+   Ported from µJump's own @emplane block. Søren, when that was built: *"I would like that there is
+   a single plane of the EM data ... when you view the cell ... but it may slow things down, so it
+   should be possible to turn it off."*
+
+   πJump's copy, 2026-09-21, ported from δJump's page with pinky100's numbers.
+
+   WHAT IT COSTS, SAID PLAINLY. One 300x162 window at 64 nm is two to four of pinky100's
+   256x256x16 chunks (1 MB each). Cold, that is a second or two; afterwards it is free, because
+   core/segread.js caches by URL and range. The switch is REMEMBERED, so somebody who turns it
+   off on a slow connection does not meet it again on the next cell.
+
+   THE CELL AND ITS NUCLEUS, as on µJump: pinky100_v185/seg and the Princeton nuclei are both plain
+   public precomputed that core/segread.js reads, so both are painted -- the cell in magenta, the
+   nucleus in blue.
+
+   MIP 4 IS 64 nm HERE, AND IT IS A REAL SECTION. µJump needs emtiles' slabOk to reach 64 nm,
+   because minnie65's 64 nm level averages two 40 nm sections. pinky100 downsamples in x and y
+   only -- every one of its scales keeps 40 nm z -- so 64 nm is mip 4 and one plane.
+
+   A SLOW DRAW MUST NOT PAINT THE PREVIOUS CELL. Every render takes a token and re-checks it at
+   each await, dropping out if a newer cell has been shown since. Without that, stepping through
+   cells paints whichever fetch lands last, and the panel shows the wrong cell -- which it would
+   be. */
+var EM_PLANE_KEY = "pjump_panel_emplane", EM_PLANE_SEG_KEY = "pjump_panel_emseg",
+    EM_PLANE_TOKEN = 0,
+    EM_PLANE_WIRED = false, EM_PLANE_LAST = null;
+/* 300x162 DRAWN, 260 SHOWN, at 64 nm: µJump's 19.2 µm of cortex, at µJump's own level. */
+var EM_PLANE_W = 300, EM_PLANE_H = 162, EM_PLANE_CSS = 260, EM_PLANE_MIP = 4;
+function emPlaneOn(){
+  try { var v = localStorage.getItem(EM_PLANE_KEY); return v === null ? true : v === "1"; }
+  catch (_e) { return true; }
+}
+/* On by default, like the section itself: somebody who has asked for the EM has asked to see
+   which nucleus the card is talking about. Remembered per page. */
+function emPlaneSegOn(){
+  try { var v = localStorage.getItem(EM_PLANE_SEG_KEY); return v === null ? true : v === "1"; }
+  catch (_e) { return true; }
+}
+function emPlaneSay(tok, msg, bad){
+  var el = document.getElementById("emPlaneSay");
+  if (!el || EM_PLANE_TOKEN !== tok) return;
+  el.textContent = msg || "";
+  el.style.color = bad ? "var(--bad)" : "var(--mut)";
+}
+/* WHERE THE IMAGERY IS, FROM THE IMAGERY. µJump carries window.MINNIE65_EM_BB as a constant; this
+   reads the volume's own info, which core/segread.js has already fetched and cached, so there is
+   no second copy of the extents to keep in step with the dataset. Null until the info lands, and
+   a null box means "draw and find out" rather than "refuse" -- the guard exists to give a better
+   message, not to be the only thing standing between a click and an error. */
+/* The one name the block uses for this page's imagery, so the block itself is identical on every
+   page that carries it. λJump keeps it on UJ.cfg.viewer, δJump and πJump in the global SRC. */
+var EM_PLANE_SRC = SRC.em;
+var EM_PLANE_BB = null;
+async function emPlaneBB(){
+  if (EM_PLANE_BB) return EM_PLANE_BB;
+  try {
+    var info = await UJ.segread._getInfo(UJ.segread._httpBase(EM_PLANE_SRC));
+    /* THE FIRST LEVEL THAT EXISTS, AND IN NANOMETRES.  2026-09-20
+       This read `info.scales[0]` and compared its voxel box against the tool's coordinate
+       directly, which is right only where the two grids agree — they do here (4 nm and 4 nm) and
+       they do not on δJump, whose frame is 9/9/45 against a 9.7 nm volume whose scales[0] is a
+       dead `placeholder` level. sectionScales() is already the list with that removed. */
+    var us = (UJ.emtiles && UJ.emtiles.sectionScales) ? UJ.emtiles.sectionScales(info) : null;
+    var s = (us && us.length ? us : info.scales)[0], o = s.voxel_offset || [0, 0, 0],
+        r = s.resolution;
+    EM_PLANE_BB = { x: [o[0] * r[0], (o[0] + s.size[0]) * r[0]],
+                    y: [o[1] * r[1], (o[1] + s.size[1]) * r[1]],
+                    z: [o[2] * r[2], (o[2] + s.size[2]) * r[2]], nm: true, res: r };
+  } catch (_e) { EM_PLANE_BB = null; }
+  return EM_PLANE_BB;
+}
+/* IT SAYS WHY IT IS NOT THERE RATHER THAN NOT BEING THERE. These guards used to return "" in the
+   page this came from -- the section simply did not appear, with nothing to suggest it ever
+   should have. A core/*.js that 404s on the server, or a script an extension blocked, looks
+   exactly like a page that never had the feature. */
+/* ids = { root, nuc } -- the cell and its nucleus, both painted here (see the header). */
+function emPlaneBox(pos, ids){
+  var missing = null;
+  if (typeof UJ === "undefined" || !UJ.emtiles || !UJ.segread)
+    missing = "the EM reader did not load \u2014 check that core/emtiles.js and core/segread.js are "
+            + "being served, then reload with Ctrl-Shift-R";
+  var tok = ++EM_PLANE_TOKEN, on = emPlaneOn() && !missing;
+  ids = ids || {};
+  EM_PLANE_LAST = { pos: pos, root: String(ids.root == null ? "" : ids.root),
+                    nuc: String(ids.nuc == null ? "" : ids.nuc) };
+  if (!missing) setTimeout(function(){ drawPanelEmPlane(tok); }, 0);
+  /* The <label> resets four properties it would inherit from this page's global label rule
+     (display:block, uppercase, letter-spaced, muted). That rule is for the form labels that head
+     a control; this is a caption with a tick in it, and left alone it reads as a section title. */
+  return '<div id="emPlaneBox" data-tok="' + tok + '" style="margin-top:10px">'
+    + '<div class="hint" style="margin:0 0 3px">'
+    + '<label for="emPlaneOn" style="display:inline-flex;align-items:center;gap:5px;margin:0;'
+    + 'cursor:pointer;text-transform:none;letter-spacing:0;font-size:inherit;color:inherit" '
+    + 'title="One plane of the EM at this coordinate, read from the imagery bucket. The first '
+    + 'cell on a cold cache takes a few seconds; turning it off here is remembered.">'
+    + '<input type="checkbox" id="emPlaneOn" style="width:auto;margin:0"' + (on ? " checked" : "")
+    + (missing ? " disabled" : "") + '> '
+    + 'EM section</label>'
+    /* The cell AND its nucleus, as µJump's: both volumes are readable on pinky100. */
+    + (missing ? "" :
+       ' <label for="emPlaneSeg" style="display:inline-flex;align-items:center;gap:5px;'
+     + 'margin:0 0 0 9px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:inherit;'
+     + 'color:inherit" title="Paints this cell\'s own segmentation over the section \u2014 the '
+     + 'cell in magenta, its nucleus in blue \u2014 from the same volumes Neuroglancer paints. '
+     + 'Costs a few more fetches, and it is remembered.">'
+     + '<input type="checkbox" id="emPlaneSeg" style="width:auto;margin:0"'
+     + (emPlaneSegOn() ? " checked" : "") + '> segmentation</label>')
+    + ' <span id="emPlaneSay" style="color:var(--mut)">'
+    + (missing ? escHtml(missing) : "") + '</span></div>'
+    + '<canvas id="emPlaneCv" width="' + EM_PLANE_W + '" height="' + EM_PLANE_H + '" '
+    + 'style="width:100%;max-width:' + EM_PLANE_CSS + 'px;display:' + (on ? "block" : "none")
+    + ';margin:4px 0 0;background:var(--bg);border:1px solid var(--line);'
+    + 'border-radius:6px"></canvas></div>';
+}
+/* A ROUND NUMBER, NOT A FIXED FRACTION. A bar of "30% of the view" reads 5.76 \u00b5m here and
+   something else on the next cell, and a scale bar whose label needs two decimals is one nobody
+   uses. The largest of 0.5/1/2/5/10/20/50/100 \u00b5m that fits in a third of the width. Drawn last,
+   always, and white on a dark outline because EM is grey everywhere and a bar of one colour
+   disappears somewhere on every section. */
+function emPlaneScaleBar(cv, view){
+  if (!cv || !view) return;
+  var nmPerPx = view.effNmPerPx || view.nmPerPx;
+  if (!(nmPerPx > 0)) return;
+  var NICE = [0.5, 1, 2, 5, 10, 20, 50, 100], want = (view.umAcross || 0) / 3, um = NICE[0], i;
+  for (i = 0; i < NICE.length; i++) if (NICE[i] <= want) um = NICE[i];
+  var px = um * 1000 / nmPerPx;
+  if (!(px > 8) || px > cv.width) return;
+  var ctx = cv.getContext("2d"), x = 12, y = cv.height - 14, h = 4;
+  ctx.save();
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(0,0,0,.85)"; ctx.lineWidth = 3;
+  ctx.strokeRect(x, y, px, h);
+  ctx.fillStyle = "#fff"; ctx.fillRect(x, y, px, h);
+  var label = (um < 1 ? um : Math.round(um)) + " \u00b5m";
+  ctx.font = "600 13px system-ui, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  ctx.strokeStyle = "rgba(0,0,0,.85)"; ctx.lineWidth = 3;
+  ctx.strokeText(label, x + px / 2, y - 5);
+  ctx.fillStyle = "#fff"; ctx.fillText(label, x + px / 2, y - 5);
+  ctx.restore();
+  try { cv.dataset.scaleUm = String(um); } catch (_e) {}
+}
+async function drawPanelEmPlane(tok){
+  var box = document.getElementById("emPlaneBox");
+  if (!box) return;
+  if (tok == null) tok = Number(box.dataset.tok || 0);
+  if (EM_PLANE_TOKEN !== tok) return;
+  var cv = document.getElementById("emPlaneCv");
+  if (!cv || !EM_PLANE_LAST) return;
+  if (!emPlaneOn()) { cv.style.display = "none"; emPlaneSay(tok, ""); return; }
+  cv.style.display = "block";
+  var pos = EM_PLANE_LAST.pos;
+  emPlaneSay(tok, "\u2026");
+  /* A quarter second before anything is fetched: stepping through cells should not queue a read
+     per cell you passed through. A newer cell bumps the token and this one drops out here. */
+  await new Promise(function(r){ setTimeout(r, 250); });
+  if (EM_PLANE_TOKEN !== tok) return;
+  try {
+    if (!emConfigure()) { emPlaneSay(tok, "the EM reader did not load", true); return; }
+    var bb = await emPlaneBB();
+    if (EM_PLANE_TOKEN !== tok) return;
+    /* The coordinate in nanometres, because the box is. A page whose frame happens to match the
+       volume's finest scale gets the same answer either way — both sides multiplied by the same
+       number — which is why this was invisible until a page came along where they differ. */
+    var R = (UJ.cfg && UJ.cfg.res) || [4, 4, 40];
+    var pnm = [pos[0] * R[0], pos[1] * R[1], pos[2] * R[2]];
+    if (bb && (pnm[0] < bb.x[0] || pnm[0] > bb.x[1] || pnm[1] < bb.y[0] || pnm[1] > bb.y[1]
+               || pnm[2] < bb.z[0] || pnm[2] > bb.z[1])) {
+      cv.style.display = "none";
+      emPlaneSay(tok, "outside pinky100\u2019s imagery, so there is no section to draw here");
+      return;
+    }
+    emPlaneSay(tok, "reading the EM\u2026");
+    var view = await UJ.emtiles.drawSection(cv, {
+      centre: pos, w: EM_PLANE_W, h: EM_PLANE_H, mip: EM_PLANE_MIP, zoom: 1,
+      lo: EM_WINDOW.lo, hi: EM_WINDOW.hi, tighten: true,
+      onProgress: function(d, n){ emPlaneSay(tok, "reading the EM\u2026 " + d + "/" + n); } });
+    if (EM_PLANE_TOKEN !== tok) return;
+    emPlaneScaleBar(cv, view);
+    /* No slab caveat here, unlike µJump: every pinky100 scale keeps 40 nm sections, so this is
+       one plane at every level and saying otherwise would invent a warning. */
+    try {
+      cv.title = view.umAcross.toFixed(1) + " \u00b5m across at " + view.nmPerPx + " nm/px, z="
+        + view.z + ". One 40 nm section. Contrast " + view.lo + "\u2013" + view.hi
+        + (view.tightened
+           ? " (narrowed onto this plane from the " + view.windowAsked[0] + "\u2013"
+             + view.windowAsked[1] + " window, because a downsampled level\u2019s values do not "
+             + "fill it)"
+           : "") + ".";
+    } catch (_t) {}
+    /* ── AND THE CELL ON TOP OF IT ─────────────────────  2026-09-21
+       The cell in magenta and its nucleus in blue, from the volumes the viewer links paint. */
+    var rootId = (EM_PLANE_LAST && EM_PLANE_LAST.root) || "";
+    var nucId = (EM_PLANE_LAST && EM_PLANE_LAST.nuc) || "";
+    if (emPlaneSegOn() && (rootId || nucId) && UJ.segpaint) {
+      if (!UJ.segpaint.configured())
+        UJ.segpaint.configure({ seg: SRC.seg, nuc: SRC.nuc, res: UJ.cfg.res });
+      emPlaneSay(tok, "reading the segmentation\u2026");
+      var got = await UJ.segpaint.paint(cv, view, { root: rootId, nuc: nucId, alpha: EM_SEG_ALPHA });
+      if (EM_PLANE_TOKEN !== tok) return;
+      /* After the overlay, because segpaint rewrites the whole canvas. */
+      emPlaneScaleBar(cv, view);
+      if (got && got.ok && !got.painted) {
+        emPlaneSay(tok, "this cell is not on this plane");
+        return;
+      }
+    } else if (!emPlaneSegOn()) {
+      emPlaneSay(tok, "");
+      return;
+    }
+    emPlaneSay(tok, "");
+  } catch (e) {
+    if (EM_PLANE_TOKEN !== tok) return;
+    emPlaneSay(tok, "could not read the imagery: " + String(e && e.message || e), true);
+  }
+}
+/* Delegated once, not wired per render: the box is rebuilt on every cell. */
+function wireEmPlaneToggle(){
+  if (EM_PLANE_WIRED) return;
+  EM_PLANE_WIRED = true;
+  document.addEventListener("change", function(e){
+    var t = e.target;
+    if (!t || (t.id !== "emPlaneOn" && t.id !== "emPlaneSeg")) return;
+    try { localStorage.setItem(t.id === "emPlaneSeg" ? EM_PLANE_SEG_KEY : EM_PLANE_KEY,
+                              t.checked ? "1" : "0"); } catch (_e) {}
+    var box = document.getElementById("emPlaneBox");
+    drawPanelEmPlane(box ? Number(box.dataset.tok || 0) : EM_PLANE_TOKEN);
+  });
+}
+wireEmPlaneToggle();
+/* @emplane:end */
+/* The one place the reader is pointed at this dataset. Guarded, so a page that loses one script
+   loses one card rather than the cell. */
+function emConfigure(){
+  if (typeof UJ === "undefined" || !UJ.emtiles || !UJ.segread) return false;
+  if (!UJ.emtiles.configured())
+    UJ.emtiles.configure({ em: SRC.em, res: UJ.cfg.res });
+  return true;
+}
 const NUC_INFO="https://td.princeton.edu/sseung-archive/pinky100-nuclei/seg/info";
 /* ONE NUCLEUS VOLUME, NOT TWO. UJ.cfg.em.nucSource (top of the file, where the Blender panel
    reads it) and SRC.nuc (here, where the viewer reads it) are the same bucket, and a page that
@@ -3387,14 +3686,16 @@ function renderTopViewDiagram(vx,vy,vz){
 /* Combines the depth/layer diagram with the top-down dataset-extent diagram side by side, so
    a single coordinate shows both where it sits among cortical layers AND where it sits in the
    physical dataset, rather than either alone. */
-function renderLocationDiagram(pos){
+function renderLocationDiagram(pos,under){
   const[vx,vy,vz]=pos;
   const layerSvg=renderLayerDiagram(estimateLayer(vx,vy,vz));
   const topSvg=renderTopViewDiagram(vx,vy,vz);
-  if(!layerSvg&&!topSvg)return "";
+  under=under||"";
+  if(!layerSvg&&!topSvg&&!under)return "";
+  /* The EM section goes under the top view (2026-09-21), as on δJump. */
   return '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-top:10px">'
     +(layerSvg?'<div style="flex:1 1 200px;min-width:180px">'+layerSvg+'</div>':'')
-    +(topSvg?'<div style="flex:1 1 200px;min-width:180px">'+topSvg+'</div>':'')
+    +((topSvg||under)?'<div style="flex:1 1 200px;min-width:180px">'+topSvg+under+'</div>':'')
     +'</div>';
 }
 
@@ -4371,7 +4672,7 @@ function showNucleus(pos){
      relocation (see its "3. Full-panel relocation" comment) -- the real #nucpanel now physically
      moves under the step-through card while stepping, so there is exactly one identity/voting/
      correction UI, not two to keep in sync. Nothing needs to happen here any more. */
-  h+=renderLocationDiagram(pos);
+  h+=renderLocationDiagram(pos,emPlaneBox(pos,{root:root||"",nuc:nid}));
   h+='<div class="meta">nearest nucleus at voxel '+coordSpan(NX[i],NY[i],NZ[i])+' &middot; '+(r.dist/1000).toFixed(2)+' &micro;m from query</div>';
   /* nearest() has no distance cap, so a query point that MICrONS's automatic nucleus detector
      never picked up at all (a real cell it simply missed) still silently returns whatever
@@ -8758,7 +9059,7 @@ async function computeCellContactsOfType(rootIdStr,i,typeLabel,radiusUm,clusterU
 function cellContactsViewerBase(){
   return{
     SRC_SEG:"precomputed://gs://microns_public_datasets/pinky100_v185/seg",
-    SRC_EM:"precomputed://https://storage.googleapis.com/microns_public_datasets/pinky100_v0/son_of_alignment_v15_rechunked",
+    SRC_EM:"precomputed://https://storage.googleapis.com/neuroglancer/pinky100_v0/son_of_alignment_v15_rechunked",
     /* The one constant, not a copy of its numbers -- this used to hold its own [86,172] and
        so kept minnie65's contrast in three viewers after the main one was corrected. */
     EM_SHADER_CONTROLS_LOCAL:EM_SHADER_CONTROLS,

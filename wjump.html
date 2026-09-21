@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-21 18:53</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-21 19:30</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -11503,11 +11503,18 @@ function tracingExtraRootsFor(nuc, root){
     return l;
   });
 }
-/* The proposed root IDs onto a state's cell layer, after the root it already selects. */
+/* The state's cell layer: its first segmentation layer that is not the nuclei. */
+function tracingCellLayerOf(st){
+  var isNuc = function(l){ return /nucle/i.test(String(l.name || "") + " " + String(l.source || "")); };
+  return ((st && st.layers) || []).filter(function(l){ return l && l.type === "segmentation" && !isNuc(l); })[0] || null;
+}
+/* The proposed root IDs onto a state's cell layer, after the root it already selects. The link's
+   own cell layer first (δJump's card has no segmentation to read, but its viewer has v1dd_public,
+   2026-09-21); a new one from the card's segmentation only where the link has none; else nothing. */
 function tracingAddRootsTo(st, extra){
   if (!extra || !extra.length) return false;
-  var isNuc = function(l){ return /nucle/i.test(String(l.name || "") + " " + String(l.source || "")); };
-  var cell = (st.layers || []).filter(function(l){ return l && l.type === "segmentation" && !isNuc(l); })[0];
+  var cell = tracingCellLayerOf(st);
+  if (!cell && !tracingSources().seg) return false;
   if (!cell){
     cell = { type: "segmentation", source: tracingSources().seg, tab: "source", name: "segmentation",
              notSelectedAlpha: 0.05, objectAlpha: 0.35 };
@@ -11606,7 +11613,10 @@ function tracingViewerOpen(structs, say, ids){
      the nucleus onto the cell layer, then the tab is sent there. Where there are none to read the
      wait is nothing, and a backend that does not answer costs 5 s, not the view. */
   const nucId = (ids && ids.nuc) || "", rootId = (ids && ids.root) || "";
-  const canExtra = !!nucId && tracingSources().seg
+  /* A cell layer to put them in: the link's own (δJump's v1dd_public, which the card itself cannot
+     read) or the card's segmentation -- 2026-09-21, Søren: "In dJump, I don't see it including the
+     community reported root IDs". */
+  const canExtra = !!nucId && !!(tracingCellLayerOf(st) || tracingSources().seg)
     && !!((UJ.cfg && UJ.cfg.tracing && UJ.cfg.tracing.extraRootsFor) || typeof fetchExtraRootIdsFor === "function");
   if (!canExtra) window.open(url, "_blank", "noopener");
   else {
