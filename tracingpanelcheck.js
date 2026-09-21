@@ -2192,10 +2192,10 @@ function link(annotations){
      the picture is of the right thing. */
   console.log("\nthe contours, back in a viewer");
   {
-    const trip = await p.evaluate(() => {
+    const trip = await p.evaluate(async () => {
       const opened = [];
       const realOpen = window.open;
-      window.open = (u) => { opened.push(u); return null; };
+      window.open = (u) => { const w = { location: { href: u || "" }, opener: 1 }; opened.push(w); return w; };
       const structs = [
         { name: "Mitochondrion 1", color: "#40e28c", rings: [
           { z: 700, points: [[1000,2000],[1200,2000],[1200,2200],[1000,2200]] },
@@ -2204,9 +2204,11 @@ function link(annotations){
           { z: 700, points: [[3000,4000],[3200,4000],[3100,4200]] } ] }
       ];
       tracingViewerOpen(structs, null, { root: "864691135499287571", nuc: "264317" });
+      { const t0 = Date.now();   /* the viewer may open its tab first and address it later (2026-09-21) */
+        while (Date.now() - t0 < 7000 && !(opened[0] && opened[0].location.href)) await new Promise(r => setTimeout(r, 100)); }
       window.open = realOpen;
       if (!opened.length) return { err: "nothing opened" };
-      const url = opened[0];
+      const url = opened[0].location.href;
       const st = JSON.parse(decodeURIComponent(url.split("#!")[1]));
       const anns = (st.layers || []).filter(l => l.type === "annotation" && l.annotations);
       /* Read it back the way a pasted link is read. */
@@ -2274,17 +2276,19 @@ function link(annotations){
 
   console.log("...and a tracing with no cell on it says so rather than showing somebody else's");
   {
-    const bare = await p.evaluate(() => {
+    const bare = await p.evaluate(async () => {
       /* The globals buildState() reads are set to a REAL cell, which is the trap: without the
          clear, the viewer would come back showing that cell around contours it has nothing to do
          with, and it would look completely convincing. */
       window.CUR_ROOT = "864691136084075884"; window.CUR_NUCID = "582301";
       const opened = []; const realOpen = window.open;
-      window.open = (u) => { opened.push(u); return null; };
+      window.open = (u) => { const w = { location: { href: u || "" }, opener: 1 }; opened.push(w); return w; };
       tracingViewerOpen([{ name: "Loose contour", color: "#40e28c",
                            rings: [{ z: 5, points: [[0,0],[10,0],[10,10]] }] }], null, {});
+      { const t0 = Date.now();   /* the viewer may open its tab first and address it later (2026-09-21) */
+        while (Date.now() - t0 < 7000 && !(opened[0] && opened[0].location.href)) await new Promise(r => setTimeout(r, 100)); }
       window.open = realOpen;
-      const st = JSON.parse(decodeURIComponent(opened[0].split("#!")[1]));
+      const st = JSON.parse(decodeURIComponent(opened[0].location.href.split("#!")[1]));
       return { segs: (st.layers || []).filter(l => l.type === "segmentation")
                        .map(l => JSON.stringify(l.segments || null)),
                say: document.getElementById("tracingStatus").textContent };
@@ -2298,17 +2302,19 @@ function link(annotations){
 
   console.log("...and two structures of the same name still get a layer each");
   {
-    const same = await p.evaluate(() => {
+    const same = await p.evaluate(async () => {
       const opened = []; const realOpen = window.open;
-      window.open = (u) => { opened.push(u); return null; };
+      window.open = (u) => { const w = { location: { href: u || "" }, opener: 1 }; opened.push(w); return w; };
       tracingViewerOpen([
         { name: "Mitochondrion", color: "#40e28c",
           rings: [{ z: 1, points: [[0,0],[10,0],[10,10]] }] },
         { name: "Mitochondrion", color: "#bfdd78",
           rings: [{ z: 1, points: [[50,0],[60,0],[60,10]] }] }
       ]);
+      { const t0 = Date.now();   /* the viewer may open its tab first and address it later (2026-09-21) */
+        while (Date.now() - t0 < 7000 && !(opened[0] && opened[0].location.href)) await new Promise(r => setTimeout(r, 100)); }
       window.open = realOpen;
-      const st = JSON.parse(decodeURIComponent(opened[0].split("#!")[1]));
+      const st = JSON.parse(decodeURIComponent(opened[0].location.href.split("#!")[1]));
       return (st.layers || []).filter(l => l.annotations).map(l => l.name);
     });
     ok(same.length === 2 && same[0] !== same[1],

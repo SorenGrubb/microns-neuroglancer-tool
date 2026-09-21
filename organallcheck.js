@@ -49,7 +49,10 @@ const SETUP = `(function(read){
   PANEL_ORGAN_NID = "521491";
   PANEL_ORGAN_ANNS = [];
   window.__opened = null;
-  window.open = function(url){ window.__opened = url; return null; };
+  /* The viewer opens its tab first and sends it on once the community's root IDs are read
+     (2026-09-21), so the stub is a tab whose address is set later. */
+  window.open = function(url){ var w = { location: { href: url || "" }, opener: 1 };
+                               window.__tab = w; window.__opened = url || ""; return w; };
   renderOrganelleSection("521491", "864691136741958236");
   var host = document.getElementById("cellOrganelles");
   var b = host.querySelector(".organshowall");
@@ -60,12 +63,15 @@ const SETUP = `(function(read){
                          && (host.querySelector(".organrow").compareDocumentPosition(b) & 4)) };
 })`;
 
-const press = `(function(){
-  window.__opened = null;
+const press = `(async function(){
+  window.__opened = null; window.__tab = null;
   var b = document.getElementById("cellOrganelles").querySelector(".organshowall");
   if (!b) return { pressed: false };
   b.click();
-  var url = window.__opened || "";
+  var t0 = Date.now();
+  while (Date.now() - t0 < 7000 && !(window.__tab && window.__tab.location.href))
+    await new Promise(function(r){ setTimeout(r, 100); });
+  var url = (window.__tab && window.__tab.location.href) || window.__opened || "";
   var st = null;
   try { st = JSON.parse(decodeURIComponent(url.split("#!")[1] || "")); } catch (e){}
   var say = document.getElementById("tracingStatus");
@@ -76,7 +82,8 @@ const press = `(function(){
              return { type: l.type, name: l.name, colour: l.annotationColor,
                       n: (l.annotations || []).length, segments: l.segments }; }) : null,
            layout: st && st.layout && st.layout.type,
-           selected: st && st.selectedLayer && st.selectedLayer.layer };
+           selected: st && st.selectedLayer && st.selectedLayer.layer,
+           cellAt: (typeof tracingCentreOfNucleus === "function") ? tracingCentreOfNucleus("521491") : null };
 })`;
 
 (async () => {
@@ -125,9 +132,15 @@ const press = `(function(){
     ok(segs.some(l => (l.segments || []).indexOf("521491") >= 0),
        "...and its nucleus", JSON.stringify(segs.map(l => l.segments)));
     ok(got.layout === "xy-3d", "...with a 3D pane for them to appear in", got.layout);
-    /* Centred on the middle of the lot rather than on any one of them: the point of the view. */
-    ok(got.pos && got.pos[0] > 1200 && got.pos[0] < 1500,
-       "centred between the three, not on one of them", got.pos && got.pos.join(","));
+    /* ON THE CELL, 2026-09-21. Søren: "for the microglia it should be on its own center." Centred
+       on the cell's nucleus where the page knows it, and between the outlines only where it does
+       not -- never on one of them. */
+    if (got.cellAt)
+      ok(got.pos && got.pos.map(Math.round).join(",") === got.cellAt.join(","),
+         "centred on the cell's own nucleus", got.pos && got.pos.join(",") + " (nucleus at " + got.cellAt.join(",") + ")");
+    else
+      ok(got.pos && got.pos[0] > 1200 && got.pos[0] < 1500,
+         "centred between the three, not on one of them", got.pos && got.pos.join(","));
     ok(/3 organelles/.test(got.said), "and the page says what it opened", got.said.slice(0, 70));
   }
 
