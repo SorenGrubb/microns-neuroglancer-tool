@@ -1249,6 +1249,42 @@ function tracingStateOffer(json, msg, bad){
     catch (_e){ d.textContent = "could not download it"; }
   });
 }
+/* ── THE TAB IS TAKEN AT THE CLICK ───────────────────────────────────────────  2026-09-22
+   Søren: "the Neuroglancer window is still blocked. Why?" Because a browser only allows
+   window.open in the turn the click happened in, and the list's buttons read the tracing out of
+   the dataset first. A caller that will fetch reserves the tab before it does -- an async function
+   runs synchronously up to its first await, so the reservation is still inside the click -- and
+   tracingViewerOpen sends that tab to the link. See src/the_viewer_tab_is_taken_at_the_click.py. */
+var TRACING_HELD_WIN = null;
+function tracingReserveTab(msg){
+  try { TRACING_HELD_WIN = window.open("", "_blank"); } catch (_e){ TRACING_HELD_WIN = null; }
+  if (TRACING_HELD_WIN) try {
+    TRACING_HELD_WIN.document.write('<!doctype html><meta charset="utf-8"><title>Opening\u2026</title>'
+      + '<body style="font:14px system-ui;background:#0d1117;color:#e6edf3;padding:24px">'
+      + escHtml(msg || "Reading the contours, then opening the viewer\u2026"));
+    TRACING_HELD_WIN.document.close();
+  } catch (_e){}
+  return TRACING_HELD_WIN;
+}
+function tracingHeldTab(){ var w = TRACING_HELD_WIN; TRACING_HELD_WIN = null; return w; }
+/* Opens the link: the tab reserved at the click if there is one, else a new one. Returns false when
+   the browser refused -- pop-ups off -- so the caller can say so rather than look like it did
+   nothing. */
+function tracingOpenUrl(url){
+  var held = tracingHeldTab();
+  if (held){
+    try { held.opener = null; } catch (_e){}
+    try { held.location.href = url; return true; } catch (_e){}
+  }
+  var w = null;
+  try { w = window.open(url, "_blank", "noopener"); } catch (_e){ w = null; }
+  return !!w;
+}
+function tracingSayBlocked(st){
+  tracingStateOffer(JSON.stringify(st),
+    "Your browser blocked the viewer tab \u2014 allow pop-ups for this page, or paste the state "
+    + "into Neuroglancer\u2019s {} button:", true);
+}
 /* How long a viewer link may be. MEASURED, not guessed (2026-09-22, Chrome on
    spelunker.cave-explorer.org): a 5.83M character URL carrying 40,000 line annotations navigates
    and loads in full. Below LONG nothing is said; between LONG and MAX it opens and says the link
@@ -1318,10 +1354,13 @@ function tracingViewerOpen(structs, say, ids){
      community reported root IDs". */
   const canExtra = !!nucId && !!(tracingCellLayerOf(st) || tracingSources().seg)
     && !!((UJ.cfg && UJ.cfg.tracing && UJ.cfg.tracing.extraRootsFor) || typeof fetchExtraRootIdsFor === "function");
-  if (!canExtra) window.open(url, "_blank", "noopener");
+  if (!canExtra){ if (!tracingOpenUrl(url)){ tracingSayBlocked(st); return; } }
   else {
-    let win = null;
-    try { win = window.open("", "_blank"); } catch (_e){}
+    /* The tab reserved at the click, or one opened now -- either way it is taken BEFORE the
+       community's root IDs are fetched, for the same reason. */
+    let win = tracingHeldTab();
+    if (!win) try { win = window.open("", "_blank"); } catch (_e){}
+    if (!win){ tracingSayBlocked(st); return; }
     tracingExtraRootsFor(nucId, rootId).then(function(extra){
       let u = url;
       if (tracingAddRootsTo(st, extra)) u = base + "#!" + encodeURIComponent(JSON.stringify(st));
@@ -2902,9 +2941,13 @@ function tracingFailedSay(got){
 
 async function tracingCellSharedInViewer(sids, btn){
   if (!sids.length) return;
+  tracingReserveTab("Reading this cell\u2019s tracings from the dataset, then opening the viewer\u2026");
   const got = await tracingFetchCell(sids, btn);
   const good = got.filter(function(x){ return !x.error; });
-  if (!good.length){ tracingSay("Could not open that cell's tracings." + tracingFailedSay(got), true); return; }
+  if (!good.length){
+    var heldC = tracingHeldTab(); if (heldC) try { heldC.close(); } catch (_e){}
+    tracingSay("Could not open that cell's tracings." + tracingFailedSay(got), true); return;
+  }
   const ids = { nuc: "", root: "" };
   let coord = "";
   good.forEach(function(x){
@@ -3086,6 +3129,8 @@ async function tracingCellZip(g, btn){
    second job (it becomes an EDIT of that tracing, carrying its structureId) that looking must not
    quietly start. */
 async function tracingSharedInViewer(sid, btn){
+  /* BEFORE THE FETCH (2026-09-22): see tracingReserveTab. */
+  tracingReserveTab("Reading this tracing from the dataset, then opening the viewer\u2026");
   const label = btn ? btn.textContent : "";
   if (btn){ btn.disabled = true; btn.textContent = "opening…"; }
   try {
@@ -3104,6 +3149,8 @@ async function tracingSharedInViewer(sid, btn){
       + "“Open it in the pad” for that.",
       { nuc: t.nucleusId || st.nucleusId || "", root: t.rootId || st.rootId || "" });
   } catch (e){
+    /* Nothing to show in it: a blank tab left open is litter. */
+    var held = tracingHeldTab(); if (held) try { held.close(); } catch (_e){}
     tracingSay("Could not open that tracing: " + String(e && e.message || e), true);
   } finally {
     if (btn){ btn.disabled = false; btn.textContent = label; }
