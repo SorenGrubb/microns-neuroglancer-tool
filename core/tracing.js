@@ -679,14 +679,35 @@ UJ.tracing = (function(){
      Every annotation carries an id. Measured in Søren's browser on 2026-09-22: a state whose
      annotations have none loads a layer with ZERO in it, in silence.
 
-     opts.lines (or window.JUMP_VIEWER_LINES in the console) writes the old edge-per-line shape instead,
-     for a viewer too old to know polylines. See src/the_viewer_link_is_polylines.py. */
-  function viewerWantsLines(){
-    try { return window.JUMP_VIEWER_LINES === true; } catch (_e){ return false; }
+     THE SHAPE FOLLOWS THE VIEWER (2026-09-22, src/the_viewer_decides_the_shape.py). Measured in
+     Søren's browser, one probe state per viewer: spelunker.cave-explorer.org and
+     neuroglancer-demo.appspot.com read a polyline; ngl.microns-explorer.org, neuroglancer.neuvue.io
+     and h01-dot-neuroglancer-demo.appspot.com do NOT -- and on those, ONE polyline empties the
+     WHOLE layer, taking the lines and points beside it, in silence. So an unknown viewer gets
+     lines: a longer link is a cost, an empty layer is a lie.
+
+     JUMP_VIEWER_POLYLINES = true (or false) in the console forces it on that page. */
+  var POLYLINE_VIEWERS = { "spelunker.cave-explorer.org": 1, "neuroglancer-demo.appspot.com": 1 };
+  function viewerBase(){
+    try { var el = document.getElementById("viewer"); if (el && el.value) return String(el.value); }
+    catch (_e){}
+    try { if (window.UJ && UJ.cfg && UJ.cfg.viewer && UJ.cfg.viewer.base)
+            return String(UJ.cfg.viewer.base); } catch (_e){}
+    return "";
+  }
+  function viewerTakesPolylines(base){
+    try { if (window.JUMP_VIEWER_POLYLINES === true) return true;
+          if (window.JUMP_VIEWER_POLYLINES === false) return false; } catch (_e){}
+    var h = "";
+    /* The exact host, never a substring: "h01-dot-neuroglancer-demo.appspot.com" ends in
+       "neuroglancer-demo.appspot.com" and does NOT take polylines. */
+    try { h = new URL(String(base || viewerBase()), location.href).host; } catch (_e){ return false; }
+    return !!POLYLINE_VIEWERS[h];
   }
   function ringAnnotations(rings, idPrefix, opts){
     var out = [];
-    var asLines = (opts && typeof opts.lines === "boolean") ? opts.lines : viewerWantsLines();
+    var asLines = (opts && typeof opts.lines === "boolean")
+                ? opts.lines : !viewerTakesPolylines(opts && opts.base);
     (rings || []).forEach(function(r, ri){
       var pts = r.points || [];
       if (pts.length < 3) return;
@@ -709,7 +730,8 @@ UJ.tracing = (function(){
   }
 
   return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
-           ringAnnotations: ringAnnotations,
+           ringAnnotations: ringAnnotations, viewerTakesPolylines: viewerTakesPolylines,
+           viewerBase: viewerBase,
            ringsToRows: ringsToRows, toSubmission: toSubmission,
            INSTANCE_COLOURS: INSTANCE_COLOURS, instanceColour: instanceColour,
            instanceName: instanceName,

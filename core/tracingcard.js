@@ -1071,10 +1071,10 @@ function organOverlayInto(st, pos){
 /* POLYLINES, 2026-09-22: one annotation per contour instead of one per edge. The writer sits in
    core/tracing.js beside the reader it is the inverse of; tracingRingLines below is what it falls
    back to. See src/the_viewer_link_is_polylines.py. */
-function tracingRingAnns(rings, idPrefix){
+function tracingRingAnns(rings, idPrefix, base){
   try {
     if (window.UJ && UJ.tracing && UJ.tracing.ringAnnotations)
-      return UJ.tracing.ringAnnotations(rings, idPrefix);
+      return UJ.tracing.ringAnnotations(rings, idPrefix, { base: base || "" });
   } catch (_e){}
   return tracingRingLines(rings, idPrefix);
 }
@@ -1317,6 +1317,12 @@ function tracingViewerOpen(structs, say, ids){
     return !(l && l.type === "annotation"
              && (/cortical layers/i.test(String(l.name || "")) || l.name === "tracing"));
   });
+  /* The viewer decides the annotation shape (2026-09-22), so it has to be known before the
+     layers are written, not just when the URL is joined. */
+  const viewerEl0 = document.getElementById("viewer");
+  const base = (viewerEl0 && viewerEl0.value)
+            || (window.UJ && UJ.cfg && UJ.cfg.viewer && UJ.cfg.viewer.base)
+            || "https://spelunker.cave-explorer.org/";
   const used = {}; let firstName = "";
   structs.forEach(function(t, i){
     /* Neuroglancer keys layers by NAME, so two structures called the same thing would be one layer
@@ -1326,7 +1332,7 @@ function tracingViewerOpen(structs, say, ids){
     used[nm] = 1; if (!firstName) firstName = nm;
     st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
                      name: nm, annotationColor: t.color || "#40e28c",
-                     annotations: tracingRingAnns(t.rings, "t" + i) });
+                     annotations: tracingRingAnns(t.rings, "t" + i, base) });
   });
   st.selectedLayer = { layer: firstName, visible: true };
   const shown = tracingShowCellIn(st, (ids && ids.root) || "", (ids && ids.nuc) || "");
@@ -1334,8 +1340,7 @@ function tracingViewerOpen(structs, say, ids){
      live on xy sections, and three section panes to one 3D pane spends the width on two views that
      show the same outline twice. */
   st.layout = { type: "xy-3d", orthographicProjection: true };
-  const viewerEl = document.getElementById("viewer");
-  const base = (viewerEl && viewerEl.value) || "https://spelunker.cave-explorer.org/";
+  /* base is resolved above, before the layers are written. */
   const url = base + "#!" + encodeURIComponent(JSON.stringify(st));
   /* A tracing is tens of vertices a section, so this is comfortable; a hundred sections of freehand
      is not, and a URL the browser silently truncates would open a viewer missing half the cell
@@ -1347,12 +1352,23 @@ function tracingViewerOpen(structs, say, ids){
       + "instead \u2014 its {} button takes it \u2014 or open one structure at a time.", true);
     return;
   }
+  /* 2026-09-22: on a viewer with no polyline type a contour costs one annotation per edge, so
+     the same cell is about four times the link. Better to name the reason than to let him wonder. */
+  let shapeSay = "";
+  try {
+    if (url.length > TRACING_LINK_LONG && UJ.tracing.viewerTakesPolylines
+        && !UJ.tracing.viewerTakesPolylines(base))
+      shapeSay = " This viewer cannot read polyline annotations, so every edge is its own line and "
+               + "the link is about four times longer than it needs to be \u2014 Spelunker and "
+               + "neuroglancer-demo read polylines.";
+  } catch (_e){}
   if (url.length > TRACING_LINK_LONG){
     /* It opens: 40,000 annotations in a 5.83M character link were measured loading in Chrome. The
        sentence is for the browsers that are tighter, and it is not an error. */
     tracingStateOffer(JSON.stringify(st),
       "Opening a long link (" + kc + "). If the viewer comes up empty, your browser cut it short: "
-      + "copy or download the state below and paste it into Neuroglancer\u2019s {} button.", false);
+      + "copy or download the state below and paste it into Neuroglancer\u2019s {} button."
+      + shapeSay, false);
   }
   /* THE WHOLE CELL, 2026-09-21: the tab first, synchronously, then the community's root IDs for
      the nucleus onto the cell layer, then the tab is sent there. Where there are none to read the
