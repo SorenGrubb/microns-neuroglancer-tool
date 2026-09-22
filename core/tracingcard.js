@@ -2041,7 +2041,7 @@ async function pad3DDraw(){
       /* One structure failing to loft — a single stray vertex, a contour that is a line — must not
          cost the others their picture. */
       let lg = null;
-      try { lg = UJ.traceloft.loft(byInst[k], res); } catch (_e){ lg = null; }
+      try { lg = UJ.traceloft.loft(tracingLoftRings(byInst[k]), res); } catch (_e){ lg = null; }
       if (lg && lg.positions && lg.positions.length) lofts.push({ inst: k, g: lg });
     });
     if (!lofts.length){ pad3DNote("Nothing to draw yet."); PAD3D_BUSY = false; return; }
@@ -2210,6 +2210,58 @@ function tracingVolumeSay(v){
     + volFmt(v.volumeTrapezoidUm3) + " µm³ between the outermost contours, which is the "
     + "lower bound — the difference is what lies past them.";
 }
+/* ── DROP REDUNDANT POINTS, ON THE PAD ───────────────────────────────────────  2026-09-22
+   Søren: "I don't see anywhere I can reduce the number of points" -- he was on the pad, and the
+   button was in the found panel. The same offer, on the contours he is actually holding. See
+   src/the_pad_can_drop_redundant_points_too.py. */
+/* Ticking it is a different picture, so the preview is rebuilt. Wired where the button is. */
+function padSmoothWire(){
+  const el = document.getElementById("tracePadSmoothZ");
+  if (!el || el.dataset.wired) return;
+  el.dataset.wired = "1";
+  el.addEventListener("change", function(){ try { pad3DSoon(); } catch (_e){} });
+}
+function padThinGain(){
+  if (!PAD || !PAD.rings || !PAD.rings.length) return null;
+  if (!(window.UJ && UJ.tracing && UJ.tracing.simplifyRings)) return null;
+  const r = UJ.tracing.simplifyRings(PAD.rings.map(function(x){
+    return { z: x.z, points: x.points };
+  }));
+  if (!r.before || r.before - r.after <= r.before / 10) return null;
+  return r;
+}
+function padThinShow(){
+  const btn = document.getElementById("padThin");
+  if (!btn) return;
+  if (!btn.dataset.wired){ btn.dataset.wired = "1"; btn.addEventListener("click", padThinRun); }
+  try { padSmoothWire(); } catch (_e){}
+  const g = padThinGain();
+  btn.style.display = g ? "" : "none";
+  if (g) btn.textContent = "Drop redundant points (" + g.before.toLocaleString() + " \u2192 "
+                         + g.after.toLocaleString() + ")";
+}
+function padThinRun(){
+  const g = padThinGain();
+  if (!g){ padSay("There is nothing redundant left to drop."); return; }
+  const volBefore = tracingVolumeOf(UJ.tracepad.toRings(PAD));
+  /* In place, keeping z and the instance: it is the same contour with fewer vertices on it. */
+  PAD.rings.forEach(function(r, i){
+    const s = g.rings[i];
+    if (s && s.points) r.points = s.points;
+  });
+  const volAfter = tracingVolumeOf(UJ.tracepad.toRings(PAD));
+  padPaint();
+  padRings();
+  const volSay = (volBefore && volAfter && volBefore.ok)
+    ? " The volume is " + tracingVolumeSay(volAfter) + " \u2014 it was "
+      + tracingVolumeSay(volBefore) + "."
+    : "";
+  padSay("Dropped " + (g.before - g.after).toLocaleString() + " redundant point"
+    + (g.before - g.after === 1 ? "" : "s") + ": " + g.before.toLocaleString() + " \u2192 "
+    + g.after.toLocaleString() + ". No point of the outline moved more than " + g.tol
+    + " voxel" + (g.tol === 1 ? "" : "s") + "." + volSay
+    + " Nothing is shared until you press \u201cUse these contours\u201d.");
+}
 function padVolume(){
   const el = document.getElementById("tracePadVol");
   if (!el || !PAD) return null;
@@ -2226,10 +2278,14 @@ function padVolume(){
         + '<b>' + (it.inst + 1) + '</b> — '
         + escHtml(v ? tracingVolumeSay(v) : "nothing yet");
     }).join("<br>");
+    try { padThinShow(); } catch (_e){}
     return null;
   }
   const v = tracingVolumeOf(all);
   el.textContent = v ? tracingVolumeSay(v) : "";
+  /* padVolume runs after every close, every delete and every section change, which is every way
+     the contours can change -- so the offer follows them without a hook of its own. */
+  try { padThinShow(); } catch (_e){}
   return v;
 }
 /* The same figure beside the button that submits, because that is where it is being decided. A
@@ -3178,9 +3234,26 @@ function tracingSaveBlob(blob, name){
 function tracingSafeName(s){
   return String(s || "tracing").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60) || "tracing";
 }
+/* ── WHAT GETS LOFTED ────────────────────────────────────────────────────────  2026-09-22
+   The rings as drawn, or -- with "smooth between sections" ticked -- an interpolated set that
+   curves in z. loft() bands straight between consecutive sections, so this is the only way the
+   surface between them becomes anything but flat. Nothing here is saved or measured.
+   See src/the_mesh_can_be_smoothed_in_z.py. */
+function tracingSmoothZ(){
+  try { const el = document.getElementById("tracePadSmoothZ"); return !!(el && el.checked); }
+  catch (_e){ return false; }
+}
+function tracingLoftRings(rings){
+  if (!tracingSmoothZ()) return rings;
+  try {
+    if (UJ.traceloft && UJ.traceloft.interpolate)
+      return UJ.traceloft.interpolate(rings, { per: 2 }).rings;
+  } catch (_e){}
+  return rings;
+}
 /* The pad's own loft, in nanometres, as OBJ. */
 function tracingObjOf(name, rings, res){
-  const g = UJ.traceloft.loft(rings, res);
+  const g = UJ.traceloft.loft(tracingLoftRings(rings), res);
   if (!g || !g.positions || !g.positions.length) return "";
   const out = ["# " + name + " — lofted from its contours by µJump's tracing card; units: nm", "o " + tracingSafeName(name)];
   for (let i = 0; i < g.positions.length; i += 3)
@@ -4988,6 +5061,11 @@ function tracingCardHtml(){
     "<button class=\"idbtn\" id=\"tracePadNewInst\" style=\"flex:0 0 auto;padding:2px 9px;font-size:12px\" title=\"Start another organelle of the same type. It gets its own colour here and its own number when it is added to the dataset, so several mitochondria in one cell stay apart. Everything else — the type, the cell, the ids — is shared.\">+ another one</button>",
     "</div>",
     "<div id=\"tracePadRings\" style=\"margin-top:6px\"></div>",
+    "<!-- DROP REDUNDANT POINTS, ON THE PAD.  2026-09-22. Søren, with a screenshot of the pad:",
+    "     \"I don't see anywhere I can reduce the number of points\" -- the button had gone in the",
+    "     found panel, which only appears after a link is read, and the cell he was holding was here.",
+    "     See src/the_pad_can_drop_redundant_points_too.py. -->",
+    "<button class=\"idbtn\" id=\"padThin\" style=\"display:none;margin-top:4px\" title=\"A contour drawn with a pen is sampled by the pointer, not by the shape: a straight stretch of membrane arrives as twenty points that two would draw identically. This drops those, moving no point of the outline by more than half a voxel. It changes the contours on the pad — nothing is shared until you press “Use these contours”.\">Drop redundant points</button>",
     "<p class=\"hint\" id=\"tracePadVol\" style=\"margin-top:4px\" title=\"Cavalieri's estimator: each section's outlined area times the slab of tissue that section stands for. A contour drawn inside another is a hole, the same rule the export fills with. It updates as you draw.\"></p>",
     "<p class=\"hint\" id=\"tracePadSay\" style=\"margin-top:6px\">Click each vertex round the cell. The first one is drawn as a ring &mdash; click it again to close the contour. <b>Shift+click</b> moves the field there, shift+drag or a plain drag pans it, and <b>,</b> and <b>.</b> step a section.</p>",
     "<!-- EVERY GESTURE, IN ONE PLACE.  2026-09-17. Søren: \"make a list of all the possible commands with",
@@ -5036,6 +5114,11 @@ function tracingCardHtml(){
     "<div class=\"row\" style=\"gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap\">",
     "<button class=\"idbtn\" id=\"tracePad3D\" style=\"flex:1 1 auto\" title=\"Lofts the contours you have drawn into a surface and draws it here. Not the export's surface -- that one is built by filling each section and running marching cubes, and it is smoother; this is the same silhouette, now.\">Show it in 3D</button>",
     "<label style=\"font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto\" title=\"Fetches the cell's own mesh for the root ID and the nucleus mesh for the nucleus ID, and draws both see-through around your tracing, so you can see where it sits. Megabytes for a whole neuron, which is why it is a choice.\"><input type=\"checkbox\" id=\"tracePadGhosts\" checked> with the cell and nucleus, see-through</label>",
+    "<!-- SMOOTH IN Z.  2026-09-22. Søren: \"Can we also interpolate between polylines in z?\" Off by",
+    "     default: on, the preview and the OBJ loft an interpolated set that CURVES between sections",
+    "     rather than cutting straight across. It changes no volume and saves nothing.",
+    "     See src/the_mesh_can_be_smoothed_in_z.py. -->",
+    "<label style=\"font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto\" title=\"Rounds the surface between sections instead of cutting straight across, by interpolating contours in z — a Catmull-Rom through four consecutive outlines, so a cell that is round stays round between the sections you drew. It affects the 3D view and the OBJ only: no volume changes, and nothing is saved.\"><input type=\"checkbox\" id=\"tracePadSmoothZ\"> smooth between sections</label>",
     "</div>",
     "<div id=\"tracePad3DHost\" style=\"margin-top:6px\"></div>",
     "</div>",
