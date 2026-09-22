@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-22 19:32</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-22 20:05</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -11211,14 +11211,35 @@ UJ.tracing = (function(){
      Every annotation carries an id. Measured in Søren's browser on 2026-09-22: a state whose
      annotations have none loads a layer with ZERO in it, in silence.
 
-     opts.lines (or window.JUMP_VIEWER_LINES in the console) writes the old edge-per-line shape instead,
-     for a viewer too old to know polylines. See src/the_viewer_link_is_polylines.py. */
-  function viewerWantsLines(){
-    try { return window.JUMP_VIEWER_LINES === true; } catch (_e){ return false; }
+     THE SHAPE FOLLOWS THE VIEWER (2026-09-22, src/the_viewer_decides_the_shape.py). Measured in
+     Søren's browser, one probe state per viewer: spelunker.cave-explorer.org and
+     neuroglancer-demo.appspot.com read a polyline; ngl.microns-explorer.org, neuroglancer.neuvue.io
+     and h01-dot-neuroglancer-demo.appspot.com do NOT -- and on those, ONE polyline empties the
+     WHOLE layer, taking the lines and points beside it, in silence. So an unknown viewer gets
+     lines: a longer link is a cost, an empty layer is a lie.
+
+     JUMP_VIEWER_POLYLINES = true (or false) in the console forces it on that page. */
+  var POLYLINE_VIEWERS = { "spelunker.cave-explorer.org": 1, "neuroglancer-demo.appspot.com": 1 };
+  function viewerBase(){
+    try { var el = document.getElementById("viewer"); if (el && el.value) return String(el.value); }
+    catch (_e){}
+    try { if (window.UJ && UJ.cfg && UJ.cfg.viewer && UJ.cfg.viewer.base)
+            return String(UJ.cfg.viewer.base); } catch (_e){}
+    return "";
+  }
+  function viewerTakesPolylines(base){
+    try { if (window.JUMP_VIEWER_POLYLINES === true) return true;
+          if (window.JUMP_VIEWER_POLYLINES === false) return false; } catch (_e){}
+    var h = "";
+    /* The exact host, never a substring: "h01-dot-neuroglancer-demo.appspot.com" ends in
+       "neuroglancer-demo.appspot.com" and does NOT take polylines. */
+    try { h = new URL(String(base || viewerBase()), location.href).host; } catch (_e){ return false; }
+    return !!POLYLINE_VIEWERS[h];
   }
   function ringAnnotations(rings, idPrefix, opts){
     var out = [];
-    var asLines = (opts && typeof opts.lines === "boolean") ? opts.lines : viewerWantsLines();
+    var asLines = (opts && typeof opts.lines === "boolean")
+                ? opts.lines : !viewerTakesPolylines(opts && opts.base);
     (rings || []).forEach(function(r, ri){
       var pts = r.points || [];
       if (pts.length < 3) return;
@@ -11241,7 +11262,8 @@ UJ.tracing = (function(){
   }
 
   return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
-           ringAnnotations: ringAnnotations,
+           ringAnnotations: ringAnnotations, viewerTakesPolylines: viewerTakesPolylines,
+           viewerBase: viewerBase,
            ringsToRows: ringsToRows, toSubmission: toSubmission,
            INSTANCE_COLOURS: INSTANCE_COLOURS, instanceColour: instanceColour,
            instanceName: instanceName,
@@ -12578,10 +12600,10 @@ function organOverlayInto(st, pos){
 /* POLYLINES, 2026-09-22: one annotation per contour instead of one per edge. The writer sits in
    core/tracing.js beside the reader it is the inverse of; tracingRingLines below is what it falls
    back to. See src/the_viewer_link_is_polylines.py. */
-function tracingRingAnns(rings, idPrefix){
+function tracingRingAnns(rings, idPrefix, base){
   try {
     if (window.UJ && UJ.tracing && UJ.tracing.ringAnnotations)
-      return UJ.tracing.ringAnnotations(rings, idPrefix);
+      return UJ.tracing.ringAnnotations(rings, idPrefix, { base: base || "" });
   } catch (_e){}
   return tracingRingLines(rings, idPrefix);
 }
@@ -12824,6 +12846,12 @@ function tracingViewerOpen(structs, say, ids){
     return !(l && l.type === "annotation"
              && (/cortical layers/i.test(String(l.name || "")) || l.name === "tracing"));
   });
+  /* The viewer decides the annotation shape (2026-09-22), so it has to be known before the
+     layers are written, not just when the URL is joined. */
+  const viewerEl0 = document.getElementById("viewer");
+  const base = (viewerEl0 && viewerEl0.value)
+            || (window.UJ && UJ.cfg && UJ.cfg.viewer && UJ.cfg.viewer.base)
+            || "https://spelunker.cave-explorer.org/";
   const used = {}; let firstName = "";
   structs.forEach(function(t, i){
     /* Neuroglancer keys layers by NAME, so two structures called the same thing would be one layer
@@ -12833,7 +12861,7 @@ function tracingViewerOpen(structs, say, ids){
     used[nm] = 1; if (!firstName) firstName = nm;
     st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
                      name: nm, annotationColor: t.color || "#40e28c",
-                     annotations: tracingRingAnns(t.rings, "t" + i) });
+                     annotations: tracingRingAnns(t.rings, "t" + i, base) });
   });
   st.selectedLayer = { layer: firstName, visible: true };
   const shown = tracingShowCellIn(st, (ids && ids.root) || "", (ids && ids.nuc) || "");
@@ -12841,8 +12869,7 @@ function tracingViewerOpen(structs, say, ids){
      live on xy sections, and three section panes to one 3D pane spends the width on two views that
      show the same outline twice. */
   st.layout = { type: "xy-3d", orthographicProjection: true };
-  const viewerEl = document.getElementById("viewer");
-  const base = (viewerEl && viewerEl.value) || "https://spelunker.cave-explorer.org/";
+  /* base is resolved above, before the layers are written. */
   const url = base + "#!" + encodeURIComponent(JSON.stringify(st));
   /* A tracing is tens of vertices a section, so this is comfortable; a hundred sections of freehand
      is not, and a URL the browser silently truncates would open a viewer missing half the cell
@@ -12854,12 +12881,23 @@ function tracingViewerOpen(structs, say, ids){
       + "instead \u2014 its {} button takes it \u2014 or open one structure at a time.", true);
     return;
   }
+  /* 2026-09-22: on a viewer with no polyline type a contour costs one annotation per edge, so
+     the same cell is about four times the link. Better to name the reason than to let him wonder. */
+  let shapeSay = "";
+  try {
+    if (url.length > TRACING_LINK_LONG && UJ.tracing.viewerTakesPolylines
+        && !UJ.tracing.viewerTakesPolylines(base))
+      shapeSay = " This viewer cannot read polyline annotations, so every edge is its own line and "
+               + "the link is about four times longer than it needs to be \u2014 Spelunker and "
+               + "neuroglancer-demo read polylines.";
+  } catch (_e){}
   if (url.length > TRACING_LINK_LONG){
     /* It opens: 40,000 annotations in a 5.83M character link were measured loading in Chrome. The
        sentence is for the browsers that are tighter, and it is not an error. */
     tracingStateOffer(JSON.stringify(st),
       "Opening a long link (" + kc + "). If the viewer comes up empty, your browser cut it short: "
-      + "copy or download the state below and paste it into Neuroglancer\u2019s {} button.", false);
+      + "copy or download the state below and paste it into Neuroglancer\u2019s {} button."
+      + shapeSay, false);
   }
   /* THE WHOLE CELL, 2026-09-21: the tab first, synchronously, then the community's root IDs for
      the nucleus onto the cell layer, then the tab is sent there. Where there are none to read the

@@ -455,7 +455,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-22 19:32</span></p>
+ctrl-shift-R.">build 2026-09-22 20:05</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -1922,12 +1922,24 @@ UJ.xjump = (function(){
       if (CB && CB.boundaries){
         var lz = (pos0(posVox, o) || centreVox())[2], segsOut = [], li = 0;
         /* ONE POLYLINE PER BOUNDARY, 2026-09-22 -- which is what the note above always called
-           them. Open paths, so no closing repeat. See src/the_layer_borders_are_polylines.py. */
+           them. Open paths, so no closing repeat. But only where the viewer reads the shape: on
+           one that does not, a single polyline empties the WHOLE layer, in silence (measured in
+           Søren's browser, ../microns-neuroglancer-tool/src/the_viewer_decides_the_shape.py).
+           See src/the_layer_borders_are_polylines.py. */
+        var POLY = !!(UJ.tracing && UJ.tracing.viewerTakesPolylines
+                      && UJ.tracing.viewerTakesPolylines(UJ.cfg.viewer && UJ.cfg.viewer.base));
         LAYER_ORDER.forEach(function(k){
           var poly = CB.boundaries[k] || [];
           if (poly.length < 2) return;
-          segsOut.push({ type:"polyline", id:"lb" + (li++),
-                         points: poly.map(function(p){ return [p[0], p[1], lz]; }) });
+          if (POLY){
+            segsOut.push({ type:"polyline", id:"lb" + (li++),
+                           points: poly.map(function(p){ return [p[0], p[1], lz]; }) });
+            return;
+          }
+          for (var i = 1; i < poly.length; i++)
+            segsOut.push({ type:"line", id:"lb" + (li++),
+                           pointA:[poly[i-1][0], poly[i-1][1], lz],
+                           pointB:[poly[i][0], poly[i][1], lz] });
         });
         if (segsOut.length)
           layers.push({ type:"annotation", name:"cerebellar layer borders (traced)",
