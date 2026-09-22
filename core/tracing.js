@@ -717,6 +717,20 @@ UJ.tracing = (function(){
 
      THE RINGS HANDED IN ARE NOT MODIFIED. This is for the link; the tracing is the record.
      See src/fewer_points_and_the_real_cap.py. */
+  /* IN NANOMETRES, not in base voxels (2026-09-22). minnie65 is 4 nm and a tracing is drawn at
+     the 32 nm level, where one screen pixel is EIGHT voxels -- so half a base voxel is a sixteenth
+     of a pixel, tighter than anything anybody drew, and "redundant" meant almost nothing. 16 nm is
+     half a pixel at the level tracings are drawn at. See src/the_tolerance_is_in_nanometres.py. */
+  var SIMPLIFY_NM = 16;
+  function resNmXY(){
+    try { var r = window.UJ && UJ.cfg && UJ.cfg.res; if (r && +r[0] > 0) return +r[0]; } catch (_e){}
+    return 4;
+  }
+  function simplifyTolVox(nm){
+    var n = (typeof nm === "number" && nm > 0) ? nm : SIMPLIFY_NM;
+    try { if (typeof window.JUMP_SIMPLIFY_NM === "number") n = window.JUMP_SIMPLIFY_NM; } catch (_e){}
+    return n / resNmXY();
+  }
   var SIMPLIFY_TOL = 0.5;
   function dpKeep(pts, first, last, tol, keep){
     var stack = [[first, last]];
@@ -740,9 +754,27 @@ UJ.tracing = (function(){
       if (worst > tol * tol){ keep[at] = 1; stack.push([i0, at]); stack.push([at, i1]); }
     }
   }
+  /* THE AREA IS THE MEASUREMENT, so the tolerance is capped at a fraction of the contour's own
+     size (2026-09-22). A polygon whose vertices sit within `tol` of a circle of radius R encloses
+     about (2/3)(tol/R) less area, so a fixed 16 nm costs 0.09% on a 12 µm cell and 0.5% on a 1.6 µm
+     organelle -- the same setting, ten times the error, because the structure is smaller. Capping
+     tol at 0.003 R holds the area error near 0.2% whatever is being traced: it never binds on a
+     cell, and it is the whole tolerance on a lysosome. Measured in tolerancecheck.js. */
+  var AREA_GUARD = 0.003;
+  function meanRadius(pts){
+    var cx = 0, cy = 0, i;
+    for (i = 0; i < pts.length; i++){ cx += pts[i][0]; cy += pts[i][1]; }
+    cx /= pts.length; cy /= pts.length;
+    var s = 0;
+    for (i = 0; i < pts.length; i++)
+      s += Math.sqrt(Math.pow(pts[i][0] - cx, 2) + Math.pow(pts[i][1] - cy, 2));
+    return s / pts.length;
+  }
   function simplifyRing(pts, tol){
     var n = pts.length;
     if (n < 6 || !(tol > 0)) return pts;
+    var cap = AREA_GUARD * meanRadius(pts);
+    if (cap > 0 && cap < tol) tol = cap;
     /* The far point, so the two halves are the two sides of the shape and not an arbitrary cut. */
     var far = 0, best = -1, i;
     for (i = 1; i < n; i++){
@@ -762,7 +794,8 @@ UJ.tracing = (function(){
   }
   /* rings -> { rings, before, after }, the counts so the card can say what it dropped. */
   function simplifyRings(rings, tol){
-    var t = (typeof tol === "number") ? tol : SIMPLIFY_TOL;
+    var t = (typeof tol === "number" && tol > 0) ? tol : simplifyTolVox();
+    /* JUMP_SIMPLIFY_TOL is still in voxels, for anyone who set it this morning. */
     try { if (typeof window.JUMP_SIMPLIFY_TOL === "number") t = window.JUMP_SIMPLIFY_TOL; }
     catch (_e){}
     var before = 0, after = 0;
@@ -773,7 +806,8 @@ UJ.tracing = (function(){
       after += s.length;
       return (s === pts) ? r : { z: r.z, points: s };
     });
-    return { rings: out, before: before, after: after, tol: t };
+    return { rings: out, before: before, after: after, tol: t,
+             nm: Math.round(t * resNmXY() * 10) / 10 };
   }
 
   function ringAnnotations(rings, idPrefix, opts){
@@ -808,6 +842,7 @@ UJ.tracing = (function(){
 
   return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
            ringAnnotations: ringAnnotations, simplifyRings: simplifyRings,
+           simplifyTolVox: simplifyTolVox, simplifyDefaultNm: function(){ return SIMPLIFY_NM; },
            viewerTakesPolylines: viewerTakesPolylines,
            viewerBase: viewerBase,
            ringsToRows: ringsToRows, toSubmission: toSubmission,

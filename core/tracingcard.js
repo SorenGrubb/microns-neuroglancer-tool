@@ -1341,7 +1341,7 @@ function tracingViewerOpen(structs, say, ids){
     const anns = tracingRingAnns(t.rings, "t" + i, base);
     if (anns.simplified){
       cut.before += anns.simplified.before; cut.after += anns.simplified.after;
-      cut.tol = anns.simplified.tol;
+      cut.tol = anns.simplified.tol; cut.nm = anns.simplified.nm;
     }
     st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
                      name: nm, annotationColor: t.color || "#40e28c", annotations: anns });
@@ -1362,8 +1362,8 @@ function tracingViewerOpen(structs, say, ids){
      has to take on trust. Only when it is a tenth or more -- below that it is noise. */
   const cutSay = (cut.before && cut.before - cut.after > cut.before / 10)
     ? " Redundant points dropped: " + cut.before.toLocaleString() + " \u2192 "
-      + cut.after.toLocaleString() + " (no point of the outline moved more than " + cut.tol
-      + " voxel" + (cut.tol === 1 ? "" : "s") + "; your saved tracing is unchanged)."
+      + cut.after.toLocaleString() + " (no point of the outline moved more than "
+      + (Math.round(cut.tol * 40) / 10) + " nm; your saved tracing is unchanged)."
     : "";
   /* 2026-09-22: on a viewer with no polyline type a contour costs one annotation per edge, so the
      same cell is about four times the link. Better to name the reason than to let him wonder. */
@@ -2226,8 +2226,8 @@ function padThinGain(){
   if (!(window.UJ && UJ.tracing && UJ.tracing.simplifyRings)) return null;
   const r = UJ.tracing.simplifyRings(PAD.rings.map(function(x){
     return { z: x.z, points: x.points };
-  }));
-  if (!r.before || r.before - r.after <= r.before / 10) return null;
+  }), thinVox("padThinNm"));
+  if (!r.before || r.after >= r.before) return null;
   return r;
 }
 function padThinShow(){
@@ -2235,6 +2235,10 @@ function padThinShow(){
   if (!btn) return;
   if (!btn.dataset.wired){ btn.dataset.wired = "1"; btn.addEventListener("click", padThinRun); }
   try { padSmoothWire(); } catch (_e){}
+  const row = document.getElementById("padThinNmRow");
+  if (row) row.style.display = (PAD && PAD.rings && PAD.rings.length) ? "flex" : "none";
+  const nm = document.getElementById("padThinNm");
+  if (nm && !nm.dataset.wired){ nm.dataset.wired = "1"; nm.addEventListener("input", padThinShow); }
   const g = padThinGain();
   btn.style.display = g ? "" : "none";
   if (g) btn.textContent = "Drop redundant points (" + g.before.toLocaleString() + " \u2192 "
@@ -2258,8 +2262,8 @@ function padThinRun(){
     : "";
   padSay("Dropped " + (g.before - g.after).toLocaleString() + " redundant point"
     + (g.before - g.after === 1 ? "" : "s") + ": " + g.before.toLocaleString() + " \u2192 "
-    + g.after.toLocaleString() + ". No point of the outline moved more than " + g.tol
-    + " voxel" + (g.tol === 1 ? "" : "s") + "." + volSay
+    + g.after.toLocaleString() + ". No point of the outline moved more than " + g.nm
+    + " nm." + volSay
     + " Nothing is shared until you press \u201cUse these contours\u201d.");
 }
 function padVolume(){
@@ -2299,17 +2303,41 @@ function padVolume(){
    It is offered only when a tenth or more of the points would go, and it hides once they have. The
    volume is recomputed and said: "I pressed a button and my cell got smaller" is the one outcome
    this must not have in silence. */
+/* The tolerance the boxes hold, in nanometres -- see src/the_tolerance_is_in_nanometres.py. */
+function thinNmOf(id){
+  try {
+    const el = document.getElementById(id);
+    const v = el ? parseFloat(el.value) : NaN;
+    if (v > 0) return v;
+  } catch (_e){}
+  try { return UJ.tracing.simplifyDefaultNm(); } catch (_e){}
+  return 16;
+}
+function thinVox(id){
+  try { return UJ.tracing.simplifyTolVox(thinNmOf(id)); } catch (_e){ return thinNmOf(id) / 4; }
+}
 function tracingThinGain(){
   const rings = (TRACING_PENDING && TRACING_PENDING.rings) || null;
   if (!rings || !rings.length) return null;
   if (!(window.UJ && UJ.tracing && UJ.tracing.simplifyRings)) return null;
-  const r = UJ.tracing.simplifyRings(rings.map(function(x){ return { z: x.z, points: x.points }; }));
-  if (!r.before || r.before - r.after <= r.before / 10) return null;
+  const r = UJ.tracing.simplifyRings(rings.map(function(x){ return { z: x.z, points: x.points }; }),
+                                     thinVox("tracingThinNm"));
+  /* ANY point, not a tenth of them (2026-09-22): a threshold made this a button that is not there
+     when it would do something, and a hidden control cannot be argued with. */
+  if (!r.before || r.after >= r.before) return null;
   return r;
 }
 function tracingThinShow(){
   const btn = document.getElementById("tracingThin");
   if (!btn) return;
+  const row = document.getElementById("tracingThinNmRow");
+  const any = !!(TRACING_PENDING && (TRACING_PENDING.rings || []).length);
+  if (row) row.style.display = any ? "flex" : "none";
+  const nm = document.getElementById("tracingThinNm");
+  if (nm && !nm.dataset.wired){
+    nm.dataset.wired = "1";
+    nm.addEventListener("input", tracingThinShow);
+  }
   const g = tracingThinGain();
   btn.style.display = g ? "" : "none";
   if (g) btn.textContent = "Drop redundant points (" + g.before.toLocaleString() + " \u2192 "
@@ -2349,8 +2377,8 @@ function tracingThinRun(){
     : "";
   tracingSay("Dropped " + (g.before - g.after).toLocaleString() + " redundant point"
     + (g.before - g.after === 1 ? "" : "s") + ": " + g.before.toLocaleString() + " \u2192 "
-    + g.after.toLocaleString() + ". No point of the outline moved more than " + g.tol
-    + " voxel" + (g.tol === 1 ? "" : "s") + "." + volSay
+    + g.after.toLocaleString() + ". No point of the outline moved more than " + g.nm
+    + " nm." + volSay
     + " Nothing is saved until you add it \u2014 read the link again to get every point back.");
 }
 function tracingVolShow(){
@@ -5066,6 +5094,7 @@ function tracingCardHtml(){
     "     found panel, which only appears after a link is read, and the cell he was holding was here.",
     "     See src/the_pad_can_drop_redundant_points_too.py. -->",
     "<button class=\"idbtn\" id=\"padThin\" style=\"display:none;margin-top:4px\" title=\"A contour drawn with a pen is sampled by the pointer, not by the shape: a straight stretch of membrane arrives as twenty points that two would draw identically. This drops those, moving no point of the outline by more than half a voxel. It changes the contours on the pad — nothing is shared until you press “Use these contours”.\">Drop redundant points</button>",
+    "<label id=\"padThinNmRow\" style=\"display:none;font-size:12px;align-items:center;gap:6px;margin-top:4px\" title=\"How far a point may move, in nanometres. 16 nm is half a pixel at the 32 nm level tracings are drawn at — below what the screen showed you. Raise it to drop more; the button says how many before you press it.\">within <input type=\"number\" id=\"padThinNm\" value=\"16\" min=\"1\" max=\"400\" step=\"1\" style=\"width:64px\"> nm</label>",
     "<p class=\"hint\" id=\"tracePadVol\" style=\"margin-top:4px\" title=\"Cavalieri's estimator: each section's outlined area times the slab of tissue that section stands for. A contour drawn inside another is a hole, the same rule the export fills with. It updates as you draw.\"></p>",
     "<p class=\"hint\" id=\"tracePadSay\" style=\"margin-top:6px\">Click each vertex round the cell. The first one is drawn as a ring &mdash; click it again to close the contour. <b>Shift+click</b> moves the field there, shift+drag or a plain drag pans it, and <b>,</b> and <b>.</b> step a section.</p>",
     "<!-- EVERY GESTURE, IN ONE PLACE.  2026-09-17. Søren: \"make a list of all the possible commands with",
@@ -5195,6 +5224,7 @@ function tracingCardHtml(){
     "     a button over doing it on the way in -- the contours in the sheet are the record. Shown only",
     "     when there is a tenth or more to gain. See src/a_button_drops_the_redundant_points.py. -->",
     "<button class=\"idbtn\" id=\"tracingThin\" style=\"display:none;margin-top:4px\" title=\"A contour drawn with a pen is sampled by the pointer, not by the shape: a straight stretch of membrane arrives as twenty points that two would draw identically. This drops those, moving no point of the outline by more than half a voxel. Your saved tracing changes only if you add it afterwards — read the link again to get every point back.\">Drop redundant points</button>",
+    "<label id=\"tracingThinNmRow\" style=\"display:none;font-size:12px;align-items:center;gap:6px;margin-top:4px\" title=\"How far a point may move, in nanometres. 16 nm is half a pixel at the 32 nm level tracings are drawn at — below what the screen showed you. Raise it to drop more; the button says how many before you press it.\">within <input type=\"number\" id=\"tracingThinNm\" value=\"16\" min=\"1\" max=\"400\" step=\"1\" style=\"width:64px\"> nm</label>",
     "<!-- THE SHAPE, BEFORE IT IS COMMITTED.  2026-09-19. Søren: \"the neuroglancer link paste function",
     "     needs to have a 3D rendering also, so you can see the 3D mesh before committing.\" The pad has",
     "     had this since 2026-09-17, and pad3DRings() has ALWAYS fallen back to a pasted tracing -- but",

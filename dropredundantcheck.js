@@ -102,7 +102,7 @@ const STATE = (() => {
   ok(JSON.stringify(after.insts) === JSON.stringify(read.insts),
      "...or the instance grouping it came in with", JSON.stringify(after.insts));
   ok(new RegExp(String(after.before).replace(/\B(?=(\d{3})+(?!\d))/g, ",")).test(after.say)
-     && /unchanged|voxel/i.test(after.say),
+     && /moved more than [\d.]+ nm/.test(after.say),
      "...saying before → after, before anything is saved", after.say.slice(0, 150));
   const dv = Math.abs(after.volAfter - after.volBefore) / after.volBefore;
   ok(dv < 0.005, "...and the volume the tracing exists to measure is unchanged",
