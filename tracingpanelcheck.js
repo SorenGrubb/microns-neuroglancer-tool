@@ -1121,7 +1121,10 @@ function link(annotations){
       datasetId: UJ.cfg.id, datasetLabel: UJ.cfg.label,
       emSource: UJ.cfg.em.emSource, segSource: UJ.cfg.em.segSource, nucSource: UJ.cfg.em.nucSource,
       boxNM: { xmin: 0, xmax: 1000, ymin: 0, ymax: 1000, zmin: 0, zmax: 1000 },
-      cells: [{ type: "astrocyte", root_id: "864691135", nucleus_id: "1" }],
+      /* THE CELL IT WAS TRACED ON. Since 2026-09-22 core/blenderexport.js keeps only the
+         tracings of the exported cells or of this box -- see nbexportcheck.js -- so a cell list
+         naming a different nucleus would rightly leave this one out. */
+      cells: [{ type: "astrocyte", root_id: "864691135", nucleus_id: "253863" }],
       include: { em: true, seg: true, meshes: true, nuclei: true },
       tracings: TRACINGS_KEPT
     });
@@ -1133,7 +1136,10 @@ function link(annotations){
      inNb.src.split("\\n")[0]);
   ok(/astrocyte at the glia limitans/.test(inNb.src), "...carrying the name he gave it");
   ok(/'nucleus_id': '253863'/.test(inNb.src), "...and the nucleus he tied it to");
-  ok(/'color': '#40e28c'/.test(inNb.src), "...and the colour he picked");
+  /* NO COLOUR since 2026-09-22: colour_policy.py in the notebook decides, so that several kinds
+     of organelle come out one colour per kind (nbcolourcheck.py). The KIND travels instead. */
+  ok(!/'color':/.test(inNb.src) && /'kind': '[a-z_]+'/.test(inNb.src),
+     "...and its kind, which the notebook colours it from", (inNb.src.match(/'kind': '[^']*'/) || [""])[0]);
   ok(/'traced_by': ''/.test(inNb.src),
      "...and traced_by is EMPTY, because he was signed out when he kept it — a blank is honest, "
      + "a guessed name would not be");

@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-22 18:12</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-22 18:39</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -12632,6 +12632,41 @@ function tracingCellCentre(coord, nuc){
   if (c.length === 3 && c.every(isFinite)) return c.map(Math.round);
   try { return tracingCentreOfNucleus(nuc); } catch (_e){ return null; }
 }
+/* ── THE STATE, TO PASTE INTO THE VIEWER ITSELF ──────────────────────────────  2026-09-22
+   Neuroglancer's {} button takes a pasted state, which is how Søren was opening the tracings a
+   link could not carry. The status line offers the same JSON: on the clipboard, or as a file.
+   See src/a_long_tracing_still_opens.py. */
+var TRACING_STATE_JSON = "";
+function tracingStateOffer(json, msg, bad){
+  TRACING_STATE_JSON = String(json || "");
+  var el = document.getElementById("tracingStatus");
+  if (!el){ tracingSay(msg, bad); return; }
+  el.innerHTML = (bad ? '<span style="color:var(--bad)">' + escHtml(msg) + "</span>" : escHtml(msg))
+    + ' <button type="button" class="hist-chip" id="tracingCopyState">copy the JSON</button>'
+    + ' <button type="button" class="hist-chip" id="tracingSaveState">download it</button>';
+  var c = document.getElementById("tracingCopyState");
+  if (c) c.addEventListener("click", function(){
+    var done = function(){ c.textContent = "copied \u2014 paste it into Neuroglancer\u2019s {} button"; };
+    var no = function(){ c.textContent = "could not copy \u2014 use download it"; };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(TRACING_STATE_JSON).then(done, no);
+      else no();
+    } catch (_e){ no(); }
+  });
+  var d = document.getElementById("tracingSaveState");
+  if (d) d.addEventListener("click", function(){
+    try { tracingSaveBlob(new Blob([TRACING_STATE_JSON], { type: "application/json" }),
+                          "neuroglancer_state.json"); d.textContent = "downloaded"; }
+    catch (_e){ d.textContent = "could not download it"; }
+  });
+}
+/* How long a viewer link may be. MEASURED, not guessed (2026-09-22, Chrome on
+   spelunker.cave-explorer.org): a 5.83M character URL carrying 40,000 line annotations navigates
+   and loads in full. Below LONG nothing is said; between LONG and MAX it opens and says the link
+   is a long one; above MAX no tab is opened, because a truncated URL opens a viewer missing half
+   the cell without saying so. */
+var TRACING_LINK_LONG = 1500000, TRACING_LINK_MAX = 8000000;
 function tracingViewerOpen(structs, say, ids){
   structs = (structs || []).filter(function(t){ return t && (t.rings || []).length; });
   if (!structs.length){ tracingSay("Nothing to look at yet — no contours.", true); return; }
@@ -12671,14 +12706,24 @@ function tracingViewerOpen(structs, say, ids){
   /* A tracing is tens of vertices a section, so this is comfortable; a hundred sections of freehand
      is not, and a URL the browser silently truncates would open a viewer missing half the cell
      without saying so. Better to say so here. */
-  if (url.length > 1500000){
-    tracingSay("Too many vertices to put in a viewer link (" + Math.round(url.length / 1000)
-      + "k characters). Open one structure at a time, or use the Blender export.", true);
+  const kc = Math.round(url.length / 1000) + "k characters";
+  if (url.length > TRACING_LINK_MAX){
+    tracingStateOffer(JSON.stringify(st),
+      "That is more than a viewer link can carry (" + kc + "). Paste the state into Neuroglancer "
+      + "instead \u2014 its {} button takes it \u2014 or open one structure at a time.", true);
     return;
+  }
+  if (url.length > TRACING_LINK_LONG){
+    /* It opens: 40,000 annotations in a 5.83M character link were measured loading in Chrome. The
+       sentence is for the browsers that are tighter, and it is not an error. */
+    tracingStateOffer(JSON.stringify(st),
+      "Opening a long link (" + kc + "). If the viewer comes up empty, your browser cut it short: "
+      + "copy or download the state below and paste it into Neuroglancer\u2019s {} button.", false);
   }
   /* THE WHOLE CELL, 2026-09-21: the tab first, synchronously, then the community's root IDs for
      the nucleus onto the cell layer, then the tab is sent there. Where there are none to read the
      wait is nothing, and a backend that does not answer costs 5 s, not the view. */
+  const wasLong = url.length > TRACING_LINK_LONG;
   const nucId = (ids && ids.nuc) || "", rootId = (ids && ids.root) || "";
   /* A cell layer to put them in: the link's own (δJump's v1dd_public, which the card itself cannot
      read) or the card's segmentation -- 2026-09-21, Søren: "In dJump, I don't see it including the
@@ -12694,7 +12739,7 @@ function tracingViewerOpen(structs, say, ids){
       if (tracingAddRootsTo(st, extra)) u = base + "#!" + encodeURIComponent(JSON.stringify(st));
       if (win){ try { win.opener = null; } catch (_e){} win.location.href = u; }
       else window.open(u, "_blank", "noopener");
-      if (extra.length) tracingSay((say || ("Opened in the viewer at " + pos.join(", ") + ".")) + " The cell "
+      if (extra.length && !wasLong) tracingSay((say || ("Opened in the viewer at " + pos.join(", ") + ".")) + " The cell "
         + "is shown with its " + extra.length + " community-proposed root ID" + (extra.length === 1 ? "" : "s")
         + " as well as " + (rootId ? "its own" : "its nucleus") + ".");
     });
@@ -12704,6 +12749,7 @@ function tracingViewerOpen(structs, say, ids){
     ? " The cell is in the 3D pane, see-through, with its nucleus in blue inside it."
     : " No cell or nucleus ID on this tracing, so the 3D pane is empty — fill one in above and"
       + " open it again.";
+  if (wasLong) return;          // the long-link offer, with its two buttons, stays put
   tracingSay((say || ("Opened in the viewer at " + pos.join(", ") + " — " + nStr
     + ", one annotation layer each, in the colours they were drawn in. Edit them there and paste "
     + "the address bar back into the box above to read them in again.")) + cellStr);

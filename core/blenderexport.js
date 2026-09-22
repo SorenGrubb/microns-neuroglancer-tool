@@ -301,9 +301,15 @@ UJ.blender = (function(){
         return (nuc && String(c.nucleus_id || "") === nuc) || (root && String(c.root_id || "") === root);
       });
       if (mine) return true;
-      /* Its centre, in nanometres, against the box -- when the page told us the voxel size. */
+      /* A tracing filed against a DIFFERENT cell is not this export's, wherever it is: that is the
+         one Søren found, 430 µm outside the box. One filed against no cell at all is judged by
+         where it is, and kept when there is no voxel size to judge it with -- a page cached from
+         before this change sends none, and dropping every outline in silence would be worse than
+         the extra one this filter exists to remove. */
+      if (nuc || root) return false;
+      /* Its centre, in nanometres, against the box. */
       var R = opts.resNm;
-      if (!Array.isArray(R) || R.length !== 3 || b.xmin == null) return false;
+      if (!Array.isArray(R) || R.length !== 3 || b.xmin == null) return true;
       var n = 0, sx = 0, sy = 0, sz = 0;
       ((t && t.rings) || []).forEach(function(r){
         (r.points || []).forEach(function(p){

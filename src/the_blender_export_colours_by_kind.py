@@ -84,9 +84,15 @@ edit_text(BE, [
         return (nuc && String(c.nucleus_id || "") === nuc) || (root && String(c.root_id || "") === root);
       });
       if (mine) return true;
-      /* Its centre, in nanometres, against the box -- when the page told us the voxel size. */
+      /* A tracing filed against a DIFFERENT cell is not this export's, wherever it is: that is the
+         one Søren found, 430 µm outside the box. One filed against no cell at all is judged by
+         where it is, and kept when there is no voxel size to judge it with -- a page cached from
+         before this change sends none, and dropping every outline in silence would be worse than
+         the extra one this filter exists to remove. */
+      if (nuc || root) return false;
+      /* Its centre, in nanometres, against the box. */
       var R = opts.resNm;
-      if (!Array.isArray(R) || R.length !== 3 || b.xmin == null) return false;
+      if (!Array.isArray(R) || R.length !== 3 || b.xmin == null) return true;
       var n = 0, sx = 0, sy = 0, sz = 0;
       ((t && t.rings) || []).forEach(function(r){
         (r.points || []).forEach(function(p){
@@ -213,7 +219,13 @@ def alphas(cells, override=None):
     a = cell_alpha_for(cells, override)
     return [1.0 if is_organelle(c) else a for c in (cells or [])]
 '''
-patch(cell_at(lambda s: s.startswith("%%writefile /content/colour_policy.py")), [
+# Guarded on the function's own name: later steps edit the block this adds, so comparing the whole
+# block would add it a second time.
+_cp = cell_at(lambda s: s.startswith("%%writefile /content/colour_policy.py"))
+if u"def organelle_colours" in "".join(nb["cells"][_cp]["source"]):
+    print("  already there: the rules for organelles")
+else:
+  patch(_cp, [
  (u"the rules for organelles",
   u"        else:\n            out.append(by_group[group_of(c)])\n    return out",
   u"        else:\n            out.append(by_group[group_of(c)])\n    return out" + POLICY),
