@@ -1140,7 +1140,7 @@ function tracingShowCellIn(st, root, nuc){
     /* Every segment of the cell, where a cell is many (χJump); see padSegOverlay. */
     try {
       const f = UJ.cfg && UJ.cfg.tracing && UJ.cfg.tracing.cellIdsFor;
-      if (typeof f === "function") (f(String(root)) || []).forEach(function(x){
+      if (typeof f === "function") (f(String(root), String(nuc || "")) || []).forEach(function(x){
         x = String(x); if (x && cellLayer.segments.indexOf(x) < 0) cellLayer.segments.push(x); });
     } catch (_e){}
     cellLayer.objectAlpha = 0.35;
@@ -1809,6 +1809,16 @@ async function pad3DGhostMeshes(){
   return out;
 }
 
+/* core/mesh3d.js's renderer: UJ.mesh3dCore where a page keeps its own UJ.mesh3d (χJump), else
+   UJ.mesh3d. See src/the_pad_draws_with_the_core_renderer.py. */
+function tracingM3D(){
+  return (window.UJ && UJ.mesh3dCore && UJ.mesh3dCore.prepare) ? UJ.mesh3dCore : UJ.mesh3d;
+}
+/* core/mesh3d.js's renderer: UJ.mesh3dCore where a page keeps its own UJ.mesh3d (χJump), else
+   UJ.mesh3d. See src/the_pad_draws_with_the_core_renderer.py. */
+function tracingM3D(){
+  return (window.UJ && UJ.mesh3dCore && UJ.mesh3dCore.prepare) ? UJ.mesh3dCore : UJ.mesh3d;
+}
 function pad3DNote(msg){
   const h = pad3DHost();
   if (h) h.innerHTML = '<p class="hint">' + escHtml(msg) + "</p>";
@@ -1860,7 +1870,7 @@ async function pad3DDraw(){
        opened out when there are ghosts so the surroundings are visible rather than filling the
        view; the tracing is still the subject, and the wheel does the rest. */
     const raw = lofts.map(function(L){
-      return UJ.mesh3d.prepare(L.g.positions, L.g.indices, { unitNm: 1 });
+      return tracingM3D().prepare(L.g.positions, L.g.indices, { unitNm: 1 });
     });
     const lo = raw[0].lo.slice(), hi = raw[0].hi.slice();
     raw.forEach(function(q){
@@ -1873,7 +1883,7 @@ async function pad3DDraw(){
                     span: (Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) || 1)
                           * (ghosts.length ? 2.5 : 1) };
     const geos = lofts.map(function(L){
-      return UJ.mesh3d.prepare(L.g.positions, L.g.indices, { unitNm: 1, frame: frame });
+      return tracingM3D().prepare(L.g.positions, L.g.indices, { unitNm: 1, frame: frame });
     });
     /* THE ONE BEING DRAWN IS THE SUBJECT, so the lighting and the wheel favour it — and it is the
        one whose shape you are deciding about right now. The rest are drawn SOLID beside it, not
@@ -1894,7 +1904,7 @@ async function pad3DDraw(){
     });
 
     const drawn = siblings.concat(ghosts.map(function(x){
-      return { geo: UJ.mesh3d.prepare(x.mesh.positions, x.mesh.indices,
+      return { geo: tracingM3D().prepare(x.mesh.positions, x.mesh.indices,
                                       { unitNm: 1000, frame: frame }),
                /* The cell fainter than the nucleus: it is the larger surface and the one you are
                   most often looking THROUGH. */
@@ -1906,7 +1916,7 @@ async function pad3DDraw(){
                   blue-grey this used to be sat at hue 222 -- inside the nucleus band, which is
                   exactly the confusion the reservation exists to prevent. */
                tint: x.what === "cell" ? [0.72, 0.72, 0.74]
-                                       : (UJ.mesh3d.NUC_TINT || [0.23, 0.45, 0.85]) };
+                                       : (tracingM3D().NUC_TINT || [0.23, 0.45, 0.85]) };
     }));
     pad3DRelease();
     const um = [0, 1, 2].map(function(i){ return (hi[i] - lo[i]) / 1000; });
@@ -1948,7 +1958,7 @@ async function pad3DDraw(){
         + ghosts.map(function(d){ return d.what; }).join(" and ") + ".</span>";
     if (PAD3D_NOTE && wantGhosts)
       lead += "<br><span class='hint'>" + escHtml(PAD3D_NOTE) + ".</span>";
-    UJ.mesh3d.show(host, geo, { lead: lead, ghosts: drawn, view: PAD3D_VIEW,
+    tracingM3D().show(host, geo, { lead: lead, ghosts: drawn, view: PAD3D_VIEW,
                                 tint: pad3DTint(lofts[subject].inst),
                                 emptyMessage: "Nothing to draw yet." });
   } catch (e){
@@ -3409,7 +3419,11 @@ async function padSegOverlay(){
     let also = [];
     try {
       const f = UJ.cfg && UJ.cfg.tracing && UJ.cfg.tracing.cellIdsFor;
-      if (root && typeof f === "function") also = (f(root) || []).map(String).filter(function(x){ return x && x !== root; });
+      /* By the cell's key as well as the fragment (2026-09-21): on χJump the fragment under the
+         pointer need not be one the cell lists. */
+      const key = (document.getElementById("tracingNucId").value || "").trim();
+      if ((root || key) && typeof f === "function")
+        also = (f(root, key) || []).map(String).filter(function(x){ return x && x !== root; });
     } catch (_e){ also = []; }
     /* And the community's proposed root IDs for the nucleus, 2026-09-21 -- the same cell the viewer
        link shows. The nucleus box is read whether or not there is a nucleus volume to paint it in. */

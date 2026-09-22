@@ -59,13 +59,13 @@ const ok = (c, what, d) => {
                selShown: !!document.getElementById("randomTypeSelect").getClientRects().length,
                btnShown: !!document.getElementById("randomOfType").getClientRects().length,
                /* ηJump names its two buttons randomUnassigned/randomCommunity (2026-09-21). */
-               unclShown: !!(document.getElementById("randomUnclassified") || document.getElementById("randomUnassigned")).getClientRects().length,
+               unclShown: !!(document.getElementById("randomUnclassified") || document.getElementById("randomUntouched") || document.getElementById("randomUnassigned")).getClientRects().length,
                /* λJump and βJump have no community button; where there is one it is on screen. */
                commShown: (function(){ const e = document.getElementById("randomCommunityId") || document.getElementById("randomCommunity");
                                        return !e || !!e.getClientRects().length; })(),
                /* His mock put the picker above the two buttons. */
                pickerFirst: !!(document.getElementById("randomTypeSelect")
-                 .compareDocumentPosition(document.getElementById("randomUnclassified") || document.getElementById("randomUnassigned")) & 4) };
+                 .compareDocumentPosition(document.getElementById("randomUnclassified") || document.getElementById("randomUntouched") || document.getElementById("randomUnassigned")) & 4) };
     });
     ok(got.tag === "DIV", "the browse block is not a fold at all", got.tag);
     ok(got.shown && got.selShown && got.btnShown && got.unclShown && got.commShown,
@@ -125,6 +125,10 @@ const ok = (c, what, d) => {
          every cell body as an error, which is right, and not what is under test here. */
       let c = ["200000", "150000", "18000"];
       try { if (!document.getElementById("url") && typeof bulkCoordOf === "function") c = String(bulkCoordOf(0)).split(","); } catch (e){}
+      /* χJump: a proofread cell's own position. */
+      try { if (window.UJ && UJ.xjump && UJ.xjump.seedListAll){
+        const r = UJ.xjump.seedListAll().filter(r => r.pos)[0]; if (r) c = r.pos.map(String); } } catch (e){}
+      const before = document.body.innerText;
       document.getElementById("x").value = c[0];
       document.getElementById("y").value = c[1];
       document.getElementById("z").value = c[2];
@@ -132,9 +136,11 @@ const ok = (c, what, d) => {
       await new Promise(r => setTimeout(r, 1200));
       /* ηJump shows the cell rather than a link box (2026-09-21); either is "it jumped". */
       const u = document.getElementById("url"), o = document.getElementById("out");
+      const np = document.getElementById("nucpanel"), er = document.getElementById("err");
+      /* χJump has neither a link box nor #nucpanel: the cell it found is written into the page. */
       return { url: u ? (u.textContent || "").slice(0, 40) : null,
-               shown: o ? o.className : (document.getElementById("nucpanel") || {}).className,
-               err: document.getElementById("err").style.display };
+               shown: o ? o.className : (np ? np.className : (document.body.innerText !== before ? "show" : "")),
+               err: er ? er.style.display : (/outside|not a coordinate/i.test((document.getElementById("find-msg") || {}).textContent || "") ? "block" : "") };
     });
     if (got.url !== null) ok(/#!|http/.test(got.url), "a viewer link is built from a shut box", got.url || "(none)");
     ok(/show/.test(got.shown), got.url === null ? "a cell is shown from a shut box" : "...and shown", got.shown);
@@ -154,14 +160,16 @@ const ok = (c, what, d) => {
       if (!vals.length) return { skip: true };
       const want = vals.filter(v => /microglia/i.test(v))[0] || vals[0];
       s.value = want;
-      const before = (document.getElementById("nucpanel") || {}).innerHTML || "";
+      const probe = () => { const np = document.getElementById("nucpanel");
+                            return np ? np.innerHTML : document.body.innerText; };
+      const before = probe();
       window.__errs = [];
       const onErr = e => window.__errs.push(String(e.message || e));
       window.addEventListener("error", onErr);
       document.getElementById("randomOfType").click();
       await new Promise(r => setTimeout(r, 1500));
       window.removeEventListener("error", onErr);
-      const after = (document.getElementById("nucpanel") || {}).innerHTML || "";
+      const after = probe();
       return { want, changed: after !== before && after.length > 0, errs: window.__errs };
     });
     if (got.skip) ok(true, "(no type with cells on this page without its backend)");

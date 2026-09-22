@@ -28,6 +28,12 @@ try{var _t=localStorage.getItem("ujump_theme");
    pairs were measured rather than eyeballed: #4ade80 on #14532d is 5.23:1, #166534 on #dcfce7 is
    6.49:1. --inset is the recessed surface inputs and the cell panel sit on, one step BELOW --card
    in dark and one step above it in light, which is what makes a panel read as inset in both. */
+ /* The Browse picker's categories, as on µJump (2026-09-21). */
+ :root{--cat-exc:#f0883e;--cat-inh:#58a6ff;--cat-aff:#d2a8ff;--cat-other:#9aa4b2}
+ :root[data-theme="light"]{--cat-exc:#bc4c00;--cat-inh:#0969da;--cat-aff:#8250df;--cat-other:#5b6472}
+ @media(prefers-color-scheme:light){:root:not([data-theme="dark"]){--cat-exc:#bc4c00;--cat-inh:#0969da;
+       --cat-aff:#8250df;--cat-other:#5b6472}}
+ #randomTypeSelect optgroup{font-weight:600}
  :root{--bg:#0f1216;--card:#171b21;--ink:#e6e9ee;--mut:#9aa4b2;--line:#262c35;
        --accent:#4ade80;--on-accent:#04240f;--accent-dim:#14532d;--inset:#0b0f14;
        --ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--danger:var(--bad);--shadow:rgba(0,0,0,.4);
@@ -449,7 +455,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-21 20:14</span></p>
+ctrl-shift-R.">build 2026-09-21 21:26</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -461,44 +467,43 @@ ctrl-shift-R.">build 2026-09-21 20:14</span></p>
 <div class="tabpanel active" data-tabpanel="jump">
 
 <div class="card">
-  <label for="x">Coordinate <span class="lab-note">&mdash; in <span id="unitres"></span> voxels;
-  jump to it in cb2 and find the proofread cells whose somata are nearest</span></label>
-  <div class="row">
-    <div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div>
-    <div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div>
-    <div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div>
-    <button class="go inline" id="go" title="Find the nearest proofread cell">&#8594;</button>
+  <!-- 2026-09-21 -- the card the other seven tools have: browsing first and always visible, the
+       kind picker above the buttons, the coordinate box a fold, shut. Every id is kept. -->
+  <div id="randomCellPanel">
+    <label for="randomTypeSelect">Browse a cell <span class="lab-note">&mdash; pick a kind and draw
+    an example, or take a random one</span></label>
+    <div id="find-random">
+      <div class="row" style="gap:8px;margin-top:2px">
+        <select id="randomTypeSelect" style="flex:1 1 auto"></select>
+        <button type="button" class="idbtn" id="randomOfType" title="Good for learning what a cell type looks like &mdash; a new random example loads each click.">Random example</button>
+      </div>
+      <button type="button" class="idbtn wide" id="randomUntouched" style="margin-top:10px"
+        title="A cell the Lee lab proofread that nobody here has extended or corrected yet — these are where your work is worth most">Random cell nobody has worked on &mdash; extend or correct it</button>
+      <p class="hint" id="randomCounts" style="margin:-2px 0 8px"></p>
+      <button type="button" class="idbtn wide" id="randomBuilt"
+        title="Jump to a cell somebody assembled in this page — useful for reviewing, confirming or challenging another person's assembly">Random community-built cell &mdash; review someone&rsquo;s assembly</button>
+      <button type="button" class="idbtn wide" id="randomUnassigned"
+        title="A nucleus somebody marked in this volume that nobody has built a cell around yet — build one and the nucleus is joined to it automatically">Random unassigned cell</button>
+    </div>
   </div>
-  <p class="hint">Or paste <code>x, y, z</code> &mdash; or a whole Neuroglancer link &mdash; into
-  the x field; it splits automatically.</p>
+  <details class="rv-panel" id="coordPanel">
+    <summary>Or jump to a coordinate <span class="lab-note">&mdash; in <span id="unitres"></span> voxels;
+    jump to it in cb2 and find the proofread cells whose somata are nearest</span></summary>
+    <div class="row">
+      <div class="coord"><input type="text" id="x" inputmode="decimal" placeholder="x"></div>
+      <div class="coord"><input type="text" id="y" inputmode="decimal" placeholder="y"></div>
+      <div class="coord"><input type="text" id="z" inputmode="decimal" placeholder="z"></div>
+      <button class="go inline" id="go" title="Find the nearest proofread cell">&#8594;</button>
+    </div>
+    <p class="hint">Or paste <code>x, y, z</code> &mdash; or a whole Neuroglancer link &mdash; into
+    the x field; it splits automatically.</p>
+  </details>
   <p class="hint" id="find-msg" style="margin:6px 0 0"></p>
   <!-- Søren, 2026-09-01: "I would like this part in xJump to be more like this part in uJump."
        µJump's shape: two full-width buttons for the two jobs worth doing, a counts line under the
        first, then a type dropdown with a Random example button. χJump had a row of pills instead,
        which offered only the third of those three things. -->
-  <details class="rv-panel" id="randomPanel">
-    <summary>Or browse a random cell</summary>
-    <div id="find-random">
-      <button type="button" class="idbtn wide" id="randomUntouched"
-        title="A cell the Lee lab proofread that nobody here has extended or corrected yet — these are where your work is worth most">Random cell nobody has worked on &mdash; extend or correct it</button>
-      <p class="hint" id="randomCounts" style="margin:-2px 0 8px"></p>
-      <button type="button" class="idbtn wide" id="randomBuilt"
-        title="Jump to a cell somebody assembled in this page — useful for reviewing, confirming or challenging another person's assembly">Random community-built cell &mdash; review someone&rsquo;s assembly</button>
-      <!-- Søren, 2026-09-02: nuclei marked here "should also be searchable as a random unassigned
-           cell". The strongest claim of the three to be work worth doing: a cell body somebody has
-           already found, with no cell assembled around it at all. Its label carries the count and
-           is rewritten by renderRandomButtons, so it says "none marked yet" rather than sitting
-           enabled over an empty pool. -->
-      <button type="button" class="idbtn wide" id="randomUnassigned"
-        title="A nucleus somebody marked in this volume that nobody has built a cell around yet — build one and the nucleus is joined to it automatically">Random unassigned cell</button>
-      <div class="row" style="gap:8px">
-        <select id="randomTypeSelect" style="flex:1 1 auto"></select>
-        <button type="button" class="idbtn" id="randomOfType">Random example</button>
-      </div>
-      <p class="hint">Good for learning what a cell type looks like &mdash; a new random example
-      loads each click.</p>
-    </div>
-  </details>
+  <!-- "Or browse a random cell" lived here until 2026-09-21; it is the first thing in this card now. -->
   <!-- Recently viewed cells, µJump's own three controls: the last few as chips right under the
        coordinate box, Back/Forward, and the full list behind a fold. Søren, 2026-09-01: "We should
        also have the recent cells in xJump, like in uJump." -->
@@ -1276,6 +1281,12 @@ UJ.cfg.mesh = {
      of them. NOT core/mesh3d.js -- that file also defines UJ.mesh3d and would silently replace
      χJump's own renderer, which knows cb2's coordinate frame; the build refuses it. -->
 <script src="core/mesh.js"></script>
+<!-- core/mesh3d.js, 2026-09-21, for the TRACING PAD's 3D preview only. Loaded before χJump's own
+     renderer and kept as UJ.mesh3dCore; χJump's UJ.mesh3d replaces it under its own name further
+     down, exactly as before. Installs nothing (mesh3dNoAutoInstall). -->
+<script>window.UJ = window.UJ || {}; UJ.mesh3dNoAutoInstall = true;</script>
+<script src="core/mesh3d.js"></script>
+<script>UJ.mesh3dCore = UJ.mesh3d;</script>
 <!-- core/points.js -- how a points total is turned into something a person reads. Small enough
      that every tool in the family carries it, which is what makes "whole numbers everywhere"
      mean everywhere: the same fix made in one tool's own chip reached that tool only, and
@@ -4830,11 +4841,25 @@ UJ.app = (function(){
     var sel = el("randomTypeSelect");
     if (sel && !sel.options.length){
       var types = X.seedTypes();
+      /* BY CATEGORY, as on µJump (2026-09-21): granule cells are excitatory, Purkinje cells
+         inhibitory, mossy fibres the afferent axons into the granular layer. */
+      var GROUP = { grc: "Neurons — excitatory", pc: "Neurons — inhibitory",
+                    mf: "Afferent axons" };
+      var COL = { "Neurons — excitatory": "var(--cat-exc)", "Neurons — inhibitory": "var(--cat-inh)",
+                  "Afferent axons": "var(--cat-aff)", "Other": "var(--cat-other)" };
+      var byG = {}, order = [];
+      types.forEach(function(t){ var g = GROUP[t.type] || "Other";
+        if (!byG[g]){ byG[g] = []; order.push(g); } byG[g].push(t); });
       sel.innerHTML = "<option value=''>any kind ("
         + seeds().filter(function(r){ return r.whole; }).length.toLocaleString() + ")</option>"
-        + types.map(function(t){
-            return "<option value='" + esc(t.type) + "'>" + esc(cap(t.label))
-                 + " (" + t.n.toLocaleString() + ")</option>"; }).join("");
+        + order.map(function(g){
+            return "<optgroup label='" + esc(g) + "' style='color:" + COL[g] + "'>"
+              + byG[g].map(function(t){
+                  return "<option value='" + esc(t.type) + "' style='color:" + COL[g] + "'>" + esc(cap(t.label))
+                       + " (" + t.n.toLocaleString() + ")</option>"; }).join("") + "</optgroup>"; }).join("");
+      sel.addEventListener("change", function(){
+        var o = sel.selectedOptions && sel.selectedOptions[0];
+        sel.style.color = (o && o.style.color) || ""; });
     }
     var rows = seeds(), touched = touchedSeeds();
     var nTouched = Object.keys(touched).length;
@@ -9355,7 +9380,9 @@ UJ.cfg.tracing = {
     return { name: c.name, how: c.how, via: rootIn ? "fragment " + rootIn : "cell " + nucIn,
              nucleusId: c.key, rootId: String(rootIn || "") };
   },
-  cellIdsFor: function(rootIn){ var c = xjumpCellOf("", rootIn); return c ? c.segs : []; }
+  /* By the cell's key first, then by the fragment (2026-09-21): a cb2 fragment is a square of the
+     cell, and the one under the pointer need not be one the cell lists. */
+  cellIdsFor: function(rootIn, keyIn){ var c = xjumpCellOf(keyIn || "", rootIn); return c ? c.segs : []; }
 };
 /* THE BULK CARD'S CELLS. core/bulkorgan.js works in row indices into a page's cell table; χJump's
    cells are assemblies and seeds, so the rows are handed out as cells are found, and stay put. */

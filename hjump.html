@@ -451,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 21:09</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-21 21:19</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1663,9 +1663,12 @@ function showCell(i, distNm, fromHistory){
   h+='<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-top:6px">'
     /* One plane of the EM under the layer wedge — the slot µJump uses, beside the orientation
        diagram, where the reader is asking where the cell is. Painted with this cell's c3 segment. */
-    +'<div style="flex:1 1 260px;min-width:220px">'+layerDiagram(HX[i],HY[i],volLayer(i))
-    +emPlaneBox(pos, seg, UJ.cfg.viewer.seg)+'</div>'
-    +'<div style="flex:2 1 260px;min-width:240px">';
+    /* SIDE BY SIDE, 2026-09-21 -- Søren: "I would prefer the EM next to the model and the other
+       things below, like for the other tools." The wedge and the section share this row; the IDs
+       and the rest run full width underneath (the two closing tags below are unchanged). */
+    +'<div style="flex:1 1 220px;min-width:200px">'+layerDiagram(HX[i],HY[i],volLayer(i))+'</div>'
+    +'<div style="flex:0 1 300px;min-width:220px">'+emPlaneBox(pos, seg, UJ.cfg.viewer.seg)+'</div>'
+    +'</div><div style="margin-top:6px"><div>';
   h+='<div class="ids">';
   h+=idRow("c3 segment", seg, "H01 c3 segmentation ID — click to copy",
       /* data-root is what core/mesh3d.js reads to put a "Show in 3D" beside this button. Its
