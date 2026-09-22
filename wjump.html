@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-21 21:22</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-22 05:45</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -8359,7 +8359,10 @@ UJ.emtiles = (function(){
        at 8 nm voxels four pixels wide, and the label says "8 nm data" rather than pretending the
        resolution improved. It also costs nothing extra to fetch -- the window in VOXELS shrinks as
        the magnification grows, so this is the only kind of zoom here that is free. */
-    var zoom = Math.max(1, Math.min(16, opts.zoom | 0 || 1));
+    /* HALF AND QUARTER SIZE, 2026-09-22 (src/the_pad_can_draw_half_size.py): below 1 the window
+       holds more voxels than the canvas has pixels, and each k x k block is drawn as its mean. */
+    var zr = +opts.zoom || 1;
+    var zoom = zr >= 1 ? Math.max(1, Math.min(16, zr | 0)) : (1 / zr <= 2.5 ? 0.5 : 0.25);
     var w = Math.max(16, opts.w | 0), h = Math.max(16, opts.h | 0);
     var vw = Math.max(8, Math.ceil(w / zoom)), vh = Math.max(8, Math.ceil(h / zoom));
     var c = toScale(scale, opts.centre);
@@ -8464,6 +8467,29 @@ UJ.emtiles = (function(){
     }
     var spanUsed = Math.max(1, hiUsed - loUsed);
 
+    if (zoom < 1){
+      /* The MEAN of each k x k block, not one voxel of it: a membrane one voxel wide would
+         otherwise vanish or survive depending on where the block boundary fell. */
+      var kk = Math.round(1 / zoom);
+      for (var hy = 0; hy < h; hy++){
+        for (var hx = 0; hx < w; hx++){
+          var sum = 0, cnt = 0;
+          for (var dy = 0; dy < kk; dy++){
+            var vy = hy * kk + dy; if (vy >= vh) break;
+            for (var dx = 0; dx < kk; dx++){
+              var vx = hx * kk + dx; if (vx >= vw) break;
+              var oh = vy * vw + vx;
+              if (seen[oh]){ sum += raw[oh]; cnt++; }
+            }
+          }
+          if (!cnt) continue;
+          var vm = (sum / cnt - loUsed) * 255 / spanUsed;
+          vm = vm < 0 ? 0 : vm > 255 ? 255 : vm;
+          var oo = (hy * w + hx) * 4;
+          img.data[oo] = img.data[oo + 1] = img.data[oo + 2] = vm;
+        }
+      }
+    } else
     for (var py2 = 0; py2 < vh; py2++){
       for (var px2 = 0; px2 < vw; px2++){
         var o2 = py2 * vw + px2;
@@ -8616,6 +8642,12 @@ UJ.tracepad = (function(){
      from the section you are on. */
   function undo(pad){
     if (pad.pending.length){ pad.pending.pop(); return "vertex"; }
+    /* A continued contour goes back to what it was before, not away (2026-09-22). */
+    var X = pad.lastExtend;
+    pad.lastExtend = null;
+    if (X && pad.rings[pad.rings.length - 1] === X.ring && X.ring.z === pad.z){
+      X.ring.points = X.before; return "extension";
+    }
     for (var i = pad.rings.length - 1; i >= 0; i--)
       if (pad.rings[i].z === pad.z){ pad.rings.splice(i, 1); return "ring"; }
     return "";
@@ -8928,9 +8960,107 @@ UJ.tracepad = (function(){
     return "ring";
   }
 
+  /* ── PICKING UP WHERE THE PEN LEFT OFF ───────────────────────────────────────  2026-09-22
+     Søren: "I have sometimes had the problem that I accidentally lifted the pen while drawing and
+     then I had to start over." A stroke that starts on a contour of the structure being drawn, on
+     this section, continues it (the caller asks for this with alt held). Ending in the air, the
+     edge it set off along is cut and the stroke goes in; ending on the contour again, the shorter
+     stretch between its ends is replaced. Only the new stroke is thinned. Returns "extended",
+     "replaced", or endStroke's answer when there was no contour near its start.
+     See src/the_pen_picks_up_where_it_left_off.py. */
+  function dist2(a, b){ var dx = a[0] - b[0], dy = a[1] - b[1]; return dx * dx + dy * dy; }
+  /* The nearest point on a closed ring: {seg, pt, d}. */
+  function nearestOnRing(pts, x, y){
+    var best = null, n = pts.length;
+    for (var i = 0; i < n; i++){
+      var a = pts[i], b = pts[(i + 1) % n], vx = b[0] - a[0], vy = b[1] - a[1];
+      var L = vx * vx + vy * vy, t = L ? ((x - a[0]) * vx + (y - a[1]) * vy) / L : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      var q = [a[0] + vx * t, a[1] + vy * t], d = Math.sqrt(dist2(q, [x, y]));
+      if (!best || d < best.d) best = { seg: i, pt: q, d: d };
+    }
+    return best;
+  }
+  /* The vertex at that point -- an existing one within `tol`, else one put in. Returned by
+     reference, so a second insertion cannot lose it. */
+  function snapVertex(pts, hit, tol){
+    var n = pts.length, a = pts[hit.seg], b = pts[(hit.seg + 1) % n];
+    if (Math.sqrt(dist2(a, hit.pt)) <= tol) return a;
+    if (Math.sqrt(dist2(b, hit.pt)) <= tol) return b;
+    var v = [Math.round(hit.pt[0]), Math.round(hit.pt[1])];
+    pts.splice(hit.seg + 1, 0, v);
+    return v;
+  }
+  function signedArea(pts){
+    var s = 0;
+    for (var i = 0; i < pts.length; i++){
+      var a = pts[i], b = pts[(i + 1) % pts.length];
+      s += a[0] * b[1] - b[0] * a[1];
+    }
+    return s / 2;
+  }
+  function extendStroke(pad, tol, snapTol){
+    var raw = pad.stroke || [];
+    if (raw.length < 2) return endStroke(pad, tol);
+    var start = raw[0], end = raw[raw.length - 1], ri = -1, hit = null;
+    for (var i = 0; i < pad.rings.length; i++){
+      var R = pad.rings[i];
+      if (R.z !== pad.z || (R.inst || 0) !== (pad.inst || 0) || R.points.length < MIN_VERTICES) continue;
+      var h = nearestOnRing(R.points, start[0], start[1]);
+      if (h.d <= snapTol && (!hit || h.d < hit.d)){ hit = h; ri = i; }
+    }
+    if (ri < 0) return endStroke(pad, tol);
+    pad.stroke = null;
+    var ring = pad.rings[ri], before = ring.points.map(function(v){ return v.slice(); });
+    var pts = ring.points.map(function(v){ return v.slice(); });
+    var sRef = snapVertex(pts, hit, tol);
+    var eHit = nearestOnRing(pts, end[0], end[1]);
+    var eRef = eHit.d <= snapTol ? snapVertex(pts, eHit, tol) : null;
+    var n = pts.length, si = pts.indexOf(sRef), ei = eRef ? pts.indexOf(eRef) : -1;
+    if (ei === si) ei = -1;
+    var d;
+    if (ei >= 0){
+      /* Ending on the contour: the shorter way round between the two ends is what was redrawn. */
+      var fwd = 0, bwd = 0, k;
+      for (k = si; k !== ei; k = (k + 1) % n) fwd += Math.sqrt(dist2(pts[k], pts[(k + 1) % n]));
+      for (k = si; k !== ei; k = (k - 1 + n) % n) bwd += Math.sqrt(dist2(pts[k], pts[(k - 1 + n) % n]));
+      d = fwd <= bwd ? 1 : -1;
+    } else {
+      /* Ending in the air: the edge the stroke set off along is the one it replaces -- after a
+         lifted pen, the chord across the gap. Its heading is taken a little way in, past the
+         snapping distance, so a wobble at the pen's first touch does not decide it. */
+      var probe = end;
+      for (var j = 1; j < raw.length; j++) if (Math.sqrt(dist2(raw[j], start)) > snapTol){ probe = raw[j]; break; }
+      var vx = probe[0] - sRef[0], vy = probe[1] - sRef[1];
+      var cosTo = function(p){ var ux = p[0] - sRef[0], uy = p[1] - sRef[1];
+        var L = Math.sqrt((ux * ux + uy * uy) * (vx * vx + vy * vy)); return L ? (ux * vx + uy * vy) / L : -1; };
+      d = cosTo(pts[(si + 1) % n]) >= cosTo(pts[(si - 1 + n) % n]) ? 1 : -1;
+    }
+    /* What stays: from the far end of the cut round to the start, in the same direction. */
+    var kept = [], at = ei >= 0 ? ei : (si + d + n) % n;
+    for (var guard = 0; guard <= n; guard++){
+      kept.push(pts[at]);
+      if (at === si) break;
+      at = (at + d + n) % n;
+    }
+    var line = simplify(raw, tol).slice(1);
+    if (ei >= 0 && line.length) line.pop();          // it ends on pts[ei], which is kept[0]
+    var out = kept.concat(line.map(function(v){ return [Math.round(v[0]), Math.round(v[1])]; }));
+    if (out.length < MIN_VERTICES) return "";
+    /* The contour keeps its winding: nothing downstream should see it flip because it was mended. */
+    if ((signedArea(out) < 0) !== (signedArea(before) < 0)) out.reverse();
+    ring.points = out;
+    /* To the end of the list, so Undo -- which takes back the latest contour here -- finds it. */
+    pad.rings.splice(ri, 1); pad.rings.push(ring);
+    pad.pending = [];
+    pad.lastExtend = { ring: ring, before: before };
+    return ei >= 0 ? "replaced" : "extended";
+  }
+
   return { create: create, setZ: setZ, addVertex: addVertex, closeRing: closeRing,
            instances: instances, newInstance: newInstance, setInstance: setInstance,
            startStroke: startStroke, strokePoint: strokePoint, endStroke: endStroke,
+           extendStroke: extendStroke,
            simplify: simplify, simplifyClosed: simplifyClosed,
            nearFirst: nearFirst, undo: undo, clearSection: clearSection,
            count: count, toRings: toRings,
@@ -9476,6 +9606,808 @@ UJ.traceloft = (function(){
 })();
 if (typeof module !== "undefined" && module.exports)
   module.exports = (typeof window !== "undefined" ? window : global).UJ.traceloft;
+</script>
+<script>/* ── core/mesh3d.js — look at a cell in the page ────────────────────────────────────────────
+   Søren, 2026-09-01: "I want to have the Show in 3D for all the other tools with meshes."
+
+   χJump got an in-page 3D view first, because cb2 is the one volume where you assemble a cell and
+   need to see whether you have assembled a cell. Every other tool in this family already fetches
+   and decodes meshes -- it just had nowhere to put them except a .glb download and PowerPoint.
+   This is that renderer, lifted out of xjump_mesh.js and made to not know what it is drawing.
+
+   WHAT IS GENERIC AND WHAT IS NOT
+   The renderer takes positions and indices. It knows nothing about precomputed, Draco, sharded
+   minishards, graphene, or cb2's legacy manifests -- core/mesh.js already handles every one of
+   those and hands back the same {positions, indices}. So the split is: FETCHING stays per tool,
+   DRAWING lives here. That is why this file is 300 lines rather than 1,500.
+
+   HOW IT REACHES FIVE TOOLS WITHOUT EDITING FIVE TOOLS
+   µJump, δJump and πJump all render their mesh-download control as
+   `<button class="idbtn meshdl" data-root="…">`, and βJump's and ηJump's were one attribute away
+   from the same. So this module installs ITSELF: it watches for those buttons and puts a
+   "Show in 3D" beside each, reading the root id from the attribute that is already there. Every
+   tool needs exactly one line added -- the script tag -- and none of them needs its own logic
+   touched.
+
+   ηJump was the exception worth recording: its button carried `class="idbtn meshdl"` but no
+   `data-root` (it closes over `c3Id(i)` in its own click handler instead), so the selector never
+   matched it and no 3D button appeared -- exactly what Søren reported on 2026-09-01. The fix was
+   to give it the attribute the other four already had, not to special-case it here.
+
+   That matters more than the line count. These are live pages with months of community data
+   behind them; a change that cannot reach inside their handlers cannot break their handlers.
+
+   WHY NO THREE.JS
+   Every page in this family is one self-contained file (or a file plus this core/ directory).
+   The cost of that discipline is the matrix maths and shaders below; the benefit is that nothing
+   breaks because a CDN moved.
+   ────────────────────────────────────────────────────────────────────────────────────────── */
+window.UJ = window.UJ || {};
+UJ.mesh3d = (function(){
+  "use strict";
+
+  /* ── geometry ─────────────────────────────────────────────────────────────────────────────
+     positions/indices in, a drawable in out. `unitNm` says what one position unit is worth in
+     nanometres -- core/mesh.js hands back MICROMETRES (1000), χJump's legacy path hands back
+     nanometres (1) -- and it exists so the size the panel prints is a real size rather than a
+     number in whatever the caller happened to use.
+
+     `extentNm`, when given, is the volume's own size, and it buys the one check that caught a
+     ten-fold error in χJump's mesh transform: NO CELL CAN BE LARGER THAN THE BLOCK IT IS IN.
+     Every fixture in that suite was built with the same wrong matrix, so every fixture agreed
+     with it; only the volume's own depth disagreed. */
+  function prepare(positions, indices, opts){
+    var o = opts || {}, unit = o.unitNm || 1;
+    var pos = positions instanceof Float32Array ? new Float32Array(positions)
+                                                : new Float32Array(positions || []);
+    var idx = indices instanceof Uint32Array ? indices : new Uint32Array(indices || []);
+    if (!pos.length || !idx.length)
+      return { pos: new Float32Array(0), idx: new Uint32Array(0), nrm: new Float32Array(0),
+               lo: [0,0,0], hi: [0,0,0], mid: [0,0,0], span: 1, vertices: 0, triangles: 0,
+               empty: true };
+    /* Into nanometres up front, so everything downstream -- the bbox, the size, the oversize
+       check, a point-in-mesh test -- speaks one unit. */
+    if (unit !== 1) for (var u = 0; u < pos.length; u++) pos[u] *= unit;
+
+    /* Per-vertex normals by accumulating face normals. Flat shading would be truer to a
+       marching-cubes surface, but WebGL 1 has no geometry stage and duplicating every vertex to
+       fake it triples the buffer for a cosmetic difference on a shape whose job is to be
+       recognised. */
+    var nrm = new Float32Array(pos.length);
+    for (var t = 0; t + 2 < idx.length; t += 3){
+      var a = idx[t]*3, b = idx[t+1]*3, c = idx[t+2]*3;
+      if (a >= pos.length || b >= pos.length || c >= pos.length) continue;
+      var ux = pos[b]-pos[a], uy = pos[b+1]-pos[a+1], uz = pos[b+2]-pos[a+2];
+      var vx = pos[c]-pos[a], vy = pos[c+1]-pos[a+1], vz = pos[c+2]-pos[a+2];
+      var nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+      nrm[a]+=nx; nrm[a+1]+=ny; nrm[a+2]+=nz;
+      nrm[b]+=nx; nrm[b+1]+=ny; nrm[b+2]+=nz;
+      nrm[c]+=nx; nrm[c+1]+=ny; nrm[c+2]+=nz;
+    }
+
+    var lo = [Infinity,Infinity,Infinity], hi = [-Infinity,-Infinity,-Infinity], i, k;
+    for (i = 0; i < pos.length; i += 3)
+      for (k = 0; k < 3; k++){
+        if (pos[i+k] < lo[k]) lo[k] = pos[i+k];
+        if (pos[i+k] > hi[k]) hi[k] = pos[i+k];
+      }
+    if (!isFinite(lo[0])){ lo = [0,0,0]; hi = [0,0,0]; }
+
+    /* RE-CENTRED IN PLACE, and not as tidiness. A float32 holds seven significant digits; a
+       vertex 400 µm into a volume is 4e5 nm, which is fine, but a mesh frame with a large offset
+       puts them at 1e11, where float32 steps in units of 8 µm and a 2 µm neurite becomes a
+       staircase. lo/hi stay ABSOLUTE, because that is what a caller reports. */
+    /* ONE FRAME FOR SEVERAL MESHES.  2026-09-17
+       `o.frame` is another geometry's {mid, span}, and it exists because a tracing drawn inside its
+       own cell has to be drawn in the CELL'S place, not re-centred into the middle of the picture.
+       Without it every mesh centres on itself and three meshes that are inside one another come out
+       concentric -- which looks plausible and is a lie. Given a frame, this centres on that mid and
+       reports that span, so everything normalises identically. */
+    var mid = (o.frame && o.frame.mid) ? o.frame.mid.slice()
+            : [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
+    for (i = 0; i < pos.length; i += 3){
+      pos[i] -= mid[0]; pos[i+1] -= mid[1]; pos[i+2] -= mid[2];
+    }
+
+    var oversize = null;
+    if (o.extentNm) for (var ax = 0; ax < 3; ax++){
+      var got = hi[ax] - lo[ax];
+      if (got > o.extentNm[ax] * 1.02){
+        oversize = { axis: "xyz".charAt(ax), got: got, max: o.extentNm[ax] }; break;
+      }
+    }
+    return { pos: pos, idx: idx, nrm: nrm, lo: lo, hi: hi, mid: mid, centred: true,
+             span: (o.frame && o.frame.span)
+                     || Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) || 1,
+             oversize: oversize, vertices: pos.length/3, triangles: Math.floor(idx.length/3) };
+  }
+
+  /* ── is a point inside this surface? ─────────────────────────────────────────────────────
+     Ray casting along +x, odd crossings means inside. Generic because a mesh IS the segment's
+     surface, so this answers "which cell contains this nucleus" for any tool that has both. */
+  var EPS = 1e-7;
+  function crossingsAlongX(px, py, pz, geo){
+    var pos = geo.pos, idx = geo.idx, n = 0;
+    for (var t = 0; t + 2 < idx.length; t += 3){
+      var a = idx[t]*3, b = idx[t+1]*3, c = idx[t+2]*3;
+      var ay = pos[a+1], az = pos[a+2], by = pos[b+1], bz = pos[b+2], cy = pos[c+1], cz = pos[c+2];
+      var d = (by-ay)*(cz-az) - (bz-az)*(cy-ay);
+      if (d > -EPS && d < EPS) continue;
+      var u = ((py-ay)*(cz-az) - (pz-az)*(cy-ay)) / d;
+      if (u < 0 || u > 1) continue;
+      var v = ((by-ay)*(pz-az) - (bz-az)*(py-ay)) / d;
+      if (v < 0 || u + v > 1) continue;
+      if (pos[a] + u*(pos[b]-pos[a]) + v*(pos[c]-pos[a]) > px) n++;
+    }
+    return n;
+  }
+  function pointInGeometry(pt, geo){
+    if (!geo || !geo.idx || !geo.idx.length) return false;
+    var px = pt[0]-geo.mid[0], py = pt[1]-geo.mid[1], pz = pt[2]-geo.mid[2];
+    var hx = (geo.hi[0]-geo.lo[0])/2, hy = (geo.hi[1]-geo.lo[1])/2, hz = (geo.hi[2]-geo.lo[2])/2;
+    if (px < -hx || px > hx || py < -hy || py > hy || pz < -hz || pz > hz) return false;
+    /* THREE RAYS, MAJORITY WINS. A ray exactly along an edge shared by two triangles is counted
+       by both, so the total comes out even and a point plainly inside reads as outside. Marching
+       cubes puts vertices on a regular lattice, so an axis-aligned ray meets shared edges
+       constantly -- this is the common case, not an exotic one. */
+    var e = (geo.span || 1) * 1e-4, votes = 0;
+    if (crossingsAlongX(px, py, pz, geo) & 1) votes++;
+    if (crossingsAlongX(px, py + e, pz + e*0.6180339, geo) & 1) votes++;
+    if (crossingsAlongX(px, py - e*0.7861513, pz + e*1.3110179, geo) & 1) votes++;
+    return votes >= 2;
+  }
+  function nucleiInside(points, geo){
+    return (points || []).map(function(p, i){ return { i:i, p:p }; })
+      .filter(function(r){ return pointInGeometry(r.p, geo); });
+  }
+
+  /* ── the smallest amount of matrix maths that draws a rotatable solid ────────────────────── */
+  function mul(a, b){
+    var o = new Float32Array(16);
+    for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++){
+      var s = 0; for (var k = 0; k < 4; k++) s += a[k*4+r] * b[c*4+k];
+      o[c*4+r] = s;
+    }
+    return o;
+  }
+  function perspective(fovy, aspect, near, far){
+    var f = 1/Math.tan(fovy/2), o = new Float32Array(16);
+    o[0]=f/aspect; o[5]=f; o[10]=(far+near)/(near-far); o[11]=-1; o[14]=2*far*near/(near-far);
+    return o;
+  }
+  function rotY(a){ var c=Math.cos(a),s=Math.sin(a),o=new Float32Array(16);
+    o[0]=c;o[2]=-s;o[5]=1;o[8]=s;o[10]=c;o[15]=1;return o; }
+  function rotX(a){ var c=Math.cos(a),s=Math.sin(a),o=new Float32Array(16);
+    o[0]=1;o[5]=c;o[6]=s;o[9]=-s;o[10]=c;o[15]=1;return o; }
+  function translate(x,y,z){ var o=new Float32Array(16);
+    o[0]=o[5]=o[10]=o[15]=1;o[12]=x;o[13]=y;o[14]=z;return o; }
+  function scale(s){ var o=new Float32Array(16); o[0]=o[5]=o[10]=s; o[15]=1; return o; }
+  /* Y IS DOWN IN THE DATA AND UP ON THE SCREEN, and that is the whole of this.
+
+     Søren, 2026-09-01: "When showing the 3D models in xJump they are upside down." They were --
+     and so were the ones in µJump, δJump, πJump, ηJump and βJump, which share the other copy of
+     this renderer. Neuroglancer and every volume in this family use the image-row convention:
+     y increases DOWNWARD, towards the ventral side. WebGL's clip space is the opposite, +y up. So
+     geometry handed straight to the GPU is drawn mirrored top-to-bottom, and a Purkinje cell
+     appears with its dendritic tree underneath its soma.
+
+     core/mesh.js has corrected for exactly this since it started writing .glb files -- see
+     flipYForGLTF() -- and neither in-page renderer ever did. Nobody noticed because a granule cell
+     looks much the same either way up; a Purkinje cell does not.
+
+     Corrected in the MODEL MATRIX rather than in the buffers, deliberately. The buffers are also
+     what the point-in-mesh nucleus test compares against and what the .glb exporter is handed, and
+     both of those want the real frame -- the exporter applies its own flip. Flipping the geometry
+     would silently break the join and double-flip every download.
+
+     Safe here for two reasons that are properties of this renderer, not luck: there is no
+     CULL_FACE, so reversing the handedness cannot turn faces into holes; and the fragment shader
+     is two-sided, so the normals -- which this same matrix transforms, correctly, since
+     diag(1,-1,1) is its own inverse-transpose -- stay right. */
+  function modelScale(s){
+    var o = new Float32Array(16);
+    o[0] = s; o[5] = -s; o[10] = s; o[15] = 1;
+    return o;
+  }
+
+  var VS = [
+    "attribute vec3 p; attribute vec3 n;",
+    "uniform mat4 mvp; uniform mat4 mv; varying vec3 vn;",
+    "void main(){ vn = normalize((mv * vec4(n, 0.0)).xyz);",
+    "  gl_Position = mvp * vec4(p, 1.0); }"
+  ].join("\n");
+  /* Two lights and a rim term. A single headlight flattens a tubular neurite into a silhouette,
+     which is exactly the shape information somebody opens this panel to judge. Two-sided, because
+     these meshes come from automatic segmentation and their winding is not guaranteed consistent
+     -- with culling on, a fragment wound the other way renders as a HOLE, and a hole in a cell is
+     precisely what somebody might be looking for. */
+  /* `alpha` is 1.0 for everything this file drew before 2026-09-17 and stays that way unless a
+     caller asks otherwise -- see the `ghosts` option on draw(). The rim term is multiplied by it
+     too: a silhouette at full strength on a 20%-opaque surface reads as a solid outline drawn round
+     a ghost, which is exactly the shape confusion transparency is there to avoid. */
+  var FS = [
+    "precision mediump float; varying vec3 vn; uniform vec3 tint; uniform float alpha;",
+    "void main(){ vec3 n = normalize(vn); if (!gl_FrontFacing) n = -n;",
+    "  float key  = max(dot(n, normalize(vec3( 0.4, 0.6, 0.8))), 0.0);",
+    "  float fill = max(dot(n, normalize(vec3(-0.5,-0.3, 0.4))), 0.0) * 0.35;",
+    "  float rim  = pow(1.0 - abs(n.z), 3.0) * 0.35;",
+    "  gl_FragColor = vec4(tint * (0.18 + key * 0.75 + fill) + rim * alpha, alpha); }"
+  ].join("\n");
+
+  function compile(gl, type, src){
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+      throw new Error("shader: " + gl.getShaderInfoLog(s));
+    return s;
+  }
+
+  var LAST = null;
+  function draw(canvas, geo, opts){
+    var o = opts || {};
+    var gl = canvas.getContext("webgl", { antialias:true, alpha:false })
+          || canvas.getContext("experimental-webgl", { antialias:true, alpha:false });
+    if (!gl) throw new Error("no WebGL");
+    /* Past 65,535 vertices the draw needs 32-bit indices. Without the extension it would silently
+       wrap and paint a shredded version of the cell -- which looks like a segmentation problem
+       rather than a rendering one, so it is checked and said. */
+    var big = geo.vertices > 65535;
+    if (big && !gl.getExtension("OES_element_index_uint"))
+      throw new Error("this cell has " + geo.vertices.toLocaleString() + " vertices and this "
+        + "browser cannot index past 65,535 — download the mesh instead");
+    /* Asked for once, here, rather than per geometry: a ghost past 65,535 vertices is the common
+       case (a whole neuron's mesh), and the extension is either present or it is not. */
+    var canBig = big || !!gl.getExtension("OES_element_index_uint");
+
+    var prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
+    gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+      throw new Error("link: " + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    function buf(data, target){
+      var b = gl.createBuffer();
+      gl.bindBuffer(target, b); gl.bufferData(target, data, gl.STATIC_DRAW); return b;
+    }
+    /* ── SEVERAL MESHES, ONE OF THEM THE SUBJECT ──────────────────────────────────  2026-09-17
+       Søren, on the tracing preview: *"Preferably also with the nucleus and root ID meshes as
+       transparent."* So `o.ghosts` is a list of {geo, tint, alpha} drawn AROUND the main geometry:
+       prepared in its frame (see prepare's `frame` option), drawn after it with blending on and
+       DEPTH WRITES OFF, so a ghost never hides what is inside it and two ghosts never fight over
+       which is in front. Depth TESTING stays on, so the solid subject still occludes the parts of
+       a ghost behind it, which is what makes "inside" legible at all. */
+    function upload(g){
+      var b = g.vertices > 65535;
+      if (b && !canBig) return null;      // this one cannot be indexed; the rest still draw
+      return { pb: buf(g.pos, gl.ARRAY_BUFFER), nb: buf(g.nrm, gl.ARRAY_BUFFER),
+               ib: buf(b ? g.idx : new Uint16Array(g.idx), gl.ELEMENT_ARRAY_BUFFER),
+               n: g.idx.length, big: b };
+    }
+    var aP = gl.getAttribLocation(prog, "p"), aN = gl.getAttribLocation(prog, "n");
+    gl.enableVertexAttribArray(aP); gl.enableVertexAttribArray(aN);
+    var uMvp = gl.getUniformLocation(prog, "mvp"), uMv = gl.getUniformLocation(prog, "mv"),
+        uTint = gl.getUniformLocation(prog, "tint"),
+        uAlpha = gl.getUniformLocation(prog, "alpha");
+    var MAIN = upload(geo);
+    var GHOSTS = (o.ghosts || []).map(function(g){
+      if (!g || !g.geo || g.geo.empty || !g.geo.idx || !g.geo.idx.length) return null;
+      var d = upload(g.geo);
+      return d ? { d: d, tint: g.tint || null, alpha: (g.alpha === undefined ? 0.22 : g.alpha) } : null;
+    }).filter(Boolean);
+    /* `o.alpha` is the SUBJECT's opacity, 1 unless a caller says otherwise. The cell panel sets
+       it below 1 when it has a nucleus to show inside the cell. */
+    var ALL = [{ d: MAIN, tint: o.tint || null,
+                 alpha: (o.alpha === undefined ? 1 : o.alpha) }].concat(GHOSTS);
+    gl.enable(gl.DEPTH_TEST);
+    function drawOne(d, tint, alpha){
+      if (!d) return;
+      gl.uniform3fv(uTint, tint);
+      gl.uniform1f(uAlpha, alpha);
+      gl.bindBuffer(gl.ARRAY_BUFFER, d.pb); gl.vertexAttribPointer(aP, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, d.nb); gl.vertexAttribPointer(aN, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, d.ib);
+      gl.drawElements(gl.TRIANGLES, d.n, d.big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
+    }
+
+    var norm = modelScale(1 / (geo.span || 1));
+    /* A CAMERA THAT SURVIVES A REDRAW.  2026-09-17. Pass an object as `o.view` and it is used and
+       MUTATED in place as the pointer turns the model, so a panel that redraws itself -- the
+       tracing preview does, after every contour -- hands the same object back and keeps the angle.
+       Left out, each panel starts where it always did. */
+    var view = o.view || {};
+    if (view.yaw === undefined) view.yaw = 0.6;
+    if (view.pitch === undefined) view.pitch = 0.3;
+    if (view.dist === undefined) view.dist = 1.9;
+    var tint = o.tint || themeTint();
+    var bg = o.bg || themeBg();
+
+    function paint(){
+      var w = canvas.clientWidth || 480, h = canvas.clientHeight || 300;
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (canvas.width !== Math.round(w*dpr) || canvas.height !== Math.round(h*dpr)){
+        canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
+      }
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      var b2 = o.bg || themeBg();
+      gl.clearColor(b2[0], b2[1], b2[2], 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      var mv = mul(translate(0, 0, -view.dist), mul(rotX(view.pitch), mul(rotY(view.yaw), norm)));
+      gl.uniformMatrix4fv(uMvp, false, mul(perspective(0.9, w/h, 0.01, 100), mv));
+      gl.uniformMatrix4fv(uMv, false, mv);
+      /* SORTED BY OPACITY, NOT BY ROLE.  2026-09-17
+         Until today the subject was always the solid thing and the ghosts were always the
+         see-through ones, so "subject first, ghosts after with depth writes off" was the same
+         sentence twice. Søren then asked for the reverse: *"make the other 3D window transparent
+         cells and show the nucleus when it is available"* -- the NUCLEUS is solid and the CELL is
+         what you see through. Drawing the cell first with depth writes on would have hidden the
+         nucleus inside it completely.
+
+         So: everything opaque, in order, writing depth; then everything transparent over it with
+         depth writes OFF, so the see-through parts neither hide each other nor hide what is inside
+         them. Depth TESTING stays on throughout, which is what keeps "inside" legible. Every
+         earlier caller lands in the first branch exactly as before. */
+      var opaque = [], clear = [];
+      ALL.forEach(function(it){ (it.alpha >= 1 ? opaque : clear).push(it); });
+      gl.disable(gl.BLEND); gl.depthMask(true);
+      opaque.forEach(function(it){ drawOne(it.d, it.tint || themeTint(), 1); });
+      if (clear.length){
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        clear.forEach(function(it){ drawOne(it.d, it.tint || themeTint(), it.alpha); });
+        gl.depthMask(true); gl.disable(gl.BLEND);
+      }
+    }
+
+    /* ── ONE FINGER TURNS IT, TWO FINGERS ZOOM ────────────────────────────────────  2026-09-17
+       Søren: *"It works well on mobile phone, however I want to have the option to zoom in or our
+       in the 3D window by using 2 fingers."* A wheel is the only way to zoom this panel had, and a
+       phone has no wheel -- so on a phone the model could be turned and never approached.
+
+       Every pointer down on the canvas is tracked rather than just the first, because that is the
+       only way to know a second one has arrived. With two down the gesture is a PINCH and nothing
+       else: rotation is suspended while it lasts, or the first finger's travel would spin the model
+       during every zoom, which feels like a fault in the model rather than in the gesture. Lifting
+       back to one finger re-anchors the rotation where that finger IS, so the model does not jump
+       by however far the pinch moved it.
+
+       `touch-action:none` on the canvas is what lets any of this happen at all -- without it the
+       browser takes the second finger for its own page zoom and the canvas never sees it.
+
+       The wheel keeps working unchanged, and the two cannot interfere: a trackpad pinch arrives as
+       a wheel event with ctrlKey, not as two pointers. */
+    var down = null, touches = {}, nTouch = 0, pinch = null;
+    function gap(){
+      var ids = Object.keys(touches);
+      if (ids.length < 2) return 0;
+      var a = touches[ids[0]], b = touches[ids[1]];
+      return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
+    }
+    canvas.addEventListener("pointerdown", function(e){
+      if (!touches[e.pointerId]) nTouch++;
+      touches[e.pointerId] = { x:e.clientX, y:e.clientY };
+      if (nTouch >= 2){
+        down = null;                       // a pinch is not a drag, however it started
+        pinch = { gap: gap() || 1, dist: view.dist };
+      } else {
+        down = { x:e.clientX, y:e.clientY, yaw:view.yaw, pitch:view.pitch };
+      }
+      try { canvas.setPointerCapture(e.pointerId); } catch(_e){}
+    });
+    canvas.addEventListener("pointermove", function(e){
+      if (touches[e.pointerId]) touches[e.pointerId] = { x:e.clientX, y:e.clientY };
+      if (pinch && nTouch >= 2){
+        var g = gap();
+        if (g > 0){
+          /* Fingers apart is closer, the way every map behaves. Clamped to the same range the
+             wheel is, so neither way of zooming can reach somewhere the other cannot. */
+          view.dist = Math.max(0.6, Math.min(12, pinch.dist * pinch.gap / g));
+          paint();
+        }
+        return;
+      }
+      if (!down) return;
+      view.yaw = down.yaw + (e.clientX - down.x) * 0.01;
+      /* Clamped short of the poles: past them the model appears to spin the wrong way, which
+         reads as a bug in the mesh rather than in the camera. */
+      view.pitch = Math.max(-1.5, Math.min(1.5, down.pitch + (e.clientY - down.y) * 0.01));
+      paint();
+    });
+    function lift(e){
+      if (touches[e.pointerId]){ delete touches[e.pointerId]; nTouch = Math.max(0, nTouch - 1); }
+      if (nTouch < 2) pinch = null;
+      if (nTouch === 1){
+        /* RE-ANCHORED on the finger still down, at the angle the model is at now. Without this the
+           model snaps back by the whole distance the remaining finger travelled during the pinch. */
+        var id = Object.keys(touches)[0], t = touches[id];
+        down = { x:t.x, y:t.y, yaw:view.yaw, pitch:view.pitch };
+      } else if (nTouch === 0) down = null;
+    }
+    canvas.addEventListener("pointerup", lift);
+    canvas.addEventListener("pointercancel", lift);
+    canvas.addEventListener("wheel", function(e){
+      e.preventDefault();
+      view.dist = Math.max(0.6, Math.min(12, view.dist * (e.deltaY > 0 ? 1.12 : 0.89)));
+      paint();
+    }, { passive:false });
+    /* The panel is ON the page, so a theme change has to REPAINT it -- CSS cannot reach inside a
+       WebGL canvas, and a panel that only re-styled would sit as a black rectangle on a white
+       page. */
+    var tb = document.getElementById("themeToggleBtn");
+    if (tb) tb.addEventListener("click", function(){ setTimeout(paint, 0); });
+    paint();
+    LAST = { gl: gl, paint: paint, canvas: canvas };
+    return paint;
+  }
+
+  /* The page's own colours, read from CSS so a tool's accent is the colour its cells are drawn
+     in without this file knowing which tool it is in. */
+  function cssVar(name, fallback){
+    try {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    } catch (e){ return fallback; }
+  }
+  function hexToRgb(h, fallback){
+    var m = /^#?([0-9a-f]{6})$/i.exec(String(h || "").trim());
+    if (!m) return fallback;
+    var n = parseInt(m[1], 16);
+    return [((n>>16)&255)/255, ((n>>8)&255)/255, (n&255)/255];
+  }
+  function isLight(){
+    var a = document.documentElement.getAttribute("data-theme");
+    if (a === "light") return true;
+    if (a === "dark") return false;
+    try { return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches); }
+    catch (e){ return false; }
+  }
+  function themeTint(){ return hexToRgb(cssVar("--accent"), isLight() ? [0.06,0.46,0.44] : [0.15,0.88,0.70]); }
+  function themeBg(){ return hexToRgb(cssVar("--bg"), isLight() ? [0.96,0.97,0.98] : [0.06,0.07,0.09]); }
+
+  /* Repaint and count distinct colours in one turn -- the only way to ask "did anything actually
+     get painted". readPixels is valid only in the same turn as the draw unless
+     preserveDrawingBuffer is on, and keeping a copy of every frame for a panel nobody screenshots
+     is a real cost. A second getContext() returns the FIRST context and ignores the attributes,
+     so a probe that tries to enable it after the fact silently reads a cleared buffer -- which
+     once made a working panel report that it had drawn nothing. */
+  function probe(){
+    if (!LAST) return -1;
+    LAST.paint();
+    var gl = LAST.gl, c = LAST.canvas;
+    var px = new Uint8Array(c.width * c.height * 4);
+    gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    var seen = {}, n = 0;
+    for (var i = 0; i < px.length; i += 4){
+      var k = px[i] + "," + px[i+1] + "," + px[i+2];
+      if (!seen[k]){ seen[k] = 1; n++; }
+    }
+    return n;
+  }
+
+  /* HOW MANY PIXELS ANSWER A QUESTION. probe() above counts distinct colours, which says "did
+     anything get drawn"; this says WHAT. The nucleus being blue is a claim about the picture, and
+     the only honest way to check a claim about a picture is to look at it. Same one-turn rule as
+     probe(): repaint and read in the same turn, because the drawing buffer is not preserved. */
+  function probePixels(pred){
+    if (!LAST) return -1;
+    LAST.paint();
+    var gl = LAST.gl, c = LAST.canvas;
+    var px = new Uint8Array(c.width * c.height * 4);
+    gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    var n = 0, w = c.width;
+    /* x and y as well as the colour, because WHERE a colour is answers a different question from
+       whether it is there: a nucleus re-centred on itself rather than left where it sits in its
+       cell would paint exactly the same pixels, in the middle. */
+    for (var i = 0; i < px.length; i += 4)
+      if (pred(px[i], px[i+1], px[i+2], (i / 4) % w, Math.floor((i / 4) / w))) n++;
+    return n;
+  }
+
+  function esc(s){ return String(s == null ? "" : s)
+    .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+  /* ── the panel ─────────────────────────────────────────────────────────────────────────── */
+  function show(host, geo, opts){
+    var o = opts || {};
+    if (!host) return null;
+    /* THE STYLESHEET IS NOT COSMETIC HERE, which is why show() now asks for it rather than trusting
+       that install() ran. `.m3d-canvas{touch-action:none}` is what lets the canvas see a second
+       finger at all -- without it the browser takes the gesture for its own page zoom, and the
+       pinch added 2026-09-17 simply never fires. install() injects it, and every tool that reaches
+       this panel through a "Show in 3D" button gets it that way; a caller that drives show()
+       directly -- the tracing preview does -- had been relying on some OTHER panel having been
+       installed first. Idempotent: it guards on its own element id. */
+    injectStyle();
+    if (!geo || geo.empty){
+      host.innerHTML = "<div class='m3d'><div class='m3d-err'>"
+        + esc(o.emptyMessage || "No mesh geometry for this cell.") + "</div></div>";
+      return null;
+    }
+    host.innerHTML = "<div class='m3d'><canvas class='m3d-canvas'></canvas>"
+      + "<div class='m3d-note'></div></div>";
+    var canvas = host.querySelector(".m3d-canvas"), note = host.querySelector(".m3d-note");
+    var um = [0,1,2].map(function(i){ return (geo.hi[i]-geo.lo[i]) / 1000; });
+
+    /* The size is printed and labelled, and that is not throat-clearing: a ten-fold error in
+       χJump's mesh transform was found by reading this line against the volume's own depth. */
+    note.innerHTML = (o.lead ? o.lead + "<br>" : "")
+      + "<span class='hint'>" + um.map(function(v){ return v.toFixed(1); }).join(" × ") + " µm · "
+      + geo.triangles.toLocaleString() + " triangles · drag to turn, scroll to zoom</span>";
+    if (geo.oversize)
+      note.innerHTML += "<br><b style='color:var(--bad)'>This cannot be right.</b> "
+        + "<span class='hint'>It measures " + (geo.oversize.got/1000).toFixed(1) + " µm along "
+        + geo.oversize.axis + ", and the whole volume is only "
+        + (geo.oversize.max/1000).toFixed(1) + " µm. Something is wrong with the mesh transform "
+        + "rather than with this cell.</span>";
+
+    try { draw(canvas, geo, o); }
+    catch (e){
+      /* The canvas goes; the note stays. A DIFFERENT class, so anything reading the panel finds
+         the size line rather than the failure. */
+      var msg = host.ownerDocument.createElement("div");
+      msg.className = "m3d-err";
+      msg.innerHTML = "Could not draw it here: " + esc(e.message) + ".";
+      canvas.parentNode.replaceChild(msg, canvas);
+      return null;
+    }
+    return geo;
+  }
+
+  /* ── styles, injected once ───────────────────────────────────────────────────────────────
+     Carried here rather than added to five stylesheets, because a module that installs itself
+     into pages it cannot edit has to bring its own. Everything is expressed in the host page's
+     CSS variables, so it takes on each tool's palette rather than imposing one. */
+  var STYLE = ".m3d{margin-top:10px}"
+    + ".m3d-canvas{display:block;width:100%;height:300px;border:1px solid var(--line,#333);"
+    + "border-radius:10px;background:var(--bg,#111);cursor:grab;touch-action:none}"
+    + ".m3d-canvas:active{cursor:grabbing}"
+    + ".m3d-note{font-size:12px;color:var(--mut,#888);margin-top:6px;line-height:1.5}"
+    + ".m3d-note b{color:var(--ink,#eee)}"
+    + ".m3d-err{font-size:12px;color:var(--bad,#e55);line-height:1.5;"
+    + "border:1px solid var(--line,#333);border-radius:10px;padding:12px;background:var(--bg,#111)}"
+    /* No sizing here on purpose. Søren, 2026-09-01: "the button should be similar size and shape
+       as the download 3D model button". Those buttons are sized by INLINE styles that differ per
+       tool -- µJump's is `padding:1px 8px;font-size:11px;vertical-align:middle`, βJump's is
+       `flex:1;min-width:150px` in a flex row -- so a fixed rule here could only ever match one of
+       them. copyShape() below lifts each tool's own sizing off the button it sits beside. */
+    + ".m3d-btn{}";
+  function injectStyle(){
+    if (document.getElementById("m3d-style")) return;
+    var s = document.createElement("style");
+    s.id = "m3d-style"; s.textContent = STYLE;
+    document.head.appendChild(s);
+  }
+
+  /* ── installing itself ───────────────────────────────────────────────────────────────────
+     µJump, δJump, πJump and ηJump emit `<button class="idbtn meshdl" data-root="…">` for the
+     mesh download, and βJump's is the same shape. So the button this module needs is always
+     beside one that already carries the id, and the install is: find those, add a sibling.
+
+     A MutationObserver rather than a one-off pass, because every one of these tools rebuilds its
+     cell panel whenever you navigate to another cell -- a single sweep at load would decorate the
+     first cell somebody looked at and nothing afterwards.
+
+     `data-m3d` marks a button already dealt with. Without it the observer would re-decorate on
+     every mutation, including the ones this module causes, which is a loop. */
+  /* The inline properties worth copying from the download button: everything that decides how big
+     the button is and how it sits in its row. NOT `display` -- that one is state, not shape, and
+     is mirrored live below, because µJump/δJump/πJump render their download button hidden and
+     reveal it only once a root id exists. */
+  var SHAPE = ["padding","paddingTop","paddingRight","paddingBottom","paddingLeft",
+               "fontSize","lineHeight","fontWeight","verticalAlign","borderRadius",
+               "flex","flexGrow","flexShrink","flexBasis","minWidth","width",
+               "marginLeft","marginRight","marginTop","marginBottom"];
+  function copyShape(from, to){
+    if (!from || !from.style) return;
+    for (var i = 0; i < SHAPE.length; i++){
+      var v = from.style[SHAPE[i]];
+      if (v) to.style[SHAPE[i]] = v;
+    }
+  }
+
+  function buttonFor(root, dl){
+    var b = document.createElement("button");
+    /* The tool's own classes minus `meshdl` -- so it inherits `idbtn` (and anything else the page
+       styles its row buttons with) and does NOT match this module's own selector, which would
+       otherwise make the observer decorate the button it just created, forever. */
+    var cls = (dl && dl.className ? String(dl.className) : "idbtn")
+                .replace(/\bmeshdl\b/g, " ").replace(/\s+/g, " ").trim() || "idbtn";
+    b.className = cls + " m3d-btn";
+    b.type = "button";
+    b.textContent = "Show in 3D";
+    b.title = "Draw this cell in the page, without leaving it";
+    b.setAttribute("data-root", root);
+    copyShape(dl, b);
+    return b;
+  }
+
+  /* ── THE NUCLEUS, AND THE ONE BLUE IT IS ───────────────────────────────────────  2026-09-17
+     Søren: *"show the nucleus when it is available? Nucleus should always be blue."*
+
+     Not a new decision -- the export has said so since 2026-09-08, and this is the same value:
+     blender/colour_policy.py, NUC_COLOR = "#3a72d8", "red MEANS vessel and blue MEANS nucleus, and
+     the cell palette contains neither". A second blue chosen here would quietly make the page and
+     the .blend disagree about what a colour means, which is worse than either being wrong alone. */
+  var NUC_COLOR = "#3a72d8";
+  var NUC_TINT = [0x3a / 255, 0x72 / 255, 0xd8 / 255];
+  /* How see-through the cell goes WHEN there is a nucleus in it. Low enough to read a nucleus
+     through, high enough that the cell is still a shape rather than a haze. */
+  var CELL_ALPHA_WITH_NUCLEUS = 0.30;
+
+  /* The nucleus mesh for a button's `data-nucid`, or null for every ordinary reason there might not
+     be one: the tool does not write the attribute, the page has not loaded core/nucmesh.js, the
+     volume publishes no meshes, or this nucleus has none. None of those is an error -- they all
+     mean "draw the cell the way it was always drawn". */
+  function nucleusMeshFor(nucId){
+    if (!nucId || nucId === "0") return Promise.resolve(null);
+    if (!(window.UJ && UJ.nucmesh && UJ.nucmesh.fetchNucleus)) return Promise.resolve(null);
+    try {
+      if (!UJ.nucmesh.configured()){
+        var src = (UJ.cfg && UJ.cfg.em && UJ.cfg.em.nucSource) || (UJ.cfg && UJ.cfg.nucSource);
+        if (!src) return Promise.resolve(null);
+        UJ.nucmesh.configure({ nuc: src });
+      }
+      return UJ.nucmesh.fetchNucleus(nucId).catch(function(){ return null; });
+    } catch (e){ return Promise.resolve(null); }
+  }
+
+  function install(opts){
+    var o = opts || {};
+    var fetcher = o.fetch || function(id, onProgress){
+      if (!window.UJ || !UJ.mesh || !UJ.mesh.fetchCombinedMesh)
+        return Promise.reject(new Error("core/mesh.js is not loaded on this page"));
+      return UJ.mesh.fetchCombinedMesh(id, onProgress);
+    };
+    injectStyle();
+
+    function decorate(dl){
+      if (!dl || dl.getAttribute("data-m3d")) return;
+      var root = dl.getAttribute("data-root");
+      /* "0" is not a cell. βJump writes the segment id straight into the attribute and it is zero
+         for a detection with no segmentation behind it -- offering to draw that would send
+         somebody to fetch a mesh for a cell that does not exist. */
+      if (!root || root === "0") return;
+      dl.setAttribute("data-m3d", "1");
+      var btn = buttonFor(root, dl);
+      var host = document.createElement("div");
+      host.className = "m3d-host";
+      /* After the ROW the button sits in, not after the button: these panels are flex rows, and a
+         300 px canvas dropped inside one lays out as a very tall column. */
+      var row = dl.parentNode;
+      if (row && row.parentNode) row.parentNode.insertBefore(host, row.nextSibling);
+      else if (dl.parentNode) dl.parentNode.appendChild(host);
+      /* BEFORE the download button, not after. Søren, 2026-09-01: "the Show in 3D should come
+         before the download 3D model". Looking at a cell in the page is the cheap thing you do
+         first; downloading a .glb is what you do once you know you want it. */
+      dl.parentNode.insertBefore(btn, dl);
+
+      /* MIRROR THE TOOL'S OWN JUDGEMENT, on two counts.
+
+         `disabled`: every one of these tools disables its mesh-download button when it knows
+         there is no mesh -- βJump meshes only about half its segments, and says so by disabling.
+         Ignoring that would offer a 3D view for cells the page has already worked out do not have
+         one, and the person would get a fetch failure instead of a button that was never enabled.
+
+         `display`: µJump, δJump and πJump render the download button HIDDEN and reveal it only
+         once at least one root id exists for the cell. A "Show in 3D" that stayed visible beside
+         an invisible sibling would be a button for a cell that has nothing to draw.
+
+         Watched rather than read once, because the tools set both as their panels render. */
+      function mirror(){
+        btn.disabled = !!dl.disabled;
+        var d = dl.style ? dl.style.display : "";
+        if (btn.style.display !== d) btn.style.display = d;
+        if (host.style.display !== d) host.style.display = d;
+      }
+      mirror();
+      if (window.MutationObserver)
+        new MutationObserver(mirror).observe(dl, { attributes:true,
+                                                   attributeFilter:["disabled","style"] });
+
+      btn.addEventListener("click", function(){
+        if (btn.disabled) return;
+        btn.disabled = true;
+        var label = btn.textContent;
+        btn.textContent = "loading…";
+        host.innerHTML = "<div class='m3d'><div class='m3d-note'>fetching the mesh…</div></div>";
+        fetcher(root, function(frac, msg){
+          btn.textContent = msg ? String(msg).slice(0, 22)
+                                : "loading… " + Math.round((frac || 0) * 100) + "%";
+        }).then(function(m){
+          var geo = prepare(m.positions, m.indices,
+            { unitNm: o.unitNm === undefined ? 1000 : o.unitNm, extentNm: o.extentNm });
+          var lead = o.lead ? o.lead(root, m, geo) : null;
+          /* A fragment that did not load is not a footnote. Søren, 2026-09-09, on πJump: "I tried
+             Show in 3D and it had not included the root ID I submitted." It had tried; the mesh
+             behind that ID is 128 fragments and over 192 MB, and fetchCombinedMesh dropped it and
+             drew the rest without a word. Drawing one of two fragments and saying nothing is the
+             one outcome that reads as the proposal having been ignored. */
+          /* A cell that arrived only because it was decimated says so, in the same place the
+             size line is -- the panel is where somebody decides whether to trust what they see. */
+          if (m.simplified && m.simplified.length){
+            var g = Math.max.apply(null, m.simplified.map(function(s){ return s.gridUm; }));
+            var kept = m.simplified.reduce(function(a,s){ return a + (s.toVertices||0); }, 0);
+            var from = m.simplified.reduce(function(a,s){ return a + (s.fromVertices||0); }, 0);
+            lead = (lead ? lead + "<br>" : "")
+              + "<b>Simplified to fit.</b> <span class='hint'>This mesh was too large to download "
+              + "whole, so vertices were merged onto a " + g.toFixed(2) + " µm grid ("
+              + from.toLocaleString() + " → " + kept.toLocaleString()
+              + " vertices). The shape is right; fine detail is not. Open it in Neuroglancer for "
+              + "the published geometry.</span>";
+          }
+          if (m.skipped && m.skipped.length){
+            lead = (lead ? lead + "<br>" : "")
+              + "<b style='color:var(--bad)'>" + m.skipped.length + " proposed root ID"
+              + (m.skipped.length > 1 ? "s are" : " is") + " not drawn here.</b> <span class='hint'>"
+              + m.skipped.map(function(s){
+                  return esc(s.rootId || "(unknown)") + " — " + esc(s.message); }).join("; ")
+              + "</span>";
+          }
+          /* THE NUCLEUS, WHEN THERE IS ONE. Prepared in the CELL'S frame -- see prepare's
+             `frame` option -- because a nucleus centred on itself would sit in the middle of the
+             picture rather than where it is in the cell, which looks right and is a lie. */
+          var nucId = dl.getAttribute("data-nucid") || "";
+          return nucleusMeshFor(nucId).then(function(nm){
+            var opts2 = { lead: lead, emptyMessage: "This cell has no mesh geometry to draw." };
+            if (nm && nm.positions && nm.positions.length){
+              var ng = prepare(nm.positions, nm.indices,
+                               { unitNm: 1000, frame: { mid: geo.mid, span: geo.span } });
+              if (!ng.empty){
+                opts2.ghosts = [{ geo: ng, tint: NUC_TINT, alpha: 1 }];
+                /* The cell goes see-through ONLY now that there is something inside it to see --
+                   the notebook's rule, and for its reason: transparency with nothing behind it
+                   costs contrast and shows nothing. */
+                opts2.alpha = CELL_ALPHA_WITH_NUCLEUS;
+                opts2.lead = (lead ? lead + "<br>" : "")
+                  + "<span class='hint'>Nucleus " + esc(nucId) + " is drawn in "
+                  + "<b style='color:" + NUC_COLOR + "'>blue</b>, and the cell around it is "
+                  + "see-through so you can see it. Blue always means nucleus here and in the "
+                  + "Blender export.</span>";
+              }
+            }
+            show(host, geo, opts2);
+          });
+        }).catch(function(e){
+          host.innerHTML = "<div class='m3d'><div class='m3d-err'>Could not load the mesh: "
+            + esc(e && e.message ? e.message : e) + "</div></div>";
+        }).then(function(){ btn.disabled = false; btn.textContent = label; });
+      });
+    }
+
+    function sweep(){
+      var all = document.querySelectorAll(o.selector || ".meshdl[data-root]");
+      Array.prototype.forEach.call(all, decorate);
+    }
+    sweep();
+    if (window.MutationObserver){
+      var mo = new MutationObserver(function(){ sweep(); });
+      mo.observe(document.body || document.documentElement,
+                 { childList:true, subtree:true });
+    }
+    return { sweep: sweep };
+  }
+
+  /* Auto-install on a page that has core/mesh.js, unless the page says not to. χJump sets
+     UJ.mesh3dNoAutoInstall because it drives the panel from its own assembly UI rather than from
+     a download button. */
+  function autoInstall(){
+    if (window.UJ && UJ.mesh3dNoAutoInstall) return;
+    if (!(window.UJ && UJ.mesh && UJ.mesh.fetchCombinedMesh)) return;
+    install({});
+  }
+  if (typeof document !== "undefined"){
+    if (document.readyState === "loading")
+      document.addEventListener("DOMContentLoaded", autoInstall);
+    else autoInstall();
+  }
+
+  return { prepare: prepare, draw: draw, show: show, install: install, probe: probe,
+           probePixels: probePixels, NUC_TINT: NUC_TINT, NUC_COLOR: NUC_COLOR,
+           pointInGeometry: pointInGeometry, nucleiInside: nucleiInside,
+           injectStyle: injectStyle, themeTint: themeTint, themeBg: themeBg };
+})();
 </script>
 <script>/* core/nucmesh.js — the nucleus's own mesh, straight out of the nuclei bucket.       2026-09-17
 
@@ -12199,7 +13131,23 @@ async function pad3DGhostMeshes(){
      below would then have said there was no ID in a box that had one. */
   const MESH = (window.UJ && UJ.mesh && UJ.mesh.fetchCombinedMesh) ? UJ.mesh
              : ((typeof MeshDL !== "undefined" && MeshDL && MeshDL.fetchCombinedMesh) ? MeshDL : null);
-  if (ids.root && ids.root !== "0" && MESH){
+  /* THE PAGE'S OWN READER FIRST (2026-09-22). χJump's cells are assemblies of cb2 fragments
+     with their own mesh store; core/mesh.js is loaded there only for its exports and cannot read
+     them. See src/the_pad_asks_the_page_for_the_cell_mesh.py. */
+  const HOSTMESH = (window.UJ && UJ.cfg && UJ.cfg.tracing && typeof UJ.cfg.tracing.cellMesh === "function")
+                 ? UJ.cfg.tracing.cellMesh : null;
+  if (HOSTMESH){
+    if (ids.root || ids.nuc){
+      try {
+        const hm = await HOSTMESH(ids.root, ids.nuc, function(msg){
+          pad3DNote("fetching the cell\u2019s mesh\u2026 " + (msg || ""));
+        });
+        if (hm && hm.positions && hm.positions.length) out.push({ what: "cell", mesh: hm });
+        else if (!hm || !hm.note) notes.push("the cell has no mesh to draw");
+        if (hm && hm.note) notes.push(hm.note);
+      } catch (e){ notes.push("the cell\u2019s mesh could not be read: " + String(e && e.message || e)); }
+    }
+  } else if (ids.root && ids.root !== "0" && MESH){
     try {
       const m = await MESH.fetchCombinedMesh(ids.root, function(f, msg){
         pad3DNote("fetching the cell’s mesh… " + (msg || Math.round((f || 0) * 100) + "%"));
@@ -12230,11 +13178,6 @@ async function pad3DGhostMeshes(){
   return out;
 }
 
-/* core/mesh3d.js's renderer: UJ.mesh3dCore where a page keeps its own UJ.mesh3d (χJump), else
-   UJ.mesh3d. See src/the_pad_draws_with_the_core_renderer.py. */
-function tracingM3D(){
-  return (window.UJ && UJ.mesh3dCore && UJ.mesh3dCore.prepare) ? UJ.mesh3dCore : UJ.mesh3d;
-}
 /* core/mesh3d.js's renderer: UJ.mesh3dCore where a page keeps its own UJ.mesh3d (χJump), else
    UJ.mesh3d. See src/the_pad_draws_with_the_core_renderer.py. */
 function tracingM3D(){
@@ -13883,6 +14826,9 @@ async function padSegOverlay(){
   }
 }
 
+/* Alt was held when this stroke began: it continues a contour rather than starting one.
+   See src/the_pen_picks_up_where_it_left_off.py. */
+var PAD_EXTEND = false;
 async function padDraw(){
   if (!PAD_CENTRE) return;
   const cv = document.getElementById("tracePad");
@@ -14528,7 +15474,9 @@ function wirePad(){
        individually." Everywhere else on the canvas a drag still pans, and shift+drag always does,
        so nothing is taken away -- but a visible handle that a drag slides past would be a strange
        thing to draw. */
-    if (!e.shiftKey){
+    /* NOT WITH ALT (2026-09-22): alt carries on a contour, and the end of a lifted stroke is a
+       vertex -- grabbing it would drag the end instead of drawing from it. */
+    if (!e.shiftKey && !e.altKey){
       const t = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
       dragging = UJ.tracepad.hitVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
     } else dragging = null;
@@ -14556,7 +15504,9 @@ function wirePad(){
         padSay("Pen detected — freehand drawing is on. Draw all the way round the structure "
           + "and lift. Untick “draw freehand” to go back to clicking each vertex."); }
     }
-    if (drawFreehand() && !dragging && !e.shiftKey){
+    PAD_EXTEND = false;
+    if ((drawFreehand() || e.altKey) && !dragging && !e.shiftKey){
+      PAD_EXTEND = !!e.altKey;
       const t0 = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
       UJ.tracepad.startStroke(PAD, t0[0], t0[1]);
       padPaint();
@@ -14600,8 +15550,26 @@ function wirePad(){
       /* Within about a pixel of where it was drawn. A distance rather than a vertex count, because
          "within a pixel of the line I drew" is a promise about the picture the tracer is looking
          at -- see core/tracepad.js's simplify(). */
-      const what = UJ.tracepad.endStroke(PAD, padTol(1.2));
+      /* ALT: CARRY ON THE CONTOUR IT STARTED ON (2026-09-22). Snapping within 15 px of it. */
+      const extend = (PAD_EXTEND || e.altKey) && UJ.tracepad.extendStroke;
+      PAD_EXTEND = false;
+      const what = extend ? UJ.tracepad.extendStroke(PAD, padTol(1.2), padTol(15))
+                          : UJ.tracepad.endStroke(PAD, padTol(1.2));
       PAD_HOVER = null;
+      if (what === "extended" || what === "replaced"){
+        padPaint(); padRings();
+        padSay(what === "extended"
+          ? "Contour continued from where the pen left it, and closed again. Alt+draw again to go on; Undo takes this part back."
+          : "Contour mended — the stretch between where the stroke began and ended is replaced by it. Undo takes it back.");
+        return;
+      }
+      if (extend && what === "ring"){
+        const n0 = PAD.rings[PAD.rings.length - 1].points.length;
+        padPaint(); padRings();
+        padSay("A new contour, " + n0 + " points — alt+draw continues a contour only when it starts "
+          + "on one of this structure’s, on this section.");
+        return;
+      }
       if (what === "ring"){
         const n = PAD.rings[PAD.rings.length - 1].points.length;
         padPaint(); padRings();
@@ -14949,7 +15917,7 @@ function tracingCardHtml(){
     "<button class=\"idbtn\" id=\"tracePadNext\" style=\"flex:0 0 auto\" title=\"On one step (. key)\">&#9654;</button>",
     "<div class=\"coord\" style=\"flex:0 0 84px\" title=\"How many sections a step moves. Every fifth section is about half a percent off the real volume.\"><input type=\"text\" id=\"tracePadStep\" inputmode=\"numeric\" value=\"5\"></div>",
     "<button class=\"idbtn\" id=\"tracePadUndo\" style=\"flex:0 0 auto\" title=\"Takes back the last vertex, or the last closed contour if you have not started one\">Undo</button>",
-    "<label style=\"font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto\" title=\"Press and draw all the way round the structure, then lift — the way you would with a pen on paper. Made for a pen display or a tablet, and it works with a mouse held down. The stroke is thinned to a contour you can still edit point by point. With this on, a plain drag DRAWS, so shift+drag is how you pan.\"><input type=\"checkbox\" id=\"tracePadPen\"> draw freehand (pen)</label>",
+    "<label style=\"font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto\" title=\"Press and draw all the way round the structure, then lift — the way you would with a pen on paper. Made for a pen display or a tablet, and it works with a mouse held down. The stroke is thinned to a contour you can still edit point by point. With this on, a plain drag DRAWS, so shift+drag is how you pan. Lifted too early? Hold alt (option on a Mac) and draw on from where it stopped.\"><input type=\"checkbox\" id=\"tracePadPen\"> draw freehand (pen)</label>",
     "<!-- THE SEGMENTATION, UNDER THE CONTOURS.  2026-09-17. Søren: \"There should be an option to show",
     "     the segmentation of the root ID and the nucleus ID of the cell in the EM window.\" Off by",
     "     default: it is a second volume to fetch, and a cell the segmentation does not have -- which is",
@@ -15000,6 +15968,7 @@ function tracingCardHtml(){
     "<table style=\"width:100%;border-collapse:collapse;font-size:12px;margin-top:6px\">",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>click</b></td><td style=\"padding:3px 0\">Put a vertex down. The first one is drawn as an open ring.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>draw freehand</b> (the tick box)</td><td style=\"padding:3px 0\">Press, go all the way round the structure, lift &mdash; one stroke, the way a pen works. Made for a pen display (Kamvas, iPad) and fine with a mouse held down. The stroke is thinned to a handful of points you can still drag, delete and add to; a pen switches this on by itself the first time it touches the pad. While it is on, a plain drag DRAWS, so <b>shift+drag</b> is how you pan.</td></tr>",
+    "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>alt+draw</b> (option on a Mac)</td><td style=\"padding:3px 0\">Carries on a contour. Lifted the pen too early? Hold alt and draw on from where it stopped: the closing line across the gap goes and the new stroke goes in. End the stroke on the contour and it replaces the stretch between its two ends instead &mdash; redrawing a part that went wrong. Undo takes back just that part. A pen button set to alt in the tablet&rsquo;s driver does the same.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>click the first ring</b></td><td style=\"padding:3px 0\">Close the contour. Three vertices minimum &mdash; under that a &ldquo;close&rdquo; is a mis-click, and it is ignored.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>Enter</b></td><td style=\"padding:3px 0\">Closes it too, for anyone who expects that.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>Esc</b></td><td style=\"padding:3px 0\">Abandon the contour being drawn. Closed ones are untouched.</td></tr>",
@@ -15270,7 +16239,7 @@ async function padRelabelMips(){
       var widest = 0;
       for (var q = 0; q < sel.options.length; q++){
         var pq = String(sel.options[q].value).split(":"), sq = await UJ.emtiles.scaleAt(parseInt(pq[0], 10) || 0, tracingSlabOk());
-        if (sq && sq.scale) widest = Math.max(widest, 560 * sq.scale.resolution[0] / Math.max(1, parseInt(pq[1], 10) || 1) / 1000);
+        if (sq && sq.scale) widest = Math.max(widest, 560 * sq.scale.resolution[0] / (parseFloat(pq[1]) || 1) / 1000);
       }
       if (widest >= 15) break;
       var op = document.createElement("option");
@@ -15279,13 +16248,33 @@ async function padRelabelMips(){
       /* ", slower to load" was a claim about minnie65's widest level; it is not the widest now. */
       [].forEach.call(sel.options, function(o){ o.textContent = o.textContent.replace(/, slower to load$/, ""); });
     }
+    /* ── HALF SIZE ──────────────────────────────────────────────────────────  2026-09-22
+       Søren, from a phone: "This is still too small to segment the cell, we need a larger view
+       also". The widest level drawn at half size -- each 2x2 block of voxels one pixel, their
+       mean -- wherever the widest view at 560 px is under 30 µm, which is every volume here.
+       See src/the_pad_can_draw_half_size.py. */
+    var wMip = 0;
+    [].forEach.call(sel.options, function(o){
+      var pp = String(o.value).split(":");
+      if (parseFloat(pp[1] || 1) >= 1) wMip = Math.max(wMip, parseInt(pp[0], 10) || 0);
+    });
+    var hv = wMip + ":0.5";
+    if (![].some.call(sel.options, function(o){ return o.value === hv; })){
+      var sw = await UJ.emtiles.scaleAt(wMip, tracingSlabOk());
+      if (sw && sw.scale && 560 * sw.scale.resolution[0] / 1000 < 30){
+        var oh = document.createElement("option");
+        oh.value = hv; oh.textContent = "0 \u00b5m across \u2014 0 nm data, drawn half size";
+        oh.title = "Twice as much tissue: each pixel is the mean of 2\u00d72 voxels. Four times the chunks on the first draw.";
+        sel.insertBefore(oh, sel.options[0]);
+      }
+    }
   } catch (_e){}
   var cv = document.getElementById("tracePad");
   var w = (cv && cv.width) || 560;
-  var chunk0 = 0, chunk1 = 0;
+  var chunk0 = 0, chunk1 = 0, wide0 = -1;
   for (var i = 0; i < sel.options.length; i++){
     var o = sel.options[i], parts = String(o.value).split(":");
-    var mip = parseInt(parts[0], 10) || 0, zoom = Math.max(1, parseInt(parts[1], 10) || 1);
+    var mip = parseInt(parts[0], 10) || 0, zoom = parseFloat(parts[1]) > 0 ? parseFloat(parts[1]) : 1;
     var got;
     try { got = await UJ.emtiles.scaleAt(mip, tracingSlabOk()); } catch (_e){ return false; }
     if (!got || !got.scale) return false;
@@ -15302,17 +16291,21 @@ async function padRelabelMips(){
       /^[\d.]+ \u00b5m( across)? \u2014 [\d.]+ nm data( \(\d+-section slab\))?/, head);
     try {
       var cs = got.scale.chunk_sizes && got.scale.chunk_sizes[0];
-      if (i === 0) chunk0 = (cs && cs[0]) || 0;
-      if (i === 1) chunk1 = (cs && cs[0]) || 0;
+      /* The first two levels drawn 1:1 or closer -- not the half-size one on top, which is the
+         same mip as the next and would make every volume look evenly chunked. */
+      if (zoom >= 1){
+        if (wide0 < 0){ wide0 = i; chunk0 = (cs && cs[0]) || 0; }
+        else if (!chunk1) chunk1 = (cs && cs[0]) || 0;
+      }
     } catch (_e){}
   }
   /* ", slower to load" IS A minnie65 FACT, AND IT IS CHECKED.
      There it is true: at 32 nm the chunks are 64 px wide where at 16 nm they are 128, so the
      widest view costs about three times as many fetches. Lee16 chunks 512 px at every scale, so
      its widest view is no slower than the next one and the warning would be a lie. */
-  if (sel.options.length && chunk0 && chunk1 && chunk0 >= chunk1)
-    sel.options[0].textContent =
-      sel.options[0].textContent.replace(/, slower to load$/, "");
+  if (wide0 >= 0 && chunk0 && chunk1 && chunk0 >= chunk1)
+    sel.options[wide0].textContent =
+      sel.options[wide0].textContent.replace(/, slower to load$/, "");
   return true;
 }
 

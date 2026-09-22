@@ -285,7 +285,9 @@ const INFO = {
       ghosts: !!document.getElementById("tracePadGhosts"),
       penTick: !!document.getElementById("tracePadPen"),
       ident: (function(){ try { return tracingIdentityFor("1", ""); } catch (e){ return "threw: " + e; } })(),
-      mips: [...document.querySelectorAll("#tracePadMip option")].map(o => o.textContent)
+      /* The 1:1-and-closer levels; the half-size one on top is asserted on its own (2026-09-22). */
+      mips: [...document.querySelectorAll("#tracePadMip option")].filter(o => !/:0\.5$/.test(o.value)).map(o => o.textContent),
+      half: (document.querySelector("#tracePadMip option") || {}).textContent || ""
     }));
     ok(got.wrapper && got.filled, "the module built the card into λJump's wrapper",
        got.wrapper + "/" + got.filled);
@@ -324,7 +326,9 @@ const INFO = {
        what says this is the same calculation and not a second opinion. */
     /* 2026-09-21: the pad reaches Lee16's 32 nm too -- its widest was 9 µm, and a view under
        15 µm gains the next single-section level (src/the_pad_reaches_the_coarsest_section.py). */
-    ok(/^18 µm across — 32 nm data/.test(got.mips[0] || ""),
+    ok(/^36 µm across — 32 nm data, drawn half size/.test(got.half),
+       "the widest view is Lee16's 32 nm drawn at half size", got.half);
+    ok(/^18 µm — 32 nm data/.test(got.mips[0] || ""),
        "the widest zoom level says what this volume actually is", got.mips[0]);
     ok(/^9 µm — 16 nm data/.test(got.mips[1] || "") && /^4\.5 µm — 8 nm data/.test(got.mips[2] || "")
        && /^2\.2 µm — 4 nm data/.test(got.mips[3] || ""),

@@ -229,7 +229,10 @@ UJ.emtiles = (function(){
        at 8 nm voxels four pixels wide, and the label says "8 nm data" rather than pretending the
        resolution improved. It also costs nothing extra to fetch -- the window in VOXELS shrinks as
        the magnification grows, so this is the only kind of zoom here that is free. */
-    var zoom = Math.max(1, Math.min(16, opts.zoom | 0 || 1));
+    /* HALF AND QUARTER SIZE, 2026-09-22 (src/the_pad_can_draw_half_size.py): below 1 the window
+       holds more voxels than the canvas has pixels, and each k x k block is drawn as its mean. */
+    var zr = +opts.zoom || 1;
+    var zoom = zr >= 1 ? Math.max(1, Math.min(16, zr | 0)) : (1 / zr <= 2.5 ? 0.5 : 0.25);
     var w = Math.max(16, opts.w | 0), h = Math.max(16, opts.h | 0);
     var vw = Math.max(8, Math.ceil(w / zoom)), vh = Math.max(8, Math.ceil(h / zoom));
     var c = toScale(scale, opts.centre);
@@ -334,6 +337,29 @@ UJ.emtiles = (function(){
     }
     var spanUsed = Math.max(1, hiUsed - loUsed);
 
+    if (zoom < 1){
+      /* The MEAN of each k x k block, not one voxel of it: a membrane one voxel wide would
+         otherwise vanish or survive depending on where the block boundary fell. */
+      var kk = Math.round(1 / zoom);
+      for (var hy = 0; hy < h; hy++){
+        for (var hx = 0; hx < w; hx++){
+          var sum = 0, cnt = 0;
+          for (var dy = 0; dy < kk; dy++){
+            var vy = hy * kk + dy; if (vy >= vh) break;
+            for (var dx = 0; dx < kk; dx++){
+              var vx = hx * kk + dx; if (vx >= vw) break;
+              var oh = vy * vw + vx;
+              if (seen[oh]){ sum += raw[oh]; cnt++; }
+            }
+          }
+          if (!cnt) continue;
+          var vm = (sum / cnt - loUsed) * 255 / spanUsed;
+          vm = vm < 0 ? 0 : vm > 255 ? 255 : vm;
+          var oo = (hy * w + hx) * 4;
+          img.data[oo] = img.data[oo + 1] = img.data[oo + 2] = vm;
+        }
+      }
+    } else
     for (var py2 = 0; py2 < vh; py2++){
       for (var px2 = 0; px2 < vw; px2++){
         var o2 = py2 * vw + px2;

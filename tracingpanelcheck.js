@@ -809,6 +809,41 @@ function link(annotations){
       ok(/Pen detected/.test(pen.said), "...and says so rather than changing under him",
          pen.said.slice(0, 50));
 
+      /* ALT CARRIES ON FROM WHERE THE PEN WAS LIFTED (2026-09-22). Søren: "I have sometimes had
+         the problem that I accidentally lifted the pen while drawing and then I had to start
+         over." Real pointer events, with alt held from the keyboard; the stroke starts ON the
+         lifted contour's last vertex, which without alt would grab and drag it. */
+      await p.evaluate(() => { PAD.rings = []; PAD.pending = []; PAD.stroke = null;
+                               document.getElementById("tracePadPen").checked = true; });
+      const M = 40, cxa = 300, cya = 260, Ra = 90;
+      const ptA = i => [box.x + cxa + Ra * Math.cos(2 * Math.PI * i / M), box.y + cya + Ra * Math.sin(2 * Math.PI * i / M)];
+      await p.mouse.move(...ptA(0)); await p.mouse.down();
+      for (let i = 1; i <= 24; i++) await p.mouse.move(...ptA(i));
+      await p.mouse.up(); await p.waitForTimeout(60);
+      const lifted = await p.evaluate(() => {
+        const r = PAD.rings[0], v = r.points[r.points.length - 1], q = PAD_VIEW.pxAt([v[0], v[1], PAD.z]);
+        return { rings: PAD.rings.length, x: q[0], y: q[1], n: r.points.length };
+      });
+      await p.keyboard.down("Alt");
+      await p.mouse.move(box.x + lifted.x, box.y + lifted.y); await p.mouse.down();
+      for (let i = 25; i <= 39; i++) await p.mouse.move(...ptA(i));
+      await p.mouse.up(); await p.keyboard.up("Alt"); await p.waitForTimeout(60);
+      const carried = await p.evaluate(() => {
+        const r = PAD.rings[0];
+        let a = 0; r.points.forEach((u, i) => { const w = r.points[(i + 1) % r.points.length]; a += u[0] * w[1] - w[0] * u[1]; });
+        const k = PAD_VIEW.pxPerToolVoxel;
+        return { rings: PAD.rings.length, areaPx: Math.abs(a / 2) * k * k, say: document.getElementById("tracePadSay").innerText };
+      });
+      ok(lifted.rings === 1 && carried.rings === 1,
+         "alt+drawing from a lifted contour's end continues it rather than starting another", carried.rings + " contour(s)");
+      ok(Math.abs(carried.areaPx / (Math.PI * Ra * Ra) - 1) < 0.06,
+         "...and the contour goes all the way round now", (carried.areaPx / (Math.PI * Ra * Ra)).toFixed(3) + " of the circle");
+      ok(/continued|mended/i.test(carried.say), "...and it says so", carried.say.slice(0, 70));
+      await p.evaluate(() => document.getElementById("tracePadUndo").click());
+      const undone = await p.evaluate(() => ({ rings: PAD.rings.length, n: PAD.rings[0] ? PAD.rings[0].points.length : 0 }));
+      ok(undone.rings === 1 && undone.n === lifted.n, "Undo takes the continuation back and keeps the first stroke",
+         undone.rings + " contour(s), " + undone.n + " points");
+
       await p.evaluate(() => {
         document.getElementById("tracePadPen").checked = false;   // back to clicking, for the rest
         PAD.rings = JSON.parse(window.__keptRings); PAD.pending = []; PAD.stroke = null;

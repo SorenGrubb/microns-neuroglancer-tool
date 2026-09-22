@@ -455,7 +455,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-21 21:26</span></p>
+ctrl-shift-R.">build 2026-09-22 05:32</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -9351,6 +9351,28 @@ function xjumpCellOf(key, seg){
            how: "proofread by the Lee lab (Nguyen et al., Nature 2023)",
            segs: X.seedSegments(r), pos: r.pos ? r.pos.slice() : null };
 }
+/* WHERE THE MESH STORE PUTS A CELL, as the contacts panel decides it (xjump_app.js,
+   ccFrameShift): as published if it fits the block and holds the soma, else moved segTranslateZ
+   sections, else as published. µm, added to the absolute mesh. */
+function xjumpMeshShift(g, soma){
+  var X = UJ.xjump;
+  if (!g || !g.loUm || !g.hiUm) return [0, 0, 0];
+  var eUm = X.extentNm().map(function(n){ return n / 1000; }), r = X.resXYZ();
+  function fits(dz){
+    for (var i = 0; i < 3; i++){
+      var lo = g.loUm[i] + (i === 2 ? dz : 0), hi = g.hiUm[i] + (i === 2 ? dz : 0);
+      if (hi < 0 || lo > eUm[i]) return false;
+      if (soma){
+        var slack = 25000 / r[i];
+        if (soma[i] < lo * 1000 / r[i] - slack || soma[i] > hi * 1000 / r[i] + slack) return false;
+      }
+    }
+    return true;
+  }
+  if (fits(0)) return [0, 0, 0];
+  var dz = (UJ.cfg.volume.segTranslateZ || 0) * r[2] / 1000;
+  return (dz && fits(dz)) ? [0, 0, dz] : [0, 0, 0];
+}
 UJ.cfg.tracing = {
   lsKey:     "xjump_tracings_v1",
   draftsKey: "xjump_tracing_drafts_v2",
@@ -9379,6 +9401,25 @@ UJ.cfg.tracing = {
     if (!c) return null;
     return { name: c.name, how: c.how, via: rootIn ? "fragment " + rootIn : "cell " + nucIn,
              nucleusId: c.key, rootId: String(rootIn || "") };
+  },
+  /* THE CELL'S MESH FOR THE PAD'S SEE-THROUGH VIEW (2026-09-22, Søren: "The xJump 3D view does
+     not show the cell mesh"). Every fragment of the cell, in µm, where the cell is. See
+     xjump-build/src/xjump_pad_sees_the_cell.py. */
+  cellMesh: function(rootIn, keyIn, say){
+    var c = xjumpCellOf(keyIn || "", rootIn);
+    var ids = c ? c.segs : (rootIn ? [String(rootIn)] : []);
+    if (!ids.length || !(UJ.mesh3d && UJ.mesh3d.umGeometry)) return Promise.resolve(null);
+    return UJ.mesh3d.umGeometry(ids, function(d, n){ if (say) say(d + " of " + n + " fragments"); })
+      .then(function(g){
+        if (!g.geo) return { note: "none of the cell's " + g.total + " fragments has a published mesh" };
+        var sh = xjumpMeshShift(g, c && c.pos), mid = g.midUm || [0, 0, 0];
+        var p = g.geo.positions, out = new Float32Array(p.length);
+        for (var i = 0; i < p.length; i += 3){
+          out[i] = p[i] + mid[0] + sh[0]; out[i + 1] = p[i + 1] + mid[1] + sh[1]; out[i + 2] = p[i + 2] + mid[2] + sh[2];
+        }
+        return { positions: out, indices: g.geo.indices,
+                 note: g.have < g.total ? g.have + " of the cell's " + g.total + " fragments have a published mesh" : "" };
+      });
   },
   /* By the cell's key first, then by the fragment (2026-09-21): a cb2 fragment is a square of the
      cell, and the one under the pointer need not be one the cell lists. */

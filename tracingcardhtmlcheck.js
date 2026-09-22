@@ -258,7 +258,7 @@ const CONTRACT = [
   console.log("\nand the pad's zoom levels are computed, not tabulated");
   {
     const TYPED = [
-      "18 µm across — 32 nm data, slower to load",
+      "18 µm — 32 nm data, slower to load",
       "9 µm — 16 nm data, a whole cell",
       "4.5 µm — 8 nm data, full detail",
       "2.2 µm — 8 nm data, drawn 2×",
@@ -281,22 +281,27 @@ const CONTRACT = [
       /* Lee16: ten scales, all 40 nm z, all chunked 512×512×16 — nothing gets slower. */
       const LEE = [0, 1, 2, 3].map(i => ({ resolution: [4 << i, 4 << i, 40],
                                            chunk_sizes: [[512, 512, 16]] }));
+      /* The 1:1-and-closer levels. Above them since 2026-09-22 sits the widest drawn at half size
+         (src/the_pad_can_draw_half_size.py), checked on its own below. */
       const read = () => [...document.querySelectorAll("#tracePadMip option")]
-                           .map(o => o.textContent);
+                           .filter(o => !/:0\.5$/.test(o.value)).map(o => o.textContent);
+      const top = () => { const o = document.querySelector("#tracePadMip option"); return o.value + " " + o.textContent; };
       UJ.emtiles = stub(MINNIE);
       await padRelabelMips();
-      const minnie = read();
+      const minnie = read(), minnieTop = top();
       UJ.emtiles = stub(LEE);
       await padRelabelMips();
-      const lee = read();
+      const lee = read(), leeTop = top();
       UJ.emtiles = real;
-      return { minnie, lee };
+      return { minnie, lee, minnieTop, leeTop };
     });
     const same = got.minnie.every((s, i) => s === TYPED[i]);
     ok(same, "fed minnie65's scales it reproduces the hand-written labels exactly",
        same ? "all six" : got.minnie.find((s, i) => s !== TYPED[i]) + "  <- expected "
               + TYPED[got.minnie.findIndex((s, i) => s !== TYPED[i])]);
-    ok(got.lee[0] === "9 µm across — 16 nm data" && got.lee[1] === "4.5 µm — 8 nm data, a whole cell"
+    ok(got.minnieTop === "2:0.5 36 µm across — 32 nm data, drawn half size",
+       "above them, the widest level drawn at half size", got.minnieTop);
+    ok(got.lee[0] === "9 µm — 16 nm data" && got.lee[1] === "4.5 µm — 8 nm data, a whole cell"
        && got.lee[2] === "2.2 µm — 4 nm data, full detail",
        "...and fed Lee16's it says Lee16's numbers", got.lee.slice(0, 3).join(" | ")
        + "  <- one scale finer, so the same mip is half the width and half the nanometres");
@@ -324,7 +329,7 @@ const CONTRACT = [
       const V1DD = [9.7, 19.4, 38.8, 77.6].map(r => ({ resolution: [r, r, 45],
                                                        chunk_sizes: [[64, 64, 64]] }));
       const read = () => [...document.querySelectorAll("#tracePadMip option")]
-                           .map(o => o.textContent);
+                           .filter(o => !/:0\.5$/.test(o.value)).map(o => o.textContent);
       UJ.emtiles = stub(V1DD);
       await padRelabelMips(); const once = read();
       await padRelabelMips(); const twice = read();

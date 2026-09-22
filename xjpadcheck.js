@@ -67,6 +67,45 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   else ok(seg.covered === seg.n, "every fragment of " + seg.key + " is painted, not only the one at the pointer",
           seg.covered + " of " + seg.n);
 
+  console.log("\nthe see-through cell around the tracing");
+  /* Søren, 2026-09-22: "The xJump 3D view does not show the cell mesh". The pad asked core/mesh.js
+     -- µJump's chunked-graph reader -- for a cb2 fragment. cb2's cells are assemblies of fragments
+     with legacy meshes in their own store; χJump reads them itself (UJ.mesh3d.umGeometry), and the
+     pad now asks the page for the cell's mesh through UJ.cfg.tracing.cellMesh. */
+  const gh = await p.evaluate(async () => {
+    const all = UJ.xjump.seedListAll().filter(r => r.whole);
+    const row = all.filter(r => UJ.xjump.seedSegments(r).length > 3)[0];
+    if (!row) return { skip: 1 };
+    const segs = UJ.xjump.seedSegments(row).map(String);
+    let asked = null, coreAsked = false;
+    const savedU = UJ.mesh3d.umGeometry, savedC = UJ.mesh && UJ.mesh.fetchCombinedMesh;
+    /* One triangle, centred, with its middle where the cell's soma is -- in the viewer's frame. */
+    const r = UJ.xjump.resXYZ(), pos = row.pos || [1000, 1000, 100];
+    const midUm = pos.map((v, i) => v * r[i] / 1000);
+    UJ.mesh3d.umGeometry = async function(ids){ asked = ids.map(String);
+      return { geo: { positions: new Float32Array([-1, 0, 0, 1, 0, 0, 0, 1, 0]), indices: new Uint32Array([0, 1, 2]) },
+               have: ids.length, total: ids.length, midUm, loUm: midUm.map(v => v - 1), hiUm: midUm.map(v => v + 1) }; };
+    if (UJ.mesh) UJ.mesh.fetchCombinedMesh = async function(){ coreAsked = true; return null; };
+    document.getElementById("tracingNucId").value = row.key;
+    document.getElementById("tracingRootId").value = "";
+    PAD3D_MESHES = null;
+    let out;
+    try { out = await pad3DGhostMeshes(); } catch (e){ return { err: String(e) }; }
+    UJ.mesh3d.umGeometry = savedU; if (UJ.mesh) UJ.mesh.fetchCombinedMesh = savedC;
+    const cell = (out || []).filter(x => x.what === "cell")[0];
+    const p0 = cell ? [cell.mesh.positions[0], cell.mesh.positions[1], cell.mesh.positions[2]] : null;
+    return { n: segs.length, asked: asked ? asked.length : 0, all: asked ? segs.every(s => asked.indexOf(s) >= 0) : false,
+             coreAsked, cell: !!cell, p0, want: [midUm[0] - 1, midUm[1], midUm[2]], note: PAD3D_NOTE };
+  });
+  if (gh.skip) ok(true, "(no seed to test)");
+  else {
+    ok(gh.cell, "the cell's mesh is among the see-through meshes", gh.err || gh.note || gh.cell);
+    ok(gh.all, "...built from every fragment of the cell, by its key", gh.asked + " of " + gh.n);
+    ok(!gh.coreAsked, "...and µJump's reader is not asked for a cb2 fragment", gh.coreAsked);
+    ok(gh.p0 && gh.p0.every((v, i) => Math.abs(v - gh.want[i]) < 1e-3),
+       "...in µm where the cell is, not centred on the origin", JSON.stringify(gh.p0) + " vs " + JSON.stringify(gh.want));
+  }
+
   ok(errors.length === 0, "no page errors", errors.join(" | ").slice(0, 300) || "none");
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");

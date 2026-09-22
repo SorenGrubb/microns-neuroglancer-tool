@@ -1778,7 +1778,23 @@ async function pad3DGhostMeshes(){
      below would then have said there was no ID in a box that had one. */
   const MESH = (window.UJ && UJ.mesh && UJ.mesh.fetchCombinedMesh) ? UJ.mesh
              : ((typeof MeshDL !== "undefined" && MeshDL && MeshDL.fetchCombinedMesh) ? MeshDL : null);
-  if (ids.root && ids.root !== "0" && MESH){
+  /* THE PAGE'S OWN READER FIRST (2026-09-22). χJump's cells are assemblies of cb2 fragments
+     with their own mesh store; core/mesh.js is loaded there only for its exports and cannot read
+     them. See src/the_pad_asks_the_page_for_the_cell_mesh.py. */
+  const HOSTMESH = (window.UJ && UJ.cfg && UJ.cfg.tracing && typeof UJ.cfg.tracing.cellMesh === "function")
+                 ? UJ.cfg.tracing.cellMesh : null;
+  if (HOSTMESH){
+    if (ids.root || ids.nuc){
+      try {
+        const hm = await HOSTMESH(ids.root, ids.nuc, function(msg){
+          pad3DNote("fetching the cell\u2019s mesh\u2026 " + (msg || ""));
+        });
+        if (hm && hm.positions && hm.positions.length) out.push({ what: "cell", mesh: hm });
+        else if (!hm || !hm.note) notes.push("the cell has no mesh to draw");
+        if (hm && hm.note) notes.push(hm.note);
+      } catch (e){ notes.push("the cell\u2019s mesh could not be read: " + String(e && e.message || e)); }
+    }
+  } else if (ids.root && ids.root !== "0" && MESH){
     try {
       const m = await MESH.fetchCombinedMesh(ids.root, function(f, msg){
         pad3DNote("fetching the cell’s mesh… " + (msg || Math.round((f || 0) * 100) + "%"));
@@ -1809,11 +1825,6 @@ async function pad3DGhostMeshes(){
   return out;
 }
 
-/* core/mesh3d.js's renderer: UJ.mesh3dCore where a page keeps its own UJ.mesh3d (χJump), else
-   UJ.mesh3d. See src/the_pad_draws_with_the_core_renderer.py. */
-function tracingM3D(){
-  return (window.UJ && UJ.mesh3dCore && UJ.mesh3dCore.prepare) ? UJ.mesh3dCore : UJ.mesh3d;
-}
 /* core/mesh3d.js's renderer: UJ.mesh3dCore where a page keeps its own UJ.mesh3d (χJump), else
    UJ.mesh3d. See src/the_pad_draws_with_the_core_renderer.py. */
 function tracingM3D(){
@@ -3462,6 +3473,9 @@ async function padSegOverlay(){
   }
 }
 
+/* Alt was held when this stroke began: it continues a contour rather than starting one.
+   See src/the_pen_picks_up_where_it_left_off.py. */
+var PAD_EXTEND = false;
 async function padDraw(){
   if (!PAD_CENTRE) return;
   const cv = document.getElementById("tracePad");
@@ -4107,7 +4121,9 @@ function wirePad(){
        individually." Everywhere else on the canvas a drag still pans, and shift+drag always does,
        so nothing is taken away -- but a visible handle that a drag slides past would be a strange
        thing to draw. */
-    if (!e.shiftKey){
+    /* NOT WITH ALT (2026-09-22): alt carries on a contour, and the end of a lifted stroke is a
+       vertex -- grabbing it would drag the end instead of drawing from it. */
+    if (!e.shiftKey && !e.altKey){
       const t = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
       dragging = UJ.tracepad.hitVertex(PAD, t[0], t[1], PAD_VIEW.pxPerToolVoxel);
     } else dragging = null;
@@ -4135,7 +4151,9 @@ function wirePad(){
         padSay("Pen detected — freehand drawing is on. Draw all the way round the structure "
           + "and lift. Untick “draw freehand” to go back to clicking each vertex."); }
     }
-    if (drawFreehand() && !dragging && !e.shiftKey){
+    PAD_EXTEND = false;
+    if ((drawFreehand() || e.altKey) && !dragging && !e.shiftKey){
+      PAD_EXTEND = !!e.altKey;
       const t0 = PAD_VIEW.toolAt(e.offsetX, e.offsetY);
       UJ.tracepad.startStroke(PAD, t0[0], t0[1]);
       padPaint();
@@ -4179,8 +4197,26 @@ function wirePad(){
       /* Within about a pixel of where it was drawn. A distance rather than a vertex count, because
          "within a pixel of the line I drew" is a promise about the picture the tracer is looking
          at -- see core/tracepad.js's simplify(). */
-      const what = UJ.tracepad.endStroke(PAD, padTol(1.2));
+      /* ALT: CARRY ON THE CONTOUR IT STARTED ON (2026-09-22). Snapping within 15 px of it. */
+      const extend = (PAD_EXTEND || e.altKey) && UJ.tracepad.extendStroke;
+      PAD_EXTEND = false;
+      const what = extend ? UJ.tracepad.extendStroke(PAD, padTol(1.2), padTol(15))
+                          : UJ.tracepad.endStroke(PAD, padTol(1.2));
       PAD_HOVER = null;
+      if (what === "extended" || what === "replaced"){
+        padPaint(); padRings();
+        padSay(what === "extended"
+          ? "Contour continued from where the pen left it, and closed again. Alt+draw again to go on; Undo takes this part back."
+          : "Contour mended — the stretch between where the stroke began and ended is replaced by it. Undo takes it back.");
+        return;
+      }
+      if (extend && what === "ring"){
+        const n0 = PAD.rings[PAD.rings.length - 1].points.length;
+        padPaint(); padRings();
+        padSay("A new contour, " + n0 + " points — alt+draw continues a contour only when it starts "
+          + "on one of this structure’s, on this section.");
+        return;
+      }
       if (what === "ring"){
         const n = PAD.rings[PAD.rings.length - 1].points.length;
         padPaint(); padRings();
@@ -4528,7 +4564,7 @@ function tracingCardHtml(){
     "<button class=\"idbtn\" id=\"tracePadNext\" style=\"flex:0 0 auto\" title=\"On one step (. key)\">&#9654;</button>",
     "<div class=\"coord\" style=\"flex:0 0 84px\" title=\"How many sections a step moves. Every fifth section is about half a percent off the real volume.\"><input type=\"text\" id=\"tracePadStep\" inputmode=\"numeric\" value=\"5\"></div>",
     "<button class=\"idbtn\" id=\"tracePadUndo\" style=\"flex:0 0 auto\" title=\"Takes back the last vertex, or the last closed contour if you have not started one\">Undo</button>",
-    "<label style=\"font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto\" title=\"Press and draw all the way round the structure, then lift — the way you would with a pen on paper. Made for a pen display or a tablet, and it works with a mouse held down. The stroke is thinned to a contour you can still edit point by point. With this on, a plain drag DRAWS, so shift+drag is how you pan.\"><input type=\"checkbox\" id=\"tracePadPen\"> draw freehand (pen)</label>",
+    "<label style=\"font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto\" title=\"Press and draw all the way round the structure, then lift — the way you would with a pen on paper. Made for a pen display or a tablet, and it works with a mouse held down. The stroke is thinned to a contour you can still edit point by point. With this on, a plain drag DRAWS, so shift+drag is how you pan. Lifted too early? Hold alt (option on a Mac) and draw on from where it stopped.\"><input type=\"checkbox\" id=\"tracePadPen\"> draw freehand (pen)</label>",
     "<!-- THE SEGMENTATION, UNDER THE CONTOURS.  2026-09-17. Søren: \"There should be an option to show",
     "     the segmentation of the root ID and the nucleus ID of the cell in the EM window.\" Off by",
     "     default: it is a second volume to fetch, and a cell the segmentation does not have -- which is",
@@ -4579,6 +4615,7 @@ function tracingCardHtml(){
     "<table style=\"width:100%;border-collapse:collapse;font-size:12px;margin-top:6px\">",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>click</b></td><td style=\"padding:3px 0\">Put a vertex down. The first one is drawn as an open ring.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>draw freehand</b> (the tick box)</td><td style=\"padding:3px 0\">Press, go all the way round the structure, lift &mdash; one stroke, the way a pen works. Made for a pen display (Kamvas, iPad) and fine with a mouse held down. The stroke is thinned to a handful of points you can still drag, delete and add to; a pen switches this on by itself the first time it touches the pad. While it is on, a plain drag DRAWS, so <b>shift+drag</b> is how you pan.</td></tr>",
+    "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>alt+draw</b> (option on a Mac)</td><td style=\"padding:3px 0\">Carries on a contour. Lifted the pen too early? Hold alt and draw on from where it stopped: the closing line across the gap goes and the new stroke goes in. End the stroke on the contour and it replaces the stretch between its two ends instead &mdash; redrawing a part that went wrong. Undo takes back just that part. A pen button set to alt in the tablet&rsquo;s driver does the same.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>click the first ring</b></td><td style=\"padding:3px 0\">Close the contour. Three vertices minimum &mdash; under that a &ldquo;close&rdquo; is a mis-click, and it is ignored.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>Enter</b></td><td style=\"padding:3px 0\">Closes it too, for anyone who expects that.</td></tr>",
     "<tr><td style=\"padding:3px 8px 3px 0;white-space:nowrap;vertical-align:top\"><b>Esc</b></td><td style=\"padding:3px 0\">Abandon the contour being drawn. Closed ones are untouched.</td></tr>",
@@ -4849,7 +4886,7 @@ async function padRelabelMips(){
       var widest = 0;
       for (var q = 0; q < sel.options.length; q++){
         var pq = String(sel.options[q].value).split(":"), sq = await UJ.emtiles.scaleAt(parseInt(pq[0], 10) || 0, tracingSlabOk());
-        if (sq && sq.scale) widest = Math.max(widest, 560 * sq.scale.resolution[0] / Math.max(1, parseInt(pq[1], 10) || 1) / 1000);
+        if (sq && sq.scale) widest = Math.max(widest, 560 * sq.scale.resolution[0] / (parseFloat(pq[1]) || 1) / 1000);
       }
       if (widest >= 15) break;
       var op = document.createElement("option");
@@ -4858,13 +4895,33 @@ async function padRelabelMips(){
       /* ", slower to load" was a claim about minnie65's widest level; it is not the widest now. */
       [].forEach.call(sel.options, function(o){ o.textContent = o.textContent.replace(/, slower to load$/, ""); });
     }
+    /* ── HALF SIZE ──────────────────────────────────────────────────────────  2026-09-22
+       Søren, from a phone: "This is still too small to segment the cell, we need a larger view
+       also". The widest level drawn at half size -- each 2x2 block of voxels one pixel, their
+       mean -- wherever the widest view at 560 px is under 30 µm, which is every volume here.
+       See src/the_pad_can_draw_half_size.py. */
+    var wMip = 0;
+    [].forEach.call(sel.options, function(o){
+      var pp = String(o.value).split(":");
+      if (parseFloat(pp[1] || 1) >= 1) wMip = Math.max(wMip, parseInt(pp[0], 10) || 0);
+    });
+    var hv = wMip + ":0.5";
+    if (![].some.call(sel.options, function(o){ return o.value === hv; })){
+      var sw = await UJ.emtiles.scaleAt(wMip, tracingSlabOk());
+      if (sw && sw.scale && 560 * sw.scale.resolution[0] / 1000 < 30){
+        var oh = document.createElement("option");
+        oh.value = hv; oh.textContent = "0 \u00b5m across \u2014 0 nm data, drawn half size";
+        oh.title = "Twice as much tissue: each pixel is the mean of 2\u00d72 voxels. Four times the chunks on the first draw.";
+        sel.insertBefore(oh, sel.options[0]);
+      }
+    }
   } catch (_e){}
   var cv = document.getElementById("tracePad");
   var w = (cv && cv.width) || 560;
-  var chunk0 = 0, chunk1 = 0;
+  var chunk0 = 0, chunk1 = 0, wide0 = -1;
   for (var i = 0; i < sel.options.length; i++){
     var o = sel.options[i], parts = String(o.value).split(":");
-    var mip = parseInt(parts[0], 10) || 0, zoom = Math.max(1, parseInt(parts[1], 10) || 1);
+    var mip = parseInt(parts[0], 10) || 0, zoom = parseFloat(parts[1]) > 0 ? parseFloat(parts[1]) : 1;
     var got;
     try { got = await UJ.emtiles.scaleAt(mip, tracingSlabOk()); } catch (_e){ return false; }
     if (!got || !got.scale) return false;
@@ -4881,17 +4938,21 @@ async function padRelabelMips(){
       /^[\d.]+ \u00b5m( across)? \u2014 [\d.]+ nm data( \(\d+-section slab\))?/, head);
     try {
       var cs = got.scale.chunk_sizes && got.scale.chunk_sizes[0];
-      if (i === 0) chunk0 = (cs && cs[0]) || 0;
-      if (i === 1) chunk1 = (cs && cs[0]) || 0;
+      /* The first two levels drawn 1:1 or closer -- not the half-size one on top, which is the
+         same mip as the next and would make every volume look evenly chunked. */
+      if (zoom >= 1){
+        if (wide0 < 0){ wide0 = i; chunk0 = (cs && cs[0]) || 0; }
+        else if (!chunk1) chunk1 = (cs && cs[0]) || 0;
+      }
     } catch (_e){}
   }
   /* ", slower to load" IS A minnie65 FACT, AND IT IS CHECKED.
      There it is true: at 32 nm the chunks are 64 px wide where at 16 nm they are 128, so the
      widest view costs about three times as many fetches. Lee16 chunks 512 px at every scale, so
      its widest view is no slower than the next one and the warning would be a lie. */
-  if (sel.options.length && chunk0 && chunk1 && chunk0 >= chunk1)
-    sel.options[0].textContent =
-      sel.options[0].textContent.replace(/, slower to load$/, "");
+  if (wide0 >= 0 && chunk0 && chunk1 && chunk0 >= chunk1)
+    sel.options[wide0].textContent =
+      sel.options[wide0].textContent.replace(/, slower to load$/, "");
   return true;
 }
 

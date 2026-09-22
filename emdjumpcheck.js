@@ -275,7 +275,9 @@ const CELL = [70556, 70763, 10196];
         catch (e){ return "threw: " + e; }
       })(),
       hook: !!(UJ.cfg.tracing && UJ.cfg.tracing.identityFor),
-      mips: [...document.querySelectorAll("#tracePadMip option")].map(o => o.textContent)
+      /* The 1:1-and-closer levels; the half-size one on top is asserted on its own (2026-09-22). */
+      mips: [...document.querySelectorAll("#tracePadMip option")].filter(o => !/:0\.5$/.test(o.value)).map(o => o.textContent),
+      half: (document.querySelector("#tracePadMip option") || {}).textContent || ""
     }));
     ok(got.wrapper && got.filled, "the module built the card into δJump's wrapper",
        got.wrapper + "/" + got.filled);
@@ -311,7 +313,9 @@ const CELL = [70556, 70763, 10196];
 
     /* 9.7 nm, not 8 — and 38.8 at the top, where µJump has 32. Every one of the six labels was
        minnie65's until padRelabelMips computed them from this volume's scale list. */
-    ok(/^22 µm across — 38.8 nm data/.test(got.mips[0] || ""),
+    ok(/^43 µm across — 38.8 nm data, drawn half size/.test(got.half),
+       "the widest view is V1DD's 38.8 nm drawn at half size", got.half);
+    ok(/^22 µm — 38.8 nm data/.test(got.mips[0] || ""),
        "the widest zoom level says what this volume actually is", got.mips[0]);
     ok(/^11 µm — 19.4 nm data/.test(got.mips[1] || "")
        && /^5\.4 µm — 9\.7 nm data/.test(got.mips[2] || ""),

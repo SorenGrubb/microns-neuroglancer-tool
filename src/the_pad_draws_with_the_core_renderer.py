@@ -26,7 +26,7 @@ s = io.open(P, encoding="utf-8").read(); b = s
 
 def edit(name, old, new, count=1):
     global s
-    if new in s and old not in s: print("  already there: " + name); return
+    if new in s: print("  already there: " + name); return
     assert s.count(old) == count, "%s: %d" % (name, s.count(old))
     s = s.replace(old, new); print("  ok: " + name)
 

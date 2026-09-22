@@ -42,8 +42,29 @@ const H01 = { type: "image", data_type: "uint8", num_channels: 1, scales: LV.map
   });
   console.log(PAGE + "\n");
   if (PAGE === "hjump.html"){
-    ok(got.vals[0] === "3:1", "the widest level is H01's 32 nm, the coarsest that keeps one section", got.vals.join(","));
-    ok(/^\d+ µm across — 32 nm data/.test(got.labels[0]), "...labelled with what it shows", got.labels[0]);
+    ok(got.vals[1] === "3:1", "the widest level drawn 1:1 is H01's 32 nm, the coarsest that keeps one section", got.vals.join(","));
+    ok(/^18 µm — 32 nm data/.test(got.labels[1]), "...labelled with what it shows", got.labels[1]);
+    /* 2026-09-22, from a phone: "This is still too small to segment the cell, we need a larger view also". */
+    ok(got.vals[0] === "3:0.5", "above it, the same level drawn at half size", got.vals[0]);
+    ok(/^36 µm across — 32 nm data, drawn half size/.test(got.labels[0]), "...36 µm across on a 560 px pad", got.labels[0]);
+    const phone = await p.evaluate(async () => {
+      document.getElementById("tracePad").width = 320;
+      await padRelabelMips();
+      const o = [].slice.call(document.getElementById("tracePadMip").options);
+      return { vals: o.map(x => x.value), labels: o.map(x => x.textContent) };
+    });
+    ok(/^20 µm across/.test(phone.labels[0]) && phone.vals.filter(v => v === "3:0.5").length === 1,
+       "...20 µm on a 320 px phone pad, and a relabel does not add it twice", phone.labels[0] + " / " + phone.vals.join(","));
+    const drawn = await p.evaluate(async () => {
+      document.getElementById("tracingPanel").open = true;
+      PAD = UJ.tracepad.create();
+      document.getElementById("tracePadWrap").style.display = "";
+      document.getElementById("tracePadMip").value = "3:0.5";
+      PAD_CENTRE = [100000, 80000, 2000];
+      try { await padDraw(); } catch (e){ return { err: String(e) }; }
+      return PAD_VIEW ? { zoom: PAD_VIEW.zoom, um: PAD_VIEW.umAcross, w: PAD_VIEW.w, vw: PAD_VIEW.vw } : { err: "no view" };
+    });
+    ok(drawn.zoom === 0.5 && drawn.vw === drawn.w * 2, "the pad draws at half size", JSON.stringify(drawn));
     ok(!got.vals.includes("4:1"), "...and not the 64 nm slab", got.vals.join(","));
   } else {
     /* Only H01's info is served here; on another page the volume is unread and the menu is the

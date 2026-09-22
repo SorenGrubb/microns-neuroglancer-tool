@@ -408,5 +408,85 @@ console.log("\nseveral structures on one pad");
      "...and the two that are left are two structures", JSON.stringify(rings.map(r => r.inst)));
 }
 
+/* ── PICKING UP WHERE THE PEN LEFT OFF ─────────────────────────────────────────  2026-09-22
+   Søren: "I have sometimes had the problem that I accidentally lifted the pen while drawing and
+   then I had to start over. I would like if there was a possibility to append to a traced polyline
+   by drawing with the pen again. Perhaps starting by holding alt while drawing."
+
+   Lifting closes the stroke with a chord across the gap. An alt-stroke that starts on a contour
+   continues it: the chord goes, the new stroke goes in, and the ring closes again. If it also ENDS
+   on the contour, it replaces the shorter stretch between its two ends -- redrawing a part. */
+console.log("\ncontinuing a contour after the pen was lifted");
+{
+  const C = [500, 500], R = 100;
+  const arc = (a0, a1, n, r) => Array.from({ length: n + 1 }, (_, i) => {
+    const a = (a0 + (a1 - a0) * i / n) * Math.PI / 180;
+    return [C[0] + (r || R) * Math.cos(a), C[1] + (r || R) * Math.sin(a)]; });
+  const draw = (p, pts) => { P.startStroke(p, pts[0][0], pts[0][1]); pts.slice(1).forEach(q => P.strokePoint(p, q[0], q[1], 0)); };
+  const area = pts => Math.abs(pts.reduce((s, a, i) => { const b = pts[(i + 1) % pts.length]; return s + a[0] * b[1] - b[0] * a[1]; }, 0) / 2);
+  /* How far inside the circle the contour ever goes, on its edges as well as its vertices: a chord
+     left across the gap is a line through the middle of the cell. */
+  const worstInside = pts => { let w = 0; pts.forEach((a, i) => { const b = pts[(i + 1) % pts.length];
+    for (let t = 0; t <= 1; t += 0.1){ const x = a[0] + (b[0] - a[0]) * t - C[0], y = a[1] + (b[1] - a[1]) * t - C[1];
+      w = Math.max(w, R - Math.sqrt(x * x + y * y)); } }); return w; };
+  const full = Math.PI * R * R;
+
+  const p = P.create(7);
+  draw(p, arc(0, 216, 240)); P.endStroke(p, 1);
+  const partial = p.rings[0].points.slice();
+  ok(worstInside(partial) > 50, "a lifted pen leaves a chord across the cell", worstInside(partial).toFixed(0) + " voxels inside");
+  draw(p, arc(216, 358, 160));
+  const what = P.extendStroke(p, 1, 15);
+  /* It ends on the contour's first end, so the stretch it replaced is the chord. */
+  ok(what === "replaced", "an alt-stroke from its end continues it, and closes on its first end", what);
+  ok(p.rings.length === 1, "...the same contour, not a second one", p.rings.length);
+  ok(Math.abs(area(p.rings[0].points) / full - 1) < 0.02, "...and it is the whole cell now",
+     (area(p.rings[0].points) / full).toFixed(3) + " of the circle");
+  ok(worstInside(p.rings[0].points) < 2, "...with no chord left through it", worstInside(p.rings[0].points).toFixed(2));
+  ok(p.stroke === null, "...and the stroke is spent");
+  ok(P.undo(p) === "extension" && p.rings.length === 1 && area(p.rings[0].points) === area(partial),
+     "Undo takes back the continuation, not the contour", p.rings.length + " contour(s)");
+
+  /* Two lifts, and the middle stroke ends in the air. */
+  const q = P.create(7);
+  draw(q, arc(0, 140, 150)); P.endStroke(q, 1);
+  draw(q, arc(140, 250, 120)); ok(P.extendStroke(q, 1, 15) === "extended", "a continuation that ends in the air is kept");
+  draw(q, arc(250, 358, 120)); P.extendStroke(q, 1, 15);
+  ok(Math.abs(area(q.rings[0].points) / full - 1) < 0.02 && worstInside(q.rings[0].points) < 2,
+     "...and a third stroke finishes the cell", (area(q.rings[0].points) / full).toFixed(3));
+
+  /* From the other end, going the other way. */
+  const r = P.create(7);
+  draw(r, arc(0, 216, 240)); P.endStroke(r, 1);
+  draw(r, arc(0, -142, 160)); P.extendStroke(r, 1, 15);
+  ok(Math.abs(area(r.rings[0].points) / full - 1) < 0.02 && worstInside(r.rings[0].points) < 2,
+     "starting from the contour's first end works as well", (area(r.rings[0].points) / full).toFixed(3));
+
+  /* Redrawing part of a finished contour: a bump out to 130 between 0° and 90°. */
+  const s = P.create(7);
+  draw(s, arc(0, 359, 400)); P.endStroke(s, 1);
+  const bump = [[C[0] + R, C[1]]].concat(arc(10, 80, 70, 130)).concat([[C[0], C[1] + R]]);
+  draw(s, bump);
+  ok(P.extendStroke(s, 1, 15) === "replaced", "a stroke from the contour back to the contour replaces the part between", "");
+  const at45 = s.rings[0].points.map(v => [Math.atan2(v[1] - C[1], v[0] - C[0]) * 180 / Math.PI, Math.hypot(v[0] - C[0], v[1] - C[1])])
+                 .filter(v => v[0] > 30 && v[0] < 60);
+  ok(at45.length && at45.every(v => v[1] > 125), "...the old stretch is gone and the new one is in", at45.map(v => v[1].toFixed(0)).join(","));
+  const far = s.rings[0].points.filter(v => v[0] < C[0] - 90);
+  ok(far.length > 0 && far.every(v => Math.abs(Math.hypot(v[0] - C[0], v[1] - C[1]) - R) < 2), "...and the far side is untouched", far.length + " points");
+
+  /* Nothing near where it started: a new contour, as an ordinary stroke would be. */
+  const t = P.create(7);
+  draw(t, arc(0, 359, 200)); P.endStroke(t, 1);
+  draw(t, arc(0, 359, 200, 20).map(v => [v[0] + 400, v[1]]));
+  ok(P.extendStroke(t, 1, 15) === "ring" && t.rings.length === 2, "an alt-stroke that starts nowhere near a contour is a new one", t.rings.length);
+
+  /* Only the structure being drawn. */
+  const u = P.create(7);
+  draw(u, arc(0, 216, 240)); P.endStroke(u, 1);
+  P.newInstance(u);
+  draw(u, arc(216, 358, 160));
+  ok(P.extendStroke(u, 1, 15) === "ring" && u.rings.length === 2, "...and another structure's contour is not continued", u.rings.length);
+}
+
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
 process.exit(fails ? 1 : 0);

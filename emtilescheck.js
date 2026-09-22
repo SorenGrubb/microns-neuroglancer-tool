@@ -293,6 +293,36 @@ console.log("\nmagnification, which is the only zoom here that is free");
      v4.pxPerToolVoxel);
 }
 
+console.log("\nhalf size: more tissue than the canvas has pixels");
+{
+  /* Søren, 2026-09-22, on a phone: "This is still too small to segment the cell, we need a larger
+     view also". The coarsest single-section level is the widest the DATA goes; zoom 0.5 draws each
+     2x2 block of it as one pixel -- the mean of the four, not one of them picked -- so a 320 px
+     phone pad shows what a 640 px one would. */
+  const cv = fakeCanvas();
+  fetched = [];
+  const centre = [240640, 207872, 21360];
+  const v = await E.drawSection(cv, { centre, mip: 2, zoom: 0.5, w: 64, h: 64, lo: 0, hi: 255 });
+  ok(v.zoom === 0.5 && v.nmPerPx === 32 && v.effNmPerPx === 64,
+     "32 nm data at 64 nm a pixel", v.zoom + "x, " + v.nmPerPx + " nm data, " + v.effNmPerPx + " nm/px");
+  ok(v.vw === 128 && v.vh === 128, "...a 128 voxel window into 64 pixels", v.vw + " into " + v.w);
+  ok(Math.abs(v.umAcross - 64 * 64 / 1000) < 1e-9, "...twice the tissue across", v.umAcross + " um");
+  ok(String(v.toolAt(32, 32)) === String(centre), "the middle pixel is still the coordinate it opened at",
+     String(v.toolAt(32, 32)));
+  ok(String(v.pxAt(centre)) === "32,32", "...and back", String(v.pxAt(centre)));
+  ok(Math.abs(v.pxPerToolVoxel - 4 / 32 * 0.5) < 1e-9, "...and a tool voxel is half as many pixels",
+     v.pxPerToolVoxel);
+  /* The pixel is the MEAN of its four voxels. */
+  const s = E._toScale(INFO.scales[2], centre);
+  const x0 = s[0] - 64, y0 = s[1] - 64;
+  const mean = (VAL(x0 + 64, y0 + 64, s[2]) + VAL(x0 + 65, y0 + 64, s[2])
+              + VAL(x0 + 64, y0 + 65, s[2]) + VAL(x0 + 65, y0 + 65, s[2])) / 4;
+  ok(Math.abs(cv.px(32, 32) - mean) <= 1, "each pixel is the mean of its 2x2 block", cv.px(32, 32) + " vs " + mean);
+  /* Asking for anything smaller than a quarter gets a quarter: 1/8 would be 64 chunks per chunk shown. */
+  const q = await E.drawSection(fakeCanvas(), { centre, mip: 2, zoom: 0.1, w: 16, h: 16, lo: 0, hi: 255 });
+  ok(q.zoom === 0.25, "no finer than a quarter", q.zoom);
+}
+
 console.log("\noutside the volume is grey, not black and not tissue");
 {
   const cv = fakeCanvas();
