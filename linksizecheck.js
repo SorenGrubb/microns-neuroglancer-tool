@@ -5,12 +5,21 @@
    and there are not that many annotation points. So, could we try to let it open it?"
 
    MEASURED IN HIS OWN BROWSER, on spelunker.cave-explorer.org, 2026-09-22:
-     - 40,000 line annotations, a 5.83 million character URL: the viewer loads all 40,000.
-     - the same state with the `id` left off each annotation: the layer loads with ZERO in it, in
-       silence. Neuroglancer drops an annotation that has no id, so the ids are not optional.
-   The refusal was at 1.5M characters, which is four times tighter than what Chrome and the viewer
-   actually take. It opens now, and above the new cap the state can be copied or downloaded to
-   paste into Neuroglancer's own JSON editor -- which is what he was doing by hand.
+     - a state with the `id` left off each annotation: the layer loads with ZERO in it, in silence.
+       Neuroglancer drops an annotation that has no id, so the ids are not optional.
+     - a CROSS-DOCUMENT navigation to a long fragment -- which is what opening a tab does:
+           2,097,152 characters   loads
+           2,097,153 characters   the tab becomes about:blank#blocked
+       Exactly url::kMaxURLChars.
+
+   THE FIRST VERSION OF THIS NOTE SAID 5.83M LOADS. It was measured by setting location.href on an
+   ALREADY-OPEN viewer, which is a same-document hash change: the renderer handles it and no URL is
+   ever built. So the cap was set to 8M, and a 2.3M link opened a blank tab saying nothing --
+   2026-09-22, Søren: "Now we are back to about:blank#blocked". The cap is the measured one now.
+
+   The refusal used to be at 1.5M, which was tighter than the truth; it is at the real limit, and
+   above it the state can be copied or downloaded to paste into Neuroglancer's own JSON editor --
+   which is what he was doing by hand.
 
    Run: node linksizecheck.js */
 const { chromium } = require("playwright");

@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-22 20:05</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-22 20:19</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -11236,10 +11236,86 @@ UJ.tracing = (function(){
     try { h = new URL(String(base || viewerBase()), location.href).host; } catch (_e){ return false; }
     return !!POLYLINE_VIEWERS[h];
   }
+  /* ── FEWER POINTS ──────────────────────────────────────────────────────────  2026-09-22
+     Søren: "Could we reduce the number of annotation points when they seem redundant?"
+
+     Douglas-Peucker. A closed ring is split at the point farthest from the first, so the answer
+     does not depend on where the pen happened to start, and each half is walked with an explicit
+     stack -- a freehand contour is thousands of points and recursion would be thousands deep.
+
+     `tol` is in VOXELS of the space the contour is stored in and no point of the drawn outline
+     moves further than that. Half a voxel by default: below what the screen shows at the level it
+     was traced at, and the area it encloses moves by well under a tenth of a percent.
+
+     THE RINGS HANDED IN ARE NOT MODIFIED. This is for the link; the tracing is the record.
+     See src/fewer_points_and_the_real_cap.py. */
+  var SIMPLIFY_TOL = 0.5;
+  function dpKeep(pts, first, last, tol, keep){
+    var stack = [[first, last]];
+    while (stack.length){
+      var seg = stack.pop(), i0 = seg[0], i1 = seg[1];
+      if (i1 <= i0 + 1) continue;
+      var ax = pts[i0][0], ay = pts[i0][1], bx = pts[i1][0], by = pts[i1][1];
+      var dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      var worst = -1, at = -1;
+      for (var i = i0 + 1; i < i1; i++){
+        var qx = pts[i][0] - ax, qy = pts[i][1] - ay, d;
+        if (L2 === 0){ d = qx * qx + qy * qy; }
+        else {
+          var t = (qx * dx + qy * dy) / L2;
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          var ex = qx - t * dx, ey = qy - t * dy;
+          d = ex * ex + ey * ey;
+        }
+        if (d > worst){ worst = d; at = i; }
+      }
+      if (worst > tol * tol){ keep[at] = 1; stack.push([i0, at]); stack.push([at, i1]); }
+    }
+  }
+  function simplifyRing(pts, tol){
+    var n = pts.length;
+    if (n < 6 || !(tol > 0)) return pts;
+    /* The far point, so the two halves are the two sides of the shape and not an arbitrary cut. */
+    var far = 0, best = -1, i;
+    for (i = 1; i < n; i++){
+      var dx = pts[i][0] - pts[0][0], dy = pts[i][1] - pts[0][1], d = dx * dx + dy * dy;
+      if (d > best){ best = d; far = i; }
+    }
+    var keep = {}; keep[0] = 1; keep[far] = 1;
+    dpKeep(pts, 0, far, tol, keep);
+    /* The second half runs far -> n -> 0, so index n stands for point 0. */
+    var wrap = pts.slice(far).concat([pts[0]]);
+    var keep2 = {}; keep2[0] = 1; keep2[wrap.length - 1] = 1;
+    dpKeep(wrap, 0, wrap.length - 1, tol, keep2);
+    for (var k in keep2){ var j = far + (+k); if (j < n) keep[j] = 1; }
+    var out = [];
+    for (i = 0; i < n; i++) if (keep[i]) out.push(pts[i]);
+    return out.length >= 3 ? out : pts;
+  }
+  /* rings -> { rings, before, after }, the counts so the card can say what it dropped. */
+  function simplifyRings(rings, tol){
+    var t = (typeof tol === "number") ? tol : SIMPLIFY_TOL;
+    try { if (typeof window.JUMP_SIMPLIFY_TOL === "number") t = window.JUMP_SIMPLIFY_TOL; }
+    catch (_e){}
+    var before = 0, after = 0;
+    var out = (rings || []).map(function(r){
+      var pts = r.points || [];
+      before += pts.length;
+      var s = simplifyRing(pts, t);
+      after += s.length;
+      return (s === pts) ? r : { z: r.z, points: s };
+    });
+    return { rings: out, before: before, after: after, tol: t };
+  }
+
   function ringAnnotations(rings, idPrefix, opts){
     var out = [];
     var asLines = (opts && typeof opts.lines === "boolean")
                 ? opts.lines : !viewerTakesPolylines(opts && opts.base);
+    /* Redundant points go before anything is written, on both shapes (2026-09-22). opts.tol = 0
+       keeps every point. The counts ride back on the array for a caller that wants to report. */
+    var simp = simplifyRings(rings, opts && opts.tol);
+    rings = simp.rings;
     (rings || []).forEach(function(r, ri){
       var pts = r.points || [];
       if (pts.length < 3) return;
@@ -11258,11 +11334,13 @@ UJ.tracing = (function(){
       P.push(P[0].slice());
       out.push({ type: "polyline", id: idPrefix + "_" + ri, points: P });
     });
+    out.simplified = { before: simp.before, after: simp.after, tol: simp.tol };
     return out;
   }
 
   return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
-           ringAnnotations: ringAnnotations, viewerTakesPolylines: viewerTakesPolylines,
+           ringAnnotations: ringAnnotations, simplifyRings: simplifyRings,
+           viewerTakesPolylines: viewerTakesPolylines,
            viewerBase: viewerBase,
            ringsToRows: ringsToRows, toSubmission: toSubmission,
            INSTANCE_COLOURS: INSTANCE_COLOURS, instanceColour: instanceColour,
@@ -12829,7 +12907,12 @@ function tracingSayBlocked(st){
    and loads in full. Below LONG nothing is said; between LONG and MAX it opens and says the link
    is a long one; above MAX no tab is opened, because a truncated URL opens a viewer missing half
    the cell without saying so. */
-var TRACING_LINK_LONG = 1500000, TRACING_LINK_MAX = 8000000;
+/* MEASURED 2026-09-22 by navigating CROSS-DOCUMENT to a long fragment -- which is what opening
+   a tab does, and what the earlier 5.83M measurement did NOT do (it set location.href on an
+   already-open viewer, a same-document hash change the renderer handles without ever building a
+   URL). 2,097,152 characters loads; 2,097,153 becomes about:blank#blocked. Exactly
+   url::kMaxURLChars. See src/fewer_points_and_the_real_cap.py. */
+var TRACING_LINK_LONG = 1200000, TRACING_LINK_MAX = 2097152;
 function tracingViewerOpen(structs, say, ids){
   structs = (structs || []).filter(function(t){ return t && (t.rings || []).length; });
   if (!structs.length){ tracingSay("Nothing to look at yet — no contours.", true); return; }
@@ -12853,15 +12936,20 @@ function tracingViewerOpen(structs, say, ids){
             || (window.UJ && UJ.cfg && UJ.cfg.viewer && UJ.cfg.viewer.base)
             || "https://spelunker.cave-explorer.org/";
   const used = {}; let firstName = "";
+  let cut = { before: 0, after: 0, tol: 0 };
   structs.forEach(function(t, i){
     /* Neuroglancer keys layers by NAME, so two structures called the same thing would be one layer
        with one of them in it. The number is already how they are told apart everywhere else. */
     let nm = String(t.name || "").replace(/[^\w .µ-]+/g, "").trim() || ("structure " + (i + 1));
     if (used[nm]) nm = nm + " (" + (i + 1) + ")";
     used[nm] = 1; if (!firstName) firstName = nm;
+    const anns = tracingRingAnns(t.rings, "t" + i, base);
+    if (anns.simplified){
+      cut.before += anns.simplified.before; cut.after += anns.simplified.after;
+      cut.tol = anns.simplified.tol;
+    }
     st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
-                     name: nm, annotationColor: t.color || "#40e28c",
-                     annotations: tracingRingAnns(t.rings, "t" + i, base) });
+                     name: nm, annotationColor: t.color || "#40e28c", annotations: anns });
   });
   st.selectedLayer = { layer: firstName, visible: true };
   const shown = tracingShowCellIn(st, (ids && ids.root) || "", (ids && ids.nuc) || "");
@@ -12875,29 +12963,38 @@ function tracingViewerOpen(structs, say, ids){
      is not, and a URL the browser silently truncates would open a viewer missing half the cell
      without saying so. Better to say so here. */
   const kc = Math.round(url.length / 1000) + "k characters";
-  if (url.length > TRACING_LINK_MAX){
-    tracingStateOffer(JSON.stringify(st),
-      "That is more than a viewer link can carry (" + kc + "). Paste the state into Neuroglancer "
-      + "instead \u2014 its {} button takes it \u2014 or open one structure at a time.", true);
-    return;
-  }
-  /* 2026-09-22: on a viewer with no polyline type a contour costs one annotation per edge, so
-     the same cell is about four times the link. Better to name the reason than to let him wonder. */
+  /* What was dropped, in his own numbers, so a silent change to his outlines is not something he
+     has to take on trust. Only when it is a tenth or more -- below that it is noise. */
+  const cutSay = (cut.before && cut.before - cut.after > cut.before / 10)
+    ? " Redundant points dropped: " + cut.before.toLocaleString() + " \u2192 "
+      + cut.after.toLocaleString() + " (no point of the outline moved more than " + cut.tol
+      + " voxel" + (cut.tol === 1 ? "" : "s") + "; your saved tracing is unchanged)."
+    : "";
+  /* 2026-09-22: on a viewer with no polyline type a contour costs one annotation per edge, so the
+     same cell is about four times the link. Better to name the reason than to let him wonder. */
   let shapeSay = "";
   try {
-    if (url.length > TRACING_LINK_LONG && UJ.tracing.viewerTakesPolylines
-        && !UJ.tracing.viewerTakesPolylines(base))
+    if (UJ.tracing.viewerTakesPolylines && !UJ.tracing.viewerTakesPolylines(base))
       shapeSay = " This viewer cannot read polyline annotations, so every edge is its own line and "
                + "the link is about four times longer than it needs to be \u2014 Spelunker and "
                + "neuroglancer-demo read polylines.";
   } catch (_e){}
+  if (url.length > TRACING_LINK_MAX){
+    tracingStateOffer(JSON.stringify(st),
+      "That is more than a tab can be opened with (" + kc + "; the browser refuses past 2,097,152 "
+      + "and shows about:blank#blocked). Paste the state into Neuroglancer instead \u2014 its {} "
+      + "button takes it \u2014 or open one structure at a time." + shapeSay, true);
+    return;
+  }
+  /* shapeSay is computed above, for both branches. */
   if (url.length > TRACING_LINK_LONG){
-    /* It opens: 40,000 annotations in a 5.83M character link were measured loading in Chrome. The
-       sentence is for the browsers that are tighter, and it is not an error. */
+    /* It opens -- up to 2,097,152 characters, which is where the browser stops (measured
+       2026-09-22; the 5.83M figure this note used to carry was a same-document hash change on an
+       already-open viewer, which never builds a URL at all). Not an error, just a warning. */
     tracingStateOffer(JSON.stringify(st),
       "Opening a long link (" + kc + "). If the viewer comes up empty, your browser cut it short: "
       + "copy or download the state below and paste it into Neuroglancer\u2019s {} button."
-      + shapeSay, false);
+      + shapeSay + cutSay, false);
   }
   /* THE WHOLE CELL, 2026-09-21: the tab first, synchronously, then the community's root IDs for
      the nucleus onto the cell layer, then the tab is sent there. Where there are none to read the
@@ -12934,7 +13031,7 @@ function tracingViewerOpen(structs, say, ids){
   if (wasLong) return;          // the long-link offer, with its two buttons, stays put
   tracingSay((say || ("Opened in the viewer at " + pos.join(", ") + " — " + nStr
     + ", one annotation layer each, in the colours they were drawn in. Edit them there and paste "
-    + "the address bar back into the box above to read them in again.")) + cellStr);
+    + "the address bar back into the box above to read them in again.")) + cellStr + cutSay);
 }
 
 /* ── SEGMENT THIS ONE ───────────────────────────────────────────────────────────  2026-09-18

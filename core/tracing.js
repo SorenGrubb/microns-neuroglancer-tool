@@ -704,10 +704,86 @@ UJ.tracing = (function(){
     try { h = new URL(String(base || viewerBase()), location.href).host; } catch (_e){ return false; }
     return !!POLYLINE_VIEWERS[h];
   }
+  /* ── FEWER POINTS ──────────────────────────────────────────────────────────  2026-09-22
+     Søren: "Could we reduce the number of annotation points when they seem redundant?"
+
+     Douglas-Peucker. A closed ring is split at the point farthest from the first, so the answer
+     does not depend on where the pen happened to start, and each half is walked with an explicit
+     stack -- a freehand contour is thousands of points and recursion would be thousands deep.
+
+     `tol` is in VOXELS of the space the contour is stored in and no point of the drawn outline
+     moves further than that. Half a voxel by default: below what the screen shows at the level it
+     was traced at, and the area it encloses moves by well under a tenth of a percent.
+
+     THE RINGS HANDED IN ARE NOT MODIFIED. This is for the link; the tracing is the record.
+     See src/fewer_points_and_the_real_cap.py. */
+  var SIMPLIFY_TOL = 0.5;
+  function dpKeep(pts, first, last, tol, keep){
+    var stack = [[first, last]];
+    while (stack.length){
+      var seg = stack.pop(), i0 = seg[0], i1 = seg[1];
+      if (i1 <= i0 + 1) continue;
+      var ax = pts[i0][0], ay = pts[i0][1], bx = pts[i1][0], by = pts[i1][1];
+      var dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      var worst = -1, at = -1;
+      for (var i = i0 + 1; i < i1; i++){
+        var qx = pts[i][0] - ax, qy = pts[i][1] - ay, d;
+        if (L2 === 0){ d = qx * qx + qy * qy; }
+        else {
+          var t = (qx * dx + qy * dy) / L2;
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          var ex = qx - t * dx, ey = qy - t * dy;
+          d = ex * ex + ey * ey;
+        }
+        if (d > worst){ worst = d; at = i; }
+      }
+      if (worst > tol * tol){ keep[at] = 1; stack.push([i0, at]); stack.push([at, i1]); }
+    }
+  }
+  function simplifyRing(pts, tol){
+    var n = pts.length;
+    if (n < 6 || !(tol > 0)) return pts;
+    /* The far point, so the two halves are the two sides of the shape and not an arbitrary cut. */
+    var far = 0, best = -1, i;
+    for (i = 1; i < n; i++){
+      var dx = pts[i][0] - pts[0][0], dy = pts[i][1] - pts[0][1], d = dx * dx + dy * dy;
+      if (d > best){ best = d; far = i; }
+    }
+    var keep = {}; keep[0] = 1; keep[far] = 1;
+    dpKeep(pts, 0, far, tol, keep);
+    /* The second half runs far -> n -> 0, so index n stands for point 0. */
+    var wrap = pts.slice(far).concat([pts[0]]);
+    var keep2 = {}; keep2[0] = 1; keep2[wrap.length - 1] = 1;
+    dpKeep(wrap, 0, wrap.length - 1, tol, keep2);
+    for (var k in keep2){ var j = far + (+k); if (j < n) keep[j] = 1; }
+    var out = [];
+    for (i = 0; i < n; i++) if (keep[i]) out.push(pts[i]);
+    return out.length >= 3 ? out : pts;
+  }
+  /* rings -> { rings, before, after }, the counts so the card can say what it dropped. */
+  function simplifyRings(rings, tol){
+    var t = (typeof tol === "number") ? tol : SIMPLIFY_TOL;
+    try { if (typeof window.JUMP_SIMPLIFY_TOL === "number") t = window.JUMP_SIMPLIFY_TOL; }
+    catch (_e){}
+    var before = 0, after = 0;
+    var out = (rings || []).map(function(r){
+      var pts = r.points || [];
+      before += pts.length;
+      var s = simplifyRing(pts, t);
+      after += s.length;
+      return (s === pts) ? r : { z: r.z, points: s };
+    });
+    return { rings: out, before: before, after: after, tol: t };
+  }
+
   function ringAnnotations(rings, idPrefix, opts){
     var out = [];
     var asLines = (opts && typeof opts.lines === "boolean")
                 ? opts.lines : !viewerTakesPolylines(opts && opts.base);
+    /* Redundant points go before anything is written, on both shapes (2026-09-22). opts.tol = 0
+       keeps every point. The counts ride back on the array for a caller that wants to report. */
+    var simp = simplifyRings(rings, opts && opts.tol);
+    rings = simp.rings;
     (rings || []).forEach(function(r, ri){
       var pts = r.points || [];
       if (pts.length < 3) return;
@@ -726,11 +802,13 @@ UJ.tracing = (function(){
       P.push(P[0].slice());
       out.push({ type: "polyline", id: idPrefix + "_" + ri, points: P });
     });
+    out.simplified = { before: simp.before, after: simp.after, tol: simp.tol };
     return out;
   }
 
   return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
-           ringAnnotations: ringAnnotations, viewerTakesPolylines: viewerTakesPolylines,
+           ringAnnotations: ringAnnotations, simplifyRings: simplifyRings,
+           viewerTakesPolylines: viewerTakesPolylines,
            viewerBase: viewerBase,
            ringsToRows: ringsToRows, toSubmission: toSubmission,
            INSTANCE_COLOURS: INSTANCE_COLOURS, instanceColour: instanceColour,

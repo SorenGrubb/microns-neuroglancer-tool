@@ -1300,7 +1300,12 @@ function tracingSayBlocked(st){
    and loads in full. Below LONG nothing is said; between LONG and MAX it opens and says the link
    is a long one; above MAX no tab is opened, because a truncated URL opens a viewer missing half
    the cell without saying so. */
-var TRACING_LINK_LONG = 1500000, TRACING_LINK_MAX = 8000000;
+/* MEASURED 2026-09-22 by navigating CROSS-DOCUMENT to a long fragment -- which is what opening
+   a tab does, and what the earlier 5.83M measurement did NOT do (it set location.href on an
+   already-open viewer, a same-document hash change the renderer handles without ever building a
+   URL). 2,097,152 characters loads; 2,097,153 becomes about:blank#blocked. Exactly
+   url::kMaxURLChars. See src/fewer_points_and_the_real_cap.py. */
+var TRACING_LINK_LONG = 1200000, TRACING_LINK_MAX = 2097152;
 function tracingViewerOpen(structs, say, ids){
   structs = (structs || []).filter(function(t){ return t && (t.rings || []).length; });
   if (!structs.length){ tracingSay("Nothing to look at yet — no contours.", true); return; }
@@ -1324,15 +1329,20 @@ function tracingViewerOpen(structs, say, ids){
             || (window.UJ && UJ.cfg && UJ.cfg.viewer && UJ.cfg.viewer.base)
             || "https://spelunker.cave-explorer.org/";
   const used = {}; let firstName = "";
+  let cut = { before: 0, after: 0, tol: 0 };
   structs.forEach(function(t, i){
     /* Neuroglancer keys layers by NAME, so two structures called the same thing would be one layer
        with one of them in it. The number is already how they are told apart everywhere else. */
     let nm = String(t.name || "").replace(/[^\w .µ-]+/g, "").trim() || ("structure " + (i + 1));
     if (used[nm]) nm = nm + " (" + (i + 1) + ")";
     used[nm] = 1; if (!firstName) firstName = nm;
+    const anns = tracingRingAnns(t.rings, "t" + i, base);
+    if (anns.simplified){
+      cut.before += anns.simplified.before; cut.after += anns.simplified.after;
+      cut.tol = anns.simplified.tol;
+    }
     st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
-                     name: nm, annotationColor: t.color || "#40e28c",
-                     annotations: tracingRingAnns(t.rings, "t" + i, base) });
+                     name: nm, annotationColor: t.color || "#40e28c", annotations: anns });
   });
   st.selectedLayer = { layer: firstName, visible: true };
   const shown = tracingShowCellIn(st, (ids && ids.root) || "", (ids && ids.nuc) || "");
@@ -1346,29 +1356,38 @@ function tracingViewerOpen(structs, say, ids){
      is not, and a URL the browser silently truncates would open a viewer missing half the cell
      without saying so. Better to say so here. */
   const kc = Math.round(url.length / 1000) + "k characters";
-  if (url.length > TRACING_LINK_MAX){
-    tracingStateOffer(JSON.stringify(st),
-      "That is more than a viewer link can carry (" + kc + "). Paste the state into Neuroglancer "
-      + "instead \u2014 its {} button takes it \u2014 or open one structure at a time.", true);
-    return;
-  }
-  /* 2026-09-22: on a viewer with no polyline type a contour costs one annotation per edge, so
-     the same cell is about four times the link. Better to name the reason than to let him wonder. */
+  /* What was dropped, in his own numbers, so a silent change to his outlines is not something he
+     has to take on trust. Only when it is a tenth or more -- below that it is noise. */
+  const cutSay = (cut.before && cut.before - cut.after > cut.before / 10)
+    ? " Redundant points dropped: " + cut.before.toLocaleString() + " \u2192 "
+      + cut.after.toLocaleString() + " (no point of the outline moved more than " + cut.tol
+      + " voxel" + (cut.tol === 1 ? "" : "s") + "; your saved tracing is unchanged)."
+    : "";
+  /* 2026-09-22: on a viewer with no polyline type a contour costs one annotation per edge, so the
+     same cell is about four times the link. Better to name the reason than to let him wonder. */
   let shapeSay = "";
   try {
-    if (url.length > TRACING_LINK_LONG && UJ.tracing.viewerTakesPolylines
-        && !UJ.tracing.viewerTakesPolylines(base))
+    if (UJ.tracing.viewerTakesPolylines && !UJ.tracing.viewerTakesPolylines(base))
       shapeSay = " This viewer cannot read polyline annotations, so every edge is its own line and "
                + "the link is about four times longer than it needs to be \u2014 Spelunker and "
                + "neuroglancer-demo read polylines.";
   } catch (_e){}
+  if (url.length > TRACING_LINK_MAX){
+    tracingStateOffer(JSON.stringify(st),
+      "That is more than a tab can be opened with (" + kc + "; the browser refuses past 2,097,152 "
+      + "and shows about:blank#blocked). Paste the state into Neuroglancer instead \u2014 its {} "
+      + "button takes it \u2014 or open one structure at a time." + shapeSay, true);
+    return;
+  }
+  /* shapeSay is computed above, for both branches. */
   if (url.length > TRACING_LINK_LONG){
-    /* It opens: 40,000 annotations in a 5.83M character link were measured loading in Chrome. The
-       sentence is for the browsers that are tighter, and it is not an error. */
+    /* It opens -- up to 2,097,152 characters, which is where the browser stops (measured
+       2026-09-22; the 5.83M figure this note used to carry was a same-document hash change on an
+       already-open viewer, which never builds a URL at all). Not an error, just a warning. */
     tracingStateOffer(JSON.stringify(st),
       "Opening a long link (" + kc + "). If the viewer comes up empty, your browser cut it short: "
       + "copy or download the state below and paste it into Neuroglancer\u2019s {} button."
-      + shapeSay, false);
+      + shapeSay + cutSay, false);
   }
   /* THE WHOLE CELL, 2026-09-21: the tab first, synchronously, then the community's root IDs for
      the nucleus onto the cell layer, then the tab is sent there. Where there are none to read the
@@ -1405,7 +1424,7 @@ function tracingViewerOpen(structs, say, ids){
   if (wasLong) return;          // the long-link offer, with its two buttons, stays put
   tracingSay((say || ("Opened in the viewer at " + pos.join(", ") + " — " + nStr
     + ", one annotation layer each, in the colours they were drawn in. Edit them there and paste "
-    + "the address bar back into the box above to read them in again.")) + cellStr);
+    + "the address bar back into the box above to read them in again.")) + cellStr + cutSay);
 }
 
 /* ── SEGMENT THIS ONE ───────────────────────────────────────────────────────────  2026-09-18
