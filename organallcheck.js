@@ -119,8 +119,10 @@ const press = `(async function(){
     const named = anns.map(l => l.name).sort();
     ok(named.join("|") === "Lysosome 1|Lysosome 2|Lysosome 3",
        "one annotation layer per organelle, named as the rows name them", named.join(", "));
-    ok(anns.every(l => l.n === 8),
-       "...each carrying its own contours, four lines a section",
+    /* One closed polyline per contour since 2026-09-22 (src/the_viewer_link_is_polylines.py);
+       this read 8 when a four-vertex contour was four line annotations. */
+    ok(anns.every(l => l.n === 2),
+       "...each carrying its own contours, one polyline a section",
        anns.map(l => l.n).join("/"));
     const cols = anns.map(l => l.colour).sort();
     ok(cols.join("|") === "#3264c8|#32c8a0|#c83232",

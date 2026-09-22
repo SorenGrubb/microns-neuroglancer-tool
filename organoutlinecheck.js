@@ -188,10 +188,12 @@ const XJ = /xjump/.test(PAGE);
   if (!all.none){
     const lys = all.layers.find(l => /^traced lysosome/i.test(l.name));
     const mit = all.layers.find(l => /^traced mitochondri/i.test(l.name));
-    ok(!!lys && lys.n === 4 && lys.types === "line" && lys.color === "#ff0000",
-       "the lysosome filed by NUCLEUS id is drawn: one ring, four lines, in its colour",
+    /* One closed polyline per contour since 2026-09-22 (src/the_viewer_link_is_polylines.py);
+       these read 4 and 8 when every edge was its own line annotation. */
+    ok(!!lys && lys.n === 1 && lys.types === "polyline" && lys.color === "#ff0000",
+       "the lysosome filed by NUCLEUS id is drawn: one ring, one polyline, in its colour",
        JSON.stringify(lys || null));
-    ok(!!mit && mit.n === 8, "the mitochondrion filed by " + B_BY + " is drawn: two rings, eight lines",
+    ok(!!mit && mit.n === 2, "the mitochondrion filed by " + B_BY + " is drawn: two rings, two polylines",
        JSON.stringify(mit || null));
     ok(all.layers.length === 2, "...one layer per kind, and nothing else", all.layers.map(l => l.name).join(" | "));
     if (TABLE){

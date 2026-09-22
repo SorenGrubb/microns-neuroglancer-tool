@@ -136,9 +136,10 @@ const SETUP = `(function(){
                elsewhereHasIt: !!c,
                stillArmed: !!ORGAN_SHOW_NEXT };
     });
-    /* Four vertices closed is four lines, three sections of it is twelve — and the centre. */
-    ok(got.n === 13, "twelve closed-loop lines, three contours' worth, and the centre", got.n);
-    ok(got.kinds.length === 2 && got.kinds.indexOf("line") >= 0 && got.kinds.indexOf("point") >= 0,
+    /* One closed polyline per contour since 2026-09-22 (src/the_viewer_link_is_polylines.py); it
+       was one line per EDGE, so this read 13. */
+    ok(got.n === 4, "three closed polylines, one per contour, and the centre", got.n);
+    ok(got.kinds.length === 2 && got.kinds.indexOf("polyline") >= 0 && got.kinds.indexOf("point") >= 0,
        "...the shape and the point, in one layer because it is one organelle",
        got.kinds.join("/"));
     ok(got.centre.length === 1 && got.centre[0] === "1050,2050,101",

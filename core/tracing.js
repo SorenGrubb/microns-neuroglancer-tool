@@ -670,7 +670,46 @@ UJ.tracing = (function(){
     return out;
   }
 
+  /* ── THE WAY OUT ───────────────────────────────────────────────────────────  2026-09-22
+     One POLYLINE per contour -- the inverse of polylineRing above, and the shape Spelunker itself
+     writes. A ring is stored open here and goes out closed: the first vertex repeated as the last,
+     because a polyline draws the segments between consecutive points and nothing more. ringFrom
+     drops that repeat again on the way back in, so a link read by this file returns what it held.
+
+     Every annotation carries an id. Measured in Søren's browser on 2026-09-22: a state whose
+     annotations have none loads a layer with ZERO in it, in silence.
+
+     opts.lines (or window.JUMP_VIEWER_LINES in the console) writes the old edge-per-line shape instead,
+     for a viewer too old to know polylines. See src/the_viewer_link_is_polylines.py. */
+  function viewerWantsLines(){
+    try { return window.JUMP_VIEWER_LINES === true; } catch (_e){ return false; }
+  }
+  function ringAnnotations(rings, idPrefix, opts){
+    var out = [];
+    var asLines = (opts && typeof opts.lines === "boolean") ? opts.lines : viewerWantsLines();
+    (rings || []).forEach(function(r, ri){
+      var pts = r.points || [];
+      if (pts.length < 3) return;
+      var z = Math.round(r.z), i;
+      if (asLines){
+        for (i = 0; i < pts.length; i++){
+          var a = pts[i], b = pts[(i + 1) % pts.length];
+          out.push({ type: "line", id: idPrefix + "_" + ri + "_" + i,
+                     pointA: [Math.round(a[0]), Math.round(a[1]), z],
+                     pointB: [Math.round(b[0]), Math.round(b[1]), z] });
+        }
+        return;
+      }
+      var P = [];
+      for (i = 0; i < pts.length; i++) P.push([Math.round(pts[i][0]), Math.round(pts[i][1]), z]);
+      P.push(P[0].slice());
+      out.push({ type: "polyline", id: idPrefix + "_" + ri, points: P });
+    });
+    return out;
+  }
+
   return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
+           ringAnnotations: ringAnnotations,
            ringsToRows: ringsToRows, toSubmission: toSubmission,
            INSTANCE_COLOURS: INSTANCE_COLOURS, instanceColour: instanceColour,
            instanceName: instanceName,

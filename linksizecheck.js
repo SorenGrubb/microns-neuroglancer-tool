@@ -28,10 +28,13 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
 
   const got = await p.evaluate(async () => {
     document.getElementById("tracingPanel").open = true;
-    /* A whole cell: 151 sections, ~8,000 contours, the size that was refused. */
+    /* 151 sections x 12 contours: the size that is long NOW. Since 2026-09-22 a contour is one
+       polyline and not one line per edge (src/the_viewer_link_is_polylines.py), so the cell that
+       used to make this link takes a quarter of the characters and no longer reaches the
+       threshold -- the threshold is what is under test, so the fixture grew to meet it. */
     const rings = [];
     for (let s = 0; s < 151; s++){
-      for (let c = 0; c < 4; c++){
+      for (let c = 0; c < 12; c++){
         const pts = [];
         for (let i = 0; i < 26; i++){
           const a = 2 * Math.PI * i / 26;
@@ -63,7 +66,8 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   console.log("a whole cell, traced over 151 sections");
   ok(got.n >= 1, "it opens the viewer rather than refusing", got.n + " tab(s): " + got.say.slice(0, 90));
   ok(got.len > 1500000, "...with the long link it used to refuse", Math.round(got.len / 1000) + "k characters");
-  ok(got.anns > 10000, "...carrying every contour", got.anns + " annotations");
+  ok(got.anns === 151 * 12, "...carrying every contour, one polyline each",
+     got.anns + " annotations");
   ok(got.allIds, "...each with an id, which Neuroglancer drops an annotation for not having",
      JSON.stringify(got.first));
   ok(/long/i.test(got.say) && /paste|copy/i.test(got.say),
@@ -74,7 +78,7 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   const huge = await p.evaluate(async () => {
     const rings = [];
     for (let s = 0; s < 400; s++)
-      for (let c = 0; c < 12; c++){
+      for (let c = 0; c < 16; c++){
         const pts = [];
         for (let i = 0; i < 40; i++) pts.push([295000 + c * 300 + i, 151000 + i]);
         rings.push({ z: 17800 + s, points: pts });

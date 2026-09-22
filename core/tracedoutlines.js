@@ -138,19 +138,9 @@ async function buildTracedOrganelleLayers(ids,want,say){
   Object.keys(byKind).sort().forEach(function(k){
     const anns=[];
     byKind[k].forEach(function(g,gi){
-      /* The same closed loops of lines tracingViewerOpen writes for one cell -- see its header
-         for why lines and not polygons. */
-      (g.rings||[]).forEach(function(r,ri){
-        const pts=r.points||[];
-        if(pts.length<3)return;
-        const z=Math.round(r.z);
-        for(let i=0;i<pts.length;i++){
-          const a=pts[i],b=pts[(i+1)%pts.length];
-          anns.push({type:"line",id:"to"+gi+"_"+ri+"_"+i,
-                     pointA:[Math.round(a[0]),Math.round(a[1]),z],
-                     pointB:[Math.round(b[0]),Math.round(b[1]),z]});
-        }
-      });
+      /* The same annotations tracingViewerOpen writes for one cell: one closed POLYLINE per
+         contour (2026-09-22, src/the_viewer_link_is_polylines.py). */
+      [].push.apply(anns,UJ.tracing.ringAnnotations(g.rings||[],"to"+gi));
     });
     if(!anns.length)return;
     const label=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined"&&ORGANELLE_KIND_BY_VALUE[k])

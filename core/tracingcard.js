@@ -1055,7 +1055,7 @@ function organOverlayInto(st, pos){
      -- and the reason to have both is to see them against each other. One layer, because it is one
      organelle. */
   let anns = [];
-  if (want.rings && want.rings.length) anns = tracingRingLines(want.rings, "org");
+  if (want.rings && want.rings.length) anns = tracingRingAnns(want.rings, "org");
   if (want.point && want.point.length === 3)
     anns = anns.concat([{ type: "point", id: "orgcentre",
                           point: want.point.map(Math.round) }]);
@@ -1067,6 +1067,16 @@ function organOverlayInto(st, pos){
                    name: nm, annotationColor: want.color || "#40e28c", annotations: anns });
   st.selectedLayer = { layer: nm, visible: true };
   return true;
+}
+/* POLYLINES, 2026-09-22: one annotation per contour instead of one per edge. The writer sits in
+   core/tracing.js beside the reader it is the inverse of; tracingRingLines below is what it falls
+   back to. See src/the_viewer_link_is_polylines.py. */
+function tracingRingAnns(rings, idPrefix){
+  try {
+    if (window.UJ && UJ.tracing && UJ.tracing.ringAnnotations)
+      return UJ.tracing.ringAnnotations(rings, idPrefix);
+  } catch (_e){}
+  return tracingRingLines(rings, idPrefix);
 }
 function tracingRingLines(rings, idPrefix){
   const out = [];
@@ -1316,7 +1326,7 @@ function tracingViewerOpen(structs, say, ids){
     used[nm] = 1; if (!firstName) firstName = nm;
     st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
                      name: nm, annotationColor: t.color || "#40e28c",
-                     annotations: tracingRingLines(t.rings, "t" + i) });
+                     annotations: tracingRingAnns(t.rings, "t" + i) });
   });
   st.selectedLayer = { layer: firstName, visible: true };
   const shown = tracingShowCellIn(st, (ids && ids.root) || "", (ids && ids.nuc) || "");

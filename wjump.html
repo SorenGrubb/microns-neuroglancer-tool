@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-22 19:06</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-22 19:32</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -11202,7 +11202,46 @@ UJ.tracing = (function(){
     return out;
   }
 
+  /* ── THE WAY OUT ───────────────────────────────────────────────────────────  2026-09-22
+     One POLYLINE per contour -- the inverse of polylineRing above, and the shape Spelunker itself
+     writes. A ring is stored open here and goes out closed: the first vertex repeated as the last,
+     because a polyline draws the segments between consecutive points and nothing more. ringFrom
+     drops that repeat again on the way back in, so a link read by this file returns what it held.
+
+     Every annotation carries an id. Measured in Søren's browser on 2026-09-22: a state whose
+     annotations have none loads a layer with ZERO in it, in silence.
+
+     opts.lines (or window.JUMP_VIEWER_LINES in the console) writes the old edge-per-line shape instead,
+     for a viewer too old to know polylines. See src/the_viewer_link_is_polylines.py. */
+  function viewerWantsLines(){
+    try { return window.JUMP_VIEWER_LINES === true; } catch (_e){ return false; }
+  }
+  function ringAnnotations(rings, idPrefix, opts){
+    var out = [];
+    var asLines = (opts && typeof opts.lines === "boolean") ? opts.lines : viewerWantsLines();
+    (rings || []).forEach(function(r, ri){
+      var pts = r.points || [];
+      if (pts.length < 3) return;
+      var z = Math.round(r.z), i;
+      if (asLines){
+        for (i = 0; i < pts.length; i++){
+          var a = pts[i], b = pts[(i + 1) % pts.length];
+          out.push({ type: "line", id: idPrefix + "_" + ri + "_" + i,
+                     pointA: [Math.round(a[0]), Math.round(a[1]), z],
+                     pointB: [Math.round(b[0]), Math.round(b[1]), z] });
+        }
+        return;
+      }
+      var P = [];
+      for (i = 0; i < pts.length; i++) P.push([Math.round(pts[i][0]), Math.round(pts[i][1]), z]);
+      P.push(P[0].slice());
+      out.push({ type: "polyline", id: idPrefix + "_" + ri, points: P });
+    });
+    return out;
+  }
+
   return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
+           ringAnnotations: ringAnnotations,
            ringsToRows: ringsToRows, toSubmission: toSubmission,
            INSTANCE_COLOURS: INSTANCE_COLOURS, instanceColour: instanceColour,
            instanceName: instanceName,
@@ -11351,19 +11390,9 @@ async function buildTracedOrganelleLayers(ids,want,say){
   Object.keys(byKind).sort().forEach(function(k){
     const anns=[];
     byKind[k].forEach(function(g,gi){
-      /* The same closed loops of lines tracingViewerOpen writes for one cell -- see its header
-         for why lines and not polygons. */
-      (g.rings||[]).forEach(function(r,ri){
-        const pts=r.points||[];
-        if(pts.length<3)return;
-        const z=Math.round(r.z);
-        for(let i=0;i<pts.length;i++){
-          const a=pts[i],b=pts[(i+1)%pts.length];
-          anns.push({type:"line",id:"to"+gi+"_"+ri+"_"+i,
-                     pointA:[Math.round(a[0]),Math.round(a[1]),z],
-                     pointB:[Math.round(b[0]),Math.round(b[1]),z]});
-        }
-      });
+      /* The same annotations tracingViewerOpen writes for one cell: one closed POLYLINE per
+         contour (2026-09-22, src/the_viewer_link_is_polylines.py). */
+      [].push.apply(anns,UJ.tracing.ringAnnotations(g.rings||[],"to"+gi));
     });
     if(!anns.length)return;
     const label=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined"&&ORGANELLE_KIND_BY_VALUE[k])
@@ -12533,7 +12562,7 @@ function organOverlayInto(st, pos){
      -- and the reason to have both is to see them against each other. One layer, because it is one
      organelle. */
   let anns = [];
-  if (want.rings && want.rings.length) anns = tracingRingLines(want.rings, "org");
+  if (want.rings && want.rings.length) anns = tracingRingAnns(want.rings, "org");
   if (want.point && want.point.length === 3)
     anns = anns.concat([{ type: "point", id: "orgcentre",
                           point: want.point.map(Math.round) }]);
@@ -12545,6 +12574,16 @@ function organOverlayInto(st, pos){
                    name: nm, annotationColor: want.color || "#40e28c", annotations: anns });
   st.selectedLayer = { layer: nm, visible: true };
   return true;
+}
+/* POLYLINES, 2026-09-22: one annotation per contour instead of one per edge. The writer sits in
+   core/tracing.js beside the reader it is the inverse of; tracingRingLines below is what it falls
+   back to. See src/the_viewer_link_is_polylines.py. */
+function tracingRingAnns(rings, idPrefix){
+  try {
+    if (window.UJ && UJ.tracing && UJ.tracing.ringAnnotations)
+      return UJ.tracing.ringAnnotations(rings, idPrefix);
+  } catch (_e){}
+  return tracingRingLines(rings, idPrefix);
 }
 function tracingRingLines(rings, idPrefix){
   const out = [];
@@ -12794,7 +12833,7 @@ function tracingViewerOpen(structs, say, ids){
     used[nm] = 1; if (!firstName) firstName = nm;
     st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
                      name: nm, annotationColor: t.color || "#40e28c",
-                     annotations: tracingRingLines(t.rings, "t" + i) });
+                     annotations: tracingRingAnns(t.rings, "t" + i) });
   });
   st.selectedLayer = { layer: firstName, visible: true };
   const shown = tracingShowCellIn(st, (ids && ids.root) || "", (ids && ids.nuc) || "");
