@@ -451,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-22 16:41</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-22 18:12</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3559,6 +3559,11 @@ function addRegionBox(){
            nanometres and passing the matrix again would inflate every cell 16x. If that is ever
            wrong it is loud: the notebook prints each cell's extent and warns outside 5-2000 um. */
         boxNM:boxNM,boxLabel:boxLabel,cells:boxCells,
+          /* WHAT THE PAGE HAS TRACED, filtered to this box and these cells by
+             core/blenderexport.js (2026-09-22, src/the_blender_export_colours_by_kind.py). */
+          tracings:(typeof TRACINGS_KEPT!=="undefined")?TRACINGS_KEPT:[],
+          /* Nanometres per voxel, so a tracing's own centre can be tested against the box. */
+          resNm:(UJ.cfg&&UJ.cfg.res)||null,
         /* Dark-theme colours whatever the page's theme: the render's background is the dark one
            either way, and a light accent vanishes on it. */
         /* The tool's OWN colours, read from its :root block -- see brandFromPage(). This

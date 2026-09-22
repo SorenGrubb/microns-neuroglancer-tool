@@ -613,7 +613,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-22 16:41</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-22 18:12</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -13109,6 +13109,11 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
               if(seenIds.has(id))continue;
               seenIds.add(id);
               boxCells.push({type:String(m.row.type||"Unclassified"),root_id:id,
+                             /* ONE CELL, ONE COLOUR (2026-09-22). The proposed root ids are the
+                                same cell as the native one, and carried no nucleus id, so
+                                colour_policy grouped them apart and painted one microglia three
+                                colours. See src/the_blender_export_colours_by_kind.py. */
+                             group:String(nidKey||rid||id),
                              nucleus_id:boxCells.some(c=>c.nucleus_id&&String(c.nucleus_id)===String(nidKey))
                                         ?null:(nidKey||null)});
             }
@@ -13134,7 +13139,10 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
           /* WHAT THE PAGE HAS TRACED. Kept locally, so this works signed out and with no backend
              at all -- see the tracing card's own comment on why the export does not wait for a
              redeploy. An empty list is the normal case and costs nothing. */
-          tracings:(typeof TRACINGS_KEPT!=="undefined")?TRACINGS_KEPT:[]
+          tracings:(typeof TRACINGS_KEPT!=="undefined")?TRACINGS_KEPT:[],
+          /* Nanometres per voxel, so a tracing's own centre can be tested against the box
+             (2026-09-22, src/the_blender_export_colours_by_kind.py). */
+          resNm:(UJ.cfg&&UJ.cfg.res)||null
         });
         return;
       }
