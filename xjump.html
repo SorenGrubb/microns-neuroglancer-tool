@@ -455,7 +455,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-09-22 05:32</span></p>
+ctrl-shift-R.">build 2026-09-22 07:28</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -5565,6 +5565,8 @@ UJ.app = (function(){
     SHOWN = { row: top.row, nm: top.nm };
     /* The tracing card's coordinate boxes follow the cell on screen -- core/tracingcard.js watches
        this one global, on every tool. 2026-09-21. */
+    /* ...and its key first, which the card's id boxes follow (2026-09-22). */
+    try { window.CUR_CELLKEY = (top.row && top.row.key) || ""; } catch (e){}
     try { if (top.row && top.row.pos && top.row.pos.length === 3) window.CUR_POS = top.row.pos.slice(); }
     catch (e){}
     host.innerHTML = foundPanelHtml(top.row, top.nm)
@@ -9421,6 +9423,9 @@ UJ.cfg.tracing = {
                  note: g.have < g.total ? g.have + " of the cell's " + g.total + " fragments have a published mesh" : "" };
       });
   },
+  /* The cell on screen, for the card's id boxes to follow (2026-09-22): its key, and no fragment
+     -- a cb2 cell is its assembly. See src/xjump_card_follows_the_found_cell.py. */
+  cellOnScreen: function(){ return window.CUR_CELLKEY ? { nuc: String(window.CUR_CELLKEY), root: "" } : null; },
   /* By the cell's key first, then by the fragment (2026-09-21): a cb2 fragment is a square of the
      cell, and the one under the pointer need not be one the cell lists. */
   cellIdsFor: function(rootIn, keyIn){ var c = xjumpCellOf(keyIn || "", rootIn); return c ? c.segs : []; }

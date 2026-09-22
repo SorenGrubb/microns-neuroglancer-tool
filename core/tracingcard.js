@@ -905,6 +905,40 @@ function tracingPos(){
    A COORDINATE HE TYPED IS NEVER OVERWRITTEN. It says so instead, with a button, because silently
    leaving stale coordinates in place is how you trace the wrong cell. */
 var TRACING_POS_AUTO = "";
+/* ── THE IDS FOLLOW THE CELL TOO ─────────────────────────────────────────────────  2026-09-22
+   Søren, on χJump: "Segmentation still does not work in xJump" -- the pad was on one cell and the
+   fragment box held another's, from an earlier lookup, so the overlay looked for the wrong cell.
+   See src/the_ids_follow_the_cell.py. */
+var TRACING_IDS_SOON = null;
+function tracingIdsOnScreen(){
+  try {
+    var f = UJ.cfg && UJ.cfg.tracing && UJ.cfg.tracing.cellOnScreen;
+    if (typeof f === "function") return f() || null;
+  } catch (_e){ return null; }
+  var hasN = typeof CUR_NUCID !== "undefined", hasR = typeof CUR_ROOT !== "undefined";
+  if (!hasN && !hasR) return null;              // a page with no idea of a cell's ids
+  return { nuc: hasN && CUR_NUCID ? String(CUR_NUCID) : "", root: hasR && CUR_ROOT ? String(CUR_ROOT) : "" };
+}
+function tracingFollowIds(){
+  var ids = tracingIdsOnScreen();
+  var nucEl = document.getElementById("tracingNucId"), rootEl = document.getElementById("tracingRootId");
+  if (!ids || !nucEl || !rootEl) return false;
+  var want = [String(ids.nuc || ""), String(ids.root || "")];
+  if (nucEl.value.trim() === want[0] && rootEl.value.trim() === want[1]) return false;
+  /* Contours on an open pad were drawn on the cell these boxes name. */
+  var wrap = document.getElementById("tracePadWrap");
+  if (typeof PAD !== "undefined" && PAD && (PAD.rings || []).length && wrap && wrap.style.display !== "none"){
+    var say = document.getElementById("tracingPosSay");
+    if (say) say.textContent = "The cell and fragment boxes still name the cell on the pad — it has contours on it.";
+    return false;
+  }
+  nucEl.value = want[0]; rootEl.value = want[1];
+  var at = document.getElementById("tracingCellAt");
+  if (at && window.CUR_POS && window.CUR_POS.length === 3)
+    at.value = window.CUR_POS.map(function(n){ return Math.round(n); }).join(", ");
+  try { tracingSuggestType(); } catch (_e){}
+  return true;
+}
 function tracingPosEls(){
   return ["tracingX","tracingY","tracingZ"].map(function(i){ return document.getElementById(i); });
 }
@@ -934,6 +968,9 @@ function tracingFillPos(force){
   els.forEach(function(e, i){ e.value = want[i]; });
   TRACING_POS_AUTO = want.join(",");
   if (say) say.textContent = "From the cell you looked up.";
+  /* The ids with it, a tick later: pages set CUR_POS before their ids (2026-09-22). */
+  clearTimeout(TRACING_IDS_SOON);
+  TRACING_IDS_SOON = setTimeout(function(){ try { tracingFollowIds(); } catch (_e){} }, 0);
   /* The pad is not moved under him: it is a view he may be drawing in, and a cell lookup is not a
      request to abandon it. The boxes are where the NEXT pad opens. */
 }
@@ -3415,7 +3452,9 @@ async function padSegOverlay(){
   const SRCS = tracingSources();
   const root = SRCS.seg ? (document.getElementById("tracingRootId").value || "").trim() : "";
   const nuc = SRCS.nuc ? (document.getElementById("tracingNucId").value || "").trim() : "";
-  if (!root && !nuc){
+  const byKey = !!((document.getElementById("tracingNucId").value || "").trim()
+                    && UJ.cfg && UJ.cfg.tracing && typeof UJ.cfg.tracing.cellIdsFor === "function");
+  if (!root && !nuc && !byKey){
     padSegSay("Nothing to paint — fill in this cell's root ID or nucleus ID below the pad, "
       + "then tick this again.", true);
     return null;
@@ -3458,7 +3497,7 @@ async function padSegOverlay(){
     /* Søren, 2026-09-21: "for the tracing segmentation, all the root IDs that have been proposed
        should be shown" -- they are painted, and the line says how many. */
     const said = [part(proposed ? "root + " + proposed + " proposed root ID" + (proposed === 1 ? "" : "s")
-                       : also.length ? "cell (" + (also.length + 1) + " segments)" : "root",
+                       : also.length ? "cell (" + (also.length + (root ? 1 : 0)) + " segments)" : "root",
                        root || also[0] || "", got && got.cell), part("nucleus", nuc, got && got.nucleus)]
                    .filter(Boolean).join(" · ");
     if (got && got.ok && !got.painted)
