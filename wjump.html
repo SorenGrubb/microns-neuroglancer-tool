@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-22 18:39</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-22 18:55</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -10651,28 +10651,85 @@ UJ.tracing = (function(){
   }
 
   /* ── 2. loose lines, in a viewer with no polygon tool ──────────────────────────────────────── */
+  /* ── LINES THAT NEARLY MEET ARE ONE CONTOUR ──────────────────────────────────  2026-09-22
+     Søren: "I have previously used a normal line annotation to segment, which means that there are
+     many not exactly connected points, and points where there are 2 line annotations, instead of
+     just one point of a poly-line. Do you think we can register that and turn all the annotations
+     in the same z-plane into one polyline to save points?"
+
+     It demanded an exact meeting (key() rounds to a hundredth of a voxel), which two clicks never
+     are, so a hand-drawn outline chained into nothing at all. Ends within `tol` are now the same
+     corner: their MIDPOINT is kept, once -- N segments, N vertices, not 2N -- and a ring whose two
+     ends nearly meet is closed the same way.
+
+     THE TOLERANCE COMES FROM THE DRAWING: a third of the median segment length. A click-to-click
+     gap is a small fraction of a segment; a gap that is a real gap is a segment or more, and stays
+     one. This file still knows nothing about how big a voxel is. See
+     src/lines_that_nearly_meet_are_one_contour.py. */
+  function dist2d(a, b){ var dx = a[0] - b[0], dy = a[1] - b[1]; return Math.sqrt(dx * dx + dy * dy); }
+  function midOf(a, b){ return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, a[2]]; }
+  function joinTolerance(lines){
+    var lens = [], i;
+    for (i = 0; i < lines.length; i++) lens.push(dist2d(lines[i].a, lines[i].b));
+    lens.sort(function(x, y){ return x - y; });
+    var med = lens.length ? lens[lens.length >> 1] : 0;
+    /* A third of a typical segment. Zero-length segments (a double click) leave med 0, and then
+       only an exact meeting joins, which is what this did before. */
+    return med > 0 ? med / 3 : 0;
+  }
   function chainLines(lines, seen){
-    var ends = {}, i, L, kA, kB;
-    for (i = 0; i < lines.length; i++){
-      L = lines[i];
-      kA = key(L.a); kB = key(L.b);
-      (ends[kA] = ends[kA] || []).push(i);
-      (ends[kB] = ends[kB] || []).push(i);
-    }
-    var used = {}, rings = [];
-    for (i = 0; i < lines.length; i++){
+    var n = lines.length, i, j;
+    if (!n) return [];
+    var tol = joinTolerance(lines);
+    /* Endpoints in a grid of tol-sized cells, so a chain of a thousand segments does not cost a
+       million comparisons. Each entry is {li, end} -- which line, and which of its two ends. */
+    var cell = tol > 0 ? tol : 1, grid = {};
+    var at = function(p){ return Math.floor(p[0] / cell) + "|" + Math.floor(p[1] / cell); };
+    var put = function(p, li, end){ var k = at(p); (grid[k] = grid[k] || []).push({ li: li, end: end }); };
+    for (i = 0; i < n; i++){ put(lines[i].a, i, 0); put(lines[i].b, i, 1); }
+    var used = {};
+    /* The nearest unused end within tol, from anywhere but this line. */
+    var nearest = function(p){
+      var best = null, bd = tol, cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell), dx, dy;
+      for (dx = -1; dx <= 1; dx++) for (dy = -1; dy <= 1; dy++){
+        var box = grid[(cx + dx) + "|" + (cy + dy)] || [];
+        for (var k = 0; k < box.length; k++){
+          var e = box[k];
+          if (used[e.li]) continue;
+          var q = e.end ? lines[e.li].b : lines[e.li].a;
+          var d = dist2d(p, q);
+          if (d <= bd){ bd = d; best = e; }
+        }
+      }
+      return best;
+    };
+    var rings = [];
+    for (i = 0; i < n; i++){
       if (used[i]) continue;
       used[i] = 1;
       var pts = [lines[i].a, lines[i].b];
-      var tail = lines[i].b;
-      for (var guard = 0; guard < lines.length + 2; guard++){
-        var cand = ends[key(tail)] || [], next = -1;
-        for (var j = 0; j < cand.length; j++) if (!used[cand[j]]){ next = cand[j]; break; }
-        if (next < 0) break;
-        used[next] = 1;
-        var L2 = lines[next];
-        tail = same(L2.a, tail) ? L2.b : L2.a;
-        pts.push(tail);
+      /* Forwards from the tail, then backwards from the head: a person does not always draw a
+         contour in one direction, and a chain started in the middle would otherwise stop short. */
+      var dir;
+      for (dir = 0; dir < 2; dir++){
+        for (var guard = 0; guard < n + 2; guard++){
+          var tip = dir ? pts[0] : pts[pts.length - 1];
+          var hit = nearest(tip);
+          if (!hit) break;
+          used[hit.li] = 1;
+          var L2 = lines[hit.li];
+          var near = hit.end ? L2.b : L2.a, far = hit.end ? L2.a : L2.b;
+          var shared = midOf(tip, near);            // ONE corner out of the two clicks
+          if (dir){ pts[0] = shared; pts.unshift(far); }
+          else { pts[pts.length - 1] = shared; pts.push(far); }
+          seen.joined = (seen.joined || 0) + 1;
+        }
+      }
+      /* The two ends of a ring meet the same way its corners do. */
+      if (pts.length > 2 && tol > 0 && dist2d(pts[0], pts[pts.length - 1]) <= tol){
+        pts[0] = midOf(pts[0], pts[pts.length - 1]);
+        pts.pop();
+        seen.joined = (seen.joined || 0) + 1;
       }
       var ring = ringFrom(pts);
       if (ring.length >= 3) rings.push(ring);
@@ -10799,7 +10856,10 @@ UJ.tracing = (function(){
     if (d.error) return { ok: false, error: d.error, structures: [], rings: [] };
     var st = d.state;
     var seen = { volumes: 0, polygons: 0, polylines: 0, lines: 0, points: 0, unreadable: 0,
-                 mixedZ: 0 };
+                 mixedZ: 0,
+                 /* Ends of hand-drawn line annotations that were within a tolerance of each other
+                    and became one vertex (2026-09-22). */
+                 joined: 0 };
 
     /* WHICH ANNOTATION LAYERS COUNT, when nobody named one.  2026-09-17
        A pasted µJump link normally carries "Cortical layers" -- the pia/white-matter bands, which
@@ -12012,7 +12072,13 @@ function tracingReadLink(){
   /* WHICH SHAPE IT READ, in words. The same link is organelle markers to the bulk card and a
      contour to this one -- the box it is pasted into is what decides -- so saying "from 36 points"
      rather than just "3 contours" makes pasting the wrong link into the wrong box visible. */
-  const fromWhat={points:"from "+r.seen.points+" points",lines:"from line annotations",
+  /* JOINED ENDS, SAID OUT LOUD (2026-09-22). Line annotations drawn by hand do not meet
+     exactly; the reader joins ends within a third of a segment and keeps one vertex where there
+     were two. That is a change to his drawing, so it is reported rather than done quietly. */
+  const fromWhat={points:"from "+r.seen.points+" points",
+                  lines:"from "+r.seen.lines+" line annotations"
+                       +(r.seen.joined?", "+r.seen.joined+" nearly-meeting ends joined into one "
+                         +"vertex each":""),
                   polygons:"from polygons",volume:"from a traced volume"};
   const src=fromWhat[(r.structures[0]||{}).from||""]||"";
   tracingSay(rings.length+" contour"+(rings.length===1?"":"s")+(src?" "+src:"")+" on "+sections.size

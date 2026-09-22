@@ -594,7 +594,13 @@ function tracingReadLink(){
   /* WHICH SHAPE IT READ, in words. The same link is organelle markers to the bulk card and a
      contour to this one -- the box it is pasted into is what decides -- so saying "from 36 points"
      rather than just "3 contours" makes pasting the wrong link into the wrong box visible. */
-  const fromWhat={points:"from "+r.seen.points+" points",lines:"from line annotations",
+  /* JOINED ENDS, SAID OUT LOUD (2026-09-22). Line annotations drawn by hand do not meet
+     exactly; the reader joins ends within a third of a segment and keeps one vertex where there
+     were two. That is a change to his drawing, so it is reported rather than done quietly. */
+  const fromWhat={points:"from "+r.seen.points+" points",
+                  lines:"from "+r.seen.lines+" line annotations"
+                       +(r.seen.joined?", "+r.seen.joined+" nearly-meeting ends joined into one "
+                         +"vertex each":""),
                   polygons:"from polygons",volume:"from a traced volume"};
   const src=fromWhat[(r.structures[0]||{}).from||""]||"";
   tracingSay(rings.length+" contour"+(rings.length===1?"":"s")+(src?" "+src:"")+" on "+sections.size

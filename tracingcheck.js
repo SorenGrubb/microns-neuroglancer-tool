@@ -573,5 +573,82 @@ console.log("\nthe two link decoders say the same thing");
   });
 }
 
+/* ── HAND-DRAWN LINES DO NOT MEET EXACTLY ───────────────────────────────────────────  2026-09-22
+   Søren: "I have previously used a normal line annotation to segment, which means that there are
+   many not exactly connected points, and points where there are 2 line annotations, instead of just
+   one point of a poly-line. Do you think we can register that and turn all the annotations in the
+   same z-plane into one polyline to save points?"
+
+   Clicking a line tool round a cell leaves each segment's end a voxel or two from the next one's
+   start, and every shared corner stored twice. Chaining used to demand the two agree to a
+   hundredth of a voxel, so a hand-drawn outline came back as nothing at all (two-point chains,
+   dropped) -- and where it did chain, each corner arrived twice. */
+console.log("\nline annotations that nearly meet, as a person draws them");
+{
+  /* A 24-sided ring drawn segment by segment: each segment's end misses the next one's start by a
+     voxel or two, the way a click does, and both are stored. */
+  const N = 24, R = 120, cx = 5000, cy = 4000, z = 700;
+  const at = i => [cx + R * Math.cos(2 * Math.PI * i / N), cy + R * Math.sin(2 * Math.PI * i / N)];
+  const wob = (p, k) => [Math.round(p[0] + ((k * 7) % 5) - 2), Math.round(p[1] + ((k * 11) % 5) - 2), z];
+  const anns = [];
+  for (let i = 0; i < N; i++)
+    anns.push({ type: "line", id: "l" + i, pointA: wob(at(i), i * 2), pointB: wob(at(i + 1), i * 2 + 1) });
+  const r = T.ringsFromLink(link(anns));
+  ok(r.ok && r.seen.lines === N, "the link reads, and every segment is seen", r.seen.lines + " lines");
+  ok(r.structures.length === 1 && r.structures[0].rings.length === 1,
+     "...chained into ONE contour, though no two ends are the same point",
+     r.structures.length + " structure(s), "
+     + (r.structures[0] ? r.structures[0].rings.length : 0) + " ring(s)");
+  const ring = r.structures[0] && r.structures[0].rings[0];
+  ok(ring && ring.points.length === N,
+     "...with one point per corner, not two: 48 endpoints in, 24 vertices out",
+     ring ? ring.points.length : "none");
+  ok(ring && ring.z === z, "...on the section it was drawn on", ring && ring.z);
+  ok(r.seen.joined === N, "...and it says how many near-meeting ends it joined", r.seen.joined);
+  ok(r.seen.unreadable === 0, "...and nothing was dropped", r.seen.unreadable);
+  /* Every vertex is within the wobble of the circle it was drawn on: a join must not invent a
+     point somewhere between two unrelated corners. */
+  const off = ring ? ring.points.map(p => Math.abs(Math.hypot(p[0] - cx, p[1] - cy) - R)) : [99];
+  ok(Math.max.apply(null, off) < 4, "...and every vertex is where it was drawn",
+     Math.max.apply(null, off).toFixed(1) + " voxels off the circle at worst");
+}
+
+console.log("\n...and a gap that is a real gap is still a gap");
+{
+  /* Two arcs on one section with a quarter of the ring missing between them: joining those two
+     ends would invent a chord across the cell, so they stay two contours. */
+  const mk = (from, to, id) => {
+    const out = [];
+    for (let i = from; i < to; i++){
+      const a = [Math.round(5000 + 120 * Math.cos(2 * Math.PI * i / 24)), Math.round(4000 + 120 * Math.sin(2 * Math.PI * i / 24)), 700];
+      const b = [Math.round(5000 + 120 * Math.cos(2 * Math.PI * (i + 1) / 24)), Math.round(4000 + 120 * Math.sin(2 * Math.PI * (i + 1) / 24)), 700];
+      out.push({ type: "line", id: id + i, pointA: a, pointB: b });
+    }
+    return out;
+  };
+  const r = T.ringsFromLink(link(mk(0, 8, "a").concat(mk(12, 20, "b"))));
+  ok(r.structures[0] && r.structures[0].rings.length === 2,
+     "two arcs a third of the cell apart stay two contours",
+     r.structures[0] ? r.structures[0].rings.length : 0);
+}
+
+console.log("\nand two sections are still two sections");
+{
+  const seg = (z, id) => {
+    const out = [];
+    for (let i = 0; i < 12; i++){
+      const a = [Math.round(5000 + 100 * Math.cos(2 * Math.PI * i / 12)), Math.round(4000 + 100 * Math.sin(2 * Math.PI * i / 12)), z];
+      const b = [Math.round(5000 + 100 * Math.cos(2 * Math.PI * (i + 1) / 12)) + 1, Math.round(4000 + 100 * Math.sin(2 * Math.PI * (i + 1) / 12)) - 1, z];
+      out.push({ type: "line", id: id + i, pointA: a, pointB: b });
+    }
+    return out;
+  };
+  const r = T.ringsFromLink(link(seg(700, "p").concat(seg(705, "q"))));
+  const rings = (r.structures[0] || {}).rings || [];
+  ok(rings.length === 2 && rings[0].z === 700 && rings[1].z === 705,
+     "one contour per section, joined within its own plane and never across",
+     rings.map(x => x.z + ":" + x.points.length).join(", "));
+}
+
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
 process.exit(fails ? 1 : 0);
