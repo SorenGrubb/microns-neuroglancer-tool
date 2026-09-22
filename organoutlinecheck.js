@@ -175,7 +175,8 @@ const XJ = /xjump/.test(PAGE);
     const pts = own.filter(l => l.type === "annotation")
                    .reduce((a, l) => a + (l.annotations || []).filter(x => x.type === "point").length, 0);
     const segs = own.filter(l => l.type === "segmentation").map(l => l.name + ":" + (l.segments || []).length);
-    return { pts, segs, ngroups: own.filter(l => / \u2014 nuclei \(/.test(l.name || "")).length,
+    return { poly: !!(UJ.tracing.viewerTakesPolylines && UJ.tracing.viewerTakesPolylines()),
+             pts, segs, ngroups: own.filter(l => / \u2014 nuclei \(/.test(l.name || "")).length,
              layers: st.layers.filter(l => /^traced /.test(l.name || "")).map(l => ({
       name: l.name, n: (l.annotations || []).length, color: l.annotationColor,
       types: [...new Set((l.annotations || []).map(a => a.type))].join(",") })) };
@@ -188,12 +189,16 @@ const XJ = /xjump/.test(PAGE);
   if (!all.none){
     const lys = all.layers.find(l => /^traced lysosome/i.test(l.name));
     const mit = all.layers.find(l => /^traced mitochondri/i.test(l.name));
-    /* One closed polyline per contour since 2026-09-22 (src/the_viewer_link_is_polylines.py);
-       these read 4 and 8 when every edge was its own line annotation. */
-    ok(!!lys && lys.n === 1 && lys.types === "polyline" && lys.color === "#ff0000",
-       "the lysosome filed by NUCLEUS id is drawn: one ring, one polyline, in its colour",
-       JSON.stringify(lys || null));
-    ok(!!mit && mit.n === 2, "the mitochondrion filed by " + B_BY + " is drawn: two rings, two polylines",
+    /* THE VIEWER DECIDES THE SHAPE (2026-09-22, src/the_viewer_decides_the_shape.py): one closed
+       polyline per contour where the page's viewer reads them, else one line per edge -- four
+       vertices, so 1 vs 4 and 2 vs 8. This check runs on several pages with different viewers, so
+       it asserts the rule rather than one of its two answers. polylinelinkcheck.js pins both. */
+    const SHAPE = all.poly ? "polyline" : "line", PER = all.poly ? 1 : 4;
+    ok(!!lys && lys.n === PER && lys.types === SHAPE && lys.color === "#ff0000",
+       "the lysosome filed by NUCLEUS id is drawn: one ring as " + PER + " " + SHAPE
+       + (PER === 1 ? "" : "s") + ", in its colour", JSON.stringify(lys || null));
+    ok(!!mit && mit.n === 2 * PER,
+       "the mitochondrion filed by " + B_BY + " is drawn: two rings, " + (2 * PER) + " " + SHAPE + "s",
        JSON.stringify(mit || null));
     ok(all.layers.length === 2, "...one layer per kind, and nothing else", all.layers.map(l => l.name).join(" | "));
     if (TABLE){

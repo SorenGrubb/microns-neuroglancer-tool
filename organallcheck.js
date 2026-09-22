@@ -32,6 +32,10 @@ const ok = (c, what, d) => {
    button under test is the button he presses. `read` is how many of them have had their geometry
    fetched — the rest are listed but cannot be drawn. */
 const SETUP = `(function(read){
+  /* THE VIEWER DECIDES THE SHAPE (2026-09-22, src/the_viewer_decides_the_shape.py). This page
+     defaults to ngl.microns-explorer.org, which cannot read a polyline, so the viewer this
+     assertion is about is NAMED. polylinelinkcheck.js checks the rule itself. */
+  document.getElementById("viewer").value = "https://spelunker.cave-explorer.org/";
   var old = document.getElementById("commReports"); if (old) old.remove();
   var oldOrgan = document.getElementById("cellOrganelles"); if (oldOrgan) oldOrgan.remove();
   document.body.insertAdjacentHTML("beforeend", '<div id="commReports"></div>');

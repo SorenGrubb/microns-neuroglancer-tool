@@ -52,6 +52,10 @@ const RINGS = (sections, perSection, verts) => {
   const got = await p.evaluate(async (mk) => {
     const rings = (new Function("return " + mk))()(40, 2, 26);
     document.getElementById("tracingPanel").open = true;
+    /* THE VIEWER DECIDES THE SHAPE (2026-09-22). This page offers four and defaults to
+       ngl.microns-explorer.org, which cannot read a polyline -- so the viewer under test is named
+       rather than inherited. The other half of the rule is checked below. */
+    document.getElementById("viewer").value = "https://spelunker.cave-explorer.org/";
     const opened = [], saved = window.open;
     window.open = u => { opened.push(u); return { closed: false, opener: null,
       location: { set href(v){ opened.push(v); }, get href(){ return ""; } } }; };
@@ -114,10 +118,40 @@ const RINGS = (sections, perSection, verts) => {
      "...with the closing repeat dropped again, so the ring is stored open once more",
      got.backFirst && got.backFirst.np);
 
+  console.log("\nand on a viewer that cannot read them, it writes lines instead");
+  const lines = await p.evaluate(async (mk) => {
+    const rings = (new Function("return " + mk))()(2, 1, 26);
+    const seen = {};
+    for (const v of ["https://ngl.microns-explorer.org/", "https://neuroglancer.neuvue.io/",
+                     "https://h01-dot-neuroglancer-demo.appspot.com/",
+                     "https://spelunker.cave-explorer.org/",
+                     "https://neuroglancer-demo.appspot.com/"]){
+      const a = UJ.tracing.ringAnnotations(rings, "t0", { base: v });
+      seen[v] = { type: a[0] && a[0].type, n: a.length };
+    }
+    return seen;
+  }, RINGS.toString());
+  /* MEASURED IN SØREN'S BROWSER, 2026-09-22, one probe state per viewer. On the three that say no,
+     ONE polyline empties the WHOLE layer -- the lines and points beside it go too, in silence. */
+  const NO = ["https://ngl.microns-explorer.org/", "https://neuroglancer.neuvue.io/",
+              "https://h01-dot-neuroglancer-demo.appspot.com/"];
+  const YES = ["https://spelunker.cave-explorer.org/", "https://neuroglancer-demo.appspot.com/"];
+  ok(NO.every(v => lines[v].type === "line" && lines[v].n === 52),
+     "the three viewers with no polyline type get one line per edge",
+     NO.map(v => v.split("/")[2] + ":" + lines[v].type).join(" "));
+  ok(YES.every(v => lines[v].type === "polyline" && lines[v].n === 2),
+     "...and the two that read them get one polyline per contour",
+     YES.map(v => v.split("/")[2] + ":" + lines[v].type).join(" "));
+  const unknown = await p.evaluate(() =>
+    UJ.tracing.ringAnnotations([{ z: 1, points: [[0,0],[1,0],[1,1]] }], "t0",
+                               { base: "https://some-viewer-nobody-measured.example/" })[0].type);
+  ok(unknown === "line", "a viewer nobody has measured gets lines, not a silent empty layer", unknown);
+
   console.log("\nan organelle's outline, on the row's own arrow");
   const org = await p.evaluate(() => {
     if (typeof organOverlayInto !== "function" || typeof ORGAN_SHOW_NEXT === "undefined")
       return { missing: true };
+    document.getElementById("viewer").value = "https://spelunker.cave-explorer.org/";
     ORGAN_SHOW_NEXT = { name: "Lysosome 1", color: "#c83232", point: [1020, 2020, 101],
                         rings: [{ z: 101, points: [[1000, 2000], [1040, 2000], [1040, 2040], [1000, 2040]] }] };
     const st = { layers: [] };

@@ -28,6 +28,10 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
 
   const got = await p.evaluate(async () => {
     document.getElementById("tracingPanel").open = true;
+    /* THE VIEWER DECIDES THE SHAPE (2026-09-22, src/the_viewer_decides_the_shape.py). This page
+       defaults to ngl.microns-explorer.org, which cannot read a polyline, so the viewer this
+       assertion is about is NAMED. polylinelinkcheck.js checks the rule itself. */
+    document.getElementById("viewer").value = "https://spelunker.cave-explorer.org/";
     /* 151 sections x 12 contours: the size that is long NOW. Since 2026-09-22 a contour is one
        polyline and not one line per edge (src/the_viewer_link_is_polylines.py), so the cell that
        used to make this link takes a quarter of the characters and no longer reaches the

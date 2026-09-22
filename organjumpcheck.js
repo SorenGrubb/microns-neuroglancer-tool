@@ -119,6 +119,10 @@ const SETUP = `(function(){
        buildState — so a one-shot overlay was used up before the link he actually clicks was made.
        buildState carries it now, and nothing consumes it. */
     const got = await p.evaluate(() => {
+    /* THE VIEWER DECIDES THE SHAPE (2026-09-22, src/the_viewer_decides_the_shape.py). This page
+       defaults to ngl.microns-explorer.org, which cannot read a polyline, so the viewer this
+       assertion is about is NAMED. polylinelinkcheck.js checks the rule itself. */
+    document.getElementById("viewer").value = "https://spelunker.cave-explorer.org/";
       const first = buildState([1050, 2050, 101]);
       const second = buildState([1050, 2050, 101]);      // the arrow, the copy button, the next render
       const elsewhere = buildState([9, 9, 9]);
