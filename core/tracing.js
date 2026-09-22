@@ -544,7 +544,73 @@ UJ.tracing = (function(){
     });
   }
 
-  return { ringsFromLink: ringsFromLink, _readLayer: readLayer,
+  /* ── SEVERAL TRACINGS' GEOMETRY, TOGETHER ────────────────────────────────────  2026-09-22
+     Søren: "Opening the neuroglancer with 4 filtered cells with 15 traced organelles took a long
+     time." One request per 20 (?structureIds=), one each six at a time from an older deployment,
+     and nothing twice in a page. Returns {structureId: {t, st} | {error}}.
+     See src/the_outlines_come_in_one_request.py. */
+  var MANY_CACHE = {}, MANY_BATCH = null;
+  function manyKey(e){ return e && e.groupId ? String(e.structureId) + "|" + String(e.groupId) : ""; }
+  function manyResult(t){
+    if (!t) return { error: "the dataset has no tracing with that id any more" };
+    if (t.error) return { t: t, error: t.error };
+    var st = rowsToStructures(t.rows || [])[0] || null;
+    if (!st || !st.rings || !st.rings.length) return { t: t, error: "that tracing came back with no contours on it" };
+    return { t: t, st: st };
+  }
+  async function fetchMany(endpoint, entries, qs, onProgress){
+    qs = qs || "";
+    var out = {}, todo = [], total = (entries || []).length, done = 0;
+    var tick = function(){ done++; if (onProgress) try { onProgress(done, total); } catch (_e){} };
+    (entries || []).forEach(function(e){
+      var k = manyKey(e);
+      if (k && MANY_CACHE[k]){ out[e.structureId] = MANY_CACHE[k]; tick(); }
+      else if (!(e.structureId in out)) todo.push(e);
+    });
+    var keep = function(e, r){
+      out[e.structureId] = r;
+      var k = manyKey(e);
+      if (k && r && r.st) MANY_CACHE[k] = r;
+      tick();
+    };
+    var pool = async function(items, n, fn){
+      var i = 0;
+      var worker = async function(){ while (i < items.length){ var it = items[i++]; await fn(it); } };
+      var ws = []; for (var w = 0; w < Math.min(n, items.length); w++) ws.push(worker());
+      await Promise.all(ws);
+    };
+    /* Together, while the deployment answers with rows. */
+    if (todo.length && MANY_BATCH !== false){
+      var chunks = [];
+      for (var c = 0; c < todo.length; c += 20) chunks.push(todo.slice(c, c + 20));
+      await pool(chunks, 3, async function(ch){
+        if (MANY_BATCH === false) return;
+        try {
+          var r = await fetch(endpoint + "?tracings=1&structureIds="
+                              + encodeURIComponent(ch.map(function(e){ return e.structureId; }).join(",")) + qs);
+          var d = await r.json(), ts = (d && d.tracings) || [];
+          var withRows = ts.filter(function(t){ return t && Array.isArray(t.rows); });
+          if (ts.length && !withRows.length){ MANY_BATCH = false; return; }   // an older deployment
+          MANY_BATCH = true;
+          var by = {};
+          withRows.forEach(function(t){ by[t.structureId] = t; });
+          ch.forEach(function(e){ keep(e, manyResult(by[e.structureId])); });
+        } catch (_e){ /* left for the one-at-a-time pass */ }
+      });
+    }
+    /* One each, six at a time, for whatever is left. */
+    var left = todo.filter(function(e){ return !(e.structureId in out); });
+    await pool(left, 6, async function(e){
+      try {
+        var r = await fetch(endpoint + "?tracings=1&structureId=" + encodeURIComponent(e.structureId) + qs);
+        var d = await r.json();
+        keep(e, manyResult(((d && d.tracings) || [])[0]));
+      } catch (err){ keep(e, { error: String(err && err.message || err) }); }
+    });
+    return out;
+  }
+
+  return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
            ringsToRows: ringsToRows, toSubmission: toSubmission,
            INSTANCE_COLOURS: INSTANCE_COLOURS, instanceColour: instanceColour,
            instanceName: instanceName,

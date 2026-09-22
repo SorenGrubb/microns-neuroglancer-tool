@@ -2827,6 +2827,17 @@ async function tracingFetchCell(sids, btn){
     }
   };
   if (btn){ btn.disabled = true; btn.dataset.label = label; }
+  /* TOGETHER where core/tracing.js can (2026-09-22, src/the_outlines_come_in_one_request.py). */
+  if (UJ.tracing && UJ.tracing.fetchMany){
+    try {
+      const res = await UJ.tracing.fetchMany(REPORT_ENDPOINT, sids.map(function(s){ return { structureId: s }; }),
+        tracingDsQS(), function(d, n){ if (btn) btn.textContent = "reading " + d + " of " + n + "\u2026"; });
+      return sids.map(function(s){
+        const x = res[s] || { error: "not read" };
+        return x.error ? { sid: s, error: x.error } : { sid: s, t: x.t, st: x.st };
+      });
+    } finally { if (btn){ btn.disabled = false; btn.textContent = label; } }
+  }
   try { await Promise.all([one(), one(), one(), one()]); }
   finally { if (btn){ btn.disabled = false; btn.textContent = label; } }
   return out;

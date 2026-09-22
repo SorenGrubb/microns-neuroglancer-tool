@@ -116,18 +116,17 @@ async function buildTracedOrganelleLayers(ids,want,say){
      would be a lie about what the dataset holds. */
   let capped=0;
   if(mine.length>FILTER_TRACE_CAP){capped=mine.length-FILTER_TRACE_CAP;mine=mine.slice(0,FILTER_TRACE_CAP);}
+  /* TOGETHER, 2026-09-22 -- one request per twenty, and nothing twice in a page. They were read
+     one after another, fifteen cold calls in a row. See src/the_outlines_come_in_one_request.py.
+     One unreadable outline is not the view's problem: it is simply not drawn. */
   const got=[];
-  for(let i=0;i<mine.length;i++){
-    say&&say("Reading outline "+(i+1)+"/"+mine.length+"\u2026");
-    try{
-      const r=await fetch(REPORT_ENDPOINT+"?tracings=1&structureId="+encodeURIComponent(mine[i].structureId)
-                          +tracedOutlinesDsQS());
-      const d=await r.json();
-      const one=((d&&d.tracings)||[])[0];
-      const st=(one&&!one.error)?(UJ.tracing.rowsToStructures(one.rows||[])[0]||null):null;
-      if(st&&st.rings&&st.rings.length)got.push({t:mine[i],rings:st.rings});
-    }catch(_e){/* one unreadable outline is not the view's problem */}
-  }
+  say&&say("Reading "+mine.length+" outline"+(mine.length===1?"":"s")+"\u2026");
+  const res=await UJ.tracing.fetchMany(REPORT_ENDPOINT,mine,tracedOutlinesDsQS(),function(d,n){
+    say&&say("Reading outlines "+d+"/"+n+"\u2026"); });
+  mine.forEach(function(t){
+    const x=res[t.structureId];
+    if(x&&x.st&&x.st.rings&&x.st.rings.length)got.push({t:t,rings:x.st.rings});
+  });
   if(!got.length)return [];
   /* Grouped by kind, each kind's outlines in one layer, in the colour that kind was drawn in. */
   const byKind={};

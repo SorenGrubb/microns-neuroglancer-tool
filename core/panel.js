@@ -806,6 +806,19 @@ function organFetchRings(nid, root, trs){
     PANEL_ORGAN_BUSY = false;
     try { renderOrganelleSection(nid, root); } catch (_e){}
   };
+  /* TOGETHER where core/tracing.js can (2026-09-22, src/the_outlines_come_in_one_request.py). */
+  if (window.UJ && UJ.tracing && UJ.tracing.fetchMany){
+    UJ.tracing.fetchMany(REPORT_ENDPOINT, want, typeof panelDsQS === "function" ? panelDsQS() : "")
+      .then(function(res){
+        want.forEach(function(t){
+          var x = res[t.structureId];
+          PANEL_ORGAN_RINGS[t.structureId] = (x && x.st && x.st.rings) ? x.st.rings : [];
+        });
+      })
+      .catch(function(){ want.forEach(function(t){ PANEL_ORGAN_RINGS[t.structureId] = []; }); })
+      .then(function(){ left = 1; done(); });
+    return;
+  }
   want.forEach(function(t){
     fetch(REPORT_ENDPOINT + "?tracings=1&structureId=" + encodeURIComponent(t.structureId)
           + (typeof panelDsQS === "function" ? panelDsQS() : ""))
