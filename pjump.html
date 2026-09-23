@@ -648,7 +648,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-23 14:50</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-23 15:02</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -5987,15 +5987,41 @@ function postAndRead(payload){
          for a new scope and so needs approving once more by its owner -- which is the state this
          project has been in since DriveApp was added on 2026-09-17. One remedy, one sentence. */
       if(!d&&/^\s*(<!doctype|<html)/i.test(String(t||""))){
-        var where=/accounts\.google\.com/i.test(got.url)
-          ? "the request was redirected to Google's sign-in page"
-          : "Apps Script answered with a Google page instead of the report";
-        return {ok:false,needsAuth:true,
-          error:where+" \u2014 so nothing was recorded. The deployment needs authorising again: "
-            +"open the /exec address in a browser tab, approve it once, and try this again. "
-            +"(A deployment authorised before the script asked for Drive access has to be "
-            +"re-approved; that access was added on 2026-09-17.) Check too that Deploy \u2192 "
-            +"Manage deployments has \u201cWho has access: Anyone\u201d."};
+        /* ── WHICH GOOGLE PAGE ───────────────────────────────────────────────────  2026-09-23
+           This used to assert one cause -- "the deployment needs authorising again" -- for a
+           symptom with two. Hesham was sent after the wrong one: his eighteen tracing rows had
+           just landed WITH their Drive files, so the deployment was authorised and Drive access
+           was working. Apps Script also answers with HTML when the script THROWS, and the remedy
+           for that is a redeploy, which is a different button in a different menu.
+           See src/an_html_reply_says_which_html_it_is.py. */
+        var body=String(t||"");
+        var signIn=/accounts\.google\.com/i.test(got.url)
+                 ||/ServiceLogin|data-initial-setup-data|signin\/v2/i.test(body);
+        var threw=/Exception|Script function not found|TypeError|ReferenceError|errorMessage|exceeded maximum execution time/i.test(body);
+        /* The evidence, where it can be read and argued with. The toast stays one sentence. */
+        try{ console.warn("[report] Apps Script answered with HTML ("
+             +(signIn?"sign-in":threw?"error page":"unidentified")+"): "+body.slice(0,200)); }catch(_cw){}
+        var why, fix;
+        if(signIn&&!threw){
+          why="the request was redirected to Google\u2019s sign-in page";
+          fix="The deployment is not reachable as \u201cAnyone\u201d, or it needs approving "
+             +"again: open the /exec address in a browser tab, approve it once, and check "
+             +"Deploy \u2192 Manage deployments has \u201cWho has access: Anyone\u201d.";
+        } else if(threw){
+          why="Apps Script ran the script and it threw, so it answered with its error page";
+          fix="The deployment is almost certainly older than this page. Redeploy it: "
+             +"Deploy \u2192 Manage deployments \u2192 edit \u2192 New version. "
+             +"The Apps Script execution log says which line.";
+        } else {
+          why="Apps Script answered with a Google page instead of the report";
+          fix="Two things do this. If other writes are landing, the deployment is authorised and "
+             +"the script threw \u2014 redeploy it (Deploy \u2192 Manage deployments \u2192 "
+             +"edit \u2192 New version). If nothing is landing, it needs approving: open the "
+             +"/exec address in a browser tab and check \u201cWho has access: Anyone\u201d. "
+             +"The console has the first 200 characters of the reply.";
+        }
+        return {ok:false,needsAuth:signIn&&!threw,
+          error:why+" \u2014 so nothing was recorded. "+fix};
       }
       var err=(d&&d.error)?String(d.error):("the server replied with something unreadable: "
               +String(t||"").slice(0,120));
