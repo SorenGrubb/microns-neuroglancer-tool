@@ -432,13 +432,31 @@ UJ.tracing = (function(){
     return String(label || "") + " " + n;
   }
 
+  /* The last stamp this page handed out, so the next one cannot be the same or earlier. */
+  var STRUCTURE_STAMP = 0;
   function structureId(name, stamp){
     /* Readable, unique per submission, and stable within one: the rows of one tracing have to find
        each other on the way back out, and a reader looking at the sheet should be able to tell
-       which cell a row belongs to without a join. */
+       which cell a row belongs to without a join.
+
+       ── AND "UNIQUE" USED TO BE A CLAIM RATHER THAN A FACT ─────────────────────────  2026-09-23
+       This was slug + "_" + Date.now(). Measured: a THOUSAND mints in a row gave two distinct ids,
+       because they shared two milliseconds. Two structures with one id are one structure with two
+       versions, and the list shows the later -- which is how Søren came to be missing an arachnoid
+       barrier cell whose 30,948 vertices were sitting behind a "v2" label.
+
+       The counter makes a repeat within this page impossible rather than unlikely. The four random
+       characters are for the collision no counter here can see: two people, two browsers, the same
+       slug in the same millisecond. An explicit stamp is returned verbatim, because that parameter
+       exists so an id can be REGENERATED and a random tail would destroy exactly that.
+       See src/two_structures_never_share_an_id.py. */
     var slug = String(name || "traced").toLowerCase().replace(/[^a-z0-9]+/g, "-")
                  .replace(/^-|-$/g, "").slice(0, 40) || "traced";
-    return slug + "_" + (stamp || Date.now());
+    if (stamp) return slug + "_" + stamp;
+    var n = Date.now();
+    if (n <= STRUCTURE_STAMP) n = STRUCTURE_STAMP + 1;
+    STRUCTURE_STAMP = n;
+    return slug + "_" + n + "_" + Math.random().toString(36).slice(2, 6);
   }
 
   function ringsToRows(rings, meta){

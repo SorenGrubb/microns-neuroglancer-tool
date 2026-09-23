@@ -81,7 +81,21 @@ const SHARED = {
   "ujump_theme":   "one light/dark preference across the family (δJump is the odd one out with its own)",
   "reporterName":  "the same person is reporting on every tool",
   "reporterEmail": "likewise",
-  "cave_token":    "µJump and πJump only — minnie65 and pinky100 are both CAVE datastacks one token reaches"
+  "cave_token":    "µJump and πJump only — minnie65 and pinky100 are both CAVE datastacks one token reaches",
+  /* ── THE PAD'S TIPS, DISMISSED ONCE ───────────────────────────────────────────────  2026-09-23
+     Added by the pad-tips work and caught by this check on all eight tools, correctly: it has no
+     page prefix. Listed rather than prefixed, because it is a ujump_theme and not one of the four
+     keys this file was written for.
+     The test is what the key HOLDS. The four that caused the bug held per-volume DATA -- a
+     dashboard bundle, a list of visited nucleus ids -- so one page reading another's was reading
+     the wrong cells, and pinky100's ids being valid minnie65 ids made that silent. This holds one
+     person's answer to "stop explaining the pad to me", about a widget that is the same widget on
+     every tool, showing the same sentences. Dismissing it in µJump and finding it dismissed in
+     πJump is the behaviour somebody would expect, exactly as with the theme.
+     It is spelled jump_, not ujump_, so the name says it belongs to the family rather than
+     borrowing one tool's namespace. */
+  "jump_pad_tips_off_v1": "one dismissal of the tracing pad's tips across the family — the same pad, "
+                        + "the same tips, one person's preference about being told"
 };
 
 /* Which pages each shared key is allowed on, where that is narrower than "anywhere". */

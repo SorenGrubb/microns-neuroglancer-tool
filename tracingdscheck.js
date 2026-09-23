@@ -54,7 +54,19 @@ const ok = (c, what, d) => {
     const reads = mine.filter(r => r.method === "GET" && /[?&](tracings|drafts)=/.test(r.url));
     const posts = mine.filter(r => r.method === "POST");
     console.log("\n" + page + (got.hasPAR ? "  (has postAndRead)" : "  (no postAndRead)"));
-    ok(reads.length >= 2, "the card read its tracings", reads.length + " read(s)");
+    /* ── ONE READ IS THE POINT NOW, NOT TWO ─────────────────────────────────────────  2026-09-23
+       This asked for >= 2, because tracingIndexSoon() and tracingBrowse() each fetched ?tracings=1
+       and the two calls above made two identical requests. That WAS the "really slow" Søren
+       reported: measured at 3.6 s warm and 27.7 s cold each, for one answer. They share one
+       in-flight promise now, so this sequence makes exactly one request -- see
+       src/the_dataset_list_does_not_wait_for_what_it_has.py, and datasetlistcheck.js, which owns
+       the counting.
+       What THIS check is for is the dataset name on every read, which is asserted below and is
+       unaffected. So: at least one read, and no two of them identical. */
+    ok(reads.length >= 1, "the card read its tracings", reads.length + " read(s)");
+    const dupe = reads.map(r => r.url).filter((u, i, a) => a.indexOf(u) !== i);
+    ok(!dupe.length, "...and no two reads are the same request",
+       dupe.length ? dupe.length + " duplicate(s): " + dupe[0].replace(/^.*\/exec/, "") : "none");
     const bad = reads.filter(r => !new RegExp("[?&]ds=" + ds + "(&|$)").test(r.url));
     ok(!bad.length, "...every read names this dataset, " + ds,
        bad.length ? bad[0].url.replace(/^.*\/exec/, "") : reads.map(r => (r.url.match(/[?&]ds=[^&]*/) || ["(none)"])[0]).join(" "));

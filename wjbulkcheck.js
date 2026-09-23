@@ -168,8 +168,21 @@ const link = pts => "https://neuroglancer-demo.appspot.com/#!" + encodeURICompon
   });
   ok(o.n === 1 && o.traced.length === 1 && /mitochondri/.test(o.traced[0]),
      "the matched nucleus's outline comes as one layer, and one tab is opened", o.traced.join(",") || o.names.join(","));
-  ok(o.first && o.first.pointA.join(",") === "1200,1200,1250",
-     "its contour is in the volume's voxels, as the link declares", o.first && o.first.pointA.join(","));
+  /* ── A CONTOUR IS A POLYLINE NOW, WHERE THE VIEWER READS ONE ────────────────────  2026-09-23
+     This read o.first.pointA, which is the shape core/tracing.js wrote when every contour went out
+     as one {type:"line"} per edge. Since 2026-09-22 a viewer that reads polylines gets ONE
+     {type:"polyline", vertices:[…]} per contour instead -- 176 contours of a whole cell were
+     30,948 line annotations and a link over Chromium's 2 MiB cap. The assertion is the same one
+     either way: the FIRST POINT of the contour, in the volume's own voxels. Read from whichever
+     shape the annotation has, so this check keeps testing the coordinate rather than the encoding.
+     See src/the_viewer_link_is_polylines.py and src/the_viewer_decides_the_shape.py. */
+  /* A line carries pointA; a polyline carries `points`, an array of vertices (core/tracing.js's
+     ringAnnotations -- the same field name polylineRing reads back in). */
+  const firstPt = o.first && (o.first.pointA || (o.first.points && o.first.points[0]));
+  ok(!!firstPt && firstPt.join(",") === "1200,1200,1250",
+     "its contour starts in the volume's voxels, as the link declares",
+     (firstPt ? firstPt.join(",") : "no point on it")
+       + (o.first ? "  (a " + (o.first.type || "line") + ")" : ""));
   ok(errors.length === 0, "no page errors", errors.join(" | ") || "none");
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
