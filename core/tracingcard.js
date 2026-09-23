@@ -1375,10 +1375,34 @@ function tracingViewerOpen(structs, say, ids){
                + "neuroglancer-demo read polylines.";
   } catch (_e){}
   if (url.length > TRACING_LINK_MAX){
+    /* PRICE THE ALTERNATIVE (2026-09-23). Søren spent an evening dropping points and then sections
+       off a cell that already fitted as polylines and could never fit as lines -- so rather than
+       tell him again that this viewer cannot read them, the same state is measured the other way
+       and the answer is in the sentence. See src/an_oversized_link_prices_the_other_viewer.py. */
+    let elseSay = "";
+    try {
+      if (UJ.tracing.viewerTakesPolylines && !UJ.tracing.viewerTakesPolylines(base)){
+        const alt = JSON.parse(JSON.stringify(st));
+        let n = 0;
+        (alt.layers || []).forEach(function(l, i){
+          if (!l || !l.annotations) return;
+          const rs = structs[n] ? structs[n].rings : null; n++;
+          if (rs) l.annotations = tracingRingAnns(rs, "t" + i, "https://spelunker.cave-explorer.org/");
+        });
+        const altLen = ("https://spelunker.cave-explorer.org/#!"
+                        + encodeURIComponent(JSON.stringify(alt))).length;
+        elseSay = altLen <= TRACING_LINK_MAX
+          ? " As polylines it would be " + Math.round(altLen / 1000) + "k and WOULD open as a link "
+            + "\u2014 Spelunker and neuroglancer-demo read them, this viewer does not. No contour "
+            + "would be dropped."
+          : " It would still be " + Math.round(altLen / 1000) + "k as polylines, so no viewer takes "
+            + "it as a link: the {} editor is the way in.";
+      }
+    } catch (_e){}
     tracingStateOffer(JSON.stringify(st),
       "That is more than a tab can be opened with (" + kc + "; the browser refuses past 2,097,152 "
       + "and shows about:blank#blocked). Paste the state into Neuroglancer instead \u2014 its {} "
-      + "button takes it \u2014 or open one structure at a time." + shapeSay, true);
+      + "button takes it, with no URL and no limit." + elseSay, true);
     return;
   }
   /* shapeSay is computed above, for both branches. */
