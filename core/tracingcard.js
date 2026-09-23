@@ -2327,6 +2327,66 @@ function tracingThinGain(){
   if (!r.before || r.after >= r.before) return null;
   return r;
 }
+/* ── DROP REDUNDANT SECTIONS ─────────────────────────────────────────────────  2026-09-23
+   Søren: "Can we reduce z-layers that are redundant in addition?" A section on the straight line
+   between its neighbours adds nothing to the mesh (which bands straight) or to the volume (a
+   trapezoid sum over the sections). See src/redundant_sections_can_go_too.py. */
+function tracingThinZGain(){
+  const rings = (TRACING_PENDING && TRACING_PENDING.rings) || null;
+  if (!rings || !rings.length) return null;
+  if (!(window.UJ && UJ.traceloft && UJ.traceloft.thinSections)) return null;
+  const r = UJ.traceloft.thinSections(rings, { nm: thinNmOf("tracingThinNm") });
+  if (!r || r.after >= r.before) return null;
+  return r;
+}
+function tracingThinZShow(){
+  const btn = document.getElementById("tracingThinZ");
+  if (!btn) return;
+  if (!btn.dataset.wired){ btn.dataset.wired = "1"; btn.addEventListener("click", tracingThinZRun); }
+  const g = tracingThinZGain();
+  btn.style.display = g ? "" : "none";
+  if (g) btn.textContent = "Drop redundant sections (" + g.before + " \u2192 " + g.after + ")";
+}
+function tracingThinZRun(){
+  const rings = (TRACING_PENDING && TRACING_PENDING.rings) || null;
+  if (!rings || !rings.length) return;
+  const g = tracingThinZGain();
+  if (!g){ tracingSay("No section lies close enough to the line between its neighbours to drop."); return; }
+  const vb = tracingVolumeOf(rings);
+  TRACING_PENDING.rings = g.rings.map(function(r){
+    return { z: r.z, points: r.points, inst: r.inst || 0 };
+  });
+  const gs = tracingGroups();
+  if (gs){
+    const keep = {};
+    g.rings.forEach(function(r){ keep[+r.z] = 1; });
+    gs.forEach(function(grp){
+      grp.rings = (grp.rings || []).filter(function(r){ return keep[+r.z]; });
+    });
+  }
+  const va = tracingVolumeOf(TRACING_PENDING.rings);
+  tracingLayersRender();
+  tracingVolShow();
+  tracingThinShow();
+  tracingThinZShow();
+  pad3DSoon();
+  /* THE STABLE FIGURE, and a word about the other one. volumeTrapezoidUm3 integrates between the
+     outermost contours and does not move when sections go; the headline Cavalieri figure gives
+     every section a full slab and therefore does. Measured in thinzcheck.js: a cylinder thinned to
+     its two ends keeps its trapezoid volume exactly and DOUBLES its Cavalieri one. */
+  let volSay = "";
+  if (vb && va && vb.ok && va.ok){
+    const b0 = vb.volumeTrapezoidUm3, a0 = va.volumeTrapezoidUm3;
+    const moved = b0 ? Math.abs(a0 - b0) / b0 : 0;
+    volSay = " Between the outermost contours it is " + volFmt(a0) + " \u00b5m\u00b3, was "
+           + volFmt(b0) + " (" + (100 * moved).toFixed(2) + "%). The Cavalieri figure above moves "
+           + "more, because every remaining section now stands for a wider slab.";
+  }
+  tracingSay("Dropped " + (g.before - g.after) + " section" + (g.before - g.after === 1 ? "" : "s")
+    + ": " + g.before + " \u2192 " + g.after + ". No contour was further than " + g.worstNm
+    + " nm from the line between the sections either side of it." + volSay
+    + " Nothing is saved until you add it \u2014 read the link again to get every section back.");
+}
 function tracingThinShow(){
   const btn = document.getElementById("tracingThin");
   if (!btn) return;
@@ -2342,6 +2402,7 @@ function tracingThinShow(){
   btn.style.display = g ? "" : "none";
   if (g) btn.textContent = "Drop redundant points (" + g.before.toLocaleString() + " \u2192 "
                          + g.after.toLocaleString() + ")";
+  try { tracingThinZShow(); } catch (_e){}
 }
 function tracingThinRun(){
   const rings = (TRACING_PENDING && TRACING_PENDING.rings) || null;
@@ -5225,6 +5286,11 @@ function tracingCardHtml(){
     "     when there is a tenth or more to gain. See src/a_button_drops_the_redundant_points.py. -->",
     "<button class=\"idbtn\" id=\"tracingThin\" style=\"display:none;margin-top:4px\" title=\"A contour drawn with a pen is sampled by the pointer, not by the shape: a straight stretch of membrane arrives as twenty points that two would draw identically. This drops those, moving no point of the outline by more than half a voxel. Your saved tracing changes only if you add it afterwards — read the link again to get every point back.\">Drop redundant points</button>",
     "<label id=\"tracingThinNmRow\" style=\"display:none;font-size:12px;align-items:center;gap:6px;margin-top:4px\" title=\"How far a point may move, in nanometres. 16 nm is half a pixel at the 32 nm level tracings are drawn at — below what the screen showed you. Raise it to drop more; the button says how many before you press it.\">within <input type=\"number\" id=\"tracingThinNm\" value=\"16\" min=\"1\" max=\"400\" step=\"1\" style=\"width:64px\"> nm</label>",
+    "<!-- DROP REDUNDANT SECTIONS.  2026-09-23. Søren: \"Can we reduce z-layers that are redundant",
+    "     in addition?\" A section already on the straight line between its neighbours adds nothing to",
+    "     the mesh or the volume. Unlike dropping POINTS this moves the Cavalieri figure, so the",
+    "     sentence says the stable one. See src/redundant_sections_can_go_too.py. -->",
+    "<button class=\"idbtn\" id=\"tracingThinZ\" style=\"display:none;margin-top:4px\" title=\"Drops whole sections whose contour already lies on the straight line between the sections above and below — which is what the mesh and the volume assume between them anyway. Unlike dropping points, this changes which sections the volume is summed over: the figure between the outermost contours stays put, the Cavalieri one moves. Nothing is saved until you add it.\">Drop redundant sections</button>",
     "<!-- THE SHAPE, BEFORE IT IS COMMITTED.  2026-09-19. Søren: \"the neuroglancer link paste function",
     "     needs to have a 3D rendering also, so you can see the 3D mesh before committing.\" The pad has",
     "     had this since 2026-09-17, and pad3DRings() has ALWAYS fallen back to a pasted tracing -- but",

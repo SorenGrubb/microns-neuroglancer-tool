@@ -628,7 +628,85 @@ UJ.traceloft = (function(){
              unpaired: unpaired, chains: chains.length };
   }
 
-  return { loft: loft, volume: volume, interpolate: interpolate,
+  /* ── SECTIONS THAT LIE ON THE LINE BETWEEN THEIR NEIGHBOURS ──────────────────  2026-09-23
+     Søren: "Can we reduce z-layers that are redundant in addition?"
+
+     LINEAR, not the cubic interpolate() above uses. loft() bands straight between sections and
+     Cavalieri is a trapezoid sum over them, so a contour already on the straight line between its
+     two neighbours adds nothing to the mesh and nothing to the volume. Fitting a cubic here would
+     be prettier and false: it is not what either consumer does with the sections.
+
+     AND THIS MOVES THE VOLUME, which dropping points inside a contour does not: it changes which
+     areas the sum is over. The caller is given volBefore/volAfter to say so.
+
+     thinSections(rings, {nm}) -> { rings, before, after, dropped, worstNm }
+     The first and last section are never dropped -- they are what the object's extent IS.
+     See src/redundant_sections_can_go_too.py. */
+  function thinSections(rings, opts){
+    opts = opts || {};
+    var resNm = (window.UJ && UJ.cfg && UJ.cfg.res && +UJ.cfg.res[0]) || 4;
+    var tol = (+opts.nm > 0 ? +opts.nm : 16) / resNm;      /* voxels */
+    var byZ = {}, zs = [];
+    (rings || []).forEach(function(r){
+      if (!r || !r.points || r.points.length < 3) return;
+      var z = +r.z;
+      if (!byZ[z]){ byZ[z] = []; zs.push(z); }
+      byZ[z].push(r);
+    });
+    zs.sort(function(a, b){ return a - b; });
+    if (zs.length < 3) return { rings: (rings || []).slice(), before: zs.length,
+                                after: zs.length, dropped: [], worstNm: 0 };
+
+    /* One resampled, aligned ring per section: the comparison has to be vertex to vertex, and
+       pairUp/bestOffset are how every other part of this file decides which vertex is which. */
+    var reps = zs.map(function(z){ return resample(orient(byZ[z][0].points), N); });
+    for (var i = 1; i < reps.length; i++){
+      var off = bestOffset(reps[i - 1], reps[i]);
+      reps[i] = reps[i].slice(off).concat(reps[i].slice(0, off));
+    }
+
+    /* How far section k sits from the straight line between a and b. */
+    function devOf(a, k, b){
+      var t = (zs[k] - zs[a]) / (zs[b] - zs[a]), worst = 0;
+      for (var v = 0; v < N; v++){
+        var x = reps[a][v][0] + (reps[b][v][0] - reps[a][v][0]) * t;
+        var y = reps[a][v][1] + (reps[b][v][1] - reps[a][v][1]) * t;
+        var d = Math.sqrt(Math.pow(reps[k][v][0] - x, 2) + Math.pow(reps[k][v][1] - y, 2));
+        if (d > worst) worst = d;
+      }
+      return worst;
+    }
+
+    /* Greedy: the cheapest section goes first, and its two neighbours are re-judged against the
+       wider gap they now span. A section only ever gets harder to drop, never easier. */
+    var alive = zs.map(function(){ return true; });
+    var prev = zs.map(function(_, i){ return i - 1; });
+    var next = zs.map(function(_, i){ return i + 1; });
+    var dev = zs.map(function(_, i){
+      return (i === 0 || i === zs.length - 1) ? Infinity : devOf(i - 1, i, i + 1);
+    });
+    var dropped = [], worst = 0;
+    for (;;){
+      var best = -1, bestD = Infinity;
+      for (var k = 1; k < zs.length - 1; k++)
+        if (alive[k] && dev[k] < bestD){ bestD = dev[k]; best = k; }
+      if (best < 0 || bestD > tol) break;
+      alive[best] = false; dropped.push(zs[best]);
+      if (bestD > worst) worst = bestD;
+      var a = prev[best], b = next[best];
+      next[a] = b; prev[b] = a;
+      if (a > 0 && alive[a]) dev[a] = devOf(prev[a], a, next[a]);
+      if (b < zs.length - 1 && alive[b]) dev[b] = devOf(prev[b], b, next[b]);
+    }
+
+    var keep = {};
+    zs.forEach(function(z, i){ if (alive[i]) keep[z] = 1; });
+    var out = (rings || []).filter(function(r){ return keep[+r.z]; });
+    return { rings: out, before: zs.length, after: zs.length - dropped.length,
+             dropped: dropped, worstNm: Math.round(worst * resNm * 10) / 10 };
+  }
+
+  return { loft: loft, volume: volume, interpolate: interpolate, thinSections: thinSections,
            _orient: orient, _resample: resample, _bestOffset: bestOffset,
            _signedArea: signedArea, _pairUp: pairUp,
            _ringArea: ringArea, _pointInRing: pointInRing, _areaOfSection: areaOfSection,
