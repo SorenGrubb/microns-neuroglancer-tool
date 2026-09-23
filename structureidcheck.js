@@ -48,12 +48,19 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
 
   const got = await p.evaluate(() => {
     const S = UJ.tracing.structureId;
-    /* Both inside one millisecond, deliberately: this is the collision. */
-    const t0 = Date.now();
+    /* ── THE CLOCK IS HELD STILL ─────────────────────────────────────────────────  2026-09-23
+       This used to mint twice and then ASK whether both had landed in the same millisecond, which
+       is a coin toss: one run in a few straddles the boundary and the check fails on its own
+       precondition while every real assertion passes. The collision is the point, so it is made to
+       happen rather than waited for. */
+    const realNow = Date.now;
+    Date.now = function(){ return 1790200000000; };
     const a = S("Whole cell"), c = S("Whole cell");
-    const sameMs = (Date.now() === t0);
+    const sameMs = (Date.now() === 1790200000000);
+    /* ...and a thousand more, all claiming the same instant. */
     const many = [];
     for (let i = 0; i < 1000; i++) many.push(S("Lysosome"));
+    Date.now = realNow;
     return { a, c, sameMs, uniq: new Set(many).size, n: many.length,
              stamped: S("Whole cell", 1790186254669),
              stampedTwice: S("Whole cell", 1790186254669),
@@ -62,7 +69,7 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   const other = await (await mk()).evaluate(() => UJ.tracing.structureId("Whole cell"));
 
   console.log("two whole cells minted in the same millisecond");
-  ok(got.sameMs, "(the two mints really were in one millisecond)", got.sameMs);
+  ok(got.sameMs, "(the clock was held still, so both mints claim one millisecond)", got.sameMs);
   ok(got.a !== got.c, "...get DIFFERENT ids", got.a === got.c ? "BOTH " + got.a : got.a + " / " + got.c);
   ok(got.uniq === got.n, "a thousand in a row are all distinct",
      got.uniq + " distinct of " + got.n);

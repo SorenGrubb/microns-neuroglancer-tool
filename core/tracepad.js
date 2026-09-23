@@ -266,6 +266,33 @@ UJ.tracepad = (function(){
     pad.stroke = null;
     return pad.inst;
   }
+  /* ── A WHOLE STRUCTURE, GONE ───────────────────────────────────────────────────  2026-09-23
+     Søren: "I should be able to delete one of the drawings, but give a warning first." The warning
+     belongs to the card, which is what knows how to ask; this is the removal, and it returns how
+     many contours went so the card can say.
+
+     THE SURVIVORS KEEP THEIR NUMBERS -- the gap is not closed up. newInstance above already refuses
+     to reuse a number, and for the same reason and one more: the card keys PAD_INST_KIND,
+     PAD_INST_COLOUR and PAD_EDIT_IDS by this number, so renumbering would slide every structure's
+     type, colour and dataset id one place to the left. Delete the second of three and 1 and 3 are
+     what is left.
+
+     Deleting the one being drawn moves to the nearest below it, or the first of what remains, so
+     the next stroke lands on a structure that exists rather than opening a new empty one. */
+  function deleteInstance(pad, i){
+    var k = Math.max(0, Math.round(i) || 0);
+    var before = (pad.rings || []).length;
+    pad.rings = (pad.rings || []).filter(function(r){ return (r.inst || 0) !== k; });
+    if ((pad.inst || 0) === k){
+      var left = [];
+      pad.rings.forEach(function(r){ var j = r.inst || 0; if (left.indexOf(j) < 0) left.push(j); });
+      left.sort(function(a, b){ return a - b; });
+      var below = left.filter(function(x){ return x < k; });
+      pad.inst = below.length ? below[below.length - 1] : (left.length ? left[0] : 0);
+      pad.pending = []; pad.stroke = null;
+    }
+    return before - pad.rings.length;
+  }
 
   function count(pad){
     var z = {};
@@ -509,6 +536,7 @@ UJ.tracepad = (function(){
 
   return { create: create, setZ: setZ, addVertex: addVertex, closeRing: closeRing,
            instances: instances, newInstance: newInstance, setInstance: setInstance,
+           deleteInstance: deleteInstance,
            startStroke: startStroke, strokePoint: strokePoint, endStroke: endStroke,
            extendStroke: extendStroke,
            simplify: simplify, simplifyClosed: simplifyClosed,

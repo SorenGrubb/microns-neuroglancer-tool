@@ -1672,6 +1672,16 @@ function tracingKeep(){
        re-register leaves the stale point standing. Moved is the question; pressed is not. */
     if(prior&&prior.centre_registered)t.centre_registered=prior.centre_registered;
     if(prior&&prior.centre_at)t.centre_at=prior.centre_at;
+    /* ── AND WHAT IT LAST SENT ──────────────────────────────────────────────────  2026-09-23
+       The same omission as the one the paragraph above describes, one field later. shared_sig is
+       the fingerprint of the last submission and it is what tracingPublish refuses a re-send on;
+       rebuilt without it, every press looked like a tracing that had never been sent. Søren's
+       sheet: three rows for one organelle, 12 contours and 137 vertices on each of them.
+
+       ANYTHING REMEMBERED ABOUT A TRACING BELONGS IN THIS LIST. That is now four fields, all with
+       the same shape and the same failure -- so if a fifth is ever added, it goes here in the same
+       breath. See src/what_was_sent_survives_a_re_add.py. */
+    if(prior&&prior.shared_sig)t.shared_sig=prior.shared_sig;
     t.pending_share=true;
     if(at>=0)TRACINGS_KEPT.splice(at,1,t); else TRACINGS_KEPT.push(t);
   });
@@ -1682,8 +1692,12 @@ function tracingKeep(){
      2026-09-19: this used to be three statements here and one of them missing there. */
   tracingPendingClear();
   document.getElementById("tracingLink").value="";
-  let sent=0;
-  all.forEach(function(t){ if(tracingPublish(t))sent++; });
+  let sent=0, same=0;
+  all.forEach(function(t){
+    t.share_nochange=false;
+    if(tracingPublish(t))sent++;
+    else if(t.share_nochange)same++;   // already up there, unchanged: arrived, not waiting
+  });
   /* IT IS NOT A DRAFT ANY MORE. Kept locally and queued or shared, and either way the way back to
      it is the list -- so a stale draft here would be a second, older copy of the same cell waiting
      to be resumed on top of it. */
@@ -1704,8 +1718,12 @@ function tracingKeep(){
   const what=all.length===1
     ?'“'+all[0].name+'”'
     :all.length+' structures — '+all.map(function(t){return t.name;}).join(", ");
-  tracingSay(sent===all.length
+  tracingSay(sent+same===all.length
     ?what+' '+(all.length===1?'is':'are')+' in the dataset and in this page’s 3D export. '
+     +(same?(same===all.length
+        ?(all.length===1?'Nothing had changed since you last added it, so nothing was sent again. '
+                        :'Nothing had changed since you last added them, so nothing was sent again. ')
+        :same+' of them had not changed, so only the rest were sent again. '):'')
      +'Anybody can open '+(all.length===1?'it':'them')+' from the list at the bottom of this card '
      +'and add to '+(all.length===1?'it':'them')+' — that becomes the next version, with their '
      +'name beside yours, and nothing of this one is deleted.'
@@ -1851,6 +1869,12 @@ function tracingPublish(t,quiet){
      goes out by itself on the next sign-in, which is the same row arriving later instead of now. */
   const sig=tracingShareSig(sub);
   if(sig&&t.shared_sig===sig){
+    /* WHY IT DID NOT GO, for the caller (2026-09-23). tracingKeep writes the card's last word from
+       `sent === all.length`, and a tracing that was refused as unchanged is not sent -- so pressing
+       Add on something already in the dataset answered "It has NOT reached the dataset yet -- sign
+       in with Google", which is alarming and the opposite of true. Two reasons not to send, and
+       they need different sentences. */
+    t.share_nochange=true;
     t.pending_share=false;
     tracingWrite(TRACINGS_KEPT);
     if(!quiet)tracingSay("\u201c"+(t.name||"That tracing")+"\u201d is already in the dataset and "
@@ -1861,6 +1885,7 @@ function tracingPublish(t,quiet){
   const ok=postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid},sub),
                       "Tracing added to the dataset \u2014 thank you.");
   if(ok===false)return false;
+  t.share_nochange=false;
   t.shared_sig=sig;
   t.pending_share=false;
   t.shared_at=new Date().toISOString();
@@ -3931,7 +3956,7 @@ function padInstances(){
       + (on ? "outline:2px solid var(--accent);" : "") + '" title="'
       + (on ? "The one you are drawing now" : "Go back to this one") + ' — '
       + it.contours + ' contour(s) on ' + it.sections + ' section(s)">'
-      + '<span style="width:9px;height:9px;border-radius:2px;background:'
+      + '<span class="padswatch" style="width:9px;height:9px;border-radius:2px;background:'
       + escHtml(padInstColour(it.inst)) + '"></span>' + (it.inst + 1)
       /* Its own type on the chip once they can differ -- with the option off the label would be the
          same word repeated down the strip, which is noise. */
@@ -3939,10 +3964,21 @@ function padInstances(){
           ? ' <span style="opacity:.75;max-width:90px;overflow:hidden;text-overflow:ellipsis;'
             + 'white-space:nowrap">' + escHtml(tracingKindFor(it.inst).name || "?") + '</span>'
           : '')
-      + (it.contours ? '' : ' <span style="opacity:.6">empty</span>') + '</button>';
+      + (it.contours ? '' : ' <span style="opacity:.6">empty</span>')
+      /* Nothing drawn yet is nothing to delete, and nothing to go to either. */
+      + (it.contours
+          ? ' <span class="padx" data-inst="' + it.inst + '" title="Delete this drawing"'
+            + ' style="padding:0 2px;opacity:.75">\u00d7</span>'
+          : '') + '</button>';
   }).join("");
   [].slice.call(box.querySelectorAll(".padinst")).forEach(function(b){
-    b.addEventListener("click", function(){
+    b.addEventListener("click", function(ev){
+      /* The × asks before it does anything (2026-09-23). Søren: "I should be able to delete one of
+         the drawings, but give a warning first." */
+      if (ev.target && ev.target.closest && ev.target.closest(".padx")){
+        padInstAsk(+b.dataset.inst);
+        return;
+      }
       /* What is in the type boxes belongs to the one being LEFT, and the one being arrived at puts
          its own there. Storing first is what makes the strip a set of tabs rather than a row of
          buttons that quietly copy one structure's type onto the next. */
@@ -3952,9 +3988,67 @@ function padInstances(){
       const col = document.getElementById("tracingColor");
       if (col) col.value = padInstColour(PAD.inst);
       padPaint(); padRings();
+      /* ...AND GOES TO IT. The tooltip on this chip has said "Go back to this one" since it was
+         written; until 2026-09-23 it only changed the selection and left the view where it was,
+         which on a cell forty sections deep is the difference between a click and a search. */
+      var went = padGoToInst(PAD.inst);
       padSay("Drawing number " + (PAD.inst + 1) + " now — anything you draw joins that one."
+        + (went ? (went.moved ? " Moved to it, on section " + went.z + "."
+                              : " It is at " + went.at[0] + ", " + went.at[1] + " here.") : "")
         + (tracingEachOwn() ? " The type box above is its own." : ""));
     });
+  });
+}
+
+/* ── ASKING BEFORE A DRAWING GOES ──────────────────────────────────────────────  2026-09-23
+   Søren: "I should be able to delete one of the drawings, but give a warning first."
+
+   It NAMES AND COUNTS. "Delete number 3?" does not say that an afternoon goes with it, so the bar
+   says how many contours on how many sections -- the two numbers that say how much work it was.
+
+   AND IT SAYS WHAT IS NOT DELETED. A drawing opened from the dataset still has its rows and its
+   file up there; taking it off the pad is taking it out of your hands, not withdrawing it from
+   everybody. Somebody who thinks this retracts a published tracing will either not press it when
+   they should, or press it believing they have retracted something they have not.
+
+   The bar replaces the strip rather than sitting over it, so nothing is hidden behind it and
+   padInstances() puts the strip back whichever button is pressed. */
+function padInstAsk(inst){
+  const box = document.getElementById("tracePadInsts");
+  if (!box || !PAD) return;
+  const it = UJ.tracepad.instances(PAD).filter(function(x){ return x.inst === inst; })[0];
+  if (!it || !it.contours) return;
+  const what = (typeof tracingKindFor === "function" && tracingKindFor(inst).name) || "";
+  const shared = (typeof PAD_EDIT_IDS !== "undefined" && PAD_EDIT_IDS[String(inst)]) || "";
+  box.innerHTML = '<span style="color:var(--bad)">Delete drawing ' + (inst + 1)
+    + (what ? ' \u201c' + escHtml(what) + '\u201d' : '') + '? '
+    + it.contours + ' contour' + (it.contours === 1 ? '' : 's') + ' on '
+    + it.sections + ' section' + (it.sections === 1 ? '' : 's') + ' would go, and that cannot be '
+    + 'undone.</span> '
+    + (shared ? '<span class="hint">It stays in the dataset either way \u2014 this only takes it '
+                + 'off the pad.</span> ' : '')
+    + '<button type="button" class="hist-chip padgo" data-go="' + inst + '" '
+    + 'style="color:var(--bad)">Delete it</button> '
+    + '<button type="button" class="hist-chip padkeep" data-keep="' + inst + '">Keep it</button>';
+  const keep = box.querySelector(".padkeep");
+  if (keep) keep.addEventListener("click", function(){
+    padInstances();
+    padSay("Kept. Nothing was deleted.");
+  });
+  const go = box.querySelector(".padgo");
+  if (go) go.addEventListener("click", function(){
+    const gone = UJ.tracepad.deleteInstance(PAD, inst);
+    /* Its type, its colour and the dataset tracing it was opened from are keyed by its number, and
+       a number that no longer names anything must not go on answering for one. */
+    try { delete PAD_INST_KIND[String(inst)]; } catch (_e){}
+    try { delete PAD_INST_COLOUR[String(inst)]; } catch (_e){}
+    try { delete PAD_EDIT_IDS[String(inst)]; } catch (_e){}
+    if (typeof PAD_EDIT_ID !== "undefined" && PAD_EDIT_ID && PAD_EDIT_ID === shared) PAD_EDIT_ID = "";
+    tracingShowKindOf(PAD.inst);
+    padPaint(); padRings();          // which redraws the strip, the volume, the draft and the 3D
+    padSay("Drawing " + (inst + 1) + " deleted \u2014 " + gone + " contour"
+      + (gone === 1 ? "" : "s") + " gone. Drawing " + (PAD.inst + 1) + " is the one you are on now."
+      + (shared ? " Its tracing in the dataset is untouched." : ""));
   });
 }
 
@@ -4279,9 +4373,49 @@ function padPaint(){
     });
   }
 }
-/* One chip per contour on this section, each with its own delete. "Delete this one" should not
-   mean "Undo until it is gone" -- that is the difference between correcting a tracing and starting
-   it again. */
+/* ── A CHIP GOES TO WHAT IT NAMES ──────────────────────────────────────────────  2026-09-23
+   Søren: "When clicking one of the contours, it should jump to that contour in the EM window, so
+   that I don't have to look for it." See src/a_chip_takes_you_to_what_it_names.py.
+
+   The centre of a contour is the mean of its vertices. Not its bounding-box centre: a crescent --
+   which is what half the organelles on this pad are -- has a bounding-box centre out in the
+   neuropil beside it, and the point of this is to put the thing itself under the cursor. */
+function padRingCentre(r){
+  if (!r || !r.points || !r.points.length) return null;
+  var cx = 0, cy = 0;
+  r.points.forEach(function(p){ cx += p[0]; cy += p[1]; });
+  return [Math.round(cx / r.points.length), Math.round(cy / r.points.length)];
+}
+function padGoToRing(ring){
+  var r = PAD && PAD.rings && PAD.rings[ring];
+  var c = padRingCentre(r);
+  if (!c) return null;
+  /* A half-drawn contour belongs to the section it is on -- padStep's rule, and the same here. */
+  if (PAD.z !== r.z){ PAD.z = r.z; PAD.pending = []; }
+  PAD_CENTRE = [c[0], c[1], PAD.z];
+  padDraw();
+  return c;
+}
+/* A structure has many contours, so: the one on THIS section if it has one -- and then the z does
+   not move, or picking a structure up to carry on drawing it would throw the section away
+   underneath you -- otherwise the nearest section it is on. */
+function padGoToInst(inst){
+  var mine = ((PAD && PAD.rings) || []).filter(function(r){ return (r.inst || 0) === inst; });
+  if (!mine.length) return null;
+  var here = mine.filter(function(r){ return r.z === PAD.z; });
+  var r = here.length ? here[0]
+        : mine.slice().sort(function(a, b){
+            return Math.abs(a.z - PAD.z) - Math.abs(b.z - PAD.z) || (a.z - b.z); })[0];
+  var c = padRingCentre(r);
+  if (!c) return null;
+  if (PAD.z !== r.z){ PAD.z = r.z; PAD.pending = []; }
+  PAD_CENTRE = [c[0], c[1], PAD.z];
+  padDraw();
+  return { at: c, z: r.z, moved: !here.length };
+}
+/* One chip per contour on this section. The BODY goes to it; the × on it deletes it. "Delete this
+   one" should not mean "Undo until it is gone" -- that is the difference between correcting a
+   tracing and starting it again. */
 function padRings(){
   try { tracingPasteGhostsSync(); } catch (_e){}
   /* The preview and the draft both follow the contours from here: this is called after every close,
@@ -4303,18 +4437,32 @@ function padRings(){
   box.innerHTML = '<span class="hint">On this section:</span> '
     + here.map(function(h, n){
         return '<button type="button" class="hist-chip padring" data-ring="' + h.ring + '" '
-          + 'title="Delete this contour \u2014 it belongs to number ' + ((h.inst || 0) + 1) + '">'
-          + '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;'
-          + 'margin-right:4px;background:' + escHtml(padInstColour(h.inst || 0)) + '"></span>'
+          + 'title="Go to this contour \u2014 it belongs to number ' + ((h.inst || 0) + 1)
+          + '. The \u00d7 deletes it.">'
+          + '<span class="padswatch" style="display:inline-block;width:8px;height:8px;'
+          + 'border-radius:2px;margin-right:4px;background:'
+          + escHtml(padInstColour(h.inst || 0)) + '"></span>'
           + (severalHere ? ('#' + ((h.inst || 0) + 1)) : String(n + 1))
-          + ' \u00b7 ' + h.points + ' points \u00d7</button>';
+          + ' \u00b7 ' + h.points + ' points'
+          /* The × was already printed here and already looked like the delete control. Now it is
+             one. Inside the button rather than beside it, so the chip stays one chip. */
+          + ' <span class="padx" data-ring="' + h.ring + '" title="Delete this contour"'
+          + ' style="padding:0 2px;opacity:.75">\u00d7</span></button>';
       }).join(" ");
   [].slice.call(box.querySelectorAll(".padring")).forEach(function(b){
-    b.addEventListener("click", function(){
-      if (UJ.tracepad.deleteRing(PAD, +b.dataset.ring)){
-        padPaint(); padRings();
-        padSay("Contour deleted. " + UJ.tracepad.count(PAD).rings + " left.");
+    b.addEventListener("click", function(ev){
+      /* WHICH HALF OF THE CHIP. The body goes there, the × deletes -- 2026-09-23. It used to be
+         delete either way, which left no way to click a contour at all. */
+      var onX = ev.target && ev.target.closest && ev.target.closest(".padx");
+      if (onX){
+        if (UJ.tracepad.deleteRing(PAD, +b.dataset.ring)){
+          padPaint(); padRings();
+          padSay("Contour deleted. " + UJ.tracepad.count(PAD).rings + " left.");
+        }
+        return;
       }
+      var c = padGoToRing(+b.dataset.ring);
+      if (c) padSay("Moved to that contour, at " + c[0] + ", " + c[1] + ".");
     });
   });
 }

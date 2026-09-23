@@ -616,7 +616,12 @@ function link(annotations){
     ok(deleted.n === onV.n - 1, "right-clicking a point deletes that point", onV.n + " -> " + deleted.n);
     ok(/Point deleted/.test(deleted.say), "...and says so", deleted.say.slice(0, 30));
 
-    /* And a contour has its own delete, so "remove this one" is not "Undo until it is gone". */
+    /* And a contour has its own delete, so "remove this one" is not "Undo until it is gone".
+       THE DELETE IS THE × SINCE 2026-09-23, not the whole chip. Søren: "When clicking one of the
+       contours, it should jump to that contour in the EM window, so that I don't have to look for
+       it" -- which the chip could not do while clicking anywhere on it deleted. The body goes
+       there, the × deletes; padjumpcheck.js owns that split, and this asserts the delete half
+       still works from here. */
     const chips = await p.evaluate(() => {
       const list = document.getElementById("tracePadRings");
       return { n: list.querySelectorAll(".padring").length, text: list.innerText.trim(),
@@ -627,11 +632,11 @@ function link(annotations){
        chips.n + " chip(s) for " + chips.here + " contour(s): " + chips.text.slice(0, 40));
     const afterChip = await p.evaluate(() => {
       const was = PAD.rings.length;
-      document.querySelector("#tracePadRings .padring").click();
+      document.querySelector("#tracePadRings .padring .padx").click();
       return { was, now: PAD.rings.length, other: PAD.rings.filter(r => r.z !== PAD.z).length,
                say: document.getElementById("tracePadSay").innerText };
     });
-    ok(afterChip.now === afterChip.was - 1, "...and clicking it deletes that contour",
+    ok(afterChip.now === afterChip.was - 1, "...and clicking its \u00d7 deletes that contour",
        afterChip.was + " -> " + afterChip.now);
     ok(afterChip.other === 1, "...leaving the other section's contour alone", afterChip.other);
 
@@ -1163,7 +1168,7 @@ function link(annotations){
   ok(empty, "TRACINGS is an empty list, not a missing name — which is a NameError in Colab");
 
   console.log("\nadding it IS sharing it, and signing out only delays it");
-  const shared = await p.evaluate(({ url }) => {
+  const shared = await p.evaluate(({ url, urlEdited }) => {
     window.__alerts = []; window.__posted = [];
     window.postReport = (x) => { window.__posted.push(x); return true; };
     GOOGLE_VERIFIED = false; GOOGLE_CREDENTIAL = "";
@@ -1204,21 +1209,35 @@ function link(annotations){
     /* ...and the block goes when the tracing does: the contours are in the dataset now. */
     out.volSayAfter = document.getElementById("tracingVolSay").textContent;
     out.foundAfter = document.getElementById("tracingFound").style.display;
-    /* Adding the same tracing AGAIN, signed in: same structureId, new groupId -- that pair is what
-       the backend versions on, so coming back after tracing five more sections is a correction
-       rather than a rival tracing of the same cell. */
+    /* Adding the same tracing AGAIN, signed in. TWO cases since 2026-09-23, and they were one
+       until Søren counted his rows: three identical rows for one organelle, seven rows in the sheet
+       carrying nothing new. So the UNCHANGED re-add must post nothing at all, and the EDITED one
+       must post once under the same structureId with a new groupId -- that pair is what the backend
+       versions on, so coming back after tracing five more sections is a correction rather than a
+       rival tracing of the same cell.
+       See microns-neuroglancer-tool/src/what_was_sent_survives_a_re_add.py. */
+    const readAdd = function(u){
+      document.getElementById("tracingLink").value = u;
+      document.getElementById("tracingRead").click();
+      const w = document.getElementById("tracingWhat");
+      w.value = "__other"; w.dispatchEvent(new Event("change", { bubbles: true }));
+      document.getElementById("tracingName").value = "second tracing";
+      document.getElementById("tracingKeep").click();
+    };
     window.__posted = [];
-    document.getElementById("tracingLink").value = url;
-    document.getElementById("tracingRead").click();
-    const w3 = document.getElementById("tracingWhat");
-    w3.value = "__other"; w3.dispatchEvent(new Event("change", { bubbles: true }));
-    document.getElementById("tracingName").value = "second tracing";
-    document.getElementById("tracingKeep").click();
+    readAdd(url);                       // the very same contours
+    out.unchanged = window.__posted.length;
+    out.sayUnchanged = document.getElementById("tracingStatus").textContent;
+    window.__posted = [];
+    readAdd(urlEdited);                 // a third section traced since
     out.again = window.__posted.map(x => ({ sid: x.structureId, gid: x.groupId }));
     out.sayAgain = document.getElementById("tracingStatus").textContent;
     return out;
   }, { url: link(polygon(2000, 3000, 600, 25, 10, "s1")
-        .concat(polygon(2005, 3005, 610, 24, 10, "s2"))) });
+        .concat(polygon(2005, 3005, 610, 24, 10, "s2"))),
+       urlEdited: link(polygon(2000, 3000, 600, 25, 10, "s1")
+        .concat(polygon(2005, 3005, 610, 24, 10, "s2"))
+        .concat(polygon(2010, 3010, 620, 23, 10, "s3"))) });
   ok(shared.posted === 0 && shared.pending,
      "signed out it is KEPT AND QUEUED, not refused and not posted",
      shared.posted + " posts, pending " + shared.pending);
@@ -1240,9 +1259,16 @@ function link(annotations){
   ok(!!row.sid, "...a structureId naming the cell", row.sid);
   ok(!!row.gid, "...and a groupId naming this act of sharing — the pair the backend "
      + "versions on, and the pair in the Drive file's name", row.gid);
+  ok(shared.unchanged === 0,
+     "adding it again UNCHANGED posts nothing — Søren's seven rows that carried nothing new",
+     shared.unchanged + " post(s)");
+  ok(/nothing ha[ds] changed|already/i.test(shared.sayUnchanged)
+       && !/NOT reached/.test(shared.sayUnchanged),
+     "...and the card says why, rather than looking as if it failed",
+     shared.sayUnchanged.slice(0, 110));
   ok(shared.again.length === 1 && shared.again[0].sid === row.sid,
-     "adding it again is one submission again, keeping the structureId — it is the same cell",
-     shared.again.length + " post(s), " + shared.again[0].sid);
+     "an EDITED re-add is one submission, keeping the structureId — it is the same cell",
+     shared.again.length + " post(s), " + (shared.again[0] || {}).sid);
   /* Søren: *"add the volumes to the data for the cell when submitting."* Measured on the page by
      core/traceloft.js, shown before the button is pressed, and carried by the submission -- the
      number stored is the number he saw. traceloftcheck.js is where the estimator itself is checked
@@ -1713,7 +1739,9 @@ function link(annotations){
                     oneColour: oneColour,
                     vol: document.getElementById("tracePadVol").innerHTML,
                     ringColours: [].slice.call(
-                      document.querySelectorAll("#tracePadRings .padring span"))
+                      /* .padswatch, not `span`: the chip also carries a × of its own since
+                         2026-09-23 (src/a_chip_takes_you_to_what_it_names.py). */
+                      document.querySelectorAll("#tracePadRings .padring .padswatch"))
                       .map(e => e.style.background) };
 
       window.__posted = [];

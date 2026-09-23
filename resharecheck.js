@@ -87,8 +87,51 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
     t.pending_share = true;
     const again2 = step("unchanged again");
 
-    return { first, again, edited, renamed, again2, nSent: SENT.length,
-             gids: SENT.map(x => x.groupId), sids: SENT.map(x => x.structureId) };
+    /* Counted here, before the button section below adds posts of its own. */
+    const nSentDirect = SENT.length, sidsDirect = SENT.map(x => x.structureId);
+
+    /* ── AND THE SAME THING THROUGH THE BUTTON ───────────────────────────────────  2026-09-23
+       Everything above drives tracingPublish() directly, which is why this check passed while the
+       bug was live: the button is tracingKeep(), and tracingKeep REBUILDS the kept entry from the
+       pad on every press. It carries shared_at, centre_registered and centre_at across that
+       rebuild -- and did not carry shared_sig, so the guard above never saw what was last sent and
+       every press posted again. Søren's sheet has the proof: three rows for
+       lysosome_1790192158786_ay6p__i8, 12 contours and 137 vertices on all three.
+       So the press is what is pressed here. */
+    const ringsFor = (n) => {
+      const out = [];
+      for (let z = 0; z < n; z++){
+        const pts = [];
+        for (let i = 0; i < 24; i++){
+          const a = 2 * Math.PI * i / 24;
+          pts.push([Math.round(295000 + 300 * Math.cos(a)), Math.round(151000 + 300 * Math.sin(a))]);
+        }
+        out.push({ z: 18000 + z, points: pts, inst: 0 });
+      }
+      return out;
+    };
+    const press = (n) => {
+      TRACING_PENDING = { rings: ringsFor(n) };
+      TRACING_BASE_ID = "";
+      try { PAD_EDIT_ID = ""; PAD_EDIT_IDS = {}; } catch (_e){}
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+      set("tracingWhat", "__other"); set("tracingName", "Lysosome 9");
+      set("tracingType", "Microglia"); set("tracingNucId", "325785");
+      set("tracingRootId", "864691136116229028");
+      set("tracingX", ""); set("tracingY", ""); set("tracingZ", "");
+      const before = SENT.length;
+      tracingKeep();
+      return SENT.length - before;
+    };
+    const keep1 = press(12);          // the first press: it goes
+    const keep2 = press(12);          // the same again: it must NOT
+    const keep3 = press(12);          // and again
+    const keep4 = press(17);          // a real edit: it goes
+    const keep5 = press(17);          // and settles again
+
+    return { first, again, edited, renamed, again2, nSent: nSentDirect,
+             gids: SENT.map(x => x.groupId), sids: sidsDirect,
+             keep: { keep1, keep2, keep3, keep4, keep5 } };
   });
 
   console.log("a lysosome, shared and then shared again");
@@ -116,6 +159,15 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   ok(got.nSent === 3, "three posts for three real states, not five for five presses",
      got.nSent + " rows for 5 presses");
   ok(new Set(got.sids).size === 1, "...all of them one organelle", [...new Set(got.sids)].join(","));
+
+  console.log("\nand the same, through the button the user actually presses");
+  ok(got.keep.keep1 === 1, "the first press posts", got.keep.keep1 + " post(s)");
+  ok(got.keep.keep2 === 0 && got.keep.keep3 === 0,
+     "pressing it again with nothing changed posts NOTHING \u2014 tracingKeep rebuilds the kept "
+     + "entry, and the memory of what was sent has to survive that",
+     "press 2: " + got.keep.keep2 + ", press 3: " + got.keep.keep3);
+  ok(got.keep.keep4 === 1, "an edit still goes", got.keep.keep4 + " post(s)");
+  ok(got.keep.keep5 === 0, "...and settles again", got.keep.keep5 + " post(s)");
 
   ok(errors.length === 0, "no page errors", errors.join(" | ").slice(0, 200) || "none");
   await b.close();
