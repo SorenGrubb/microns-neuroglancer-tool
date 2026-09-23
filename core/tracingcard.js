@@ -1767,6 +1767,25 @@ function tracingRegisterCentre(t){
   }
 }
 
+/* ── WHAT WAS LAST SENT ──────────────────────────────────────────────────────  2026-09-23
+   Søren, on Hesham's rows: "he was able to log it again and again ... It should only be possible to
+   log an organelle once and then update the same one if there are changes."
+
+   His structureId never changed -- it was one organelle gaining a version per press, 10 of his 18
+   rows carrying nothing new. So this is the fingerprint of a submission as the BACKEND sees it:
+   everything that lands in the row, and every contour. NOT the timestamp and NOT the groupId, which
+   differ on every press by construction and would make every save look like a change.
+   See src/an_unchanged_tracing_is_not_sent_again.py. */
+function tracingShareSig(sub){
+  try {
+    const c = (sub.contours || []).map(function(r){
+      return r.z + ":" + r.ringIndex + ":" + (r.points || "");
+    }).join("|");
+    return [sub.structureId, sub.name, sub.kind, sub.cellType, sub.color,
+            sub.nucleusId, sub.rootId, sub.cellCoord, sub.instanceOf, sub.instanceIndex,
+            (sub.contours || []).length, c].join("\u0001");
+  } catch (_e){ return ""; }
+}
 function tracingPublish(t,quiet){
   if(!t||!t.rings||!t.rings.length)return false;
   const signedIn=(typeof GOOGLE_VERIFIED!=="undefined"&&GOOGLE_VERIFIED)
@@ -1795,9 +1814,23 @@ function tracingPublish(t,quiet){
                                              sectionGapNm:t.section_gap_nm,
                                              areaUm2:t.area_um2, areas:t.areas});
   if(!sub.contours.length)return false;
+  /* NOTHING NEW, NOTHING SENT (2026-09-23). The same test tracingPublish already applies to the
+     centre annotation below -- whether it MOVED, not whether anything was pressed -- applied to the
+     tracing itself. pending_share is cleared as well, or an unchanged tracing sits in the queue and
+     goes out by itself on the next sign-in, which is the same row arriving later instead of now. */
+  const sig=tracingShareSig(sub);
+  if(sig&&t.shared_sig===sig){
+    t.pending_share=false;
+    tracingWrite(TRACINGS_KEPT);
+    if(!quiet)tracingSay("\u201c"+(t.name||"That tracing")+"\u201d is already in the dataset and "
+      +"nothing has changed since, so nothing was sent. Edit the outline or its details and add it "
+      +"again to file a new version of it.");
+    return false;
+  }
   const ok=postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid},sub),
                       "Tracing added to the dataset \u2014 thank you.");
   if(ok===false)return false;
+  t.shared_sig=sig;
   t.pending_share=false;
   t.shared_at=new Date().toISOString();
   /* A PROMISE IS NOT A YES, 2026-09-21. λJump, βJump, ηJump and ωJump answer with a promise of
@@ -1807,7 +1840,9 @@ function tracingPublish(t,quiet){
   if(ok&&typeof ok.then==="function"){
     ok.then(function(d){
       if(!(d&&d.ok===false))return;
-      t.pending_share=true; t.shared_at="";
+      /* The signature is what says "this is already up there". A refusal means it is not, so it
+         goes with the rest or the retry would be declined as an unchanged re-send. */
+      t.pending_share=true; t.shared_at=""; t.shared_sig="";
       tracingWrite(TRACINGS_KEPT); tracingRenderList();
       tracingSay("\u201c"+(t.name||"The tracing")+"\u201d did NOT reach the dataset: "
         +String(d.error||"the server refused it")+" It is kept here and goes up on its own once "
@@ -5168,7 +5203,7 @@ function tracingCardHtml(){
     "<div style=\"position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111\">",
     "<!-- TIPS, 2026-09-22 (src/the_pad_gives_tips.py): the tick on the left turns them off. -->",
     "<style>#tracePadTipBar a{color:var(--accent);text-decoration:underline}</style>",
-    "<div id=\"tracePadTipBar\" style=\"position:sticky;left:0;display:flex;gap:10px;align-items:center;padding:6px 10px;background:var(--card);color:var(--ink);border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.4\">",
+    "<div id=\"tracePadTipBar\" style=\"position:sticky;left:0;display:flex;gap:10px;align-items:center;padding:6px 10px;background:var(--panel);color:var(--ink);border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.4\">",
     "<label style=\"font-size:12px;display:flex;align-items:center;gap:5px;flex:0 0 auto;margin:0\" title=\"Tips about the pad, about recognising organelles, and how to suggest a change. Untick to hide them.\"><input type=\"checkbox\" id=\"tracePadTips\" checked> Tips</label>",
     "<span id=\"tracePadTip\" style=\"flex:1 1 auto;min-width:0\"></span>",
     "<button type=\"button\" class=\"idbtn\" id=\"tracePadTipNext\" style=\"flex:0 0 auto;padding:1px 9px\" title=\"Another tip\">&rsaquo;</button>",

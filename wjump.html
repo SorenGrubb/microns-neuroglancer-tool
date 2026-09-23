@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-22 20:46</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-23 14:51</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -9598,7 +9598,188 @@ UJ.traceloft = (function(){
              evenlySpaced: sorted[0] === sorted[sorted.length - 1] };
   }
 
-  return { loft: loft, volume: volume,
+  /* ── INTERPOLATING BETWEEN SECTIONS ──────────────────────────────────────────  2026-09-22
+     Søren: "Can we also interpolate between polylines in z?"
+
+     WHY IT CURVES. loft() bands straight between consecutive sections, so a LINEARLY interpolated
+     contour lies exactly on the band it was meant to improve -- more triangles, identical surface.
+     This runs a Catmull-Rom through the corresponding vertex on four consecutive contours instead,
+     which bows the surface the way a round object actually goes. Proven in interpcheck.js against
+     a sphere: the made contour lands nearer the true radius than the straight line does.
+
+     CORRESPONDENCE comes from the pieces the mesh already trusts -- resample to N by arc length,
+     orient for winding, pairUp for which contour is which on the next section, bestOffset for the
+     rotation that pairs their vertices. Chains are followed upward from the lowest section, so a
+     contour whose pen started elsewhere does not twist.
+
+     interpolate(rings, {per}) -> { rings, made, unpaired, chains }
+       rings    the ones handed in, UNCHANGED, plus the made ones marked interp:true
+       per      extra rings between ADJACENT sections, at fractional z: mesh and export only,
+                never saved, because there is no section to put them on. 0 by default, which
+                makes only the contours for MISSING sections.
+     See src/contours_interpolate_in_z.py. */
+  function catmull(p0, p1, p2, p3, t){
+    var t2 = t * t, t3 = t2 * t;
+    return 0.5 * ((2 * p1) + (-p0 + p2) * t
+                + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+                + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  }
+  function interpolate(rings, opts){
+    opts = opts || {};
+    var per = Math.max(0, Math.min(8, opts.per | 0));
+    var byZ = {}, zs = [];
+    (rings || []).forEach(function(r, i){
+      if (!r || !r.points || r.points.length < 3) return;
+      var pts = resample(orient(r.points), N);
+      if (!pts) return;
+      var z = +r.z;
+      if (!byZ[z]){ byZ[z] = []; zs.push(z); }
+      byZ[z].push({ pts: pts, c: centroid(pts), src: i, inst: r.inst || 0 });
+    });
+    zs.sort(function(a, b){ return a - b; });
+    if (zs.length < 2) return { rings: (rings || []).slice(), made: 0, unpaired: 0, chains: 0 };
+
+    /* CHAINS. Each one is the same contour followed up the stack, every ring rotated onto the one
+       below it so vertex i means the same place all the way up. */
+    var chains = [], live = [], unpaired = 0;
+    byZ[zs[0]].forEach(function(r){
+      var ch = { steps: [{ z: zs[0], pts: r.pts }], inst: r.inst };
+      chains.push(ch); live.push({ ch: ch, last: r.pts });
+    });
+    for (var k = 1; k < zs.length; k++){
+      var above = byZ[zs[k]];
+      var below = live.map(function(L){ return { c: centroid(L.last) }; });
+      var pr = pairUp(below, above), taken = {};
+      pr.pairs.forEach(function(pair){
+        var L = live[pair[0]], A = above[pair[1]];
+        taken[pair[1]] = 1;
+        var off = bestOffset(L.last, A.pts);
+        var rot = A.pts.slice(off).concat(A.pts.slice(0, off));
+        L.ch.steps.push({ z: zs[k], pts: rot });
+        L.last = rot;
+      });
+      /* A contour nothing paired with starts a chain of its own -- a branch, or the section where
+         the organelle first appears. Its own doing its best: it is not forced onto a neighbour. */
+      above.forEach(function(A, j){
+        if (taken[j]) return;
+        unpaired++;
+        var ch = { steps: [{ z: zs[k], pts: A.pts }], inst: A.inst };
+        chains.push(ch); live.push({ ch: ch, last: A.pts });
+      });
+    }
+
+    /* AND THE RINGS BETWEEN. Catmull-Rom on each vertex, clamped at the ends of a chain. */
+    var made = [];
+    chains.forEach(function(ch){
+      var S = ch.steps;
+      if (S.length < 2) return;
+      for (var i = 0; i + 1 < S.length; i++){
+        var a = S[i], b = S[i + 1];
+        var p0 = S[i - 1] || a, p3 = S[i + 2] || b;
+        var gap = b.z - a.z;
+        /* The sections with nothing on them, and then the fractional ones if asked for. */
+        var want = [];
+        for (var zz = Math.floor(a.z) + 1; zz < b.z; zz++)
+          if (zz > a.z) want.push({ z: zz, t: (zz - a.z) / gap, keep: true });
+        for (var q = 1; q <= per; q++){
+          var t = q / (per + 1), fz = a.z + gap * t;
+          if (want.some(function(w){ return Math.abs(w.z - fz) < 1e-9; })) continue;
+          want.push({ z: fz, t: t, keep: false });
+        }
+        want.forEach(function(w){
+          var pts = [];
+          for (var v = 0; v < N; v++){
+            pts.push([catmull(p0.pts[v][0], a.pts[v][0], b.pts[v][0], p3.pts[v][0], w.t),
+                      catmull(p0.pts[v][1], a.pts[v][1], b.pts[v][1], p3.pts[v][1], w.t)]);
+          }
+          made.push({ z: w.z, points: pts, inst: ch.inst, interp: true, section: w.keep });
+        });
+      }
+    });
+    made.sort(function(x, y){ return x.z - y.z; });
+    return { rings: (rings || []).slice().concat(made), made: made.length,
+             unpaired: unpaired, chains: chains.length };
+  }
+
+  /* ── SECTIONS THAT LIE ON THE LINE BETWEEN THEIR NEIGHBOURS ──────────────────  2026-09-23
+     Søren: "Can we reduce z-layers that are redundant in addition?"
+
+     LINEAR, not the cubic interpolate() above uses. loft() bands straight between sections and
+     Cavalieri is a trapezoid sum over them, so a contour already on the straight line between its
+     two neighbours adds nothing to the mesh and nothing to the volume. Fitting a cubic here would
+     be prettier and false: it is not what either consumer does with the sections.
+
+     AND THIS MOVES THE VOLUME, which dropping points inside a contour does not: it changes which
+     areas the sum is over. The caller is given volBefore/volAfter to say so.
+
+     thinSections(rings, {nm}) -> { rings, before, after, dropped, worstNm }
+     The first and last section are never dropped -- they are what the object's extent IS.
+     See src/redundant_sections_can_go_too.py. */
+  function thinSections(rings, opts){
+    opts = opts || {};
+    var resNm = (window.UJ && UJ.cfg && UJ.cfg.res && +UJ.cfg.res[0]) || 4;
+    var tol = (+opts.nm > 0 ? +opts.nm : 16) / resNm;      /* voxels */
+    var byZ = {}, zs = [];
+    (rings || []).forEach(function(r){
+      if (!r || !r.points || r.points.length < 3) return;
+      var z = +r.z;
+      if (!byZ[z]){ byZ[z] = []; zs.push(z); }
+      byZ[z].push(r);
+    });
+    zs.sort(function(a, b){ return a - b; });
+    if (zs.length < 3) return { rings: (rings || []).slice(), before: zs.length,
+                                after: zs.length, dropped: [], worstNm: 0 };
+
+    /* One resampled, aligned ring per section: the comparison has to be vertex to vertex, and
+       pairUp/bestOffset are how every other part of this file decides which vertex is which. */
+    var reps = zs.map(function(z){ return resample(orient(byZ[z][0].points), N); });
+    for (var i = 1; i < reps.length; i++){
+      var off = bestOffset(reps[i - 1], reps[i]);
+      reps[i] = reps[i].slice(off).concat(reps[i].slice(0, off));
+    }
+
+    /* How far section k sits from the straight line between a and b. */
+    function devOf(a, k, b){
+      var t = (zs[k] - zs[a]) / (zs[b] - zs[a]), worst = 0;
+      for (var v = 0; v < N; v++){
+        var x = reps[a][v][0] + (reps[b][v][0] - reps[a][v][0]) * t;
+        var y = reps[a][v][1] + (reps[b][v][1] - reps[a][v][1]) * t;
+        var d = Math.sqrt(Math.pow(reps[k][v][0] - x, 2) + Math.pow(reps[k][v][1] - y, 2));
+        if (d > worst) worst = d;
+      }
+      return worst;
+    }
+
+    /* Greedy: the cheapest section goes first, and its two neighbours are re-judged against the
+       wider gap they now span. A section only ever gets harder to drop, never easier. */
+    var alive = zs.map(function(){ return true; });
+    var prev = zs.map(function(_, i){ return i - 1; });
+    var next = zs.map(function(_, i){ return i + 1; });
+    var dev = zs.map(function(_, i){
+      return (i === 0 || i === zs.length - 1) ? Infinity : devOf(i - 1, i, i + 1);
+    });
+    var dropped = [], worst = 0;
+    for (;;){
+      var best = -1, bestD = Infinity;
+      for (var k = 1; k < zs.length - 1; k++)
+        if (alive[k] && dev[k] < bestD){ bestD = dev[k]; best = k; }
+      if (best < 0 || bestD > tol) break;
+      alive[best] = false; dropped.push(zs[best]);
+      if (bestD > worst) worst = bestD;
+      var a = prev[best], b = next[best];
+      next[a] = b; prev[b] = a;
+      if (a > 0 && alive[a]) dev[a] = devOf(prev[a], a, next[a]);
+      if (b < zs.length - 1 && alive[b]) dev[b] = devOf(prev[b], b, next[b]);
+    }
+
+    var keep = {};
+    zs.forEach(function(z, i){ if (alive[i]) keep[z] = 1; });
+    var out = (rings || []).filter(function(r){ return keep[+r.z]; });
+    return { rings: out, before: zs.length, after: zs.length - dropped.length,
+             dropped: dropped, worstNm: Math.round(worst * resNm * 10) / 10 };
+  }
+
+  return { loft: loft, volume: volume, interpolate: interpolate, thinSections: thinSections,
            _orient: orient, _resample: resample, _bestOffset: bestOffset,
            _signedArea: signedArea, _pairUp: pairUp,
            _ringArea: ringArea, _pointInRing: pointInRing, _areaOfSection: areaOfSection,
@@ -11249,6 +11430,20 @@ UJ.tracing = (function(){
 
      THE RINGS HANDED IN ARE NOT MODIFIED. This is for the link; the tracing is the record.
      See src/fewer_points_and_the_real_cap.py. */
+  /* IN NANOMETRES, not in base voxels (2026-09-22). minnie65 is 4 nm and a tracing is drawn at
+     the 32 nm level, where one screen pixel is EIGHT voxels -- so half a base voxel is a sixteenth
+     of a pixel, tighter than anything anybody drew, and "redundant" meant almost nothing. 16 nm is
+     half a pixel at the level tracings are drawn at. See src/the_tolerance_is_in_nanometres.py. */
+  var SIMPLIFY_NM = 16;
+  function resNmXY(){
+    try { var r = window.UJ && UJ.cfg && UJ.cfg.res; if (r && +r[0] > 0) return +r[0]; } catch (_e){}
+    return 4;
+  }
+  function simplifyTolVox(nm){
+    var n = (typeof nm === "number" && nm > 0) ? nm : SIMPLIFY_NM;
+    try { if (typeof window.JUMP_SIMPLIFY_NM === "number") n = window.JUMP_SIMPLIFY_NM; } catch (_e){}
+    return n / resNmXY();
+  }
   var SIMPLIFY_TOL = 0.5;
   function dpKeep(pts, first, last, tol, keep){
     var stack = [[first, last]];
@@ -11272,9 +11467,27 @@ UJ.tracing = (function(){
       if (worst > tol * tol){ keep[at] = 1; stack.push([i0, at]); stack.push([at, i1]); }
     }
   }
+  /* THE AREA IS THE MEASUREMENT, so the tolerance is capped at a fraction of the contour's own
+     size (2026-09-22). A polygon whose vertices sit within `tol` of a circle of radius R encloses
+     about (2/3)(tol/R) less area, so a fixed 16 nm costs 0.09% on a 12 µm cell and 0.5% on a 1.6 µm
+     organelle -- the same setting, ten times the error, because the structure is smaller. Capping
+     tol at 0.003 R holds the area error near 0.2% whatever is being traced: it never binds on a
+     cell, and it is the whole tolerance on a lysosome. Measured in tolerancecheck.js. */
+  var AREA_GUARD = 0.003;
+  function meanRadius(pts){
+    var cx = 0, cy = 0, i;
+    for (i = 0; i < pts.length; i++){ cx += pts[i][0]; cy += pts[i][1]; }
+    cx /= pts.length; cy /= pts.length;
+    var s = 0;
+    for (i = 0; i < pts.length; i++)
+      s += Math.sqrt(Math.pow(pts[i][0] - cx, 2) + Math.pow(pts[i][1] - cy, 2));
+    return s / pts.length;
+  }
   function simplifyRing(pts, tol){
     var n = pts.length;
     if (n < 6 || !(tol > 0)) return pts;
+    var cap = AREA_GUARD * meanRadius(pts);
+    if (cap > 0 && cap < tol) tol = cap;
     /* The far point, so the two halves are the two sides of the shape and not an arbitrary cut. */
     var far = 0, best = -1, i;
     for (i = 1; i < n; i++){
@@ -11294,7 +11507,8 @@ UJ.tracing = (function(){
   }
   /* rings -> { rings, before, after }, the counts so the card can say what it dropped. */
   function simplifyRings(rings, tol){
-    var t = (typeof tol === "number") ? tol : SIMPLIFY_TOL;
+    var t = (typeof tol === "number" && tol > 0) ? tol : simplifyTolVox();
+    /* JUMP_SIMPLIFY_TOL is still in voxels, for anyone who set it this morning. */
     try { if (typeof window.JUMP_SIMPLIFY_TOL === "number") t = window.JUMP_SIMPLIFY_TOL; }
     catch (_e){}
     var before = 0, after = 0;
@@ -11305,7 +11519,8 @@ UJ.tracing = (function(){
       after += s.length;
       return (s === pts) ? r : { z: r.z, points: s };
     });
-    return { rings: out, before: before, after: after, tol: t };
+    return { rings: out, before: before, after: after, tol: t,
+             nm: Math.round(t * resNmXY() * 10) / 10 };
   }
 
   function ringAnnotations(rings, idPrefix, opts){
@@ -11340,6 +11555,7 @@ UJ.tracing = (function(){
 
   return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
            ringAnnotations: ringAnnotations, simplifyRings: simplifyRings,
+           simplifyTolVox: simplifyTolVox, simplifyDefaultNm: function(){ return SIMPLIFY_NM; },
            viewerTakesPolylines: viewerTakesPolylines,
            viewerBase: viewerBase,
            ringsToRows: ringsToRows, toSubmission: toSubmission,
@@ -12934,7 +13150,9 @@ function tracingViewerOpen(structs, say, ids){
   /* The viewer decides the annotation shape (2026-09-22), so it has to be known before the
      layers are written, not just when the URL is joined. */
   const viewerEl0 = document.getElementById("viewer");
-  const base = (viewerEl0 && viewerEl0.value)
+  /* `let`, because a link too big for this viewer is re-pointed at one that takes it below
+     (2026-09-23, src/too_big_here_opens_where_it_fits.py). */
+  let base = (viewerEl0 && viewerEl0.value)
             || (window.UJ && UJ.cfg && UJ.cfg.viewer && UJ.cfg.viewer.base)
             || "https://spelunker.cave-explorer.org/";
   const used = {}; let firstName = "";
@@ -12948,7 +13166,7 @@ function tracingViewerOpen(structs, say, ids){
     const anns = tracingRingAnns(t.rings, "t" + i, base);
     if (anns.simplified){
       cut.before += anns.simplified.before; cut.after += anns.simplified.after;
-      cut.tol = anns.simplified.tol;
+      cut.tol = anns.simplified.tol; cut.nm = anns.simplified.nm;
     }
     st.layers.push({ type: "annotation", source: "local://annotations", tab: "annotations",
                      name: nm, annotationColor: t.color || "#40e28c", annotations: anns });
@@ -12960,7 +13178,7 @@ function tracingViewerOpen(structs, say, ids){
      show the same outline twice. */
   st.layout = { type: "xy-3d", orthographicProjection: true };
   /* base is resolved above, before the layers are written. */
-  const url = base + "#!" + encodeURIComponent(JSON.stringify(st));
+  let url = base + "#!" + encodeURIComponent(JSON.stringify(st));
   /* A tracing is tens of vertices a section, so this is comfortable; a hundred sections of freehand
      is not, and a URL the browser silently truncates would open a viewer missing half the cell
      without saying so. Better to say so here. */
@@ -12969,8 +13187,8 @@ function tracingViewerOpen(structs, say, ids){
      has to take on trust. Only when it is a tenth or more -- below that it is noise. */
   const cutSay = (cut.before && cut.before - cut.after > cut.before / 10)
     ? " Redundant points dropped: " + cut.before.toLocaleString() + " \u2192 "
-      + cut.after.toLocaleString() + " (no point of the outline moved more than " + cut.tol
-      + " voxel" + (cut.tol === 1 ? "" : "s") + "; your saved tracing is unchanged)."
+      + cut.after.toLocaleString() + " (no point of the outline moved more than "
+      + (Math.round(cut.tol * 40) / 10) + " nm; your saved tracing is unchanged)."
     : "";
   /* 2026-09-22: on a viewer with no polyline type a contour costs one annotation per edge, so the
      same cell is about four times the link. Better to name the reason than to let him wonder. */
@@ -12981,12 +13199,59 @@ function tracingViewerOpen(structs, say, ids){
                + "the link is about four times longer than it needs to be \u2014 Spelunker and "
                + "neuroglancer-demo read polylines.";
   } catch (_e){}
+  let movedViewer = false;
   if (url.length > TRACING_LINK_MAX){
-    tracingStateOffer(JSON.stringify(st),
-      "That is more than a tab can be opened with (" + kc + "; the browser refuses past 2,097,152 "
-      + "and shows about:blank#blocked). Paste the state into Neuroglancer instead \u2014 its {} "
-      + "button takes it \u2014 or open one structure at a time." + shapeSay, true);
-    return;
+    /* PRICE THE ALTERNATIVE (2026-09-23). Søren spent an evening dropping points and then sections
+       off a cell that already fitted as polylines and could never fit as lines -- so rather than
+       tell him again that this viewer cannot read them, the same state is measured the other way
+       and the answer is in the sentence. See src/an_oversized_link_prices_the_other_viewer.py. */
+    /* OPEN IT WHERE IT FITS (2026-09-23). Søren: "Can't you just measure when it will fail to
+       open and then open with Spelunker instead? It should be easy for the user." The measurement
+       was already being made to tell him about it; making it and then not acting on it was the
+       wrong end of the job. See src/too_big_here_opens_where_it_fits.py. */
+    let elseSay = "", moved = false;
+    try {
+      if (UJ.tracing.viewerTakesPolylines && !UJ.tracing.viewerTakesPolylines(base)){
+        /* One he already has in his own list, if the page offers one. */
+        const altBase = (function(){
+          try {
+            const el = document.getElementById("viewer");
+            const hit = el && [].filter.call(el.options, function(o){
+              return UJ.tracing.viewerTakesPolylines(o.value);
+            })[0];
+            if (hit) return hit.value;
+          } catch (_e){}
+          return "https://spelunker.cave-explorer.org/";
+        })();
+        const alt = JSON.parse(JSON.stringify(st));
+        let n = 0;
+        (alt.layers || []).forEach(function(l, i){
+          if (!l || !l.annotations) return;
+          const rs = structs[n] ? structs[n].rings : null; n++;
+          if (rs) l.annotations = tracingRingAnns(rs, "t" + i, altBase);
+        });
+        const altUrl = altBase + "#!" + encodeURIComponent(JSON.stringify(alt));
+        if (altUrl.length <= TRACING_LINK_MAX){
+          const wasHost = (function(){ try { return new URL(base).host; } catch (_e){ return base; } })();
+          const nowHost = (function(){ try { return new URL(altBase).host; } catch (_e){ return altBase; } })();
+          st = alt; base = altBase; url = altUrl; moved = movedViewer = true;
+          tracingSay("Too big for " + wasHost + " as line annotations (" + kc + "; a tab cannot be "
+            + "opened past 2,097,152 characters), so it opened in " + nowHost + " as polylines, "
+            + "where it is " + Math.round(altUrl.length / 1000) + "k. Nothing was dropped. Your "
+            + "viewer setting is unchanged \u2014 this one link went elsewhere because it had to.");
+        } else {
+          elseSay = " It would still be " + Math.round(altUrl.length / 1000) + "k as polylines, so "
+                  + "no viewer takes it as a link: the {} editor is the way in.";
+        }
+      }
+    } catch (_e){}
+    if (!moved){
+      tracingStateOffer(JSON.stringify(st),
+        "That is more than a tab can be opened with (" + kc + "; the browser refuses past 2,097,152 "
+        + "and shows about:blank#blocked). Paste the state into Neuroglancer instead \u2014 its {} "
+        + "button takes it, with no URL and no limit." + elseSay, true);
+      return;
+    }
   }
   /* shapeSay is computed above, for both branches. */
   if (url.length > TRACING_LINK_LONG){
@@ -13001,7 +13266,8 @@ function tracingViewerOpen(structs, say, ids){
   /* THE WHOLE CELL, 2026-09-21: the tab first, synchronously, then the community's root IDs for
      the nucleus onto the cell layer, then the tab is sent there. Where there are none to read the
      wait is nothing, and a backend that does not answer costs 5 s, not the view. */
-  const wasLong = url.length > TRACING_LINK_LONG;
+  /* movedViewer: the sentence saying WHERE it opened and why is the one that must survive. */
+  const wasLong = movedViewer || url.length > TRACING_LINK_LONG;
   const nucId = (ids && ids.nuc) || "", rootId = (ids && ids.root) || "";
   /* A cell layer to put them in: the link's own (δJump's v1dd_public, which the card itself cannot
      read) or the card's segmentation -- 2026-09-21, Søren: "In dJump, I don't see it including the
@@ -13324,6 +13590,25 @@ function tracingRegisterCentre(t){
   }
 }
 
+/* ── WHAT WAS LAST SENT ──────────────────────────────────────────────────────  2026-09-23
+   Søren, on Hesham's rows: "he was able to log it again and again ... It should only be possible to
+   log an organelle once and then update the same one if there are changes."
+
+   His structureId never changed -- it was one organelle gaining a version per press, 10 of his 18
+   rows carrying nothing new. So this is the fingerprint of a submission as the BACKEND sees it:
+   everything that lands in the row, and every contour. NOT the timestamp and NOT the groupId, which
+   differ on every press by construction and would make every save look like a change.
+   See src/an_unchanged_tracing_is_not_sent_again.py. */
+function tracingShareSig(sub){
+  try {
+    const c = (sub.contours || []).map(function(r){
+      return r.z + ":" + r.ringIndex + ":" + (r.points || "");
+    }).join("|");
+    return [sub.structureId, sub.name, sub.kind, sub.cellType, sub.color,
+            sub.nucleusId, sub.rootId, sub.cellCoord, sub.instanceOf, sub.instanceIndex,
+            (sub.contours || []).length, c].join("\u0001");
+  } catch (_e){ return ""; }
+}
 function tracingPublish(t,quiet){
   if(!t||!t.rings||!t.rings.length)return false;
   const signedIn=(typeof GOOGLE_VERIFIED!=="undefined"&&GOOGLE_VERIFIED)
@@ -13352,9 +13637,23 @@ function tracingPublish(t,quiet){
                                              sectionGapNm:t.section_gap_nm,
                                              areaUm2:t.area_um2, areas:t.areas});
   if(!sub.contours.length)return false;
+  /* NOTHING NEW, NOTHING SENT (2026-09-23). The same test tracingPublish already applies to the
+     centre annotation below -- whether it MOVED, not whether anything was pressed -- applied to the
+     tracing itself. pending_share is cleared as well, or an unchanged tracing sits in the queue and
+     goes out by itself on the next sign-in, which is the same row arriving later instead of now. */
+  const sig=tracingShareSig(sub);
+  if(sig&&t.shared_sig===sig){
+    t.pending_share=false;
+    tracingWrite(TRACINGS_KEPT);
+    if(!quiet)tracingSay("\u201c"+(t.name||"That tracing")+"\u201d is already in the dataset and "
+      +"nothing has changed since, so nothing was sent. Edit the outline or its details and add it "
+      +"again to file a new version of it.");
+    return false;
+  }
   const ok=postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid},sub),
                       "Tracing added to the dataset \u2014 thank you.");
   if(ok===false)return false;
+  t.shared_sig=sig;
   t.pending_share=false;
   t.shared_at=new Date().toISOString();
   /* A PROMISE IS NOT A YES, 2026-09-21. λJump, βJump, ηJump and ωJump answer with a promise of
@@ -13364,7 +13663,9 @@ function tracingPublish(t,quiet){
   if(ok&&typeof ok.then==="function"){
     ok.then(function(d){
       if(!(d&&d.ok===false))return;
-      t.pending_share=true; t.shared_at="";
+      /* The signature is what says "this is already up there". A refusal means it is not, so it
+         goes with the rest or the retry would be declined as an unchanged re-send. */
+      t.pending_share=true; t.shared_at=""; t.shared_sig="";
       tracingWrite(TRACINGS_KEPT); tracingRenderList();
       tracingSay("\u201c"+(t.name||"The tracing")+"\u201d did NOT reach the dataset: "
         +String(d.error||"the server refused it")+" It is kept here and goes up on its own once "
@@ -13648,7 +13949,7 @@ async function pad3DDraw(){
       /* One structure failing to loft — a single stray vertex, a contour that is a line — must not
          cost the others their picture. */
       let lg = null;
-      try { lg = UJ.traceloft.loft(byInst[k], res); } catch (_e){ lg = null; }
+      try { lg = UJ.traceloft.loft(tracingLoftRings(byInst[k]), res); } catch (_e){ lg = null; }
       if (lg && lg.positions && lg.positions.length) lofts.push({ inst: k, g: lg });
     });
     if (!lofts.length){ pad3DNote("Nothing to draw yet."); PAD3D_BUSY = false; return; }
@@ -13817,6 +14118,62 @@ function tracingVolumeSay(v){
     + volFmt(v.volumeTrapezoidUm3) + " µm³ between the outermost contours, which is the "
     + "lower bound — the difference is what lies past them.";
 }
+/* ── DROP REDUNDANT POINTS, ON THE PAD ───────────────────────────────────────  2026-09-22
+   Søren: "I don't see anywhere I can reduce the number of points" -- he was on the pad, and the
+   button was in the found panel. The same offer, on the contours he is actually holding. See
+   src/the_pad_can_drop_redundant_points_too.py. */
+/* Ticking it is a different picture, so the preview is rebuilt. Wired where the button is. */
+function padSmoothWire(){
+  const el = document.getElementById("tracePadSmoothZ");
+  if (!el || el.dataset.wired) return;
+  el.dataset.wired = "1";
+  el.addEventListener("change", function(){ try { pad3DSoon(); } catch (_e){} });
+}
+function padThinGain(){
+  if (!PAD || !PAD.rings || !PAD.rings.length) return null;
+  if (!(window.UJ && UJ.tracing && UJ.tracing.simplifyRings)) return null;
+  const r = UJ.tracing.simplifyRings(PAD.rings.map(function(x){
+    return { z: x.z, points: x.points };
+  }), thinVox("padThinNm"));
+  if (!r.before || r.after >= r.before) return null;
+  return r;
+}
+function padThinShow(){
+  const btn = document.getElementById("padThin");
+  if (!btn) return;
+  if (!btn.dataset.wired){ btn.dataset.wired = "1"; btn.addEventListener("click", padThinRun); }
+  try { padSmoothWire(); } catch (_e){}
+  const row = document.getElementById("padThinNmRow");
+  if (row) row.style.display = (PAD && PAD.rings && PAD.rings.length) ? "flex" : "none";
+  const nm = document.getElementById("padThinNm");
+  if (nm && !nm.dataset.wired){ nm.dataset.wired = "1"; nm.addEventListener("input", padThinShow); }
+  const g = padThinGain();
+  btn.style.display = g ? "" : "none";
+  if (g) btn.textContent = "Drop redundant points (" + g.before.toLocaleString() + " \u2192 "
+                         + g.after.toLocaleString() + ")";
+}
+function padThinRun(){
+  const g = padThinGain();
+  if (!g){ padSay("There is nothing redundant left to drop."); return; }
+  const volBefore = tracingVolumeOf(UJ.tracepad.toRings(PAD));
+  /* In place, keeping z and the instance: it is the same contour with fewer vertices on it. */
+  PAD.rings.forEach(function(r, i){
+    const s = g.rings[i];
+    if (s && s.points) r.points = s.points;
+  });
+  const volAfter = tracingVolumeOf(UJ.tracepad.toRings(PAD));
+  padPaint();
+  padRings();
+  const volSay = (volBefore && volAfter && volBefore.ok)
+    ? " The volume is " + tracingVolumeSay(volAfter) + " \u2014 it was "
+      + tracingVolumeSay(volBefore) + "."
+    : "";
+  padSay("Dropped " + (g.before - g.after).toLocaleString() + " redundant point"
+    + (g.before - g.after === 1 ? "" : "s") + ": " + g.before.toLocaleString() + " \u2192 "
+    + g.after.toLocaleString() + ". No point of the outline moved more than " + g.nm
+    + " nm." + volSay
+    + " Nothing is shared until you press \u201cUse these contours\u201d.");
+}
 function padVolume(){
   const el = document.getElementById("tracePadVol");
   if (!el || !PAD) return null;
@@ -13833,10 +14190,14 @@ function padVolume(){
         + '<b>' + (it.inst + 1) + '</b> — '
         + escHtml(v ? tracingVolumeSay(v) : "nothing yet");
     }).join("<br>");
+    try { padThinShow(); } catch (_e){}
     return null;
   }
   const v = tracingVolumeOf(all);
   el.textContent = v ? tracingVolumeSay(v) : "";
+  /* padVolume runs after every close, every delete and every section change, which is every way
+     the contours can change -- so the offer follows them without a hook of its own. */
+  try { padThinShow(); } catch (_e){}
   return v;
 }
 /* The same figure beside the button that submits, because that is where it is being decided. A
@@ -13850,21 +14211,106 @@ function padVolume(){
    It is offered only when a tenth or more of the points would go, and it hides once they have. The
    volume is recomputed and said: "I pressed a button and my cell got smaller" is the one outcome
    this must not have in silence. */
+/* The tolerance the boxes hold, in nanometres -- see src/the_tolerance_is_in_nanometres.py. */
+function thinNmOf(id){
+  try {
+    const el = document.getElementById(id);
+    const v = el ? parseFloat(el.value) : NaN;
+    if (v > 0) return v;
+  } catch (_e){}
+  try { return UJ.tracing.simplifyDefaultNm(); } catch (_e){}
+  return 16;
+}
+function thinVox(id){
+  try { return UJ.tracing.simplifyTolVox(thinNmOf(id)); } catch (_e){ return thinNmOf(id) / 4; }
+}
 function tracingThinGain(){
   const rings = (TRACING_PENDING && TRACING_PENDING.rings) || null;
   if (!rings || !rings.length) return null;
   if (!(window.UJ && UJ.tracing && UJ.tracing.simplifyRings)) return null;
-  const r = UJ.tracing.simplifyRings(rings.map(function(x){ return { z: x.z, points: x.points }; }));
-  if (!r.before || r.before - r.after <= r.before / 10) return null;
+  const r = UJ.tracing.simplifyRings(rings.map(function(x){ return { z: x.z, points: x.points }; }),
+                                     thinVox("tracingThinNm"));
+  /* ANY point, not a tenth of them (2026-09-22): a threshold made this a button that is not there
+     when it would do something, and a hidden control cannot be argued with. */
+  if (!r.before || r.after >= r.before) return null;
   return r;
+}
+/* ── DROP REDUNDANT SECTIONS ─────────────────────────────────────────────────  2026-09-23
+   Søren: "Can we reduce z-layers that are redundant in addition?" A section on the straight line
+   between its neighbours adds nothing to the mesh (which bands straight) or to the volume (a
+   trapezoid sum over the sections). See src/redundant_sections_can_go_too.py. */
+function tracingThinZGain(){
+  const rings = (TRACING_PENDING && TRACING_PENDING.rings) || null;
+  if (!rings || !rings.length) return null;
+  if (!(window.UJ && UJ.traceloft && UJ.traceloft.thinSections)) return null;
+  const r = UJ.traceloft.thinSections(rings, { nm: thinNmOf("tracingThinNm") });
+  if (!r || r.after >= r.before) return null;
+  return r;
+}
+function tracingThinZShow(){
+  const btn = document.getElementById("tracingThinZ");
+  if (!btn) return;
+  if (!btn.dataset.wired){ btn.dataset.wired = "1"; btn.addEventListener("click", tracingThinZRun); }
+  const g = tracingThinZGain();
+  btn.style.display = g ? "" : "none";
+  if (g) btn.textContent = "Drop redundant sections (" + g.before + " \u2192 " + g.after + ")";
+}
+function tracingThinZRun(){
+  const rings = (TRACING_PENDING && TRACING_PENDING.rings) || null;
+  if (!rings || !rings.length) return;
+  const g = tracingThinZGain();
+  if (!g){ tracingSay("No section lies close enough to the line between its neighbours to drop."); return; }
+  const vb = tracingVolumeOf(rings);
+  TRACING_PENDING.rings = g.rings.map(function(r){
+    return { z: r.z, points: r.points, inst: r.inst || 0 };
+  });
+  const gs = tracingGroups();
+  if (gs){
+    const keep = {};
+    g.rings.forEach(function(r){ keep[+r.z] = 1; });
+    gs.forEach(function(grp){
+      grp.rings = (grp.rings || []).filter(function(r){ return keep[+r.z]; });
+    });
+  }
+  const va = tracingVolumeOf(TRACING_PENDING.rings);
+  tracingLayersRender();
+  tracingVolShow();
+  tracingThinShow();
+  tracingThinZShow();
+  pad3DSoon();
+  /* THE STABLE FIGURE, and a word about the other one. volumeTrapezoidUm3 integrates between the
+     outermost contours and does not move when sections go; the headline Cavalieri figure gives
+     every section a full slab and therefore does. Measured in thinzcheck.js: a cylinder thinned to
+     its two ends keeps its trapezoid volume exactly and DOUBLES its Cavalieri one. */
+  let volSay = "";
+  if (vb && va && vb.ok && va.ok){
+    const b0 = vb.volumeTrapezoidUm3, a0 = va.volumeTrapezoidUm3;
+    const moved = b0 ? Math.abs(a0 - b0) / b0 : 0;
+    volSay = " Between the outermost contours it is " + volFmt(a0) + " \u00b5m\u00b3, was "
+           + volFmt(b0) + " (" + (100 * moved).toFixed(2) + "%). The Cavalieri figure above moves "
+           + "more, because every remaining section now stands for a wider slab.";
+  }
+  tracingSay("Dropped " + (g.before - g.after) + " section" + (g.before - g.after === 1 ? "" : "s")
+    + ": " + g.before + " \u2192 " + g.after + ". No contour was further than " + g.worstNm
+    + " nm from the line between the sections either side of it." + volSay
+    + " Nothing is saved until you add it \u2014 read the link again to get every section back.");
 }
 function tracingThinShow(){
   const btn = document.getElementById("tracingThin");
   if (!btn) return;
+  const row = document.getElementById("tracingThinNmRow");
+  const any = !!(TRACING_PENDING && (TRACING_PENDING.rings || []).length);
+  if (row) row.style.display = any ? "flex" : "none";
+  const nm = document.getElementById("tracingThinNm");
+  if (nm && !nm.dataset.wired){
+    nm.dataset.wired = "1";
+    nm.addEventListener("input", tracingThinShow);
+  }
   const g = tracingThinGain();
   btn.style.display = g ? "" : "none";
   if (g) btn.textContent = "Drop redundant points (" + g.before.toLocaleString() + " \u2192 "
                          + g.after.toLocaleString() + ")";
+  try { tracingThinZShow(); } catch (_e){}
 }
 function tracingThinRun(){
   const rings = (TRACING_PENDING && TRACING_PENDING.rings) || null;
@@ -13900,8 +14346,8 @@ function tracingThinRun(){
     : "";
   tracingSay("Dropped " + (g.before - g.after).toLocaleString() + " redundant point"
     + (g.before - g.after === 1 ? "" : "s") + ": " + g.before.toLocaleString() + " \u2192 "
-    + g.after.toLocaleString() + ". No point of the outline moved more than " + g.tol
-    + " voxel" + (g.tol === 1 ? "" : "s") + "." + volSay
+    + g.after.toLocaleString() + ". No point of the outline moved more than " + g.nm
+    + " nm." + volSay
     + " Nothing is saved until you add it \u2014 read the link again to get every point back.");
 }
 function tracingVolShow(){
@@ -14785,9 +15231,26 @@ function tracingSaveBlob(blob, name){
 function tracingSafeName(s){
   return String(s || "tracing").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60) || "tracing";
 }
+/* ── WHAT GETS LOFTED ────────────────────────────────────────────────────────  2026-09-22
+   The rings as drawn, or -- with "smooth between sections" ticked -- an interpolated set that
+   curves in z. loft() bands straight between consecutive sections, so this is the only way the
+   surface between them becomes anything but flat. Nothing here is saved or measured.
+   See src/the_mesh_can_be_smoothed_in_z.py. */
+function tracingSmoothZ(){
+  try { const el = document.getElementById("tracePadSmoothZ"); return !!(el && el.checked); }
+  catch (_e){ return false; }
+}
+function tracingLoftRings(rings){
+  if (!tracingSmoothZ()) return rings;
+  try {
+    if (UJ.traceloft && UJ.traceloft.interpolate)
+      return UJ.traceloft.interpolate(rings, { per: 2 }).rings;
+  } catch (_e){}
+  return rings;
+}
 /* The pad's own loft, in nanometres, as OBJ. */
 function tracingObjOf(name, rings, res){
-  const g = UJ.traceloft.loft(rings, res);
+  const g = UJ.traceloft.loft(tracingLoftRings(rings), res);
   if (!g || !g.positions || !g.positions.length) return "";
   const out = ["# " + name + " — lofted from its contours by µJump's tracing card; units: nm", "o " + tracingSafeName(name)];
   for (let i = 0; i < g.positions.length; i += 3)
@@ -16563,7 +17026,7 @@ function tracingCardHtml(){
     "<div style=\"position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111\">",
     "<!-- TIPS, 2026-09-22 (src/the_pad_gives_tips.py): the tick on the left turns them off. -->",
     "<style>#tracePadTipBar a{color:var(--accent);text-decoration:underline}</style>",
-    "<div id=\"tracePadTipBar\" style=\"position:sticky;left:0;display:flex;gap:10px;align-items:center;padding:6px 10px;background:var(--card);color:var(--ink);border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.4\">",
+    "<div id=\"tracePadTipBar\" style=\"position:sticky;left:0;display:flex;gap:10px;align-items:center;padding:6px 10px;background:var(--panel);color:var(--ink);border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.4\">",
     "<label style=\"font-size:12px;display:flex;align-items:center;gap:5px;flex:0 0 auto;margin:0\" title=\"Tips about the pad, about recognising organelles, and how to suggest a change. Untick to hide them.\"><input type=\"checkbox\" id=\"tracePadTips\" checked> Tips</label>",
     "<span id=\"tracePadTip\" style=\"flex:1 1 auto;min-width:0\"></span>",
     "<button type=\"button\" class=\"idbtn\" id=\"tracePadTipNext\" style=\"flex:0 0 auto;padding:1px 9px\" title=\"Another tip\">&rsaquo;</button>",
@@ -16595,6 +17058,12 @@ function tracingCardHtml(){
     "<button class=\"idbtn\" id=\"tracePadNewInst\" style=\"flex:0 0 auto;padding:2px 9px;font-size:12px\" title=\"Start another organelle of the same type. It gets its own colour here and its own number when it is added to the dataset, so several mitochondria in one cell stay apart. Everything else — the type, the cell, the ids — is shared.\">+ another one</button>",
     "</div>",
     "<div id=\"tracePadRings\" style=\"margin-top:6px\"></div>",
+    "<!-- DROP REDUNDANT POINTS, ON THE PAD.  2026-09-22. Søren, with a screenshot of the pad:",
+    "     \"I don't see anywhere I can reduce the number of points\" -- the button had gone in the",
+    "     found panel, which only appears after a link is read, and the cell he was holding was here.",
+    "     See src/the_pad_can_drop_redundant_points_too.py. -->",
+    "<button class=\"idbtn\" id=\"padThin\" style=\"display:none;margin-top:4px\" title=\"A contour drawn with a pen is sampled by the pointer, not by the shape: a straight stretch of membrane arrives as twenty points that two would draw identically. This drops those, moving no point of the outline by more than half a voxel. It changes the contours on the pad — nothing is shared until you press “Use these contours”.\">Drop redundant points</button>",
+    "<label id=\"padThinNmRow\" style=\"display:none;font-size:12px;align-items:center;gap:6px;margin-top:4px\" title=\"How far a point may move, in nanometres. 16 nm is half a pixel at the 32 nm level tracings are drawn at — below what the screen showed you. Raise it to drop more; the button says how many before you press it.\">within <input type=\"number\" id=\"padThinNm\" value=\"16\" min=\"1\" max=\"400\" step=\"1\" style=\"width:64px\"> nm</label>",
     "<p class=\"hint\" id=\"tracePadVol\" style=\"margin-top:4px\" title=\"Cavalieri's estimator: each section's outlined area times the slab of tissue that section stands for. A contour drawn inside another is a hole, the same rule the export fills with. It updates as you draw.\"></p>",
     "<p class=\"hint\" id=\"tracePadSay\" style=\"margin-top:6px\">Click each vertex round the cell. The first one is drawn as a ring &mdash; click it again to close the contour. <b>Shift+click</b> moves the field there, shift+drag or a plain drag pans it, and <b>,</b> and <b>.</b> step a section.</p>",
     "<!-- EVERY GESTURE, IN ONE PLACE.  2026-09-17. Søren: \"make a list of all the possible commands with",
@@ -16643,6 +17112,11 @@ function tracingCardHtml(){
     "<div class=\"row\" style=\"gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap\">",
     "<button class=\"idbtn\" id=\"tracePad3D\" style=\"flex:1 1 auto\" title=\"Lofts the contours you have drawn into a surface and draws it here. Not the export's surface -- that one is built by filling each section and running marching cubes, and it is smoother; this is the same silhouette, now.\">Show it in 3D</button>",
     "<label style=\"font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto\" title=\"Fetches the cell's own mesh for the root ID and the nucleus mesh for the nucleus ID, and draws both see-through around your tracing, so you can see where it sits. Megabytes for a whole neuron, which is why it is a choice.\"><input type=\"checkbox\" id=\"tracePadGhosts\" checked> with the cell and nucleus, see-through</label>",
+    "<!-- SMOOTH IN Z.  2026-09-22. Søren: \"Can we also interpolate between polylines in z?\" Off by",
+    "     default: on, the preview and the OBJ loft an interpolated set that CURVES between sections",
+    "     rather than cutting straight across. It changes no volume and saves nothing.",
+    "     See src/the_mesh_can_be_smoothed_in_z.py. -->",
+    "<label style=\"font-size:12px;display:flex;align-items:center;gap:6px;flex:0 0 auto\" title=\"Rounds the surface between sections instead of cutting straight across, by interpolating contours in z — a Catmull-Rom through four consecutive outlines, so a cell that is round stays round between the sections you drew. It affects the 3D view and the OBJ only: no volume changes, and nothing is saved.\"><input type=\"checkbox\" id=\"tracePadSmoothZ\"> smooth between sections</label>",
     "</div>",
     "<div id=\"tracePad3DHost\" style=\"margin-top:6px\"></div>",
     "</div>",
@@ -16719,6 +17193,12 @@ function tracingCardHtml(){
     "     a button over doing it on the way in -- the contours in the sheet are the record. Shown only",
     "     when there is a tenth or more to gain. See src/a_button_drops_the_redundant_points.py. -->",
     "<button class=\"idbtn\" id=\"tracingThin\" style=\"display:none;margin-top:4px\" title=\"A contour drawn with a pen is sampled by the pointer, not by the shape: a straight stretch of membrane arrives as twenty points that two would draw identically. This drops those, moving no point of the outline by more than half a voxel. Your saved tracing changes only if you add it afterwards — read the link again to get every point back.\">Drop redundant points</button>",
+    "<label id=\"tracingThinNmRow\" style=\"display:none;font-size:12px;align-items:center;gap:6px;margin-top:4px\" title=\"How far a point may move, in nanometres. 16 nm is half a pixel at the 32 nm level tracings are drawn at — below what the screen showed you. Raise it to drop more; the button says how many before you press it.\">within <input type=\"number\" id=\"tracingThinNm\" value=\"16\" min=\"1\" max=\"400\" step=\"1\" style=\"width:64px\"> nm</label>",
+    "<!-- DROP REDUNDANT SECTIONS.  2026-09-23. Søren: \"Can we reduce z-layers that are redundant",
+    "     in addition?\" A section already on the straight line between its neighbours adds nothing to",
+    "     the mesh or the volume. Unlike dropping POINTS this moves the Cavalieri figure, so the",
+    "     sentence says the stable one. See src/redundant_sections_can_go_too.py. -->",
+    "<button class=\"idbtn\" id=\"tracingThinZ\" style=\"display:none;margin-top:4px\" title=\"Drops whole sections whose contour already lies on the straight line between the sections above and below — which is what the mesh and the volume assume between them anyway. Unlike dropping points, this changes which sections the volume is summed over: the figure between the outermost contours stays put, the Cavalieri one moves. Nothing is saved until you add it.\">Drop redundant sections</button>",
     "<!-- THE SHAPE, BEFORE IT IS COMMITTED.  2026-09-19. Søren: \"the neuroglancer link paste function",
     "     needs to have a 3D rendering also, so you can see the 3D mesh before committing.\" The pad has",
     "     had this since 2026-09-17, and pad3DRings() has ALWAYS fallen back to a pasted tracing -- but",
