@@ -1327,7 +1327,9 @@ function tracingViewerOpen(structs, say, ids){
   /* The viewer decides the annotation shape (2026-09-22), so it has to be known before the
      layers are written, not just when the URL is joined. */
   const viewerEl0 = document.getElementById("viewer");
-  const base = (viewerEl0 && viewerEl0.value)
+  /* `let`, because a link too big for this viewer is re-pointed at one that takes it below
+     (2026-09-23, src/too_big_here_opens_where_it_fits.py). */
+  let base = (viewerEl0 && viewerEl0.value)
             || (window.UJ && UJ.cfg && UJ.cfg.viewer && UJ.cfg.viewer.base)
             || "https://spelunker.cave-explorer.org/";
   const used = {}; let firstName = "";
@@ -1353,7 +1355,7 @@ function tracingViewerOpen(structs, say, ids){
      show the same outline twice. */
   st.layout = { type: "xy-3d", orthographicProjection: true };
   /* base is resolved above, before the layers are written. */
-  const url = base + "#!" + encodeURIComponent(JSON.stringify(st));
+  let url = base + "#!" + encodeURIComponent(JSON.stringify(st));
   /* A tracing is tens of vertices a section, so this is comfortable; a hundred sections of freehand
      is not, and a URL the browser silently truncates would open a viewer missing half the cell
      without saying so. Better to say so here. */
@@ -1374,36 +1376,59 @@ function tracingViewerOpen(structs, say, ids){
                + "the link is about four times longer than it needs to be \u2014 Spelunker and "
                + "neuroglancer-demo read polylines.";
   } catch (_e){}
+  let movedViewer = false;
   if (url.length > TRACING_LINK_MAX){
     /* PRICE THE ALTERNATIVE (2026-09-23). Søren spent an evening dropping points and then sections
        off a cell that already fitted as polylines and could never fit as lines -- so rather than
        tell him again that this viewer cannot read them, the same state is measured the other way
        and the answer is in the sentence. See src/an_oversized_link_prices_the_other_viewer.py. */
-    let elseSay = "";
+    /* OPEN IT WHERE IT FITS (2026-09-23). Søren: "Can't you just measure when it will fail to
+       open and then open with Spelunker instead? It should be easy for the user." The measurement
+       was already being made to tell him about it; making it and then not acting on it was the
+       wrong end of the job. See src/too_big_here_opens_where_it_fits.py. */
+    let elseSay = "", moved = false;
     try {
       if (UJ.tracing.viewerTakesPolylines && !UJ.tracing.viewerTakesPolylines(base)){
+        /* One he already has in his own list, if the page offers one. */
+        const altBase = (function(){
+          try {
+            const el = document.getElementById("viewer");
+            const hit = el && [].filter.call(el.options, function(o){
+              return UJ.tracing.viewerTakesPolylines(o.value);
+            })[0];
+            if (hit) return hit.value;
+          } catch (_e){}
+          return "https://spelunker.cave-explorer.org/";
+        })();
         const alt = JSON.parse(JSON.stringify(st));
         let n = 0;
         (alt.layers || []).forEach(function(l, i){
           if (!l || !l.annotations) return;
           const rs = structs[n] ? structs[n].rings : null; n++;
-          if (rs) l.annotations = tracingRingAnns(rs, "t" + i, "https://spelunker.cave-explorer.org/");
+          if (rs) l.annotations = tracingRingAnns(rs, "t" + i, altBase);
         });
-        const altLen = ("https://spelunker.cave-explorer.org/#!"
-                        + encodeURIComponent(JSON.stringify(alt))).length;
-        elseSay = altLen <= TRACING_LINK_MAX
-          ? " As polylines it would be " + Math.round(altLen / 1000) + "k and WOULD open as a link "
-            + "\u2014 Spelunker and neuroglancer-demo read them, this viewer does not. No contour "
-            + "would be dropped."
-          : " It would still be " + Math.round(altLen / 1000) + "k as polylines, so no viewer takes "
-            + "it as a link: the {} editor is the way in.";
+        const altUrl = altBase + "#!" + encodeURIComponent(JSON.stringify(alt));
+        if (altUrl.length <= TRACING_LINK_MAX){
+          const wasHost = (function(){ try { return new URL(base).host; } catch (_e){ return base; } })();
+          const nowHost = (function(){ try { return new URL(altBase).host; } catch (_e){ return altBase; } })();
+          st = alt; base = altBase; url = altUrl; moved = movedViewer = true;
+          tracingSay("Too big for " + wasHost + " as line annotations (" + kc + "; a tab cannot be "
+            + "opened past 2,097,152 characters), so it opened in " + nowHost + " as polylines, "
+            + "where it is " + Math.round(altUrl.length / 1000) + "k. Nothing was dropped. Your "
+            + "viewer setting is unchanged \u2014 this one link went elsewhere because it had to.");
+        } else {
+          elseSay = " It would still be " + Math.round(altUrl.length / 1000) + "k as polylines, so "
+                  + "no viewer takes it as a link: the {} editor is the way in.";
+        }
       }
     } catch (_e){}
-    tracingStateOffer(JSON.stringify(st),
-      "That is more than a tab can be opened with (" + kc + "; the browser refuses past 2,097,152 "
-      + "and shows about:blank#blocked). Paste the state into Neuroglancer instead \u2014 its {} "
-      + "button takes it, with no URL and no limit." + elseSay, true);
-    return;
+    if (!moved){
+      tracingStateOffer(JSON.stringify(st),
+        "That is more than a tab can be opened with (" + kc + "; the browser refuses past 2,097,152 "
+        + "and shows about:blank#blocked). Paste the state into Neuroglancer instead \u2014 its {} "
+        + "button takes it, with no URL and no limit." + elseSay, true);
+      return;
+    }
   }
   /* shapeSay is computed above, for both branches. */
   if (url.length > TRACING_LINK_LONG){
@@ -1418,7 +1443,8 @@ function tracingViewerOpen(structs, say, ids){
   /* THE WHOLE CELL, 2026-09-21: the tab first, synchronously, then the community's root IDs for
      the nucleus onto the cell layer, then the tab is sent there. Where there are none to read the
      wait is nothing, and a backend that does not answer costs 5 s, not the view. */
-  const wasLong = url.length > TRACING_LINK_LONG;
+  /* movedViewer: the sentence saying WHERE it opened and why is the one that must survive. */
+  const wasLong = movedViewer || url.length > TRACING_LINK_LONG;
   const nucId = (ids && ids.nuc) || "", rootId = (ids && ids.root) || "";
   /* A cell layer to put them in: the link's own (δJump's v1dd_public, which the card itself cannot
      read) or the card's segmentation -- 2026-09-21, Søren: "In dJump, I don't see it including the
