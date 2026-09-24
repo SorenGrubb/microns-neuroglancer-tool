@@ -245,14 +245,14 @@ function tracedCellNameLayers(nucId, rootId, base){
   var out = [];
   return wants.reduce(function(chain, w){
     return chain.then(function(){
-      /* NO BUDGET AT ALL, AND THE URL DECIDES. FILTER_TRACE_BUDGET is short of the cap on
-         purpose, because a filter view has many cells and a base state to leave room for; one cell
-         has neither. Dropping the outline in here would also decide "it does not fit" before
-         anything had been composed, which is the decision the caller has to make — it is the one
-         that knows the link can go somewhere else (2026-09-24). */
+      /* THE URL DECIDES, not a budget in here — deciding "it does not fit" before anything has
+         been composed takes the decision away from the caller, and the caller is the one that knows
+         the link can go somewhere else (2026-09-24). Since all_of_them_or_the_json.py the builder
+         has no budget at all; `quiet` is still wanted, because the reads cap speaks in the filter's
+         voice. */
       return buildTracedOrganelleLayers({ nuc: [String(nucId || "")], root: [String(rootId || "")] },
                                         w, function(){},
-                                        { budget: Infinity, quiet: true, base: base || "" })
+                                        { quiet: true, base: base || "" })
         .then(function(ls){ if (ls && ls.length) out.push.apply(out, ls); },
               function(e){ console.warn("[traced cell link] " + w + " unavailable", e); });
     });
@@ -402,6 +402,28 @@ async function fillOrganSegKinds(){
     console.warn("[uJump filter] could not list traced organelle kinds",e);
   }
 }
+/* ── OPEN IT, OR HAND IT OVER ───────────────────────────────────  2026-09-24
+   The whole of the size decision, in one function, because it was in three places and two tools had
+   none of it. `win` is the tab reserved at the click for the popup blocker; it is CLOSED when the
+   state is handed over instead, since leaving it on about:blank behind the offer is two confusing
+   things at once. `anchor` is the element the offer panel is put beside.
+   Returns true if a tab was sent somewhere. See src/all_of_them_or_the_json.py. */
+function tracedOutlinesGo(url, json, win, anchor){
+  var cap = (typeof tracedLinkMax === "function") ? tracedLinkMax() : 2097152;
+  if (url.length > cap){
+    if (win){ try { win.close(); } catch (_e){} }
+    if (typeof tracedOutlinesStateOffer === "function")
+      tracedOutlinesStateOffer(anchor, json, url.length);
+    else if (typeof showSubmitToast === "function")
+      showSubmitToast(false, "That view is " + Math.round(url.length / 1000) + "k and a tab cannot "
+        + "be opened past " + cap.toLocaleString() + " characters. Narrow the filter, or pick one "
+        + "kind rather than all.");
+    return false;
+  }
+  if (win){ try { win.opener = null; } catch (_e){} win.location.href = url; }
+  else window.open(url, "_blank", "noopener");
+  return true;
+}
 function tracedOutlinesWire(){
   const sel=document.getElementById("filterOrganSeg");
   if(!sel||sel.dataset.wired)return;
@@ -417,13 +439,17 @@ function tracedOutlinesWire(){
    is not. Measured 2026-09-23: six traced cells of 200 contours built a 22,397k link, ten times
    what a tab can be opened with, without the outline cap firing once.
 
-   So the link has a cap of its own, in the unit the browser actually counts. 2,097,152 is where
-   Chromium stops (measured in Søren's browser, 2026-09-22); 1,200,000 of it is offered to the
-   outlines and the remaining ~900k left for what else the state carries -- segmentation layers,
-   region boxes, organelle points, the EM. A caller that knows its own state can pass {budget: n}.
-   See src/the_outlines_fit_the_link_they_go_in.py. */
+   THE LINK'S SIZE IS NOT DECIDED HERE, and used to be (2026-09-24). This had a budget of
+   1,200,000 characters and dropped whole outlines to stay under it, so the composed link always
+   fitted and the offer that hands over the state — which measures the COMPOSED link — could never
+   fire. Søren: "what it does now is give an error message and then open Neuroglancer with fewer
+   whole cell segmentations. That was not the point." Measured on six traced cells of sixty
+   contours: 7,200 of 14,400 annotations survived, silently.
+
+   So this builds what it was asked for and the caller measures: tracedOutlinesGo below opens it
+   when it all fits and hands over the state when it does not. Nothing in between.
+   See src/all_of_them_or_the_json.py. */
 const FILTER_TRACE_CAP=150;
-const FILTER_TRACE_BUDGET=1200000;
 /* What this costs in a URL, not in memory: encodeURIComponent turns every quote, brace, comma and
    colon into three characters, so JSON.stringify alone under-counts by about two thirds. */
 function tracedOutlinesCost(anns){
@@ -487,12 +513,9 @@ async function buildTracedOrganelleLayers(ids,want,say,opts){
     const k=String(g.t.instanceOf||g.t.kind||"organelle").toLowerCase();
     (byKind[k]=byKind[k]||[]).push(g);
   });
-  /* ── AS MANY AS THE LINK WILL TAKE ────────────────────────────────────────────  2026-09-23
-     The annotations are made first and measured as they go, and an outline that does not fit the
-     remaining budget is left out whole -- never half an outline, which would be a shape nobody
-     traced. Order is the index's, so what you get is the first N rather than an arbitrary N. */
-  const budget=(opts&&opts.budget!==undefined)?opts.budget:FILTER_TRACE_BUDGET;
-  const madeFor={}; let spent=0, tooBig=0;
+  /* Everything asked for, whatever it comes to; the caller measures its link and either
+     opens it or hands the state over (tracedOutlinesGo). 2026-09-24. */
+  const madeFor={};
   Object.keys(byKind).sort().forEach(function(k){
     madeFor[k]=[];
     byKind[k].forEach(function(g,gi){
@@ -504,9 +527,6 @@ async function buildTracedOrganelleLayers(ids,want,say,opts){
       const a=UJ.tracing.ringAnnotations(g.rings||[],"to"+gi,
                                          (opts&&opts.base)?{base:opts.base}:undefined);
       if(!a||!a.length)return;
-      const cost=tracedOutlinesCost(a);
-      if(spent+cost>budget){ tooBig++; return; }
-      spent+=cost;
       [].push.apply(madeFor[k],a);
     });
   });
@@ -523,32 +543,8 @@ async function buildTracedOrganelleLayers(ids,want,say,opts){
                  annotationColor:byKind[k][0].t.color||"#40e28c",
                  annotations:anns});
   });
-  /* SAID, NOT SILENT -- the same rule the reads cap follows six lines down, for the same reason:
-     somebody reading this view is deciding what to trace next. */
-  /* opts.quiet: the caller says it better. The sentences below are the FILTER's — "narrow the
-     filter", "pick one kind rather than all" — and a single cell's name has no filter to narrow
-     and one kind to pick from (2026-09-24). */
-  if(tooBig&&!(opts&&opts.quiet)&&typeof showSubmitToast==="function"){
-    /* WHY, WHEN THE ANSWER IS THE VIEWER. On one that cannot read polylines every EDGE of every
-       contour is its own annotation, so a single whole cell is already over the budget and the
-       honest view is empty -- measured here: three traced cells are 180 contours and 712k as
-       polylines, and nothing at all as lines. An empty view with no reason is the worst of the
-       three outcomes, so the reason somebody can act on is named. */
-    var shapeWhy="";
-    try {
-      if(UJ.tracing&&UJ.tracing.viewerTakesPolylines&&!UJ.tracing.viewerTakesPolylines())
-        shapeWhy=" This viewer cannot read polyline annotations, so every edge of every contour is "
-               +"its own line and these outlines cost about four times what they need to \u2014 "
-               +"Spelunker and neuroglancer-demo read polylines, and the same cells fit there.";
-    } catch (_sw){}
-    showSubmitToast(false,(got.length===tooBig
-        ?"Not one of these "+tooBig+" outlines fits a viewer link on its own"
-        :"Left "+tooBig+" outline"+(tooBig===1?"":"s")+" out")
-      +" \u2014 a viewer link cannot be opened past 2,097,152 characters"
-      +(got.length===tooBig?"":", and the ones drawn already fill it")+". Pick one kind rather "
-      +"than all, or narrow the filter. A whole cell is a hundred times the contours of a "
-      +"lysosome."+shapeWhy);
-  }
+  /* The READS cap is a different cost and keeps its sentence: it bounds a hundred and fifty
+     round trips to Drive, not the size of a link (2026-09-24). */
   if(capped&&!(opts&&opts.quiet)&&typeof showSubmitToast==="function")
     showSubmitToast(false,"Drew "+got.length+" traced outline"+(got.length===1?"":"s")
       +" and left "+capped+" out \u2014 the view reads one file per outline, so it stops at "

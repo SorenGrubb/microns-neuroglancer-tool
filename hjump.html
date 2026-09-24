@@ -451,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 11:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 13:41</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3898,14 +3898,18 @@ function renderFilterResults(){
     .catch(function(err){ console.warn("[hJump filter] traced outlines unavailable",err); return []; })
     .then(function(layers){
       vb.textContent=label;
-      let url=href;
+      let url=href, json="";
       if(layers.length){
         const k=href.indexOf("#!");
         const st=JSON.parse(decodeURIComponent(href.slice(k+2)));
         st.layers.push.apply(st.layers,layers);
-        url=href.slice(0,k)+"#!"+encodeURIComponent(JSON.stringify(st));
+        json=JSON.stringify(st);
+        url=href.slice(0,k)+"#!"+encodeURIComponent(json);
       }
-      if(win){ try{ win.opener=null; }catch(_e){} win.location.href=url; }
+      /* Measured before it is opened (2026-09-24). Nothing is trimmed to make it fit any more, so
+         a view that cannot be opened is handed over as state instead of opening short. */
+      if(typeof tracedOutlinesGo==="function")tracedOutlinesGo(url,json||"{}",win,vb);
+      else if(win){ try{ win.opener=null; }catch(_e){} win.location.href=url; }
       else window.open(url,"_blank","noopener");
     });
   });

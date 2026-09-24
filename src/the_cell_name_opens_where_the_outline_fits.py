@@ -70,13 +70,6 @@ edit("core/tracedoutlines.js", [
       const a=UJ.tracing.ringAnnotations(g.rings||[],"to"+gi,
                                          (opts&&opts.base)?{base:opts.base}:undefined);"""),
 
- (u"...and can be told to keep quiet",
-  u"""  if(tooBig&&typeof showSubmitToast==="function"){""",
-  u"""  /* opts.quiet: the caller says it better. The sentences below are the FILTER's — "narrow the
-     filter", "pick one kind rather than all" — and a single cell's name has no filter to narrow
-     and one kind to pick from (2026-09-24). */
-  if(tooBig&&!(opts&&opts.quiet)&&typeof showSubmitToast==="function"){"""),
-
  (u"...for the reads cap too",
   u"""  if(capped&&typeof showSubmitToast==="function")""",
   u"""  if(capped&&!(opts&&opts.quiet)&&typeof showSubmitToast==="function")"""),
@@ -113,14 +106,14 @@ function tracedCellNameLayers(nucId, rootId, base){
  (u"...and is not refused against the filter's budget",
   u"""      return buildTracedOrganelleLayers({ nuc: [String(nucId || "")], root: [String(rootId || "")] },
                                         w, function(){})""",
-  u"""      /* NO BUDGET AT ALL, AND THE URL DECIDES. FILTER_TRACE_BUDGET is short of the cap on
-         purpose, because a filter view has many cells and a base state to leave room for; one cell
-         has neither. Dropping the outline in here would also decide "it does not fit" before
-         anything had been composed, which is the decision the caller has to make — it is the one
-         that knows the link can go somewhere else (2026-09-24). */
+  u"""      /* THE URL DECIDES, not a budget in here — deciding "it does not fit" before anything has
+         been composed takes the decision away from the caller, and the caller is the one that knows
+         the link can go somewhere else (2026-09-24). Since all_of_them_or_the_json.py the builder
+         has no budget at all; `quiet` is still wanted, because the reads cap speaks in the filter's
+         voice. */
       return buildTracedOrganelleLayers({ nuc: [String(nucId || "")], root: [String(rootId || "")] },
                                         w, function(){},
-                                        { budget: Infinity, quiet: true, base: base || "" })"""),
+                                        { quiet: true, base: base || "" })"""),
 
  # ── 3. and the click opens where it fits ──────────────────────────────────────────────────────
  (u"the click opens where the outline fits",

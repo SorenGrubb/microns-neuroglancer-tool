@@ -23,13 +23,19 @@
    outlines are left out only when they do not fit — with the number said out loud, because a view
    that quietly drew some of them is a lie about what the dataset holds.
 
+   REWRITTEN 2026-09-24. This used to assert the opposite of what it asserts now: "one that does
+   not fit is trimmed until it does, and says how many it left out". Søren: "what it does now is
+   give an error message and then open Neuroglancer with fewer whole cell segmentations. That was
+   not the point." Trimming inside the builder is what stopped the JSON offer from ever firing, so
+   the builder no longer trims and the caller measures — see src/all_of_them_or_the_json.py and
+   filterallornothingcheck.js, which asserts the new rule end to end.
+
    WHAT IS ASSERTED:
      - a selection that fits is drawn whole, and nothing is said about size
-     - one that does not fit is trimmed until it does, and says how many it left out
-     - ...and what it opens is under the cap
-     - ...and it is not empty: it draws what it can
-     - the budget is about SIZE, not count — many small outlines survive where a few huge ones do not
-     - a caller can set its own budget, because it knows what else is in its state
+     - one that does NOT fit is still drawn whole: nothing is left out here
+     - ...and it really is over the cap, so the caller has something to decide
+     - the shape is the viewer's: a polyline viewer gets polylines, and the same cells cost far less
+     - the cost is measured in what a URL counts, which is what the caller measures against
 
    Run: node tracedlinksizecheck.js */
 const { chromium } = require("playwright");
@@ -128,61 +134,46 @@ const POLYLINE = "https://spelunker.cave-explorer.org/";
     ok(r.names === "traced whole cell (1)", "...and the cell drawn", r.names);
   }
 
-  /* ── too big ──────────────────────────────────────────────────────────────────────────── */
+  /* ── too big, and still whole ───────────────────────────────────────── */
   console.log("\na selection too big for a link");
   {
     const nucs = seed(6, 200, 120);
-    /* What it would be with no budget at all, so "trimmed" is measured against the real thing
-       rather than against a number written down here. */
-    const whole = await run(LINES_ONLY, nucs, { budget: Infinity });
     const r = await run(LINES_ONLY, nucs);
-    ok(whole.len > MAX, "(untrimmed, this selection really is over the cap)",
-       Math.round(whole.len / 1000) + "k against " + Math.round(MAX / 1000) + "k");
-    ok(r.len > 0 && r.len < MAX, "what it opens is under the cap", Math.round(r.len / 1000) + "k");
-    ok(r.anns < whole.anns, "...outlines were left out, because they had to be",
-       r.anns + " of " + whole.anns);
-    /* Either wording names the number: some were left out, or not one of them fitted. */
-    ok(/(left \d+ outline|not one of these \d+ outlines)/i.test(r.said),
-       "...and it says how many",
-       r.said.slice(0, 120) || "(said nothing)");
-    /* ── AND WHY, WHEN THE ANSWER IS THE VIEWER ───────────────────────────────────  2026-09-23
-       On a viewer that cannot read polylines each contour costs one annotation PER EDGE, so a
-       single whole cell is already over the budget and the honest view is empty. An empty view
-       with no explanation is the worst of the three outcomes, so the message has to name the
-       reason somebody can act on. */
-    ok(r.anns === 0 ? /polyline/i.test(r.said) : true,
-       "...and when not even one fits, it says the viewer is why",
-       r.anns === 0 ? (r.said.slice(0, 170) || "(said nothing)") : "(some fitted)");
+    ok(r.len > MAX, "it really is over the cap, which is the caller's problem to solve",
+       Math.round(r.len / 1000) + "k against " + Math.round(MAX / 1000) + "k");
+    ok(r.anns > 0, "...and every outline is still in it", r.anns + " annotation(s)");
+    ok(!/left out|left \d+ outline|not one of these/i.test(r.said),
+       "...with nothing trimmed and nothing said about trimming \u2014 the offer is what answers this",
+       r.said.slice(0, 140) || "(said nothing)");
+    ok(r.names === "traced whole cell (6)", "...all six cells", r.names);
   }
 
-  /* ── the same selection, on a viewer that reads polylines ────────────────────────────────── */
+  /* ── the same selection, on a viewer that reads polylines ────────────────────── */
   console.log("\nthe same cells, where a contour is one annotation");
   {
     const nucs = seed(3, 180, 120);
     const lines = await run(LINES_ONLY, nucs);
     const poly = await run(POLYLINE, nucs);
     ok(poly.types === "polyline", "a polyline viewer gets polylines", poly.types);
-    ok(poly.anns > lines.anns,
-       "...and fits more of the same cells, because a contour is one annotation and not one per edge",
-       poly.anns + " contours against " + lines.anns);
-    ok(poly.len < MAX, "...still under the cap", Math.round(poly.len / 1000) + "k");
+    ok(lines.types === "line", "...and one that reads none gets a line per edge", lines.types);
+    ok(poly.anns < lines.anns, "...one annotation per contour rather than one per edge",
+       poly.anns + " against " + lines.anns);
+    /* The four-to-one S\u00f8ren's own fibroblast shows: 418,811 characters as polylines against
+       1,790,053 as lines. Both carry the same three cells; only the shape differs. */
+    ok(poly.len * 3 < lines.len, "...and the link is a fraction of the length, for the same cells",
+       Math.round(poly.len / 1000) + "k against " + Math.round(lines.len / 1000) + "k");
   }
 
-  /* ── the unit is characters, not outlines ────────────────────────────────────────────────── */
-  console.log("\nthe budget is size, not count");
+  /* ── the unit is what a URL counts ───────────────────────────────────── */
+  console.log("\ncost is measured in what a URL counts");
   {
-    const many = seed(120, 2, 8);          // 120 outlines, all tiny
-    const small = await run(LINES_ONLY, many);
-    ok(small.anns === 120 * 2 * (small.types === "polyline" ? 1 : 8) / (small.types === "polyline" ? 1 : 1)
-         || small.anns > 0,
-       "120 small outlines are all drawn", small.anns + " annotation(s) from 120 outlines");
-    ok(!/left out/i.test(small.said), "...nothing left out", small.said || "(nothing said)");
-    const few = seed(3, 300, 150);         // 3 outlines, enormous
-    const bigWhole = await run(LINES_ONLY, few, { budget: Infinity });
-    const big = await run(LINES_ONLY, few);
-    ok(/left out/i.test(big.said) || big.anns < bigWhole.anns,
-       "...while 3 huge ones do not all fit \u2014 which a cap in outlines could never tell apart",
-       big.anns + " of " + bigWhole.anns + "; " + (big.said.slice(0, 90) || "(nothing said)"));
+    const both = await p.evaluate(() => {
+      const a = [{ type: "polyline", id: "x", points: [[1, 2, 3], [4, 5, 6]] }];
+      return { cost: tracedOutlinesCost(a), raw: JSON.stringify(a).length };
+    });
+    ok(both.cost > both.raw,
+       "encodeURIComponent is what it counts, not JSON.stringify \u2014 which under-counts by about "
+         + "two thirds", both.cost + " encoded against " + both.raw + " raw");
   }
 
   ok(errors.length === 0, "no page errors", errors.join(" | ").slice(0, 200) || "none");
