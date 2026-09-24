@@ -252,15 +252,27 @@ function tracedCellNameWire(){
     var nuc = a.getAttribute("data-nuc") || "", root = a.getAttribute("data-root") || "";
     if (!nuc && !root) return;
     /* Asked of the index already in memory, so an untraced cell costs nothing: no request, no
-       delay, and the anchor behaves exactly as it did before any of this existed. */
+       delay, and the anchor behaves exactly as it did before any of this existed.
+
+       BUT NOT-YET-KNOWN IS NOT NO (2026-09-24). Søren: "This macrophage does not show the whole
+       cell trace when opening in Neuroglancer." Measured on the live site, the cell's outline was
+       in the index and the layer built; what he hit was this test running before the index had
+       arrived. That fetch takes 3.6 s warm and 27.7 s cold, so the first clicks of a page were
+       answered "no" by a set that had not been read yet. When it has never loaded the click takes
+       the tab and waits for it; a cell that turns out to have nothing traced then opens exactly the
+       link it would have opened anyway. See src/the_cell_name_waits_for_the_index.py. */
     if (typeof tracedKindHas !== "function") return;
-    if (!tracedKindHas("__traced_cell", nuc, root) && !tracedKindHas("__traced_nucleus", nuc, root)) return;
+    var known = (typeof TRACED_KIND_SETS !== "undefined") && !!TRACED_KIND_SETS;
+    if (known && !tracedKindHas("__traced_cell", nuc, root)
+              && !tracedKindHas("__traced_nucleus", nuc, root)) return;
     e.preventDefault();
     var href = a.href, win = null;
     try { win = window.open("", "_blank"); } catch (_e){}      // at the click, or it is a popup
     var ext = a.querySelector(".ext"), was = ext ? ext.innerHTML : "";
     if (ext) ext.innerHTML = "\u2026";
-    tracedCellNameLayers(nuc, root).then(function(layers){
+    var ready = known || typeof tracedKindSets !== "function"
+      ? Promise.resolve() : tracedKindSets().then(function(){}, function(){});
+    ready.then(function(){ return tracedCellNameLayers(nuc, root); }).then(function(layers){
       if (ext) ext.innerHTML = was;
       var url = href, k = href.indexOf("#!");
       if (layers.length && k >= 0){

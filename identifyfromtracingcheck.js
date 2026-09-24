@@ -65,6 +65,8 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
       window.__REREAD = [];
       postReport = function(pl){ window.__SENT.push(pl); return Promise.resolve({ ok: true }); };
       tracingRegisterCentre = function(){ return false; };   // its own path, its own rule
+      window.__REFRESH = [];
+      window.tracedKindsRefresh = function(force){ window.__REFRESH.push(!!force); return Promise.resolve(); };
       loadCommunityReports = function(nid){ window.__REREAD.push(String(nid)); };
     }
     const ringsFor = (n, x0) => {
@@ -182,6 +184,21 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   await p.evaluate(() => { delete UJ.cfg.tracing.identityFor; });
   ok(!viaHook.offer, "a tool whose host answers the identity question is left out of this entirely",
      viaHook.offer ? viaHook.offer.slice(0, 90) : "no offer");
+
+  /* ── AND THE TRACED-OUTLINE INDEX IS NOW OUT OF DATE ────────────────────────
+     Søren, of a macrophage he had just traced: "This macrophage does not show the whole cell trace
+     when opening in Neuroglancer." That index is read once at page load, so the cell name's ↗ was
+     asking a set fetched before the tracing existed. */
+  console.log("\nand the press refreshes the index the tracing is now in");
+  const refreshed = await p.evaluate(async () => {
+    const before = window.__REFRESH.length;
+    await new Promise(r => setTimeout(r, 3200));
+    return { calls: window.__REFRESH.slice(before) };
+  });
+  ok(refreshed.calls.length > 0, "the traced-outline index is re-read after a save",
+     refreshed.calls.length + " refresh(es)");
+  ok(refreshed.calls.some(f => f === true), "...forced, so the cached set is replaced",
+     JSON.stringify(refreshed.calls));
 
   ok(errors.length === 0, "no page errors", errors.join(" | ").slice(0, 200) || "none");
   await b.close();

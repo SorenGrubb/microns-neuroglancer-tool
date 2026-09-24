@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-24 09:16</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-24 11:04</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -9260,9 +9260,40 @@ UJ.traceloft = (function(){
     return best;
   }
 
+  /* The furthest a contour's outline gets from its own centre — its size, for deciding whether
+     another contour is near enough to be the same object. MAX rather than mean: an open curve's
+     centroid is not inside it, and the extent is the honest measure of how big the thing is. */
+  function radiusOf(pts){
+    if (!pts || !pts.length) return 0;
+    var c = centroid(pts), m = 0, i, d;
+    for (i = 0; i < pts.length; i++){
+      d = Math.hypot(pts[i][0] - c[0], pts[i][1] - c[1]);
+      if (d > m) m = d;
+    }
+    return m;
+  }
+  /* ── HOW FAR “NEAREST” IS ALLOWED TO BE ────────────────────────────  2026-09-24
+     Søren, of a fibroblast traced every tenth section with a cilium traced on every one: "The middle
+     part of this fibroblast is getting a really bad mesh." The body's contour had nothing of its own
+     on the next section, so it was banded to the cilium 19 µm away.
+
+     Plausible when the centres are near RELATIVE TO HOW BIG the two contours are, or when their
+     outlines nearly touch whatever the ratio. Both are ratios of the contours' own size, so this
+     needs no idea how big a voxel is. Measured on his file, the two populations do not overlap:
+     every real band is under 2.58, every shard is 2.93 or more.
+     See src/a_contour_is_not_joined_to_something_far_away.py. */
+  var REACH_RATIO = 2.5;
+  function plausiblePair(d, ra, rb){
+    if (!(ra > 0) || !(rb > 0)) return true;        // no size recorded: exactly as before
+    if (d <= REACH_RATIO * (ra + rb)) return true;
+    return (d - (ra + rb)) <= 2 * Math.max(ra, rb);
+  }
   /* Greedy nearest-centroid pairing between the contours of two neighbouring sections. A cell that
      branches has two contours above one, and one of them gets the band while the other is capped —
-     which draws the branch as a separate stub rather than as a twisted sheet joining both. */
+     which draws the branch as a separate stub rather than as a twisted sheet joining both.
+
+     THE SECOND-NEAREST IS NOT TRIED when the nearest is implausible, and that is deliberate: if the
+     closest contour on that section is not this object, nothing further away is either. */
   function pairUp(below, above){
     var used = {}, pairs = [], i, j;
     for (i = 0; i < below.length; i++){
@@ -9272,7 +9303,9 @@ UJ.traceloft = (function(){
         var d = Math.pow(c[0] - above[j].c[0], 2) + Math.pow(c[1] - above[j].c[1], 2);
         if (d < bestD){ bestD = d; pick = j; }
       }
-      if (pick >= 0){ used[pick] = 1; pairs.push([i, pick]); }
+      if (pick >= 0 && plausiblePair(Math.sqrt(bestD), below[i].rad, above[pick].rad)){
+        used[pick] = 1; pairs.push([i, pick]);
+      }
     }
     return { pairs: pairs, usedAbove: used };
   }
@@ -9407,7 +9440,7 @@ UJ.traceloft = (function(){
       if (!pts) return;
       var z = Math.round(r.z);
       if (!byZ[z]){ byZ[z] = []; zs.push(z); }
-      byZ[z].push({ pts: pts, c: centroid(pts) });
+      byZ[z].push({ pts: pts, c: centroid(pts), rad: radiusOf(pts) });
     });
     zs.sort(function(a, b){ return a - b; });
 
@@ -9519,20 +9552,44 @@ UJ.traceloft = (function(){
        nearest-centroid can never join a hole to an outline -- which would be a sheet through the
        middle of the tissue, and is exactly what a small hole next to a small neighbouring cell
        would have produced. */
-    function pairByParity(below, above, wantHole, zLo, zHi){
-      var bi = [], ai = [], b = [], a = [], i;
-      for (i = 0; i < below.length; i++) if (!below[i].hole === !wantHole){ bi.push(i); b.push(below[i]); }
+    function pairByParity(liveList, above, zHi, wantHole, out){
+      var b = [], a = [], ai = [], i;
+      for (i = 0; i < liveList.length; i++) if (!liveList[i].r.hole === !wantHole) b.push(liveList[i]);
       for (i = 0; i < above.length; i++) if (!above[i].hole === !wantHole){ ai.push(i); a.push(above[i]); }
       if (!b.length || !a.length) return;
-      pairUp(b, a).pairs.forEach(function(p){
-        band(b[p[0]], a[p[1]], zLo, zHi);
-        mark(hasAbove, zLo, bi[p[0]]);
-        mark(hasBelow, zHi, ai[p[1]]);
+      pairUp(b.map(function(L){ return L.r; }), a).pairs.forEach(function(p){
+        var L = b[p[0]], A = a[p[1]], j = ai[p[1]];
+        band(L.r, A, L.z, zHi);
+        mark(hasAbove, L.z, L.i);
+        mark(hasBelow, zHi, j);
+        out[L.z + ":" + L.i] = { r: A, z: zHi, i: j };
       });
     }
-    for (var k = 0; k < zs.length - 1; k++){
-      pairByParity(byZ[zs[k]], byZ[zs[k + 1]], false, zs[k], zs[k + 1]);
-      pairByParity(byZ[zs[k]], byZ[zs[k + 1]], true, zs[k], zs[k + 1]);
+    /* ── A CONTOUR WAITS FOR ITS OWN NEXT SECTION ────────────────────  2026-09-24
+       This used to band zs[k] to zs[k+1] and nothing else, which is right only while everything is
+       traced at one rate. Søren's fibroblast is traced every tenth section with a cilium on every
+       one, so the body's next contour is ten sections up and the section in between holds only the
+       cilium — which, before the reach limit above, is what the body got banded to.
+
+       HOW LONG IT WAITS is the tracer's own spacing: the widest gap between consecutive sections
+       anywhere in this tracing. Eleven sections on his file, exactly the rate he used; ONE on an
+       evenly traced object, so a contour that genuinely ends is still capped at the very next
+       section, as it always was. */
+    var maxGap = 12;
+    for (var gi = 1; gi < zs.length; gi++) maxGap = Math.max(maxGap, zs[gi] - zs[gi - 1]);
+    var live = zs.length ? byZ[zs[0]].map(function(r, i){ return { r: r, z: zs[0], i: i }; }) : [];
+    for (var k = 1; k < zs.length; k++){
+      var above = byZ[zs[k]], zHi = zs[k], moved = {};
+      pairByParity(live, above, zHi, false, moved);
+      pairByParity(live, above, zHi, true, moved);
+      var next = [], took = {};
+      live.forEach(function(L){
+        var rep = moved[L.z + ":" + L.i];
+        if (rep){ next.push(rep); took[rep.i] = 1; return; }
+        if (zHi - L.z <= maxGap) next.push(L);      // still waiting; past that, it has ended
+      });
+      above.forEach(function(A, j){ if (!took[j]) next.push({ r: A, z: zHi, i: j }); });
+      live = next;
     }
     /* Which holes were taken care of by their parent's cap, so they do not also get a disc of
        their own on that side -- two coplanar caps facing the same way is a doubled surface, and
@@ -9707,7 +9764,7 @@ UJ.traceloft = (function(){
       if (!pts) return;
       var z = +r.z;
       if (!byZ[z]){ byZ[z] = []; zs.push(z); }
-      byZ[z].push({ pts: pts, c: centroid(pts), src: i, inst: r.inst || 0 });
+      byZ[z].push({ pts: pts, c: centroid(pts), rad: radiusOf(pts), src: i, inst: r.inst || 0 });
     });
     zs.sort(function(a, b){ return a - b; });
     if (zs.length < 2) return { rings: (rings || []).slice(), made: 0, unpaired: 0, chains: 0 };
@@ -9721,7 +9778,9 @@ UJ.traceloft = (function(){
     });
     for (var k = 1; k < zs.length; k++){
       var above = byZ[zs[k]];
-      var below = live.map(function(L){ return { c: centroid(L.last) }; });
+      /* With the radius, so a chain is not dragged onto a contour nowhere near it either — the
+         same rule the mesh uses, and for the same reason (2026-09-24). */
+      var below = live.map(function(L){ return { c: centroid(L.last), rad: radiusOf(L.last) }; });
       var pr = pairUp(below, above), taken = {};
       pr.pairs.forEach(function(pair){
         var L = live[pair[0]], A = above[pair[1]];
@@ -11942,15 +12001,27 @@ function tracedCellNameWire(){
     var nuc = a.getAttribute("data-nuc") || "", root = a.getAttribute("data-root") || "";
     if (!nuc && !root) return;
     /* Asked of the index already in memory, so an untraced cell costs nothing: no request, no
-       delay, and the anchor behaves exactly as it did before any of this existed. */
+       delay, and the anchor behaves exactly as it did before any of this existed.
+
+       BUT NOT-YET-KNOWN IS NOT NO (2026-09-24). Søren: "This macrophage does not show the whole
+       cell trace when opening in Neuroglancer." Measured on the live site, the cell's outline was
+       in the index and the layer built; what he hit was this test running before the index had
+       arrived. That fetch takes 3.6 s warm and 27.7 s cold, so the first clicks of a page were
+       answered "no" by a set that had not been read yet. When it has never loaded the click takes
+       the tab and waits for it; a cell that turns out to have nothing traced then opens exactly the
+       link it would have opened anyway. See src/the_cell_name_waits_for_the_index.py. */
     if (typeof tracedKindHas !== "function") return;
-    if (!tracedKindHas("__traced_cell", nuc, root) && !tracedKindHas("__traced_nucleus", nuc, root)) return;
+    var known = (typeof TRACED_KIND_SETS !== "undefined") && !!TRACED_KIND_SETS;
+    if (known && !tracedKindHas("__traced_cell", nuc, root)
+              && !tracedKindHas("__traced_nucleus", nuc, root)) return;
     e.preventDefault();
     var href = a.href, win = null;
     try { win = window.open("", "_blank"); } catch (_e){}      // at the click, or it is a popup
     var ext = a.querySelector(".ext"), was = ext ? ext.innerHTML : "";
     if (ext) ext.innerHTML = "\u2026";
-    tracedCellNameLayers(nuc, root).then(function(layers){
+    var ready = known || typeof tracedKindSets !== "function"
+      ? Promise.resolve() : tracedKindSets().then(function(){}, function(){});
+    ready.then(function(){ return tracedCellNameLayers(nuc, root); }).then(function(layers){
       if (ext) ext.innerHTML = was;
       var url = href, k = href.indexOf("#!");
       if (layers.length && k >= 0){
@@ -14014,6 +14085,19 @@ function tracingKeep(){
      +'(the account button, top right) and '+(all.length===1?'it goes':'they go')+' up on '
      +(all.length===1?'its':'their')+' own.');
   tracingFlushSoon();
+  /* ── AND THE TRACED-OUTLINE INDEX IS NOW OUT OF DATE ────────────────  2026-09-24
+     Søren, of a macrophage he had just traced: "This macrophage does not show the whole cell trace
+     when opening in Neuroglancer." core/tracedoutlines.js reads that index ONCE, at page load, and
+     nothing invalidated it — so the cell name's ↗ was asking a set fetched before this tracing
+     existed. The delay is the one every other submission here uses: Apps Script needs a moment to
+     append the row before a re-read would see it. Refreshing rather than merely clearing, because
+     the filter's Whole cell / Nucleus counts read the same set and should gain this cell too. */
+  setTimeout(function(){
+    try {
+      if (typeof window.tracedKindsRefresh === "function") window.tracedKindsRefresh(true);
+      else if (typeof tracedKindSets === "function") tracedKindSets(true);
+    } catch (_e){}
+  }, 2500);
   /* LAST, and after tracingSay: the offer sits under the card's own sentence about the press, and
      tracingPendingClear() above would have removed it if it had been built first (2026-09-24). */
   try { tracingIdAsk(all); } catch (_e){}

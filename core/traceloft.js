@@ -114,9 +114,40 @@ UJ.traceloft = (function(){
     return best;
   }
 
+  /* The furthest a contour's outline gets from its own centre — its size, for deciding whether
+     another contour is near enough to be the same object. MAX rather than mean: an open curve's
+     centroid is not inside it, and the extent is the honest measure of how big the thing is. */
+  function radiusOf(pts){
+    if (!pts || !pts.length) return 0;
+    var c = centroid(pts), m = 0, i, d;
+    for (i = 0; i < pts.length; i++){
+      d = Math.hypot(pts[i][0] - c[0], pts[i][1] - c[1]);
+      if (d > m) m = d;
+    }
+    return m;
+  }
+  /* ── HOW FAR “NEAREST” IS ALLOWED TO BE ────────────────────────────  2026-09-24
+     Søren, of a fibroblast traced every tenth section with a cilium traced on every one: "The middle
+     part of this fibroblast is getting a really bad mesh." The body's contour had nothing of its own
+     on the next section, so it was banded to the cilium 19 µm away.
+
+     Plausible when the centres are near RELATIVE TO HOW BIG the two contours are, or when their
+     outlines nearly touch whatever the ratio. Both are ratios of the contours' own size, so this
+     needs no idea how big a voxel is. Measured on his file, the two populations do not overlap:
+     every real band is under 2.58, every shard is 2.93 or more.
+     See src/a_contour_is_not_joined_to_something_far_away.py. */
+  var REACH_RATIO = 2.5;
+  function plausiblePair(d, ra, rb){
+    if (!(ra > 0) || !(rb > 0)) return true;        // no size recorded: exactly as before
+    if (d <= REACH_RATIO * (ra + rb)) return true;
+    return (d - (ra + rb)) <= 2 * Math.max(ra, rb);
+  }
   /* Greedy nearest-centroid pairing between the contours of two neighbouring sections. A cell that
      branches has two contours above one, and one of them gets the band while the other is capped —
-     which draws the branch as a separate stub rather than as a twisted sheet joining both. */
+     which draws the branch as a separate stub rather than as a twisted sheet joining both.
+
+     THE SECOND-NEAREST IS NOT TRIED when the nearest is implausible, and that is deliberate: if the
+     closest contour on that section is not this object, nothing further away is either. */
   function pairUp(below, above){
     var used = {}, pairs = [], i, j;
     for (i = 0; i < below.length; i++){
@@ -126,7 +157,9 @@ UJ.traceloft = (function(){
         var d = Math.pow(c[0] - above[j].c[0], 2) + Math.pow(c[1] - above[j].c[1], 2);
         if (d < bestD){ bestD = d; pick = j; }
       }
-      if (pick >= 0){ used[pick] = 1; pairs.push([i, pick]); }
+      if (pick >= 0 && plausiblePair(Math.sqrt(bestD), below[i].rad, above[pick].rad)){
+        used[pick] = 1; pairs.push([i, pick]);
+      }
     }
     return { pairs: pairs, usedAbove: used };
   }
@@ -261,7 +294,7 @@ UJ.traceloft = (function(){
       if (!pts) return;
       var z = Math.round(r.z);
       if (!byZ[z]){ byZ[z] = []; zs.push(z); }
-      byZ[z].push({ pts: pts, c: centroid(pts) });
+      byZ[z].push({ pts: pts, c: centroid(pts), rad: radiusOf(pts) });
     });
     zs.sort(function(a, b){ return a - b; });
 
@@ -373,20 +406,44 @@ UJ.traceloft = (function(){
        nearest-centroid can never join a hole to an outline -- which would be a sheet through the
        middle of the tissue, and is exactly what a small hole next to a small neighbouring cell
        would have produced. */
-    function pairByParity(below, above, wantHole, zLo, zHi){
-      var bi = [], ai = [], b = [], a = [], i;
-      for (i = 0; i < below.length; i++) if (!below[i].hole === !wantHole){ bi.push(i); b.push(below[i]); }
+    function pairByParity(liveList, above, zHi, wantHole, out){
+      var b = [], a = [], ai = [], i;
+      for (i = 0; i < liveList.length; i++) if (!liveList[i].r.hole === !wantHole) b.push(liveList[i]);
       for (i = 0; i < above.length; i++) if (!above[i].hole === !wantHole){ ai.push(i); a.push(above[i]); }
       if (!b.length || !a.length) return;
-      pairUp(b, a).pairs.forEach(function(p){
-        band(b[p[0]], a[p[1]], zLo, zHi);
-        mark(hasAbove, zLo, bi[p[0]]);
-        mark(hasBelow, zHi, ai[p[1]]);
+      pairUp(b.map(function(L){ return L.r; }), a).pairs.forEach(function(p){
+        var L = b[p[0]], A = a[p[1]], j = ai[p[1]];
+        band(L.r, A, L.z, zHi);
+        mark(hasAbove, L.z, L.i);
+        mark(hasBelow, zHi, j);
+        out[L.z + ":" + L.i] = { r: A, z: zHi, i: j };
       });
     }
-    for (var k = 0; k < zs.length - 1; k++){
-      pairByParity(byZ[zs[k]], byZ[zs[k + 1]], false, zs[k], zs[k + 1]);
-      pairByParity(byZ[zs[k]], byZ[zs[k + 1]], true, zs[k], zs[k + 1]);
+    /* ── A CONTOUR WAITS FOR ITS OWN NEXT SECTION ────────────────────  2026-09-24
+       This used to band zs[k] to zs[k+1] and nothing else, which is right only while everything is
+       traced at one rate. Søren's fibroblast is traced every tenth section with a cilium on every
+       one, so the body's next contour is ten sections up and the section in between holds only the
+       cilium — which, before the reach limit above, is what the body got banded to.
+
+       HOW LONG IT WAITS is the tracer's own spacing: the widest gap between consecutive sections
+       anywhere in this tracing. Eleven sections on his file, exactly the rate he used; ONE on an
+       evenly traced object, so a contour that genuinely ends is still capped at the very next
+       section, as it always was. */
+    var maxGap = 12;
+    for (var gi = 1; gi < zs.length; gi++) maxGap = Math.max(maxGap, zs[gi] - zs[gi - 1]);
+    var live = zs.length ? byZ[zs[0]].map(function(r, i){ return { r: r, z: zs[0], i: i }; }) : [];
+    for (var k = 1; k < zs.length; k++){
+      var above = byZ[zs[k]], zHi = zs[k], moved = {};
+      pairByParity(live, above, zHi, false, moved);
+      pairByParity(live, above, zHi, true, moved);
+      var next = [], took = {};
+      live.forEach(function(L){
+        var rep = moved[L.z + ":" + L.i];
+        if (rep){ next.push(rep); took[rep.i] = 1; return; }
+        if (zHi - L.z <= maxGap) next.push(L);      // still waiting; past that, it has ended
+      });
+      above.forEach(function(A, j){ if (!took[j]) next.push({ r: A, z: zHi, i: j }); });
+      live = next;
     }
     /* Which holes were taken care of by their parent's cap, so they do not also get a disc of
        their own on that side -- two coplanar caps facing the same way is a doubled surface, and
@@ -561,7 +618,7 @@ UJ.traceloft = (function(){
       if (!pts) return;
       var z = +r.z;
       if (!byZ[z]){ byZ[z] = []; zs.push(z); }
-      byZ[z].push({ pts: pts, c: centroid(pts), src: i, inst: r.inst || 0 });
+      byZ[z].push({ pts: pts, c: centroid(pts), rad: radiusOf(pts), src: i, inst: r.inst || 0 });
     });
     zs.sort(function(a, b){ return a - b; });
     if (zs.length < 2) return { rings: (rings || []).slice(), made: 0, unpaired: 0, chains: 0 };
@@ -575,7 +632,9 @@ UJ.traceloft = (function(){
     });
     for (var k = 1; k < zs.length; k++){
       var above = byZ[zs[k]];
-      var below = live.map(function(L){ return { c: centroid(L.last) }; });
+      /* With the radius, so a chain is not dragged onto a contour nowhere near it either — the
+         same rule the mesh uses, and for the same reason (2026-09-24). */
+      var below = live.map(function(L){ return { c: centroid(L.last), rad: radiusOf(L.last) }; });
       var pr = pairUp(below, above), taken = {};
       pr.pairs.forEach(function(pair){
         var L = live[pair[0]], A = above[pair[1]];

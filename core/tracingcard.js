@@ -1743,6 +1743,19 @@ function tracingKeep(){
      +'(the account button, top right) and '+(all.length===1?'it goes':'they go')+' up on '
      +(all.length===1?'its':'their')+' own.');
   tracingFlushSoon();
+  /* ── AND THE TRACED-OUTLINE INDEX IS NOW OUT OF DATE ────────────────  2026-09-24
+     Søren, of a macrophage he had just traced: "This macrophage does not show the whole cell trace
+     when opening in Neuroglancer." core/tracedoutlines.js reads that index ONCE, at page load, and
+     nothing invalidated it — so the cell name's ↗ was asking a set fetched before this tracing
+     existed. The delay is the one every other submission here uses: Apps Script needs a moment to
+     append the row before a re-read would see it. Refreshing rather than merely clearing, because
+     the filter's Whole cell / Nucleus counts read the same set and should gain this cell too. */
+  setTimeout(function(){
+    try {
+      if (typeof window.tracedKindsRefresh === "function") window.tracedKindsRefresh(true);
+      else if (typeof tracedKindSets === "function") tracedKindSets(true);
+    } catch (_e){}
+  }, 2500);
   /* LAST, and after tracingSay: the offer sits under the card's own sentence about the press, and
      tracingPendingClear() above would have removed it if it had been built first (2026-09-24). */
   try { tracingIdAsk(all); } catch (_e){}

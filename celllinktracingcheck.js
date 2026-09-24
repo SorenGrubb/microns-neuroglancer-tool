@@ -150,6 +150,18 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   ok(reads === readsBefore, "...without reading a single outline file",
      (reads - readsBefore) + " read(s)");
 
+  /* ── AND BEFORE THE INDEX HAS ARRIVED ────────────────────────────────────
+     That fetch takes 3.6 s warm and 27.7 s cold, and a click in the first seconds of a page used to
+     be answered "no" by a set nobody had read yet — which is what Søren hit on a macrophage whose
+     outline was in the index all along. Not-yet-known is not no. */
+  console.log("\nand a click before the index has arrived");
+  await show(cells.A);
+  await p.evaluate(() => { TRACED_KIND_SETS = null; TRACED_KIND_WAIT = null; TRACED_KIND_DS = null; });
+  const cold = await click(null, 25000);
+  ok(!cold.none && !cold.bad, "still opens a view", cold.none ? "nothing opened" : "ok");
+  ok(!!(cold.traced || []).length, "...with the outline, after waiting for the index",
+     (cold.traced || []).join(" | ") || "(no traced layers)");
+
   console.log("\nand the browser keeps its own shortcuts");
   await show(cells.A);
   const ctrl = await click({ ctrlKey: true }, 3000);
