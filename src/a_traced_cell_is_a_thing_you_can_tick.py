@@ -247,3 +247,28 @@ PAGE = [
 ]
 for _pg in ("ujump.html",):
     edit(_pg, PAGE)
+
+
+# ── 4. every tool: the matching rule answers for the two kinds when given the cell's ids ───────
+edit("core/organellefilter.js", [
+ (u"matches() can answer for a traced kind",
+  u'''  function matches(have, want, m){
+    if (!m) return true;
+    have = have || []; want = want || [];''',
+  u'''  function matches(have, want, m, ids){
+    if (!m) return true;
+    have = have || []; want = want || [];
+    /* \u2500\u2500 A TRACED WHOLE CELL IS NOT IN THE CALLER'S LIST \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-09-24
+       S\u00f8ren: "The whole cell and nucleus filter should work on all the tools."
+       Every tool builds `have` from its own organelle reports, and a traced outline is in neither
+       those nor the ontology -- it is in the traced-structures index. A tool that passes the cell's
+       ids gets the two kinds answered here rather than in seven filter loops; one that passes
+       nothing behaves exactly as before.
+       See src/a_traced_cell_is_a_thing_you_can_tick.py. */
+    if (ids && typeof tracedKindHas === "function"){
+      have = have.slice();
+      ["__traced_cell", "__traced_nucleus"].forEach(function(v){
+        if (have.indexOf(v) < 0 && tracedKindHas(v, ids.nuc, ids.root)) have.push(v);
+      });
+    }'''),
+])

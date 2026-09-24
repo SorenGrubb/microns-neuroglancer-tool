@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 06:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 08:28</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -4109,7 +4109,10 @@ function runFilterBjump(){
     /* One rule, in core/organellefilter.js, rather than re-derived here -- and it now honours the
        has / not-annotated selector, which this page did not previously have. */
     if(organelleMode){
-      if(!UJ.organelleFilter.matches(bjumpOrganelleKindsOf(i),organelleSel,organelleMode))continue;
+      /* Both ids, as this page's own "Open all" passes them: the segmentation covers about half
+         the block, so a tracing may be filed under either. */
+      if(!UJ.organelleFilter.matches(bjumpOrganelleKindsOf(i),organelleSel,organelleMode,
+                                     {nuc:String(BID[i]),root:BSEG[i]?String(BSEG[i]):""}))continue;
     }
     let markersOk=true;
     for(const f of markerFilters){
@@ -4412,7 +4415,10 @@ function buildColumnsBjump(){
   function renderOrganelleFilterBox(counts,note){
     if(!organellesBox)return;
     UJ.organelleFilter.render(organellesBox,{
-      counts:counts||{}, cls:"forganelle", modeId:"fOrganelleMode",
+      counts:Object.assign(counts||{},(typeof tracedKindCounts==="function")?tracedKindCounts():{}),
+      /* Outlined whole cells and nuclei, from the traced-structures index (2026-09-24). */
+      extraGroups:(typeof tracedKindGroup==="function")?tracedKindGroup():null,
+      cls:"forganelle", modeId:"fOrganelleMode",
       onChange:invalidatePreview
     });
     if(note){
@@ -4437,6 +4443,14 @@ function buildColumnsBjump(){
   }
   buildOrganelleFilterBox();
   window.__bjumpBuildOrganelleFilterBox=buildOrganelleFilterBox;
+  /* The traced-outline kinds, read once and the list redrawn with their counts (2026-09-24).
+     buildOrganelleFilterBox draws immediately with zeroes and fills the counts in when its own
+     fetch lands, so going back through it cannot blank the list. */
+  window.tracedKindsRefresh=function(force){
+    if(typeof tracedKindSets!=="function")return Promise.resolve();
+    return tracedKindSets(force).then(function(){ try{ buildOrganelleFilterBox(); }catch(_e){} });
+  };
+  try{ window.tracedKindsRefresh(); }catch(_e){}
 
   /* Warm the position-fixes cache eagerly too (2026-08-19), same reasoning as the identity
      dropdown just above: by the time a user has picked filters and clicked Download, 220 rows'

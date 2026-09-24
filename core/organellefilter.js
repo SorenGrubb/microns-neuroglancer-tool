@@ -56,13 +56,16 @@ UJ.organelleFilter = (function(){
      same list at UJ.organelles.GROUPS (generated, never hand-copied -- see build_wjump.py). Both
      are the same 61 kinds in the same 13 groups, so either is correct and neither is preferred. */
   function groupsOf(opts){
-    if (opts && opts.groups) return opts.groups;
     /* ── A GROUP THE ONTOLOGY DOES NOT HAVE ──────────────────────────────────────  2026-09-24
        Søren wanted to filter on "has somebody outlined the whole of this cell", which is a real
        question about the dataset and is not an organelle. `extraGroups` appends without replacing,
        so a caller adds a question rather than taking over the list.
        See src/a_traced_cell_is_a_thing_you_can_tick.py. */
-    var base = baseGroups();
+    /* `groups` REPLACES the ontology; `extraGroups` ADDS to whatever it ended up being. The two
+       were written a day apart and an early return on `groups` quietly made them exclusive — so
+       χJump, the one tool that passes its own vocabulary because it generates it into its own page,
+       was the one tool that got no traced-outline group. 2026-09-24. */
+    var base = (opts && opts.groups) ? opts.groups : baseGroups();
     if (opts && opts.extraGroups && opts.extraGroups.length)
       return base.concat(opts.extraGroups);
     return base;
@@ -202,9 +205,22 @@ UJ.organelleFilter = (function(){
      "has" with nothing ticked means "has anything", and "not" with nothing ticked means "has
      nothing" -- which is how a user reads an empty tick list next to those words, and is the one
      reading under which the two options partition the dataset. */
-  function matches(have, want, m){
+  function matches(have, want, m, ids){
     if (!m) return true;
     have = have || []; want = want || [];
+    /* ── A TRACED WHOLE CELL IS NOT IN THE CALLER'S LIST ───────────────  2026-09-24
+       Søren: "The whole cell and nucleus filter should work on all the tools."
+       Every tool builds `have` from its own organelle reports, and a traced outline is in neither
+       those nor the ontology -- it is in the traced-structures index. A tool that passes the cell's
+       ids gets the two kinds answered here rather than in seven filter loops; one that passes
+       nothing behaves exactly as before.
+       See src/a_traced_cell_is_a_thing_you_can_tick.py. */
+    if (ids && typeof tracedKindHas === "function"){
+      have = have.slice();
+      ["__traced_cell", "__traced_nucleus"].forEach(function(v){
+        if (have.indexOf(v) < 0 && tracedKindHas(v, ids.nuc, ids.root)) have.push(v);
+      });
+    }
     var hit = want.length
       ? want.some(function(k){ return have.indexOf(k) >= 0; })
       : have.length > 0;

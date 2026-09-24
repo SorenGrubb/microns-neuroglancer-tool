@@ -707,7 +707,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 06:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 08:28</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -4600,11 +4600,23 @@ function plugHoleHtml(plugs,holes){
 function idSpan(v){
   return '<span class="idval" title="click to copy" data-c="'+v+'">'+v+'</span>';
 }
-function celltypeLink(pos,innerHtml){
+/* ── AND THE CELL'S OWN OUTLINE COMES WITH IT ────────────────────  2026-09-24
+   Søren: "When the cell has a whole cell or nucleus segmentation, it should load that when opening
+   Neuroglancer by clicking the cell name."
+
+   `ids` is OPTIONAL and the third argument on purpose. This link is also drawn for the sub-cells of
+   a merged detection, for a user-reported cell and for the identification result, and the name on
+   screen is not always the cell the panel is open on -- so a call site that cannot say which cell
+   it means says nothing, and gets exactly the link it got before. The handler that reads these is
+   in core/tracedoutlines.js (tracedCellNameWire).
+   See src/the_cell_name_opens_the_cell_with_its_outline.py. */
+function celltypeLink(pos,innerHtml,ids){
   const url=pos?neuroglancerLinkForPos(pos):null;
-  return url
-    ?'<a href="'+url+'" target="_blank" rel="noopener" title="Open in Neuroglancer">'+innerHtml+' <span class="ext">&#8599;</span></a>'
-    :innerHtml;
+  if(!url)return innerHtml;
+  const mine=(ids&&(ids.nuc||ids.root))
+    ?' class="ctlink" data-nuc="'+escHtml(ids.nuc||"")+'" data-root="'+escHtml(ids.root||"")+'"'
+    :'';
+  return '<a href="'+url+'"'+mine+' target="_blank" rel="noopener" title="Open in Neuroglancer">'+innerHtml+' <span class="ext">&#8599;</span></a>';
 }
 function longName(name){
   if(!window.LONG_BY_CODE){window.LONG_BY_CODE={};try{for(var _k in LEAF_NAMES){var _m=String(LEAF_NAMES[_k]).match(/\(([^)]+)\)\s*$/);if(_m)window.LONG_BY_CODE[_m[1]]=LEAF_NAMES[_k];}}catch(_e){}}
@@ -4767,7 +4779,7 @@ function showNucleus(pos){
   let h="";
   if(merged){
     h+='<span class="tag" style="background:#3a2a10;color:#f0883e;border:1px solid #f0883e" title="MICrONS\u2019s automatic nucleus detector merged 2+ real, distinct nuclei into a single detection here \u2014 confirmed by S\u00f8ren against his own coordinates.">merged nucleus segmentation</span>';
-    var _tc={};merged.forEach(function(mm){var _t=longName(mm.type||'Unclassified');_tc[_t]=(_tc[_t]||0)+1;});var _sum=Object.keys(_tc).map(function(_t){return (_tc[_t]>1?_tc[_t]+' \u00d7 ':'')+_t;}).join(' + ');h+='<div class="celltype">'+celltypeLink(pos,escHtml(_sum))+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+' <small>merged nucleus segmentation</small></div>';
+    var _tc={};merged.forEach(function(mm){var _t=longName(mm.type||'Unclassified');_tc[_t]=(_tc[_t]||0)+1;});var _sum=Object.keys(_tc).map(function(_t){return (_tc[_t]>1?_tc[_t]+' \u00d7 ':'')+_t;}).join(' + ');h+='<div class="celltype">'+celltypeLink(pos,escHtml(_sum),{nuc:nid,root:root})+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+' <small>merged nucleus segmentation</small></div>';
     h+='<div class="meta" id="commReports"></div>';
     h+='<div class="meta">This MICrONS nucleus detection sits between '+merged.length+' separate, real nuclei that its automatic detector merged into one blob. The single MICrONS suggestion below ('+ti.name+(ti.mtype?" / "+ti.mtype:"")+') applies to the whole merged blob and is not reliable here. Verified identifications for the individual cells:</div>';
     for(const m of merged){
@@ -4784,7 +4796,7 @@ function showNucleus(pos){
   } else if(own){
     const ownNote=ownVsMicronsNote(own.type,ti.name,ti.cls);
     h+='<span class="tag" style="background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)" title="From S\u00f8ren\u2019s own verified cell-type coordinates (collected with colleagues) \u2014 trusted above the automated MICrONS prediction shown below.">verified identification</span>';
-    h+='<div class="celltype">'+celltypeLink(pos,longName(own.type))+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+(own.vloc?' <small style="color:var(--mut)">('+own.vloc+')</small>':'')+'</div>';
+    h+='<div class="celltype">'+celltypeLink(pos,longName(own.type),{nuc:nid,root:root})+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+(own.vloc?' <small style="color:var(--mut)">('+own.vloc+')</small>':'')+'</div>';
     h+='<div class="meta" id="commReports"></div>';
     if(own.fine)h+='<div class="meta" style="margin-top:-6px">'+own.fine+'</div>';
     if(own.gl)h+='<div class="meta" style="margin-top:-6px">'+own.gl+'</div>';
@@ -4806,7 +4818,7 @@ function showNucleus(pos){
     const unclassified=ti.name==="Unclassified";
     if(!unclassified)window.CUR_MICRONS_NAME=longName(ti.name); // see CUR_MICRONS_NAME's reset comment above -- no real prediction to vote on when unclassified
     h+='<span class="tag '+ti.ab+'" id="ctTag" title="'+BROAD_SOURCE_NOTE+'">'+(ti.cls?ti.cls.replace("_"," "):"nucleus &middot; no prediction")+'</span>';
-    h+='<div class="celltype" id="ctHeadline"'+(unclassified?' data-unclassified="1"':'')+' data-microns-name="'+escHtml(longName(ti.name))+'" title="'+(ciBroad?ciBroad.full+" \u2014 "+ciBroad.role:"")+'">'+celltypeLink(pos,longName(ti.name))+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+' <small>'+(unclassified?"no MICrONS prediction":"MICrONS prediction")+'</small></div>';     h+='<div id="idVotePanel" style="margin:3px 0 2px"></div>';
+    h+='<div class="celltype" id="ctHeadline"'+(unclassified?' data-unclassified="1"':'')+' data-microns-name="'+escHtml(longName(ti.name))+'" title="'+(ciBroad?ciBroad.full+" \u2014 "+ciBroad.role:"")+'">'+celltypeLink(pos,longName(ti.name),{nuc:nid,root:root})+favStarHtml(nid,root,NX[i],NY[i],NZ[i])+' <small>'+(unclassified?"no MICrONS prediction":"MICrONS prediction")+'</small></div>';     h+='<div id="idVotePanel" style="margin:3px 0 2px"></div>';
     h+='<div class="meta" id="commReports"></div>';
     if(ti.name==="astrocyte"){
       const af=fineName(window.OWN_FINE,i,window.OWN_FINE_DIST);if(af)h+='<div class="meta" style="margin-top:-6px">'+af+'</div>';
@@ -10687,7 +10699,12 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     const orgBox=document.getElementById("filterOrganellesBox");
     if(!orgBox||!UJ.organelleFilter)return;
     UJ.organelleFilter.render(orgBox,{
-      counts:(typeof ujumpOrganelleCounts==="function")?ujumpOrganelleCounts(orgMap):{},
+      counts:Object.assign((typeof ujumpOrganelleCounts==="function")?ujumpOrganelleCounts(orgMap):{},
+                           (typeof tracedKindCounts==="function")?tracedKindCounts():{}),
+      /* Whole cells and nuclei that somebody has OUTLINED — not organelles, and not in the
+         organelle-locations sheet, so they come from the traced-structures index and sit in a
+         group of their own (2026-09-24). */
+      extraGroups:(typeof tracedKindGroup==="function")?tracedKindGroup():null,
       cls:"forgpt",
       mode:false,
       onChange:function(){ if(typeof invalidateFilterResult==="function")invalidateFilterResult(); },
@@ -10788,13 +10805,28 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
     const box=document.getElementById("filterOrganelleBox");
     if(!box||!UJ.organelleFilter)return;
     UJ.organelleFilter.render(box,{
-      counts:ujumpOrganelleCounts(orgMap),
+      counts:Object.assign(ujumpOrganelleCounts(orgMap),
+                           (typeof tracedKindCounts==="function")?tracedKindCounts():{}),
+      extraGroups:(typeof tracedKindGroup==="function")?tracedKindGroup():null,
       cls:"forgfilter",
       modeId:"filterOrganelle",
       onChange:function(){ if(typeof invalidateFilterResult==="function")invalidateFilterResult(); }
     });
   }
   renderOrganelleFilterBox(window.ORG_MAP||null);
+  /* ── THE TRACED-OUTLINE KINDS ────────────────────────────────  2026-09-24
+     Read once and both lists redrawn, which is the same shape the organelle map above uses and for
+     the same reason: the counts are what make the checkboxes worth having, and a filter that
+     fetched on every render would ask again on every tick. organelleFilter.render() preserves the
+     ticks across a redraw, so this cannot take away a choice already made. */
+  window.tracedKindsRefresh=function(force){
+    if(typeof tracedKindSets!=="function")return Promise.resolve();
+    return tracedKindSets(force).then(function(){
+      try{ renderOrganelleFilterBox(window.ORG_MAP||null); }catch(_e){}
+      try{ renderOrganelleLayerBox(window.ORG_MAP||null); }catch(_e){}
+    });
+  };
+  try{ window.tracedKindsRefresh(); }catch(_e){}
   /* Fetched ONCE, here, rather than only when a filter run needs it (which is what happened
      before and is why there were no counts to show). The map is small -- only cells somebody has
      reported on -- and it is what makes the numbers beside the checkboxes real. Failure is silent
@@ -11278,7 +11310,12 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
             return !!(typeof plugsForNucIdx==="function"&&plugsForNucIdx(row.i));
           return false;
         };
-        const hasOne=k=>denseHas(k)||!!(orgReports&&orgReports.some(o=>o.kind===k));
+        /* A ticked __traced_ kind asks the traced-structures index, not the organelle
+           reports: "has somebody outlined the whole of this cell" is a different question of a
+           different dataset (2026-09-24). */
+        const orgRid=String(rowRootId(row)||"");
+        const hasOne=k=>(typeof tracedKindHas==="function"&&tracedKindHas(k,orgNid,orgRid))
+                       ||denseHas(k)||!!(orgReports&&orgReports.some(o=>o.kind===k));
         const hasKind=organelleKinds.length
           ? organelleKinds.some(hasOne)
           /* "Annotated with anything at all" has to see the same four sources, or ticking nothing
@@ -12650,12 +12687,28 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
        one layer per kind, pushed onto the state after it is built, so nothing about which cells
        matched or what the Excel holds is touched. Both ids, by this filter's own rule for a row. */
     const organSegSel=document.getElementById("filterOrganSeg");
+    const organSegIds={nuc:lastResult.matches.map(function(m){return rowNucId(m.row);}),
+                       root:lastResult.matches.map(function(m){return rowRootId(m.row);})};
     const organSegLayers=(typeof buildTracedOrganelleLayers==="function")
-      ? await buildTracedOrganelleLayers(
-          {nuc:lastResult.matches.map(function(m){return rowNucId(m.row);}),
-           root:lastResult.matches.map(function(m){return rowRootId(m.row);})},
+      ? await buildTracedOrganelleLayers(organSegIds,
           organSegSel&&organSegSel.value,function(msg){viewAllBtn.textContent=msg;})
       : [];
+    /* ── AND WHAT THE LAYER LIST ASKED FOR ──────────────────────────  2026-09-24
+       Søren: "tick either Whole cell or Nucleus to select for those and to show their 3D
+       structures." The dropdown above picks ONE thing to draw; these are ticks, and several can be
+       on at once, so they are asked for one at a time and added to what the dropdown gave. */
+    const tracedTicks=(typeof TRACED_KIND_VALUES!=="undefined"&&typeof buildTracedOrganelleLayers==="function")
+      ? Array.prototype.map.call(
+          document.querySelectorAll("#filterOrganellesBox .forgpt:checked"),
+          function(cb){ return cb.value; }).filter(function(v){ return !!TRACED_KIND_VALUES[v]; })
+      : [];
+    for(const v of tracedTicks){
+      const want=v==="__traced_cell"?"__cells":"__nuclei";
+      if(organSegSel&&organSegSel.value===want)continue;      // the dropdown already drew it
+      const more=await buildTracedOrganelleLayers(organSegIds,want,
+        function(msg){viewAllBtn.textContent=msg;});
+      if(more&&more.length)organSegLayers.push.apply(organSegLayers,more);
+    }
     viewAllBtn.textContent="Fetching proposed segmentation IDs…";
     window.ALL_ROOTID_PROPOSALS=await fetchAllRootIdProposals();
     viewAllBtn.textContent="Building view…";

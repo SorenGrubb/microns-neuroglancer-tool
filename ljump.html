@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 06:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 08:28</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -2893,7 +2893,10 @@ function runFilterLjump(){
     }
     /* One rule, in core/organellefilter.js, and it now honours the has / not-annotated selector. */
     if(organelleMode){
-      if(!UJ.organelleFilter.matches(ljumpOrganelleKindsOf(i),organelleSel,organelleMode)) continue;
+      /* Lee16 has no segmentation, so a tracing here is filed by nucleus id and there is no
+         root id to offer — which is what the filter's own "Open all" already passes. */
+      if(!UJ.organelleFilter.matches(ljumpOrganelleKindsOf(i),organelleSel,organelleMode,
+                                     {nuc:BID[i]?String(BID[i]):"",root:""})) continue;
     }
     const box=ljumpBoxFor(i,regionBoxes);
     if(box===null) continue;                 // region filter is on and this nucleus is outside it
@@ -3118,7 +3121,10 @@ function buildColumnsLjump(){
          Gains the has / not-annotated selector in the process -- previously only µJump's dropdown
          could ask "which cells has nobody checked". */
       UJ.organelleFilter.render(organellesBox,{
-        counts:counts, cls:"forganelle", modeId:"fOrganelleMode",
+        counts:Object.assign(counts,(typeof tracedKindCounts==="function")?tracedKindCounts():{}),
+        /* Outlined whole cells and nuclei, from the traced-structures index (2026-09-24). */
+        extraGroups:(typeof tracedKindGroup==="function")?tracedKindGroup():null,
+        cls:"forganelle", modeId:"fOrganelleMode",
         onChange:invalidatePreview
       });
     }).catch(function(){
@@ -3127,6 +3133,13 @@ function buildColumnsLjump(){
   }
   buildOrganelleFilterBox();
   window.__ljumpBuildOrganelleFilterBox=buildOrganelleFilterBox;
+  /* The traced-outline kinds, read once and the list redrawn with their counts (2026-09-24).
+     The renderer keeps the ticks across a redraw. */
+  window.tracedKindsRefresh=function(force){
+    if(typeof tracedKindSets!=="function")return Promise.resolve();
+    return tracedKindSets(force).then(function(){ try{ buildOrganelleFilterBox(); }catch(_e){} });
+  };
+  try{ window.tracedKindsRefresh(); }catch(_e){}
 
   /* Warm the fixes cache eagerly: by the time a user has picked filters and clicked Download,
      488 rows' worth of fetch has almost always resolved, so corrected_voxel/correction_votes

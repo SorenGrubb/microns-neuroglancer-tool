@@ -1161,7 +1161,9 @@ function loadCommunityReports(nid,cellPos){
               if(smallEl)smallEl.textContent=(_s.label?_s.label+" "+_s.noun:"Published "+_s.noun)+" \u2014 confirmed by "+users(win.n);
               headEl.title=(headEl.title?headEl.title+" \u2014 ":"")+users(win.n)+" confirmed this matches "+(_s.label?_s.label+"\u2019s "+_s.noun:"the published "+_s.noun)+(win.firstBy?", first confirmed by "+win.firstBy:"")+".";
             } else {
-              headEl.innerHTML=(typeof celltypeLink==="function"?celltypeLink(cellPos,escHtml(win.name)):escHtml(win.name))
+              /* The ids go with the name so the ↗ can bring this cell's outline (2026-09-24);
+                 loadCommunityReports is given the nucleus, not the root. */
+              headEl.innerHTML=(typeof celltypeLink==="function"?celltypeLink(cellPos,escHtml(win.name),{nuc:nid,root:""}):escHtml(win.name))
                 +((typeof favStarHtml==="function"&&cellPos)?favStarHtml(nid,"",cellPos[0],cellPos[1],cellPos[2]):"")
                 +' <small>community identification</small>';
               /* Keep the PowerPoint/3D-model export's title in sync with this override -- it reads

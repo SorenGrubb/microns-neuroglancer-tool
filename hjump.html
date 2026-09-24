@@ -451,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 06:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 08:28</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -2887,7 +2887,11 @@ function buildOrganelleFilterUI(){
        has / not-annotated selector, and there is now one implementation across all seven tools
        instead of six near-copies that drifted apart once already. */
     UJ.organelleFilter.render(box,{
-      counts:counts, cls:"forganelle", modeId:"filterOrganelleMode",
+      /* Whole cells and nuclei somebody has OUTLINED — a group of their own, counted off the
+         traced-structures index rather than the organelle-locations sheet (2026-09-24). */
+      counts:Object.assign(counts,(typeof tracedKindCounts==="function")?tracedKindCounts():{}),
+      extraGroups:(typeof tracedKindGroup==="function")?tracedKindGroup():null,
+      cls:"forganelle", modeId:"filterOrganelleMode",
       onChange:function(){ if(typeof invalidateFilter==="function")invalidateFilter(); }
     });
   }).catch(function(){
@@ -3635,6 +3639,15 @@ function buildFilterUI(){
     +'<option value="__Sp">spininess</option>';
   buildIdentityFilterUI();
   buildOrganelleFilterUI();
+  /* ── THE TRACED-OUTLINE KINDS ────────────────────────────────  2026-09-24
+     Read once, then the list is drawn again with the counts in it. The renderer keeps the ticks
+     across a redraw, so this cannot take away a choice already made, and the organelle fetch it
+     goes back through is itself cached. Exposed for tracedkindalltoolscheck.js. */
+  window.tracedKindsRefresh=function(force){
+    if(typeof tracedKindSets!=="function")return Promise.resolve();
+    return tracedKindSets(force).then(function(){ try{ buildOrganelleFilterUI(); }catch(_e){} });
+  };
+  try{ window.tracedKindsRefresh(); }catch(_e){}
 }
 
 /* ── step-through review (2026-08-20) ────────────────────────────────────────────────────────
@@ -3790,7 +3803,10 @@ function runFilter(){
     /* OR across checked kinds, and now also has / not-annotated -- one rule, in
        core/organellefilter.js, rather than the same three lines in six files. */
     if(organelleMode){
-      if(!UJ.organelleFilter.matches(hjumpOrganelleKindsOf(i),wantOrganelles,organelleMode))continue;
+      /* BOTH ids: a tracing on this page is filed with the cell body as its nucleusId and the
+         c3 segment as its rootId, and either may be the one it was saved under. */
+      if(!UJ.organelleFilter.matches(hjumpOrganelleKindsOf(i),wantOrganelles,organelleMode,
+                                     {nuc:String(HSB[i]),root:c3Id(i)}))continue;
     }
     const vol=HVB[i];
     if(vMin!==null&&vol<vMin)continue;

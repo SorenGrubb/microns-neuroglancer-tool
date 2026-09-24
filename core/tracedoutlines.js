@@ -137,7 +137,7 @@ function tracedOutlinesStateOffer(after, json, chars){
    Cached: the filter renders on load and again whenever counts arrive, and a fetch per render
    would be a request every time somebody ticks anything.
    See src/a_traced_cell_is_a_thing_you_can_tick.py. */
-var TRACED_KIND_SETS = null, TRACED_KIND_WAIT = null;
+var TRACED_KIND_SETS = null, TRACED_KIND_WAIT = null, TRACED_KIND_DS = null;
 var TRACED_KIND_VALUES = { "__traced_cell": "cell", "__traced_nucleus": "nucleus" };
 function tracedKindIds(t){
   var out = [];
@@ -151,11 +151,17 @@ function tracedKindIds(t){
   return out;
 }
 function tracedKindSets(force){
+  /* ── ONE CACHE PER DATASET ─────────────────────────────────  2026-09-24
+     ωJump switches volume with the page open and rebuilds its controls when it does, so a single
+     cached index would show the previous volume's counts beside the new volume's cells. Nothing
+     had hit this before, because ωJump had no such counts until today. */
+  var ds = tracedOutlinesDsQS();
+  if (ds !== TRACED_KIND_DS){ TRACED_KIND_SETS = null; TRACED_KIND_WAIT = null; TRACED_KIND_DS = ds; }
   if (TRACED_KIND_SETS && !force) return Promise.resolve(TRACED_KIND_SETS);
   if (TRACED_KIND_WAIT && !force) return TRACED_KIND_WAIT;
   if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT)
     return Promise.resolve({ cell: {}, nucleus: {} });
-  TRACED_KIND_WAIT = fetch(REPORT_ENDPOINT + "?tracings=1" + tracedOutlinesDsQS())
+  TRACED_KIND_WAIT = fetch(REPORT_ENDPOINT + "?tracings=1" + ds)
     .then(function(r){ return r.json(); })
     .then(function(d){
       var sets = { cell: {}, nucleus: {} };
@@ -203,6 +209,80 @@ function tracedKindGroup(){
     { value: "__traced_cell", label: "Whole cell (traced)", short: "Whole cell (traced)" },
     { value: "__traced_nucleus", label: "Nucleus (traced)", short: "Nucleus (traced)" }
   ] }];
+}
+/* ── THE CELL'S NAME OPENS THE CELL WITH ITS OUTLINE ────────────────  2026-09-24
+   Søren: "When the cell has a whole cell or nucleus segmentation, it should load that when opening
+   Neuroglancer by clicking the cell name."
+
+   Delegated on the document rather than wired per anchor: these headlines are rewritten whenever a
+   cell loads, a community identification wins, or a merged detection is expanded, and a listener
+   attached to the anchor would be re-attached on each of those or quietly lost on one of them.
+
+   An anchor opts in by carrying the cell's ids (class="ctlink", data-nuc, data-root). One that
+   does not is left entirely alone -- see src/the_cell_name_opens_the_cell_with_its_outline.py for
+   why that is not merely defensive. */
+function tracedCellNameLayers(nucId, rootId){
+  if (typeof tracedKindHas !== "function" || typeof buildTracedOrganelleLayers !== "function")
+    return Promise.resolve([]);
+  var wants = [];
+  if (tracedKindHas("__traced_cell", nucId, rootId)) wants.push("__cells");
+  if (tracedKindHas("__traced_nucleus", nucId, rootId)) wants.push("__nuclei");
+  if (!wants.length) return Promise.resolve([]);
+  /* One kind at a time and in series: buildTracedOrganelleLayers answers for one pick, and two
+     Drive reads of one cell in parallel buy nothing worth the second connection. */
+  var out = [];
+  return wants.reduce(function(chain, w){
+    return chain.then(function(){
+      return buildTracedOrganelleLayers({ nuc: [String(nucId || "")], root: [String(rootId || "")] },
+                                        w, function(){})
+        .then(function(ls){ if (ls && ls.length) out.push.apply(out, ls); },
+              function(e){ console.warn("[traced cell link] " + w + " unavailable", e); });
+    });
+  }, Promise.resolve()).then(function(){ return out; });
+}
+function tracedCellNameWire(){
+  if (tracedCellNameWire.done || typeof document === "undefined") return;
+  tracedCellNameWire.done = true;
+  document.addEventListener("click", function(e){
+    /* The browser's own shortcuts stay the browser's: ctrl/cmd-click and middle-click open the
+       plain link in a background tab, which is what they are for. */
+    if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = (e.target && e.target.closest) ? e.target.closest("a.ctlink") : null;
+    if (!a || !a.href) return;
+    var nuc = a.getAttribute("data-nuc") || "", root = a.getAttribute("data-root") || "";
+    if (!nuc && !root) return;
+    /* Asked of the index already in memory, so an untraced cell costs nothing: no request, no
+       delay, and the anchor behaves exactly as it did before any of this existed. */
+    if (typeof tracedKindHas !== "function") return;
+    if (!tracedKindHas("__traced_cell", nuc, root) && !tracedKindHas("__traced_nucleus", nuc, root)) return;
+    e.preventDefault();
+    var href = a.href, win = null;
+    try { win = window.open("", "_blank"); } catch (_e){}      // at the click, or it is a popup
+    var ext = a.querySelector(".ext"), was = ext ? ext.innerHTML : "";
+    if (ext) ext.innerHTML = "\u2026";
+    tracedCellNameLayers(nuc, root).then(function(layers){
+      if (ext) ext.innerHTML = was;
+      var url = href, k = href.indexOf("#!");
+      if (layers.length && k >= 0){
+        try {
+          var st = JSON.parse(decodeURIComponent(href.slice(k + 2)));
+          st.layers = (st.layers || []).concat(layers);
+          var u2 = href.slice(0, k) + "#!" + encodeURIComponent(JSON.stringify(st));
+          var cap = (typeof tracedLinkMax === "function") ? tracedLinkMax() : 2000000;
+          if (u2.length <= cap) url = u2;
+          else console.warn("[traced cell link] " + u2.length.toLocaleString() + " characters is past "
+                            + "what a viewer link carries (" + cap.toLocaleString() + ") \u2014 opened "
+                            + "the cell without its outline.");
+        } catch (_e){ console.warn("[traced cell link] could not read the link's own state", _e); }
+      }
+      if (win){ try { win.opener = null; } catch (_e){} win.location.href = url; }
+      else window.open(url, "_blank", "noopener");
+    });
+  });
+}
+if (typeof document !== "undefined"){
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", tracedCellNameWire);
+  else tracedCellNameWire();
 }
 var FILTER_ORGAN_SEG_FILLED=false;
 async function fillOrganSegKinds(){
