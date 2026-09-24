@@ -117,8 +117,13 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
     let st = null;
     try { st = JSON.parse(decodeURIComponent(u.slice(k + 2))); } catch (e){ return { bad: true, url: u.slice(0, 60) }; }
     const traced = (st.layers || []).filter(l => /^traced /.test(l.name || ""));
+    const annTypes = {};
+    traced.forEach(l => (l.annotations || []).forEach(an => {
+      annTypes[an.type] = (annTypes[an.type] || 0) + 1; }));
+    let host = "";
+    try { host = new URL(u).host; } catch (e){ host = u.slice(0, 40); }
     return { layers: (st.layers || []).map(l => l.name || l.type),
-             traced: traced.map(l => l.name),
+             traced: traced.map(l => l.name), host: host, annTypes: annTypes,
              anns: traced.reduce((a, l) => a + ((l.annotations || []).length), 0) };
   }, [mods, waitMs]);
 
@@ -161,6 +166,55 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   ok(!cold.none && !cold.bad, "still opens a view", cold.none ? "nothing opened" : "ok");
   ok(!!(cold.traced || []).length, "...with the outline, after waiting for the index",
      (cold.traced || []).join(" | ") || "(no traced layers)");
+
+  /* ── AND WHEN IT DOES NOT FIT THIS VIEWER ───────────────────────────────────
+     Søren, clicking the name of a pia mater fibroblast whose whole cell is 479 contours on 243
+     sections: an error saying to "pick one kind rather than all, or narrow the filter" — the
+     filter's words, on a click that used no filter, and a cell that has exactly one outline.
+
+     MEASURED on that cell: 418,811 characters as polylines, 1,790,053 as lines. µJump's viewer
+     reads no polylines, so it was the long form that did not fit. The answer was in the error all
+     along: Spelunker reads polylines. The cap is shrunk here rather than seeding half a megabyte
+     of contours. */
+  console.log("\nand an outline too big for this viewer");
+  /* A fat outline: sixty contours of sixty points. As polylines that is sixty annotations; as
+     lines it is three thousand six hundred, which is the four-to-one his own cell shows. */
+  const fatRing = (z, r) => {
+    const p = [];
+    for (let i = 0; i < 60; i++){
+      const a = 2 * Math.PI * i / 60;
+      p.push(Math.round(120000 + r * Math.cos(a)) + "," + Math.round(140000 + r * Math.sin(a)));
+    }
+    return { structureId: "wc1", kind: "cell", instanceOf: "", name: "Whole cell", color: "#40e28c",
+             nucleusId: cells.A.nuc, ringIndex: 0, z: z, points: p.join(";") };
+  };
+  const fat = [];
+  for (let z = 1000; z < 1060; z++) fat.push(fatRing(z, 800 + (z % 7) * 13));
+  ROWS = { wc1: fat, nu1: ROWS.nu1 };
+  await show(cells.A);
+  const moved = await p.evaluate(async () => {
+    window.JUMP_LINK_MAX = 300000;             // between the two forms: lines no, polylines yes
+    return (UJ.tracing.viewerTakesPolylines && UJ.tracing.viewerTakesPolylines()) === false;
+  });
+  ok(moved, "this page's viewer reads no polylines, which is the case at issue", moved);
+  const big = await click(null, 25000);
+  ok(!big.none && !big.bad, "it still opens", big.none ? "nothing opened" : "ok");
+  ok(!!(big.traced || []).some(n => /whole cell/i.test(n)),
+     "...with the outline, not an error about narrowing a filter",
+     (big.traced || []).join(" | ") || "(no traced layers)");
+  ok(/spelunker|neuroglancer-demo/.test(String(big.url || big.host || "")),
+     "...opened where polylines fit", big.host || (big.url || "").slice(0, 60));
+  ok(big.annTypes && big.annTypes.polyline > 0 && !big.annTypes.line,
+     "...and as polylines, which is what made it fit", JSON.stringify(big.annTypes || {}));
+
+  console.log("\nand when nothing can carry it");
+  await show(cells.A);
+  await p.evaluate(() => { window.JUMP_LINK_MAX = 900; });
+  const tiny = await click(null, 25000);
+  ok(!tiny.none, "the cell still opens", tiny.none ? "nothing opened" : "ok");
+  ok(!(tiny.traced || []).length, "...without the outline, rather than a tab that will not load",
+     (tiny.traced || []).join(" | ") || "none");
+  await p.evaluate(() => { window.JUMP_LINK_MAX = 50000000; });
 
   console.log("\nand the browser keeps its own shortcuts");
   await show(cells.A);
