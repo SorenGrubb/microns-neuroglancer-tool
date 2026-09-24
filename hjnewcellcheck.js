@@ -36,6 +36,28 @@
      - the cell joins the list without a reload
      - ...and can be identified from there, through this page's own identification flow
 
+   AND THEN THE CELL IS A CELL (2026-09-24, second pass). Søren, having reported one: *"I just
+   reported a cell, then pressed Jump to it and it took me to another cell, the nearest cell which
+   is 27 µm away..."* — because the button filled the coordinate boxes and re-ran the search, and
+   the search only knows the 47,447 rows in the embedded table. The cell he had just added was not
+   one of them, so "the nearest cell" was a stranger 27 µm away, which is exactly what the offer
+   had said a moment earlier.
+
+   λJump hit this and answered it properly — its own comment says the separate hand-built card
+   "had none of the tool on it" — so an added nucleus JOINS THE ARRAYS there, and every reader that
+   walks 0..N-1 finds it without being told. ηJump's nearest(), kNearest(), contacts, type pools,
+   browse picker and random pickers are all such readers. So: the same rights here.
+
+     - reporting a cell grows the table by one
+     - nearest() at that coordinate returns the added cell, not a stranger
+     - "Jump to it" opens THAT cell
+     - the panel carries the name that was proposed, and does not credit H01 with it
+     - ...nor prints a soma volume, spininess or synapse count nothing measured
+     - ...and says where it came from instead
+     - the layer is marked as estimated, because no layer volume was sampled for it
+     - a second jump to that coordinate no longer offers to report a cell there
+     - the added cell is in the unassigned pool, which is where an unnamed cell belongs
+
    Run: node hjnewcellcheck.js */
 const { chromium } = require("playwright");
 const page_ = require("./pagepath.js");
@@ -223,6 +245,64 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   ok(!named.none && named.shown, "...and it opens this page's own identification flow", named.shown);
   ok(!named.none && Number(named.body) > 49376 && named.seg === "7788990011",
      "...on that cell's own ids", named.none ? "-" : named.body + " / " + named.seg);
+
+  /* ── and then it is a cell ────────────────────────────────────────────────────────────── */
+  console.log("\nand then the cell you added is the cell you go to");
+  const joined = await p.evaluate(async (pos) => {
+    const r = nearest(pos[0], pos[1], pos[2]);
+    return { N: N, tab: (typeof N_TAB === "number" ? N_TAB : null),
+             hitDistNm: Math.round(r.dist), hitI: r.i,
+             added: (typeof HADDED !== "undefined" && HADDED) ? !!HADDED[r.i] : null,
+             body: (typeof HSB !== "undefined") ? String(HSB[r.i]) : "",
+             unassigned: (typeof UNASSIGNED_IDX !== "undefined")
+                         && UNASSIGNED_IDX.indexOf(r.i) >= 0 };
+  }, FAR.pos);
+  ok(joined.tab !== null && joined.N === joined.tab + 1,
+     "reporting a cell grows the table by one",
+     joined.tab === null ? "N_TAB is not defined — the table cannot tell its own rows apart"
+                         : joined.N + " rows, table has " + joined.tab);
+  ok(joined.hitDistNm < 1000, "nearest() at that coordinate finds the added cell, not a stranger",
+     (joined.hitDistNm / 1000).toFixed(2) + " µm away");
+  ok(joined.added === true, "...and the row knows it was added rather than published",
+     String(joined.added));
+  ok(Number(joined.body) > 49376, "...under the id derived from its coordinate", joined.body);
+  ok(joined.unassigned, "...and it is in the unassigned pool, where an unnamed cell belongs",
+     String(joined.unassigned));
+
+  const opened = await p.evaluate(async () => {
+    const btn = document.querySelector("#newCellList .jump");
+    if (!btn) return { none: true };
+    btn.click();
+    await new Promise(r => setTimeout(r, 1400));
+    const panel = document.getElementById("nucpanel");
+    const txt = (panel.textContent || "").replace(/\s+/g, " ");
+    const head = (document.getElementById("ctHeadline") || {}).textContent || "";
+    return { txt: txt, head: head.replace(/\s+/g, " ").trim(),
+             body: (typeof CUR_NUCID !== "undefined") ? String(CUR_NUCID) : "",
+             cta: !!document.querySelector("#newCellCta button"),
+             nan: /NaN/.test(txt) };
+  });
+  ok(!opened.none, "the list offers to jump to it", opened.none ? "no button" : "offered");
+  ok(!opened.none && Number(opened.body) > 49376,
+     "...and the cell that opens IS the added one", opened.none ? "-" : opened.body);
+  ok(!opened.none && /astrocyte/i.test(opened.head),
+     "...headlined with the name that was proposed for it", opened.head.slice(0, 90) || "(no headline)");
+  ok(!opened.none && !/H01 published classification/i.test(opened.head),
+     "...and H01 is not credited with a call it never made", opened.head.slice(0, 90));
+  ok(!opened.none && /not in H01|added|reported/i.test(opened.txt),
+     "...the panel says where the cell came from instead",
+     (opened.txt.match(/[^.]*(not in H01|added by|reported)[^.]*/i) || ["(said nothing)"])[0].slice(0, 120));
+  ok(!opened.none && !opened.nan,
+     "...and prints no NaN where H01 measured nothing", opened.nan ? "NaN on the card" : "clean");
+  ok(!opened.none && !/µm³/.test(opened.txt.split("3 nearest")[0] || ""),
+     "...no soma volume, because nothing measured this soma",
+     /µm³/.test((opened.txt.split("3 nearest")[0] || "")) ? "printed one anyway" : "none printed");
+  ok(!opened.none && /estimated/i.test(opened.txt),
+     "...and its layer is marked as estimated, not sampled",
+     /estimated/i.test(opened.txt) ? "marked" : "claimed as sampled");
+  ok(!opened.none && !opened.cta,
+     "a coordinate that now has a cell is no longer asked to report one",
+     opened.cta ? "offered again" : "not offered");
 
   /* ── and when the segmentation cannot be read ─────────────────────────────────────────── */
   console.log("\nand when the segmentation cannot be read");
