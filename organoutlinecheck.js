@@ -161,8 +161,20 @@ const XJ = /xjump/.test(PAGE);
      goes on meaning organelles. */
   ok(pick.opts.some(o => /^__cells=.*\(2 outlined\)/.test(o)),
      "...and whole cells ARE offered, on their own, with how many", pick.opts.join(" | "));
+  /* Whole cells before nuclei, and both before the organelle kinds: each insert goes after the
+     last one, or they come out in the reverse of the order they are declared in. */
+  ok(pick.opts.findIndex(o => /^__cells=/.test(o)) === 2,
+     "...directly after \u201call organelles\u201d, where it is found rather than scrolled to",
+     pick.opts.map((o, i) => i + ":" + o.split("=")[0]).join(" "));
 
   const openAll = async (want) => p.evaluate(async ([want, LINK]) => {
+    /* ── THE CAP IS SOMEBODY ELSE'S CHECK ────────────────────────────────────────  2026-09-24
+       This page's own default filter view is 24,757,320 characters -- twelve times what a tab can
+       be opened with -- so since src/too_big_to_open_is_not_too_big_to_use.py the filter hands over
+       the JSON instead of opening it. Right, and not what THIS check is about: it asks which
+       outlines get into the view. The limit is lifted so the view opens and can be read.
+       filterstateoffercheck.js and tracedlinksizecheck.js own the size behaviour. */
+    window.JUMP_LINK_MAX = 50000000;
     window.__opened = null;
     window.open = function(u){ if (u) window.__opened = u; return null; };
     window.confirm = function(){ return true; };

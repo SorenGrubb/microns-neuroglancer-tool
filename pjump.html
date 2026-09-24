@@ -648,7 +648,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-23 20:26</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 06:27</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -12498,12 +12498,29 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     if(!state)return;
     if(vascTraceLayers.length)state.layers.push(...vascTraceLayers);
     if(organSegLayers.length)state.layers.push(...organSegLayers);
-    const url=document.getElementById("viewer").value+"#!"+encodeURIComponent(JSON.stringify(state));
+    const stateJson=JSON.stringify(state);
+    const url=document.getElementById("viewer").value+"#!"+encodeURIComponent(stateJson);
+    /* ── PAST THE CAP THERE IS NOTHING TO SAY YES TO ──────────────────────  2026-09-24
+       Søren: "there should be an option to paste the JSON code yourself into a Neuroglancer
+       instance when the file size is too big ... offer the user to either do the search again more
+       limited or download a JSON file".
+
+       This asked, in a confirm(), whether to open it anyway — with VASC_URL_WARN_LENGTH set to
+       1.95 MiB, which is 52,429 characters BELOW the real limit, so "yes" on a view between the
+       two opened about:blank#blocked. Measured on his own filter today: 24,757,320 characters, and
+       the only button was yes. The state itself is fine at any size; it is the URL that is not, so
+       past the cap the state is handed over instead. core/tracedoutlines.js. */
+    if(typeof tracedLinkMax==="function"&&url.length>tracedLinkMax()){
+      tracedOutlinesStateOffer(viewAllBtn,stateJson,url.length);
+      return;
+    }
     if(url.length>VASC_URL_WARN_LENGTH){
+      /* Still openable, just slow — so this one keeps the yes/no it always had, and says what to
+         turn off. The offer above is for the sizes where yes is not an answer. */
       const mb=(url.length/1024/1024).toFixed(1);
       const proceed=confirm(
-        "This view is large ("+mb+" MB, "+url.length.toLocaleString()+" characters) and may fail to open "+
-        "or load slowly in Neuroglancer.\n\nTo shrink it: uncheck some traced vasculature categories or "+
+        "This view is large ("+mb+" MB, "+url.length.toLocaleString()+" characters) and may load "+
+        "slowly in Neuroglancer.\n\nTo shrink it: uncheck some traced vasculature categories or "+
         "organelle points, turn off EM imagery, narrow your match filters, or reduce the number of "+
         "region boxes.\n\n"+
         "Open it anyway?"

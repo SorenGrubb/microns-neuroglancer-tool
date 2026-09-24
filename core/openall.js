@@ -142,7 +142,19 @@
       .then(function(layers){
         if (btn) btn.textContent = label;
         if (layers && layers.length) state.layers.push.apply(state.layers, layers);
+        var json = JSON.stringify(state);
         var u = url(state);
+        /* ── PAST THE CAP, HAND OVER THE STATE ───────────────────────────  2026-09-24
+           The same answer µJump’s filter gives, for the three tools that open through here.
+           The blank tab opened a moment ago for the popup blocker is closed again: leaving it on
+           about:blank while the offer appears behind it is two confusing things at once.
+           See src/too_big_to_open_is_not_too_big_to_use.py. */
+        if (typeof tracedLinkMax === "function" && u.length > tracedLinkMax()){
+          if (win){ try { win.close(); } catch (_e){} }
+          if (typeof tracedOutlinesStateOffer === "function")
+            tracedOutlinesStateOffer(btn || sel, json, u.length);
+          return;
+        }
         if (win){ try { win.opener = null; } catch (_e){} win.location.href = u; }
         else window.open(u, "_blank");
       });

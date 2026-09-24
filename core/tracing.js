@@ -828,6 +828,33 @@ UJ.tracing = (function(){
              nm: Math.round(t * resNmXY() * 10) / 10 };
   }
 
+/* ── WAS THIS CONTOUR EVER CLOSED? ────────────────────────────────────────────────  2026-09-24
+   Søren: "it is making a few very long lines from one end of the cell to the other." Those are
+   closing chords on contours that were never rings -- an arachnoid barrier cell is a sheet, and its
+   profile on a section is an open curve along a membrane.
+
+   The gap from the last point back to the first, against the LONGEST ordinary segment. Not the mean
+   or the median: Douglas-Peucker leaves a closed ring with very uneven segments, and its closing
+   segment is one of the long ones, so a median would call real rings open. A closed ring's gap is
+   the same order as its longest step; an open curve's is the span of the whole shape -- measured at
+   79x on one of his.
+
+   Four times is deliberately generous in the safe direction. Wrongly opening a ring puts a notch in
+   a lysosome; wrongly leaving a nearly-closed curve open draws exactly what was traced.
+   See src/a_contour_that_was_never_closed_stays_open.py. */
+  var RING_CLOSE_RATIO = 4;
+  function ringWasClosed(pts){
+    if (!pts || pts.length < 4) return true;      // a triangle is a ring, and has nothing to compare
+    var longest = 0, i, dx, dy;
+    for (i = 1; i < pts.length; i++){
+      dx = pts[i][0] - pts[i - 1][0]; dy = pts[i][1] - pts[i - 1][1];
+      var d = Math.sqrt(dx * dx + dy * dy);
+      if (d > longest) longest = d;
+    }
+    if (!longest) return true;                    // every point on top of the last: nothing to say
+    dx = pts[pts.length - 1][0] - pts[0][0]; dy = pts[pts.length - 1][1] - pts[0][1];
+    return Math.sqrt(dx * dx + dy * dy) <= longest * RING_CLOSE_RATIO;
+  }
   function ringAnnotations(rings, idPrefix, opts){
     var out = [];
     var asLines = (opts && typeof opts.lines === "boolean")
@@ -840,8 +867,12 @@ UJ.tracing = (function(){
       var pts = r.points || [];
       if (pts.length < 3) return;
       var z = Math.round(r.z), i;
+      /* Both shapes drew the closing chord, so the polyline change only made an old fault
+         visible (2026-09-24). */
+      var shut = ringWasClosed(pts);
       if (asLines){
-        for (i = 0; i < pts.length; i++){
+        var last = shut ? pts.length : pts.length - 1;
+        for (i = 0; i < last; i++){
           var a = pts[i], b = pts[(i + 1) % pts.length];
           out.push({ type: "line", id: idPrefix + "_" + ri + "_" + i,
                      pointA: [Math.round(a[0]), Math.round(a[1]), z],
@@ -851,7 +882,7 @@ UJ.tracing = (function(){
       }
       var P = [];
       for (i = 0; i < pts.length; i++) P.push([Math.round(pts[i][0]), Math.round(pts[i][1]), z]);
-      P.push(P[0].slice());
+      if (shut) P.push(P[0].slice());
       out.push({ type: "polyline", id: idPrefix + "_" + ri, points: P });
     });
     out.simplified = { before: simp.before, after: simp.after, tol: simp.tol };

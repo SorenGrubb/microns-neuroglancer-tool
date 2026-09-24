@@ -93,14 +93,17 @@ function tracedOutlinesKindName(k){'''),
     sel.options[1].textContent=kinds.length
       ?"All outlined organelles ("+kinds.reduce(function(a,k){return a+n[k];},0)+")"
       :"All outlined organelles — none traced yet";
-    /* Straight after "all organelles", so it is found rather than scrolled to. */
+    /* Straight after "all organelles", so it is found rather than scrolled to -- and in the order
+       they are declared, which puts whole cells first. Each one goes after the last one inserted,
+       or they come out reversed. */
+    let at=sel.options[2]||null;
     Object.keys(TRACED_NOT_ORGANELLE).forEach(function(k){
       if(!other[k])return;
       const m=TRACED_NOT_ORGANELLE[k];
       const o=document.createElement("option");
       o.value=m.pick;
       o.textContent=m.plural+" ("+other[k]+" outlined)";
-      sel.insertBefore(o, sel.options[2]||null);
+      sel.insertBefore(o, at);
     });'''),
 
  (u"...and the builder draws what was picked",
