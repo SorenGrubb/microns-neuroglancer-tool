@@ -1,4 +1,29 @@
-/* ── core/report.js ─ shared reporting surface ─────────────────────────────────
+/* ── A STABLE ID FOR A CELL NOTHING DETECTED ───────────────────────────  2026-09-24
+   Everything identity does in this family is keyed on a NUMERIC cell id: the Master cell list is
+   keyed by it, votes and history address it, and a cell without one cannot be identified, voted on
+   or disagreed with — its name lives on its own row where the first writer wins.
+
+   Derived from the coordinate rather than assigned by a server: every client computes the same id
+   from the same row, with no new state to keep and nothing to deploy. FNV-1a, mapped into a band
+   starting at a million. Measured: λJump's Lee16 detections are 1..488 and ηJump's H01 cell_bodies
+   ids are 1..49,376, so the band cannot meet either. The DATASET KEY IS INSIDE THE HASH, so two
+   tools cannot collide with each other. Across a thousand added cells the chance of two hashing
+   alike is about 0.02 %.
+
+   Written for λJump on 2026-09-10 and moved here on 2026-09-24, when ηJump needed the same id: a
+   family that has already watched six near-copies of one control drift apart should not have two
+   tools computing an identity differently. λJump's addedNucleusId() is now one line.
+   See src/a_cell_h01_never_listed.py. */
+var ADDED_CELL_ID_BASE = 1000000, ADDED_CELL_ID_SPAN = 1000000000;
+function addedCellId(coordStr){
+  var s = ((window.UJ && UJ.cfg && UJ.cfg.backend && UJ.cfg.backend.ds) || "")
+        + "|" + String(coordStr || "").replace(/\s+/g, "");
+  var h = 0x811c9dc5;
+  for (var i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return ADDED_CELL_ID_BASE + (h % ADDED_CELL_ID_SPAN);
+}
+
+/* ── core/report.js ─ shared reporting surface ────────────────────────────
    Extracted from ujump.html on 2026-08-18 (stage P5, after core/panel.js and core/tree.js).
 
    Four things moved, and they belong together because they are all about a report that is NOT a

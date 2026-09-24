@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 13:41</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 19:46</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1687,13 +1687,10 @@ else setTimeout(kickNewNuclei,0);
    starting at a million -- this dataset's detections are 1..488, so the two cannot meet. The
    dataset key is inside the hash so two tools cannot collide with each other either. Across a
    thousand added cells the chance of two hashing alike is about 0.02 %. */
-const ADDED_ID_BASE=1000000, ADDED_ID_SPAN=1000000000;
-function addedNucleusId(coordStr){
-  const s=((UJ&&UJ.cfg&&UJ.cfg.backend&&UJ.cfg.backend.ds)||"")+"|"+String(coordStr||"").replace(/\s+/g,"");
-  let h=0x811c9dc5;
-  for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
-  return ADDED_ID_BASE+(h%ADDED_ID_SPAN);
-}
+/* MOVED to core/report.js on 2026-09-24, when ηJump needed the same id — the body above is now
+   addedCellId() there, unchanged, so every id this page has ever derived stays the same. This name
+   is what λJump's own callers use. See src/a_cell_h01_never_listed.py. */
+function addedNucleusId(coordStr){ return addedCellId(coordStr); }
 function absorbAddedNuclei(){
   const list=(NEW_NUC_CACHE||[]).filter(function(r){return !!newNucCoord(r);});
   const cut=function(a){return Array.prototype.slice.call(a,0,N_DET);};
