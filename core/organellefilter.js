@@ -57,6 +57,17 @@ UJ.organelleFilter = (function(){
      are the same 61 kinds in the same 13 groups, so either is correct and neither is preferred. */
   function groupsOf(opts){
     if (opts && opts.groups) return opts.groups;
+    /* ── A GROUP THE ONTOLOGY DOES NOT HAVE ──────────────────────────────────────  2026-09-24
+       Søren wanted to filter on "has somebody outlined the whole of this cell", which is a real
+       question about the dataset and is not an organelle. `extraGroups` appends without replacing,
+       so a caller adds a question rather than taking over the list.
+       See src/a_traced_cell_is_a_thing_you_can_tick.py. */
+    var base = baseGroups();
+    if (opts && opts.extraGroups && opts.extraGroups.length)
+      return base.concat(opts.extraGroups);
+    return base;
+  }
+  function baseGroups(opts){
     if (typeof ORGANELLE_GROUPS !== "undefined" && ORGANELLE_GROUPS) return ORGANELLE_GROUPS;
     if (window.ORGANELLE_GROUPS) return window.ORGANELLE_GROUPS;
     if (UJ.organelles && UJ.organelles.GROUPS) return UJ.organelles.GROUPS;

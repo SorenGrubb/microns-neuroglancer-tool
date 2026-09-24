@@ -126,6 +126,84 @@ function tracedOutlinesStateOffer(after, json, chars){
   });
   return box;
 }
+/* ── WHICH CELLS HAVE BEEN OUTLINED ───────────────────────────────────────────  2026-09-24
+   Søren: "I need to be able to filter for only the cells that have whole cell structures."
+
+   The organelle filter asks the organelle-locations sheet; a traced whole cell is not in it. This
+   reads the traced-structures index -- the same one the outline picker reads -- once per page, and
+   answers which cells carry one. By nucleus id AND root id, because a tracing is filed against
+   whichever the tracer had, and by both scoped and bare ids, because a dataset prefixes them.
+
+   Cached: the filter renders on load and again whenever counts arrive, and a fetch per render
+   would be a request every time somebody ticks anything.
+   See src/a_traced_cell_is_a_thing_you_can_tick.py. */
+var TRACED_KIND_SETS = null, TRACED_KIND_WAIT = null;
+var TRACED_KIND_VALUES = { "__traced_cell": "cell", "__traced_nucleus": "nucleus" };
+function tracedKindIds(t){
+  var out = [];
+  ["nucleusId", "rootId"].forEach(function(f){
+    var v = String((t && t[f]) || "").trim();
+    if (!v) return;
+    out.push(v);
+    var i = v.indexOf(":");                 // "<dataset>:<id>" -- both spellings answer
+    if (i >= 0) out.push(v.slice(i + 1));
+  });
+  return out;
+}
+function tracedKindSets(force){
+  if (TRACED_KIND_SETS && !force) return Promise.resolve(TRACED_KIND_SETS);
+  if (TRACED_KIND_WAIT && !force) return TRACED_KIND_WAIT;
+  if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT)
+    return Promise.resolve({ cell: {}, nucleus: {} });
+  TRACED_KIND_WAIT = fetch(REPORT_ENDPOINT + "?tracings=1" + tracedOutlinesDsQS())
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var sets = { cell: {}, nucleus: {} };
+      ((d && d.tracings) || []).forEach(function(t){
+        var k = String((t && (t.instanceOf || t.kind)) || "").toLowerCase();
+        if (k !== "cell" && k !== "nucleus") return;
+        tracedKindIds(t).forEach(function(id){ sets[k][id] = 1; });
+      });
+      TRACED_KIND_SETS = sets; TRACED_KIND_WAIT = null;
+      return sets;
+    }, function(e){
+      TRACED_KIND_WAIT = null;
+      console.warn("[traced kinds] index unavailable", e);
+      return { cell: {}, nucleus: {} };
+    });
+  return TRACED_KIND_WAIT;
+}
+/* Does THIS cell carry one? `value` is a __traced_ pseudo-kind; anything else is not ours. */
+function tracedKindHas(value, nucId, rootId){
+  var k = TRACED_KIND_VALUES[value];
+  if (!k || !TRACED_KIND_SETS) return false;
+  var set = TRACED_KIND_SETS[k] || {};
+  var ids = tracedKindIds({ nucleusId: nucId, rootId: rootId });
+  for (var i = 0; i < ids.length; i++) if (set[ids[i]]) return true;
+  return false;
+}
+/* CELLS, not tracings -- the unit every other number in that panel uses. */
+function tracedKindCounts(){
+  var c = {};
+  c.__traced_cell = TRACED_KIND_SETS ? Object.keys(TRACED_KIND_SETS.cell || {}).length : 0;
+  c.__traced_nucleus = TRACED_KIND_SETS ? Object.keys(TRACED_KIND_SETS.nucleus || {}).length : 0;
+  /* An id counted twice -- once scoped, once bare -- would double it. Both spellings of one cell
+     are in the set on purpose, so the count is halved where both are present. */
+  ["cell", "nucleus"].forEach(function(k){
+    if (!TRACED_KIND_SETS) return;
+    var ids = Object.keys(TRACED_KIND_SETS[k] || {}), bare = {};
+    ids.forEach(function(id){ var i = id.indexOf(":"); bare[i >= 0 ? id.slice(i + 1) : id] = 1; });
+    c[k === "cell" ? "__traced_cell" : "__traced_nucleus"] = Object.keys(bare).length;
+  });
+  return c;
+}
+/* The group the two lists show. Empty when the page has no backend to ask. */
+function tracedKindGroup(){
+  return [{ label: "Traced outlines (whole structures)", kinds: [
+    { value: "__traced_cell", label: "Whole cell (traced)", short: "Whole cell (traced)" },
+    { value: "__traced_nucleus", label: "Nucleus (traced)", short: "Nucleus (traced)" }
+  ] }];
+}
 var FILTER_ORGAN_SEG_FILLED=false;
 async function fillOrganSegKinds(){
   if(FILTER_ORGAN_SEG_FILLED)return;
