@@ -10,7 +10,9 @@
      s1  a lysosome filed against cell A's NUCLEUS id             -> must be drawn
      s2  a mitochondrion filed against cell B's ROOT id            -> must be drawn
      s3  a lysosome filed against a nucleus no cell here has        -> must NOT be read
-     s4  a traced CELL, against cell A                              -> not an organelle; not read
+     s4  a traced CELL, against cell A                              -> not under "all organelles",
+                                                                       but IS under "whole cells"
+     s5  a traced CELL, against cell B                              -> likewise
 
    The one thing it exists to catch is WHICH outlines get in — matching on one id alone silently
    drops half the dataset in the way that looks like "nobody has traced these".
@@ -121,12 +123,20 @@ const XJ = /xjump/.test(PAGE);
     { structureId: "s1", kind: "lysosome", instanceOf: "lysosome", nucleusId: cells.A.nuc, color: "#ff0000" },
     Object.assign({ structureId: "s2", kind: "mitochondria", instanceOf: "mitochondria", color: "#00ff00" }, B_FILED),
     { structureId: "s3", kind: "lysosome", instanceOf: "lysosome", nucleusId: "999999999", color: "#ff0000" },
-    { structureId: "s4", kind: "cell", nucleusId: cells.A.nuc }
+    { structureId: "s4", kind: "cell", name: "Whole cell", nucleusId: cells.A.nuc, color: "#40e28c" },
+    Object.assign({ structureId: "s5", kind: "cell", name: "Whole cell", color: "#40e28c" }, B_FILED)
   ];
   ROWS = {
     s1: [row("s1", "lysosome", { nucleusId: cells.A.nuc }, ring(100, 1000, 2000))],
     s2: [row("s2", "mitochondria", B_FILED, ring(200, 3000, 4000)),
-         row("s2", "mitochondria", B_FILED, ring(201, 3000, 4000), { ringIndex: 1 })]
+         row("s2", "mitochondria", B_FILED, ring(201, 3000, 4000), { ringIndex: 1 })],
+    /* The two traced CELLS have geometry too, or "picked and nothing drawn" would look like the
+       feature working. A cell row carries kind "cell" and no instanceOf. */
+    s4: [Object.assign(row("s4", "cell", { nucleusId: cells.A.nuc }, ring(300, 5000, 6000)),
+                       { instanceOf: "", name: "Whole cell" })],
+    s5: [Object.assign(row("s5", "cell", B_FILED, ring(400, 7000, 8000)), { instanceOf: "", name: "Whole cell" }),
+         Object.assign(row("s5", "cell", B_FILED, ring(401, 7000, 8000), { ringIndex: 1 }),
+                       { instanceOf: "", name: "Whole cell" })]
   };
 
   console.log(PAGE + "\n\nthe picker");
@@ -141,7 +151,16 @@ const XJ = /xjump/.test(PAGE);
   if (pick.none){ await b.close(); console.log("\n1 FAILED"); process.exit(1); }
   ok(pick.opts.some(o => /^lysosome=.*\(2 outlined\)/.test(o)),
      "...listing the kinds that have been outlined, with how many", pick.opts.join(" | "));
-  ok(!pick.opts.some(o => /^cell=/.test(o)), "...and not a traced cell, which is not an organelle");
+  ok(!pick.opts.some(o => /^cell=/.test(o)),
+     "...and a traced cell is not offered as an organelle KIND, because it is not one",
+     pick.opts.filter(o => /cell/i.test(o)).join(" | ") || "(none)");
+  /* ── AND A WHOLE CELL CAN BE PICKED ───────────────────────────────────────────  2026-09-23
+     Søren: "There are no options to select whole cell structure in the Filter and show." It was
+     excluded from the picker AND the builder, in both places by the same `k==="cell"` test. It
+     gets an entry of its own rather than joining "all organelles", so the count beside that option
+     goes on meaning organelles. */
+  ok(pick.opts.some(o => /^__cells=.*\(2 outlined\)/.test(o)),
+     "...and whole cells ARE offered, on their own, with how many", pick.opts.join(" | "));
 
   const openAll = async (want) => p.evaluate(async ([want, LINK]) => {
     window.__opened = null;
@@ -201,6 +220,9 @@ const XJ = /xjump/.test(PAGE);
        "the mitochondrion filed by " + B_BY + " is drawn: two rings, " + (2 * PER) + " " + SHAPE + "s",
        JSON.stringify(mit || null));
     ok(all.layers.length === 2, "...one layer per kind, and nothing else", all.layers.map(l => l.name).join(" | "));
+    ok(!all.layers.some(l => /whole cell/i.test(l.name || "")),
+       "...and the two traced CELLS are not among them: \u201call organelles\u201d still means organelles",
+       all.layers.map(l => l.name).join(" | "));
     if (TABLE){
       ok(all.pts === cells.n, "the view has a point on every matched nucleus", all.pts + " of " + cells.n);
       ok(all.ngroups >= 1, "...in one layer per community identity", all.ngroups + " layer(s)");
@@ -229,6 +251,22 @@ const XJ = /xjump/.test(PAGE);
   const none = await openAll("");
   ok(!none.none && none.layers.length === 0 && !reads.some(r => r.sid !== "(index)"),
      "\"None — points only\" draws no outlines and reads none", none.none ? "no view" : none.layers.length + " layers");
+  console.log("\nwhole cells");
+  const cellsOnly = await openAll("__cells");
+  ok(!cellsOnly.none, "picking whole cells produced a view");
+  if (!cellsOnly.none){
+    const PER = cellsOnly.poly ? 1 : 4;
+    const wc = cellsOnly.layers.find(l => /whole cell/i.test(l.name || ""));
+    ok(!!wc, "the traced cells are drawn", cellsOnly.layers.map(l => l.name).join(" | ") || "(none)");
+    ok(!!wc && wc.n === 3 * PER,
+       "...both of them, three rings between them", wc ? wc.n + " annotation(s)" : "-");
+    ok(!!wc && /\(2\)/.test(wc.name || ""),
+       "...and the layer says how many cells it holds", wc ? wc.name : "-");
+    ok(cellsOnly.layers.length === 1,
+       "...and no organelles came with them \u2014 this option means what it says",
+       cellsOnly.layers.map(l => l.name).join(" | "));
+  }
+
   ok(errors.length === 0, "the page still loads with no new errors", errors.join(" | ") || "none");
 
   await b.close();

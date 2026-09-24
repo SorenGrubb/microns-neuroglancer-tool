@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-23 14:51</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-23 21:20</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -8816,6 +8816,33 @@ UJ.tracepad = (function(){
     pad.stroke = null;
     return pad.inst;
   }
+  /* ── A WHOLE STRUCTURE, GONE ───────────────────────────────────────────────────  2026-09-23
+     Søren: "I should be able to delete one of the drawings, but give a warning first." The warning
+     belongs to the card, which is what knows how to ask; this is the removal, and it returns how
+     many contours went so the card can say.
+
+     THE SURVIVORS KEEP THEIR NUMBERS -- the gap is not closed up. newInstance above already refuses
+     to reuse a number, and for the same reason and one more: the card keys PAD_INST_KIND,
+     PAD_INST_COLOUR and PAD_EDIT_IDS by this number, so renumbering would slide every structure's
+     type, colour and dataset id one place to the left. Delete the second of three and 1 and 3 are
+     what is left.
+
+     Deleting the one being drawn moves to the nearest below it, or the first of what remains, so
+     the next stroke lands on a structure that exists rather than opening a new empty one. */
+  function deleteInstance(pad, i){
+    var k = Math.max(0, Math.round(i) || 0);
+    var before = (pad.rings || []).length;
+    pad.rings = (pad.rings || []).filter(function(r){ return (r.inst || 0) !== k; });
+    if ((pad.inst || 0) === k){
+      var left = [];
+      pad.rings.forEach(function(r){ var j = r.inst || 0; if (left.indexOf(j) < 0) left.push(j); });
+      left.sort(function(a, b){ return a - b; });
+      var below = left.filter(function(x){ return x < k; });
+      pad.inst = below.length ? below[below.length - 1] : (left.length ? left[0] : 0);
+      pad.pending = []; pad.stroke = null;
+    }
+    return before - pad.rings.length;
+  }
 
   function count(pad){
     var z = {};
@@ -9059,6 +9086,7 @@ UJ.tracepad = (function(){
 
   return { create: create, setZ: setZ, addVertex: addVertex, closeRing: closeRing,
            instances: instances, newInstance: newInstance, setInstance: setInstance,
+           deleteInstance: deleteInstance,
            startStroke: startStroke, strokePoint: strokePoint, endStroke: endStroke,
            extendStroke: extendStroke,
            simplify: simplify, simplifyClosed: simplifyClosed,
@@ -11145,13 +11173,31 @@ UJ.tracing = (function(){
     return String(label || "") + " " + n;
   }
 
+  /* The last stamp this page handed out, so the next one cannot be the same or earlier. */
+  var STRUCTURE_STAMP = 0;
   function structureId(name, stamp){
     /* Readable, unique per submission, and stable within one: the rows of one tracing have to find
        each other on the way back out, and a reader looking at the sheet should be able to tell
-       which cell a row belongs to without a join. */
+       which cell a row belongs to without a join.
+
+       ── AND "UNIQUE" USED TO BE A CLAIM RATHER THAN A FACT ─────────────────────────  2026-09-23
+       This was slug + "_" + Date.now(). Measured: a THOUSAND mints in a row gave two distinct ids,
+       because they shared two milliseconds. Two structures with one id are one structure with two
+       versions, and the list shows the later -- which is how Søren came to be missing an arachnoid
+       barrier cell whose 30,948 vertices were sitting behind a "v2" label.
+
+       The counter makes a repeat within this page impossible rather than unlikely. The four random
+       characters are for the collision no counter here can see: two people, two browsers, the same
+       slug in the same millisecond. An explicit stamp is returned verbatim, because that parameter
+       exists so an id can be REGENERATED and a random tail would destroy exactly that.
+       See src/two_structures_never_share_an_id.py. */
     var slug = String(name || "traced").toLowerCase().replace(/[^a-z0-9]+/g, "-")
                  .replace(/^-|-$/g, "").slice(0, 40) || "traced";
-    return slug + "_" + (stamp || Date.now());
+    if (stamp) return slug + "_" + stamp;
+    var n = Date.now();
+    if (n <= STRUCTURE_STAMP) n = STRUCTURE_STAMP + 1;
+    STRUCTURE_STAMP = n;
+    return slug + "_" + n + "_" + Math.random().toString(36).slice(2, 6);
   }
 
   function ringsToRows(rings, meta){
@@ -11582,6 +11628,13 @@ UJ.tracing = (function(){
 var UJ = UJ || {};
 /* A kind's short name where the page has no ORGANELLE_KIND_BY_VALUE (χJump), from the same
    vocabulary through core/organelles.js. 2026-09-21. */
+/* ── THE TWO KINDS THAT ARE NOT ORGANELLES ────────────────────────────────────  2026-09-23
+   Søren: "There are no options to select whole cell structure in the Filter and show."
+   Named here rather than looked up: tracedOutlinesKindName("cell") answers "cell", and a layer
+   called "traced cell (3)" beside "traced lysosome (12)" reads as though a cell were another
+   organelle. See src/a_whole_cell_is_something_you_can_pick.py. */
+var TRACED_NOT_ORGANELLE = { cell: { pick: "__cells", plural: "Whole cells", layer: "whole cell" },
+                             nucleus: { pick: "__nuclei", plural: "Nuclei", layer: "nucleus" } };
 function tracedOutlinesKindName(k){
   try { if (window.UJ && UJ.organelles && UJ.organelles.shortOf) return UJ.organelles.shortOf(k); }
   catch (_e){}
@@ -11622,18 +11675,33 @@ async function fillOrganSegKinds(){
   try{
     const r=await fetch(REPORT_ENDPOINT+"?tracings=1"+tracedOutlinesDsQS());
     const d=await r.json();
-    const n={};
+    const n={}, other={};
     ((d&&d.tracings)||[]).forEach(function(t){
       const k=String((t&&(t.instanceOf||t.kind))||"").toLowerCase();
-      if(!k||k==="cell"||k==="nucleus")return;
+      if(!k)return;
+      /* A cell and a nucleus are counted apart from the organelles, and offered apart: the number
+         beside "All outlined organelles" is what somebody reads to decide whether the view is
+         worth opening, and a whole cell is a hundred times the contours of a lysosome. */
+      if(TRACED_NOT_ORGANELLE[k]){ other[k]=(other[k]||0)+1; return; }
       n[k]=(n[k]||0)+1;
     });
     const kinds=Object.keys(n).sort();
-    if(!kinds.length){
+    if(!kinds.length&&!Object.keys(other).length){
       sel.options[1].textContent="All outlined organelles — none traced yet";
       return;
     }
-    sel.options[1].textContent="All outlined organelles ("+kinds.reduce(function(a,k){return a+n[k];},0)+")";
+    sel.options[1].textContent=kinds.length
+      ?"All outlined organelles ("+kinds.reduce(function(a,k){return a+n[k];},0)+")"
+      :"All outlined organelles — none traced yet";
+    /* Straight after "all organelles", so it is found rather than scrolled to. */
+    Object.keys(TRACED_NOT_ORGANELLE).forEach(function(k){
+      if(!other[k])return;
+      const m=TRACED_NOT_ORGANELLE[k];
+      const o=document.createElement("option");
+      o.value=m.pick;
+      o.textContent=m.plural+" ("+other[k]+" outlined)";
+      sel.insertBefore(o, sel.options[2]||null);
+    });
     kinds.forEach(function(k){
       const label=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined"&&ORGANELLE_KIND_BY_VALUE[k])
                  ?(ORGANELLE_KIND_BY_VALUE[k].short||ORGANELLE_KIND_BY_VALUE[k].label||k):tracedOutlinesKindName(k);
@@ -11653,8 +11721,29 @@ function tracedOutlinesWire(){
   sel.dataset.wired="1";
   ["focus","mousedown"].forEach(function(ev){ sel.addEventListener(ev,fillOrganSegKinds); });
 }
+/* ── TWO CAPS, FOR TWO DIFFERENT COSTS ────────────────────────────────────────  2026-09-23
+   Søren, on picking whole cells: "We also have to keep in mind that they may be too big for showing
+   in Neuroglancer if we collect all of them."
+
+   FILTER_TRACE_CAP is a cap on READS -- one Drive file per outline -- and says so in its own note.
+   It is not a cap on the LINK, and cannot be: 150 lysosomes is a small view and three whole cells
+   is not. Measured 2026-09-23: six traced cells of 200 contours built a 22,397k link, ten times
+   what a tab can be opened with, without the outline cap firing once.
+
+   So the link has a cap of its own, in the unit the browser actually counts. 2,097,152 is where
+   Chromium stops (measured in Søren's browser, 2026-09-22); 1,200,000 of it is offered to the
+   outlines and the remaining ~900k left for what else the state carries -- segmentation layers,
+   region boxes, organelle points, the EM. A caller that knows its own state can pass {budget: n}.
+   See src/the_outlines_fit_the_link_they_go_in.py. */
 const FILTER_TRACE_CAP=150;
-async function buildTracedOrganelleLayers(ids,want,say){
+const FILTER_TRACE_BUDGET=1200000;
+/* What this costs in a URL, not in memory: encodeURIComponent turns every quote, brace, comma and
+   colon into three characters, so JSON.stringify alone under-counts by about two thirds. */
+function tracedOutlinesCost(anns){
+  try { return encodeURIComponent(JSON.stringify(anns)).length; }
+  catch (_e){ return Infinity; }
+}
+async function buildTracedOrganelleLayers(ids,want,say,opts){
   if(!want||!REPORT_ENDPOINT)return [];
   /* The cells that matched, by both ids -- a tracing is filed against whichever the tracer had. */
   const nucSet=new Set(),rootSet=new Set();
@@ -11668,14 +11757,23 @@ async function buildTracedOrganelleLayers(ids,want,say){
     const d=await r.json();
     index=(d&&d.tracings)||[];
   }catch(e){console.warn("[uJump filter] tracings index unavailable",e);return [];}
-  const isOrganelle=function(t){
-    const k=String((t&&(t.instanceOf||t.kind))||"").toLowerCase();
-    return !!k&&k!=="cell"&&k!=="nucleus";
+  const kindOf=function(t){ return String((t&&(t.instanceOf||t.kind))||"").toLowerCase(); };
+  /* WHAT THIS SELECTION MEANS (2026-09-23). "__all" is every ORGANELLE, as it always was; the two
+     kinds that are not organelles answer to pickers of their own. */
+  const wantedKind=(function(){
+    for(var k in TRACED_NOT_ORGANELLE)
+      if(TRACED_NOT_ORGANELLE[k].pick===want)return k;
+    return "";
+  })();
+  const takes=function(t){
+    const k=kindOf(t);
+    if(!k)return false;
+    if(wantedKind)return k===wantedKind;
+    if(want==="__all")return !TRACED_NOT_ORGANELLE[k];
+    return k===String(want).toLowerCase();
   };
   let mine=index.filter(function(t){
-    if(!t||!t.structureId||!isOrganelle(t))return false;
-    if(want!=="__all"&&String(t.instanceOf||t.kind||"").toLowerCase()!==String(want).toLowerCase())
-      return false;
+    if(!t||!t.structureId||!takes(t))return false;
     return nucSet.has(String(t.nucleusId||""))||rootSet.has(String(t.rootId||""));
   });
   if(!mine.length)return [];
@@ -11702,22 +11800,61 @@ async function buildTracedOrganelleLayers(ids,want,say){
     const k=String(g.t.instanceOf||g.t.kind||"organelle").toLowerCase();
     (byKind[k]=byKind[k]||[]).push(g);
   });
-  const layers=[];
+  /* ── AS MANY AS THE LINK WILL TAKE ────────────────────────────────────────────  2026-09-23
+     The annotations are made first and measured as they go, and an outline that does not fit the
+     remaining budget is left out whole -- never half an outline, which would be a shape nobody
+     traced. Order is the index's, so what you get is the first N rather than an arbitrary N. */
+  const budget=(opts&&opts.budget!==undefined)?opts.budget:FILTER_TRACE_BUDGET;
+  const madeFor={}; let spent=0, tooBig=0;
   Object.keys(byKind).sort().forEach(function(k){
-    const anns=[];
+    madeFor[k]=[];
     byKind[k].forEach(function(g,gi){
       /* The same annotations tracingViewerOpen writes for one cell: one closed POLYLINE per
          contour (2026-09-22, src/the_viewer_link_is_polylines.py). */
-      [].push.apply(anns,UJ.tracing.ringAnnotations(g.rings||[],"to"+gi));
+      const a=UJ.tracing.ringAnnotations(g.rings||[],"to"+gi);
+      if(!a||!a.length)return;
+      const cost=tracedOutlinesCost(a);
+      if(spent+cost>budget){ tooBig++; return; }
+      spent+=cost;
+      [].push.apply(madeFor[k],a);
     });
+  });
+  const layers=[];
+  Object.keys(byKind).sort().forEach(function(k){
+    const anns=madeFor[k]||[];
     if(!anns.length)return;
-    const label=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined"&&ORGANELLE_KIND_BY_VALUE[k])
-               ?(ORGANELLE_KIND_BY_VALUE[k].short||ORGANELLE_KIND_BY_VALUE[k].label||k):tracedOutlinesKindName(k);
+    const label=TRACED_NOT_ORGANELLE[k]?TRACED_NOT_ORGANELLE[k].layer
+               :((typeof ORGANELLE_KIND_BY_VALUE!=="undefined"&&ORGANELLE_KIND_BY_VALUE[k])
+                 ?(ORGANELLE_KIND_BY_VALUE[k].short||ORGANELLE_KIND_BY_VALUE[k].label||k)
+                 :tracedOutlinesKindName(k));
     layers.push({type:"annotation",source:"local://annotations",tab:"annotations",
                  name:"traced "+label+" ("+byKind[k].length+")",
                  annotationColor:byKind[k][0].t.color||"#40e28c",
                  annotations:anns});
   });
+  /* SAID, NOT SILENT -- the same rule the reads cap follows six lines down, for the same reason:
+     somebody reading this view is deciding what to trace next. */
+  if(tooBig&&typeof showSubmitToast==="function"){
+    /* WHY, WHEN THE ANSWER IS THE VIEWER. On one that cannot read polylines every EDGE of every
+       contour is its own annotation, so a single whole cell is already over the budget and the
+       honest view is empty -- measured here: three traced cells are 180 contours and 712k as
+       polylines, and nothing at all as lines. An empty view with no reason is the worst of the
+       three outcomes, so the reason somebody can act on is named. */
+    var shapeWhy="";
+    try {
+      if(UJ.tracing&&UJ.tracing.viewerTakesPolylines&&!UJ.tracing.viewerTakesPolylines())
+        shapeWhy=" This viewer cannot read polyline annotations, so every edge of every contour is "
+               +"its own line and these outlines cost about four times what they need to \u2014 "
+               +"Spelunker and neuroglancer-demo read polylines, and the same cells fit there.";
+    } catch (_sw){}
+    showSubmitToast(false,(got.length===tooBig
+        ?"Not one of these "+tooBig+" outlines fits a viewer link on its own"
+        :"Left "+tooBig+" outline"+(tooBig===1?"":"s")+" out")
+      +" \u2014 a viewer link cannot be opened past 2,097,152 characters"
+      +(got.length===tooBig?"":", and the ones drawn already fill it")+". Pick one kind rather "
+      +"than all, or narrow the filter. A whole cell is a hundred times the contours of a "
+      +"lysosome."+shapeWhy);
+  }
   if(capped&&typeof showSubmitToast==="function")
     showSubmitToast(false,"Drew "+got.length+" traced outline"+(got.length===1?"":"s")
       +" and left "+capped+" out \u2014 the view reads one file per outline, so it stops at "
@@ -12611,7 +12748,38 @@ function tracingCurrentAll(){
      be assigned after the numbering, which was harmless only while the numbering did not care. */
   if(!TRACING_PENDING.id){
     const label=groups[0].w.name;
-    const prior=(TRACINGS_KEPT||[]).filter(function(x){return x&&x.id&&x.name===label;})[0];
+    /* ── AND THE SAME CELL ────────────────────────────────────────────────────────  2026-09-23
+       Søren: "one of the arachnoid barrier cells is missing". It was overwritten. This filter
+       matched on the NAME alone, and "Whole cell" is the default name of every cell anybody traces
+       -- so his second arachnoid barrier cell (nucleus 286159) found the first (nucleus 286849) in
+       the kept list, took its id, and filed 30,948 vertices of somebody's tracing as the previous
+       version of a different cell.
+
+       The intent is right and stays: re-reading a cell you have already added must file a version
+       rather than a twin. The key was too weak. A structure is its name AND THE CELL IT IS PART OF,
+       compared the same three ways tracingNextIndex compares cells above -- nucleus, root, or the
+       coordinate -- any one positive match being enough, because a root id moves when the
+       segmentation is proofread and a nucleus id does not.
+
+       WITH NOTHING TO COMPARE the answer is no. A twin is two rows to merge; an overwrite is an
+       afternoon of tracing behind a "v2" label. Minting an id deletes nothing, so the doubtful case
+       takes the recoverable mistake. See src/a_second_cell_does_not_take_the_first_ones_id.py. */
+    const bareId=function(v){ var s=String(v||""); var i=s.indexOf(":"); return i<0?s:s.slice(i+1); };
+    const cellOf=function(x){
+      return {nuc:bareId(x&&(x.nucleus_id||x.nucleusId)),
+              root:bareId(x&&(x.root_id||x.rootId)),
+              at:String((x&&(x.cell_coord||x.cellCoord))||"")};
+    };
+    const here=cellOf({nucleus_id:nid,root_id:rid,cell_coord:tracingCellAtVal()});
+    const sameCell=function(x){
+      const c=cellOf(x);
+      return !!((here.nuc&&c.nuc&&c.nuc===here.nuc)
+              ||(here.root&&c.root&&c.root===here.root)
+              ||(here.at&&c.at&&c.at===here.at));
+    };
+    const prior=(TRACINGS_KEPT||[]).filter(function(x){
+      return x&&x.id&&x.name===label&&sameCell(x);
+    })[0];
     TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(label);
   }
   /* WHERE THE OTHER STRUCTURES HANG FROM.  2026-09-19
@@ -13464,6 +13632,16 @@ function tracingKeep(){
        re-register leaves the stale point standing. Moved is the question; pressed is not. */
     if(prior&&prior.centre_registered)t.centre_registered=prior.centre_registered;
     if(prior&&prior.centre_at)t.centre_at=prior.centre_at;
+    /* ── AND WHAT IT LAST SENT ──────────────────────────────────────────────────  2026-09-23
+       The same omission as the one the paragraph above describes, one field later. shared_sig is
+       the fingerprint of the last submission and it is what tracingPublish refuses a re-send on;
+       rebuilt without it, every press looked like a tracing that had never been sent. Søren's
+       sheet: three rows for one organelle, 12 contours and 137 vertices on each of them.
+
+       ANYTHING REMEMBERED ABOUT A TRACING BELONGS IN THIS LIST. That is now four fields, all with
+       the same shape and the same failure -- so if a fifth is ever added, it goes here in the same
+       breath. See src/what_was_sent_survives_a_re_add.py. */
+    if(prior&&prior.shared_sig)t.shared_sig=prior.shared_sig;
     t.pending_share=true;
     if(at>=0)TRACINGS_KEPT.splice(at,1,t); else TRACINGS_KEPT.push(t);
   });
@@ -13474,8 +13652,12 @@ function tracingKeep(){
      2026-09-19: this used to be three statements here and one of them missing there. */
   tracingPendingClear();
   document.getElementById("tracingLink").value="";
-  let sent=0;
-  all.forEach(function(t){ if(tracingPublish(t))sent++; });
+  let sent=0, same=0;
+  all.forEach(function(t){
+    t.share_nochange=false;
+    if(tracingPublish(t))sent++;
+    else if(t.share_nochange)same++;   // already up there, unchanged: arrived, not waiting
+  });
   /* IT IS NOT A DRAFT ANY MORE. Kept locally and queued or shared, and either way the way back to
      it is the list -- so a stale draft here would be a second, older copy of the same cell waiting
      to be resumed on top of it. */
@@ -13496,8 +13678,12 @@ function tracingKeep(){
   const what=all.length===1
     ?'“'+all[0].name+'”'
     :all.length+' structures — '+all.map(function(t){return t.name;}).join(", ");
-  tracingSay(sent===all.length
+  tracingSay(sent+same===all.length
     ?what+' '+(all.length===1?'is':'are')+' in the dataset and in this page’s 3D export. '
+     +(same?(same===all.length
+        ?(all.length===1?'Nothing had changed since you last added it, so nothing was sent again. '
+                        :'Nothing had changed since you last added them, so nothing was sent again. ')
+        :same+' of them had not changed, so only the rest were sent again. '):'')
      +'Anybody can open '+(all.length===1?'it':'them')+' from the list at the bottom of this card '
      +'and add to '+(all.length===1?'it':'them')+' — that becomes the next version, with their '
      +'name beside yours, and nothing of this one is deleted.'
@@ -13643,6 +13829,12 @@ function tracingPublish(t,quiet){
      goes out by itself on the next sign-in, which is the same row arriving later instead of now. */
   const sig=tracingShareSig(sub);
   if(sig&&t.shared_sig===sig){
+    /* WHY IT DID NOT GO, for the caller (2026-09-23). tracingKeep writes the card's last word from
+       `sent === all.length`, and a tracing that was refused as unchanged is not sent -- so pressing
+       Add on something already in the dataset answered "It has NOT reached the dataset yet -- sign
+       in with Google", which is alarming and the opposite of true. Two reasons not to send, and
+       they need different sentences. */
+    t.share_nochange=true;
     t.pending_share=false;
     tracingWrite(TRACINGS_KEPT);
     if(!quiet)tracingSay("\u201c"+(t.name||"That tracing")+"\u201d is already in the dataset and "
@@ -13653,6 +13845,7 @@ function tracingPublish(t,quiet){
   const ok=postReport(Object.assign({timestamp:new Date().toISOString(),groupId:gid},sub),
                       "Tracing added to the dataset \u2014 thank you.");
   if(ok===false)return false;
+  t.share_nochange=false;
   t.shared_sig=sig;
   t.pending_share=false;
   t.shared_at=new Date().toISOString();
@@ -14910,17 +15103,49 @@ var TRACING_SHARED = [], PAD_EDIT_ID = "", TRACING_INDEX_AT = 0;
    so this is cheap enough to do when the pad opens, and a minute's cache keeps it to one request
    per session of work. It fails silently: with no index, tracingNextIndex() starts at 1 and says
    so, which is a label to fix rather than work lost. */
+/* ── ONE READ OF THE INDEX, SHARED BY EVERYONE WHO WANTS IT ──────────────────  2026-09-23
+   Søren: "The loading of the tracings in the dataset is really slow." Measured against his backend
+   before changing anything: ?tracings=1 is 3.6 s warm and 27.7 s cold, ONE request, 13 kB -- and
+   ?whoami=1, which returns three statements into doGet, is 11.3 s cold, so most of the cold cost is
+   Apps Script starting a container rather than this query. There was no fan-out to remove.
+
+   What was slow was waiting for it twice. This function fetched the index when the pad opened and
+   tracingBrowse() fetched the identical URL again on every press, ignoring both the answer and this
+   cache. So there is one fetch now, and whoever asks while it is in the air waits on the SAME
+   promise instead of starting another. See src/the_dataset_list_does_not_wait_for_what_it_has.py. */
+var TRACING_INDEX_WAIT = null;
+function tracingIndexFetch(){
+  if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT)
+    return Promise.reject(new Error("this page has no backend configured"));
+  if (TRACING_INDEX_WAIT) return TRACING_INDEX_WAIT;
+  TRACING_INDEX_WAIT = fetch(REPORT_ENDPOINT + "?tracings=1" + tracingDsQS())
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      /* An older deployment answers this route with something else entirely. Saying so beats
+         quietly keeping an empty list and reporting "nothing has been traced yet". */
+      if (!d || !Array.isArray(d.tracings))
+        throw new Error("the backend did not answer with a list of tracings");
+      TRACING_SHARED = tracingInScope(d.tracings);
+      TRACING_INDEX_AT = Date.now();
+      tracingReconcileKept();
+      TRACING_INDEX_WAIT = null;
+      return TRACING_SHARED;
+    }, function(e){
+      /* NOT cached as an attempt. The old code stamped the clock BEFORE fetching, so one failed
+         request left the index un-asked for the minute after the backend came back. */
+      TRACING_INDEX_WAIT = null; TRACING_INDEX_AT = 0;
+      throw e;
+    });
+  return TRACING_INDEX_WAIT;
+}
+/* THE INDEX, FETCHED QUIETLY, because the numbering needs it before he presses anything. Cheap
+   enough to do when the pad opens, and a minute's cache keeps it to one request per session of
+   work. It fails silently: with no index, tracingNextIndex() starts at 1 and says so, which is a
+   label to fix rather than work lost. */
 function tracingIndexSoon(){
   if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT) return;
   if (Date.now() - TRACING_INDEX_AT < 60000) return;
-  TRACING_INDEX_AT = Date.now();
-  try {
-    fetch(REPORT_ENDPOINT + "?tracings=1" + tracingDsQS())
-      .then(function(r){ return r.json(); })
-      .then(function(d){ if (d && d.tracings){ TRACING_SHARED = tracingInScope(d.tracings);
-                                               tracingReconcileKept(); } })
-      .catch(function(){});
-  } catch (e){}
+  try { tracingIndexFetch().catch(function(){}); } catch (e){}
 }
 
 /* ── "IN THE DATASET" IS CHECKED AGAINST THE DATASET ───────────────────────  2026-09-21
@@ -14956,17 +15181,38 @@ async function tracingBrowse(){
       + "read yet.</p>";
     return;
   }
-  host.innerHTML = '<p class="hint">Reading the dataset’s tracings…</p>';
+  /* ── WHAT IS IN HAND GOES UP FIRST ─────────────────────────────────────────────  2026-09-23
+     This used to overwrite the panel with "Reading the dataset’s tracings…" and then fetch the
+     same URL tracingIndexSoon() had already fetched when the pad opened -- so every press cost a
+     blank panel and 3 to 27 seconds for data the page was holding. The rows go up now and the
+     refresh happens behind them; the list is replaced only once newer data has actually arrived. */
+  const had = (TRACING_SHARED || []).length;
+  if (had) tracingRenderShared();
+  else host.innerHTML = '<p class="hint">Reading the dataset’s tracings… one request, a few '
+    + "seconds — and up to half a minute if the backend has been idle and has to start up "
+    + "again. Measured at 3.6 s warm and 27.7 s cold on 2026-09-23.</p>";
+  const at = TRACING_INDEX_AT;
   try {
-    const r = await fetch(REPORT_ENDPOINT + "?tracings=1" + tracingDsQS());
-    const d = await r.json();
-    TRACING_SHARED = tracingInScope((d && d.tracings) || []);
+    await tracingIndexFetch();
     tracingRenderShared();
-    if (d && Array.isArray(d.tracings)) tracingReconcileKept();
   } catch (e){
-    host.innerHTML = '<p class="hint" style="color:var(--bad)">Could not read them: '
-      + escHtml(String(e && e.message || e)) + ". If the backend has not been redeployed since "
-      + "2026-09-17 it does not answer this question yet.</p>";
+    const why = escHtml(String(e && e.message || e));
+    if (had){
+      /* A LIST ALREADY UP IS NOT BLANKED. Measured in datasetlistcheck.js before this went in: a
+         failed refresh turned ten rows into an error page, throwing away data that was in the
+         browser the whole time. The note goes ABOVE the rows, where he is already looking, and says
+         how old they are -- "could not refresh" over a list read ten minutes ago is true and
+         useful; an empty panel is neither. */
+      tracingRenderShared();
+      host.insertAdjacentHTML("afterbegin",
+        '<p class="hint" style="color:var(--bad)">Could not refresh the list: ' + why
+        + ". These are the tracings as they were read "
+        + (at ? escHtml(draftWhen(new Date(at).toISOString())) : "earlier") + ".</p>");
+    } else {
+      host.innerHTML = '<p class="hint" style="color:var(--bad)">Could not read them: ' + why
+        + ". If the backend has not been redeployed since 2026-09-17 it does not answer this "
+        + "question yet.</p>";
+    }
   }
 }
 
@@ -15670,7 +15916,7 @@ function padInstances(){
       + (on ? "outline:2px solid var(--accent);" : "") + '" title="'
       + (on ? "The one you are drawing now" : "Go back to this one") + ' — '
       + it.contours + ' contour(s) on ' + it.sections + ' section(s)">'
-      + '<span style="width:9px;height:9px;border-radius:2px;background:'
+      + '<span class="padswatch" style="width:9px;height:9px;border-radius:2px;background:'
       + escHtml(padInstColour(it.inst)) + '"></span>' + (it.inst + 1)
       /* Its own type on the chip once they can differ -- with the option off the label would be the
          same word repeated down the strip, which is noise. */
@@ -15678,10 +15924,21 @@ function padInstances(){
           ? ' <span style="opacity:.75;max-width:90px;overflow:hidden;text-overflow:ellipsis;'
             + 'white-space:nowrap">' + escHtml(tracingKindFor(it.inst).name || "?") + '</span>'
           : '')
-      + (it.contours ? '' : ' <span style="opacity:.6">empty</span>') + '</button>';
+      + (it.contours ? '' : ' <span style="opacity:.6">empty</span>')
+      /* Nothing drawn yet is nothing to delete, and nothing to go to either. */
+      + (it.contours
+          ? ' <span class="padx" data-inst="' + it.inst + '" title="Delete this drawing"'
+            + ' style="padding:0 2px;opacity:.75">\u00d7</span>'
+          : '') + '</button>';
   }).join("");
   [].slice.call(box.querySelectorAll(".padinst")).forEach(function(b){
-    b.addEventListener("click", function(){
+    b.addEventListener("click", function(ev){
+      /* The × asks before it does anything (2026-09-23). Søren: "I should be able to delete one of
+         the drawings, but give a warning first." */
+      if (ev.target && ev.target.closest && ev.target.closest(".padx")){
+        padInstAsk(+b.dataset.inst);
+        return;
+      }
       /* What is in the type boxes belongs to the one being LEFT, and the one being arrived at puts
          its own there. Storing first is what makes the strip a set of tabs rather than a row of
          buttons that quietly copy one structure's type onto the next. */
@@ -15691,9 +15948,67 @@ function padInstances(){
       const col = document.getElementById("tracingColor");
       if (col) col.value = padInstColour(PAD.inst);
       padPaint(); padRings();
+      /* ...AND GOES TO IT. The tooltip on this chip has said "Go back to this one" since it was
+         written; until 2026-09-23 it only changed the selection and left the view where it was,
+         which on a cell forty sections deep is the difference between a click and a search. */
+      var went = padGoToInst(PAD.inst);
       padSay("Drawing number " + (PAD.inst + 1) + " now — anything you draw joins that one."
+        + (went ? (went.moved ? " Moved to it, on section " + went.z + "."
+                              : " It is at " + went.at[0] + ", " + went.at[1] + " here.") : "")
         + (tracingEachOwn() ? " The type box above is its own." : ""));
     });
+  });
+}
+
+/* ── ASKING BEFORE A DRAWING GOES ──────────────────────────────────────────────  2026-09-23
+   Søren: "I should be able to delete one of the drawings, but give a warning first."
+
+   It NAMES AND COUNTS. "Delete number 3?" does not say that an afternoon goes with it, so the bar
+   says how many contours on how many sections -- the two numbers that say how much work it was.
+
+   AND IT SAYS WHAT IS NOT DELETED. A drawing opened from the dataset still has its rows and its
+   file up there; taking it off the pad is taking it out of your hands, not withdrawing it from
+   everybody. Somebody who thinks this retracts a published tracing will either not press it when
+   they should, or press it believing they have retracted something they have not.
+
+   The bar replaces the strip rather than sitting over it, so nothing is hidden behind it and
+   padInstances() puts the strip back whichever button is pressed. */
+function padInstAsk(inst){
+  const box = document.getElementById("tracePadInsts");
+  if (!box || !PAD) return;
+  const it = UJ.tracepad.instances(PAD).filter(function(x){ return x.inst === inst; })[0];
+  if (!it || !it.contours) return;
+  const what = (typeof tracingKindFor === "function" && tracingKindFor(inst).name) || "";
+  const shared = (typeof PAD_EDIT_IDS !== "undefined" && PAD_EDIT_IDS[String(inst)]) || "";
+  box.innerHTML = '<span style="color:var(--bad)">Delete drawing ' + (inst + 1)
+    + (what ? ' \u201c' + escHtml(what) + '\u201d' : '') + '? '
+    + it.contours + ' contour' + (it.contours === 1 ? '' : 's') + ' on '
+    + it.sections + ' section' + (it.sections === 1 ? '' : 's') + ' would go, and that cannot be '
+    + 'undone.</span> '
+    + (shared ? '<span class="hint">It stays in the dataset either way \u2014 this only takes it '
+                + 'off the pad.</span> ' : '')
+    + '<button type="button" class="hist-chip padgo" data-go="' + inst + '" '
+    + 'style="color:var(--bad)">Delete it</button> '
+    + '<button type="button" class="hist-chip padkeep" data-keep="' + inst + '">Keep it</button>';
+  const keep = box.querySelector(".padkeep");
+  if (keep) keep.addEventListener("click", function(){
+    padInstances();
+    padSay("Kept. Nothing was deleted.");
+  });
+  const go = box.querySelector(".padgo");
+  if (go) go.addEventListener("click", function(){
+    const gone = UJ.tracepad.deleteInstance(PAD, inst);
+    /* Its type, its colour and the dataset tracing it was opened from are keyed by its number, and
+       a number that no longer names anything must not go on answering for one. */
+    try { delete PAD_INST_KIND[String(inst)]; } catch (_e){}
+    try { delete PAD_INST_COLOUR[String(inst)]; } catch (_e){}
+    try { delete PAD_EDIT_IDS[String(inst)]; } catch (_e){}
+    if (typeof PAD_EDIT_ID !== "undefined" && PAD_EDIT_ID && PAD_EDIT_ID === shared) PAD_EDIT_ID = "";
+    tracingShowKindOf(PAD.inst);
+    padPaint(); padRings();          // which redraws the strip, the volume, the draft and the 3D
+    padSay("Drawing " + (inst + 1) + " deleted \u2014 " + gone + " contour"
+      + (gone === 1 ? "" : "s") + " gone. Drawing " + (PAD.inst + 1) + " is the one you are on now."
+      + (shared ? " Its tracing in the dataset is untouched." : ""));
   });
 }
 
@@ -16018,9 +16333,49 @@ function padPaint(){
     });
   }
 }
-/* One chip per contour on this section, each with its own delete. "Delete this one" should not
-   mean "Undo until it is gone" -- that is the difference between correcting a tracing and starting
-   it again. */
+/* ── A CHIP GOES TO WHAT IT NAMES ──────────────────────────────────────────────  2026-09-23
+   Søren: "When clicking one of the contours, it should jump to that contour in the EM window, so
+   that I don't have to look for it." See src/a_chip_takes_you_to_what_it_names.py.
+
+   The centre of a contour is the mean of its vertices. Not its bounding-box centre: a crescent --
+   which is what half the organelles on this pad are -- has a bounding-box centre out in the
+   neuropil beside it, and the point of this is to put the thing itself under the cursor. */
+function padRingCentre(r){
+  if (!r || !r.points || !r.points.length) return null;
+  var cx = 0, cy = 0;
+  r.points.forEach(function(p){ cx += p[0]; cy += p[1]; });
+  return [Math.round(cx / r.points.length), Math.round(cy / r.points.length)];
+}
+function padGoToRing(ring){
+  var r = PAD && PAD.rings && PAD.rings[ring];
+  var c = padRingCentre(r);
+  if (!c) return null;
+  /* A half-drawn contour belongs to the section it is on -- padStep's rule, and the same here. */
+  if (PAD.z !== r.z){ PAD.z = r.z; PAD.pending = []; }
+  PAD_CENTRE = [c[0], c[1], PAD.z];
+  padDraw();
+  return c;
+}
+/* A structure has many contours, so: the one on THIS section if it has one -- and then the z does
+   not move, or picking a structure up to carry on drawing it would throw the section away
+   underneath you -- otherwise the nearest section it is on. */
+function padGoToInst(inst){
+  var mine = ((PAD && PAD.rings) || []).filter(function(r){ return (r.inst || 0) === inst; });
+  if (!mine.length) return null;
+  var here = mine.filter(function(r){ return r.z === PAD.z; });
+  var r = here.length ? here[0]
+        : mine.slice().sort(function(a, b){
+            return Math.abs(a.z - PAD.z) - Math.abs(b.z - PAD.z) || (a.z - b.z); })[0];
+  var c = padRingCentre(r);
+  if (!c) return null;
+  if (PAD.z !== r.z){ PAD.z = r.z; PAD.pending = []; }
+  PAD_CENTRE = [c[0], c[1], PAD.z];
+  padDraw();
+  return { at: c, z: r.z, moved: !here.length };
+}
+/* One chip per contour on this section. The BODY goes to it; the × on it deletes it. "Delete this
+   one" should not mean "Undo until it is gone" -- that is the difference between correcting a
+   tracing and starting it again. */
 function padRings(){
   try { tracingPasteGhostsSync(); } catch (_e){}
   /* The preview and the draft both follow the contours from here: this is called after every close,
@@ -16042,18 +16397,32 @@ function padRings(){
   box.innerHTML = '<span class="hint">On this section:</span> '
     + here.map(function(h, n){
         return '<button type="button" class="hist-chip padring" data-ring="' + h.ring + '" '
-          + 'title="Delete this contour \u2014 it belongs to number ' + ((h.inst || 0) + 1) + '">'
-          + '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;'
-          + 'margin-right:4px;background:' + escHtml(padInstColour(h.inst || 0)) + '"></span>'
+          + 'title="Go to this contour \u2014 it belongs to number ' + ((h.inst || 0) + 1)
+          + '. The \u00d7 deletes it.">'
+          + '<span class="padswatch" style="display:inline-block;width:8px;height:8px;'
+          + 'border-radius:2px;margin-right:4px;background:'
+          + escHtml(padInstColour(h.inst || 0)) + '"></span>'
           + (severalHere ? ('#' + ((h.inst || 0) + 1)) : String(n + 1))
-          + ' \u00b7 ' + h.points + ' points \u00d7</button>';
+          + ' \u00b7 ' + h.points + ' points'
+          /* The × was already printed here and already looked like the delete control. Now it is
+             one. Inside the button rather than beside it, so the chip stays one chip. */
+          + ' <span class="padx" data-ring="' + h.ring + '" title="Delete this contour"'
+          + ' style="padding:0 2px;opacity:.75">\u00d7</span></button>';
       }).join(" ");
   [].slice.call(box.querySelectorAll(".padring")).forEach(function(b){
-    b.addEventListener("click", function(){
-      if (UJ.tracepad.deleteRing(PAD, +b.dataset.ring)){
-        padPaint(); padRings();
-        padSay("Contour deleted. " + UJ.tracepad.count(PAD).rings + " left.");
+    b.addEventListener("click", function(ev){
+      /* WHICH HALF OF THE CHIP. The body goes there, the × deletes -- 2026-09-23. It used to be
+         delete either way, which left no way to click a contour at all. */
+      var onX = ev.target && ev.target.closest && ev.target.closest(".padx");
+      if (onX){
+        if (UJ.tracepad.deleteRing(PAD, +b.dataset.ring)){
+          padPaint(); padRings();
+          padSay("Contour deleted. " + UJ.tracepad.count(PAD).rings + " left.");
+        }
+        return;
       }
+      var c = padGoToRing(+b.dataset.ring);
+      if (c) padSay("Moved to that contour, at " + c[0] + ", " + c[1] + ".");
     });
   });
 }
