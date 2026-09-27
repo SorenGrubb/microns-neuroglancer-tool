@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 19:46</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-26 20:59</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1613,11 +1613,20 @@ function coordSpan(x,y,z){
 let CUR_IDX=null;
 /* The cell NAME is the Neuroglancer link, as in βJump: when the community names a cell, the
    name it gets keeps opening the viewer. */
-function celltypeLink(pos,innerHtml){
+/* ── THE IDS COME WITH THE NAME ────────────────────────────────────────────────  2026-09-26
+   This took (pos, innerHtml) — two parameters — so core/panel.js's third argument was discarded
+   silently, and the ctlink attributes that let the ↗ open a cell WITH its hand-traced outline were
+   never written on this page. The feature went in on 2026-09-24 and had never run here. Measured:
+   celltypelinkcheck.js reported "2 parameters" and "(no class)" before this line changed.
+   See src/one_shape_for_the_cell_name_link.py. */
+function celltypeLink(pos,innerHtml,ids){
   const i=CUR_IDX;
   if(i==null) return innerHtml;
   const u=viewerUrl([BX[i],BY[i],BZ[i]]);
-  return '<a href="'+escHtml(u)+'" target="_blank" rel="noopener" title="Open this nucleus in Neuroglancer" '
+  const mine=(ids&&(ids.nuc||ids.root))
+    ?' class="ctlink" data-nuc="'+escHtml(ids.nuc||"")+'" data-root="'+escHtml(ids.root||"")+'"'
+    :'';
+  return '<a href="'+escHtml(u)+'"'+mine+' target="_blank" rel="noopener" title="Open this nucleus in Neuroglancer" '
        + 'style="color:var(--accent);text-decoration:none">'+innerHtml
        + ' <span style="font-size:.7em;opacity:.75">&#8599;</span></a>';
 }
@@ -1961,7 +1970,8 @@ function showCell(i, distNm){
   /* The star works for both now: an added cell has a real id to key a favourite on. It was
      absent yesterday only because every added cell shared id 0 and would have shared one star. */
   h+='<div class="celltype" id="ctHeadline" data-unclassified="1" data-microns-name="">'
-    + celltypeLink(pos,added?escHtml(addedName||"Unnamed cell"):('Nucleus '+BID[i]))
+    + celltypeLink(pos,added?escHtml(addedName||"Unnamed cell"):('Nucleus '+BID[i]),
+                   {nuc:String(BID[i]),root:""})
     + ((typeof favStarHtml==="function")?favStarHtml(String(BID[i]),"",pos[0],pos[1],pos[2]):"")
     + (added?'':' <small>no classifier for this dataset</small>')+'</div>';
 

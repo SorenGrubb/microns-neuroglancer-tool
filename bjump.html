@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 19:46</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-26 20:59</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1952,14 +1952,22 @@ function coordSpan(x,y,z){
    here the name IS the Neuroglancer link, which is what Søren asked for on 2026-08-16 -- so when
    the community names a cell, the name it gets keeps opening the viewer. Uses CUR_IDX rather than
    searching by position: panel.js only ever calls this for the cell currently on screen. */
-function celltypeLink(pos,innerHtml){
+/* ── THE IDS COME WITH THE NAME ────────────────────────────────────────────────  2026-09-26
+   λJump's fault, and for the same reason: two parameters, so core/panel.js's ids object was
+   discarded and the ↗ on a community-named cell could not bring its outline. Measured the same
+   way — celltypelinkcheck.js, "2 parameters" and "(no class)".
+   See src/one_shape_for_the_cell_name_link.py. */
+function celltypeLink(pos,innerHtml,ids){
   const i=CUR_IDX;
   if(i==null) return innerHtml;
   /* Proposals included: the name IS the viewer link (Søren, 2026-08-16), so this is where a
      corrected segmentation has to show up. Written before the proposals have loaded, and
      rewritten by bjumpRefreshViewerLinks() the moment they do. */
   const u=viewerUrl([BX[i],BY[i],BZ[i]],BSEG[i],BSRC[i],bjumpCellSegIds(i,BSEG[i]));
-  return '<a href="'+escHtml(u)+'" target="_blank" rel="noopener" title="Open this nucleus in Neuroglancer" '
+  const mine=(ids&&(ids.nuc||ids.root))
+    ?' class="ctlink" data-nuc="'+escHtml(ids.nuc||"")+'" data-root="'+escHtml(ids.root||"")+'"'
+    :'';
+  return '<a href="'+escHtml(u)+'"'+mine+' target="_blank" rel="noopener" title="Open this nucleus in Neuroglancer" '
        + 'style="color:var(--accent);text-decoration:none">'+innerHtml
        + ' <span style="font-size:.7em;opacity:.75">&#8599;</span></a>';
 }
@@ -2032,7 +2040,7 @@ function showCell(i, distNm){
      dataset publishes no cell types at all, so there is never a machine prediction for a
      community name to override, only an empty slot for it to fill. */
   h+='<div class="celltype" id="ctHeadline" data-unclassified="1" data-microns-name="">'
-    + celltypeLink(pos,'Nucleus '+BID[i])
+    + celltypeLink(pos,'Nucleus '+BID[i],{nuc:String(BID[i]),root:seg?String(seg):""})
     + ((typeof favStarHtml==="function")?favStarHtml(String(BID[i]),seg?String(seg):"",pos[0],pos[1],pos[2]):"")
     + ' <small>no classifier for this dataset</small></div>';
 

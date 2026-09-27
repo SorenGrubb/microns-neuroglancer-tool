@@ -201,7 +201,7 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
       return { sent: [], msg: "(no form)", listed: "(no form)" };
     const t = document.getElementById("newCellType");
     if (t){
-      const hit = [].filter.call(t.options, o => /astrocyte/i.test(o.value))[0];
+      const hit = [].filter.call(t.options, o => /endothelial/i.test(o.value))[0];
       if (hit) t.value = hit.value;
     }
     const c = document.getElementById("newCellComment");
@@ -227,7 +227,7 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   ok(!!ident && String(ident.rootId) === "7788990011", "...and the same segment",
      ident ? ident.rootId : "-");
   ok(/thank|recorded|added/i.test(sent.msg), "...and the form says it landed", sent.msg.slice(0, 100) || "(said nothing)");
-  ok(/astrocyte/i.test(sent.listed), "the cell joins the list without a reload",
+  ok(/endothelial/i.test(sent.listed), "the cell joins the list without a reload",
      sent.listed.replace(/\s+/g, " ").slice(0, 140) || "(list empty)");
 
   /* ── and it can be identified ─────────────────────────────────────────────────────────── */
@@ -255,7 +255,16 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
              added: (typeof HADDED !== "undefined" && HADDED) ? !!HADDED[r.i] : null,
              body: (typeof HSB !== "undefined") ? String(HSB[r.i]) : "",
              unassigned: (typeof UNASSIGNED_IDX !== "undefined")
-                         && UNASSIGNED_IDX.indexOf(r.i) >= 0 };
+                         && UNASSIGNED_IDX.indexOf(r.i) >= 0,
+             /* Which pool the filter put it in, and what that pool is called on screen. */
+             pools: (typeof IDX_BY_TYPE !== "undefined")
+                    ? Object.keys(IDX_BY_TYPE).filter(k => (IDX_BY_TYPE[k] || []).indexOf(r.i) >= 0)
+                    : [],
+             boxes: [].map.call(document.querySelectorAll("#filterTypes label"),
+                                e => (e.textContent || "").replace(/\s+/g, " ").trim()),
+             picker: [].map.call(
+                (document.getElementById("randomTypeSelect") || { options: [] }).options,
+                o => (o.textContent || "").trim()) };
   }, FAR.pos);
   ok(joined.tab !== null && joined.N === joined.tab + 1,
      "reporting a cell grows the table by one",
@@ -266,8 +275,50 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   ok(joined.added === true, "...and the row knows it was added rather than published",
      String(joined.added));
   ok(Number(joined.body) > 49376, "...under the id derived from its coordinate", joined.body);
-  ok(joined.unassigned, "...and it is in the unassigned pool, where an unnamed cell belongs",
-     String(joined.unassigned));
+  /* ── AND IT IS FILED UNDER THE NAME IT WAS GIVEN ────────────────────────────  2026-09-26
+     Søren: "the endothelial cell did not get its own category in the filter, it is just called
+     cell not in H01's list. That should be fixed."
+
+     "Endothelial cell" is not an H01 cell type — H01's nearest is "blood-vessel-cell" — so there
+     was no pool for it to join and every named added cell landed in one heap. A cell H01 never
+     listed has no published call to be measured against; the name somebody gave it is the only
+     name it has, so that is what it is filed under.
+
+     This replaces an assertion written on 2026-09-24 ("...and it is in the unassigned pool"). It
+     was right about an added cell with no type on it and wrong about this one: the cell under test
+     was reported AS an astrocyte, and a cell somebody has named is not one nobody has identified.
+     The unnamed case is asserted below in its place. */
+  ok(joined.pools.some(k => /endothelial/i.test(k)) && joined.pools.indexOf("not-in-h01") < 0,
+     "the added cell is filed under the name it was reported with, not in one heap",
+     joined.pools.join(", ") || "(no pool at all)");
+  ok(joined.boxes.some(t => /endothelial/i.test(t) && /\b1\b/.test(t)),
+     "...and the filter offers that name as its own tickable category",
+     joined.boxes.filter(t => /endothelial|not in H01/i.test(t)).join(" | ") || "(not offered)");
+  ok(joined.picker.some(t => /endothelial/i.test(t)),
+     "...and “Browse a cell” can draw one",
+     joined.picker.filter(t => /endothelial|not in H01/i.test(t)).join(" | ") || "(not listed)");
+  ok(!joined.unassigned,
+     "...and it is no longer among the cells nobody has identified — somebody just did",
+     joined.unassigned ? "still counted as unassigned" : "out of that pool");
+
+  /* The other half of the same rule: a cell reported with no type at all IS unassigned, and that
+     is the one "Cell not in H01's list" exists to name. */
+  const noName = await p.evaluate(async () => {
+    const pos = [262528, 201573, 3999];
+    HJ_NEW_CELLS = (HJ_NEW_CELLS || []).concat([{ coord: pos.join(","), rootId: "",
+      identified: "", comment: "", reporterName: "Søren Grubb",
+      timestamp: new Date().toISOString() }]);
+    absorbAddedCells();
+    await new Promise(r => setTimeout(r, 300));
+    const i = nearest(pos[0], pos[1], pos[2]).i;
+    return { pools: Object.keys(IDX_BY_TYPE).filter(k => (IDX_BY_TYPE[k] || []).indexOf(i) >= 0),
+             unassigned: UNASSIGNED_IDX.indexOf(i) >= 0 };
+  });
+  ok(noName.pools.indexOf("not-in-h01") >= 0,
+     "a cell reported with no type is what “Cell not in H01’s list” names",
+     noName.pools.join(", ") || "(no pool)");
+  ok(noName.unassigned, "...and it is in the unassigned pool, where an unnamed cell belongs",
+     String(noName.unassigned));
 
   const opened = await p.evaluate(async () => {
     const btn = document.querySelector("#newCellList .jump");
@@ -285,7 +336,7 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   ok(!opened.none, "the list offers to jump to it", opened.none ? "no button" : "offered");
   ok(!opened.none && Number(opened.body) > 49376,
      "...and the cell that opens IS the added one", opened.none ? "-" : opened.body);
-  ok(!opened.none && /astrocyte/i.test(opened.head),
+  ok(!opened.none && /endothelial/i.test(opened.head),
      "...headlined with the name that was proposed for it", opened.head.slice(0, 90) || "(no headline)");
   ok(!opened.none && !/H01 published classification/i.test(opened.head),
      "...and H01 is not credited with a call it never made", opened.head.slice(0, 90));

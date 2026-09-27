@@ -451,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-24 20:51</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-26 21:02</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -1615,18 +1615,28 @@ function fmt(n){ return Number(n).toLocaleString("en-GB"); }
 
 /* Matches µJump's celltypeLink() exactly, including the .ext arrow span -- the cell NAME is the
    Neuroglancer link, there is no separate button (Søren, 2026-08-16). */
-/* ── TWO SHAPES, ONE LINK ──────────────────────────────────  2026-09-20
-   This page's five call sites pass (pos, segId, innerHtml), because an H01 viewer link carries the
-   c3 segment and the other five tools' links do not. core/panel.js calls the shape those five
-   use — celltypeLink(pos, innerHtml) — when a community identification takes over the headline,
-   and would otherwise have passed the cell's NAME as a segment id: a link into a segment called
-   "Astrocyte", and a headline with nothing in it.
+/* ── ONE SHAPE, ONE LINK ───────────────────────────────────  2026-09-26
+   (pos, innerHtml, ids) — µJump's, δJump's, πJump's, λJump's and βJump's. It was this page's own
+   (pos, segId, innerHtml) until today, guarded by `innerHtml === undefined` so that core/panel.js's
+   two-argument call still worked.
 
-   Two arguments means "take the segment from the cell on screen", which is the cell the override
-   is renaming. The three-argument call sites are untouched. */
-function celltypeLink(pos, segId, innerHtml){
-  if(innerHtml===undefined){ innerHtml=segId; segId=(typeof CUR_ROOT!=="undefined"&&CUR_ROOT)||""; }
-  return '<a href="'+escHtml(viewerUrl(pos,segId))+'" target="_blank" rel="noopener" '
+   THAT GUARD IS WHY THE NAME DISAPPEARED. On 2026-09-24 panel.js gained a third argument, so the
+   ↗ on a community-named cell could open it with its outline. The guard stopped firing, the name
+   went into `segId`, the ids object went into `innerHtml`, and Søren's endothelial cell was
+   headlined "[object Object]". Nothing threw; a guard that adapts to two shapes hides the arrival
+   of a third.
+
+   An H01 viewer link carries the c3 segment, which the other tools' links do not, so the segment
+   is read out of ids.root — and where the caller has none, out of the cell on screen, which is
+   what the two-argument path was reaching for all along. The ctlink attributes are µJump's
+   verbatim; core/tracedoutlines.js wires `a.ctlink` by class on every page that has them.
+   See src/one_shape_for_the_cell_name_link.py. */
+function celltypeLink(pos, innerHtml, ids){
+  const segId=(ids&&ids.root)?ids.root:((typeof CUR_ROOT!=="undefined"&&CUR_ROOT)||"");
+  const mine=(ids&&(ids.nuc||ids.root))
+    ?' class="ctlink" data-nuc="'+escHtml(ids.nuc||"")+'" data-root="'+escHtml(ids.root||"")+'"'
+    :'';
+  return '<a href="'+escHtml(viewerUrl(pos,segId))+'"'+mine+' target="_blank" rel="noopener" '
     +'title="Open this cell in Neuroglancer, with its c3 segment already selected">'
     +innerHtml+' <span class="ext">&#8599;</span></a>';
 }
@@ -1708,7 +1718,7 @@ function showCell(i, distNm, fromHistory){
   const noPub=!!H01_NO_CALL[t];
   h+='<div class="celltype" id="ctHeadline" data-unclassified="'+(noPub?"1":"0")+'"'
     +' data-microns-name="'+(noPub?"":escHtml(longName(t)))+'">'
-    +celltypeLink(pos,seg,escHtml(hjCellName(i)))+star
+    +celltypeLink(pos,escHtml(hjCellName(i)),{nuc:String(HSB[i]),root:seg})+star
     /* The byline is a provenance claim, so an added cell gets its own (2026-09-24). */
     +(HADDED[i]?' <small>added here, not in H01&rsquo;s list</small>'
                :' <small>H01 published classification</small>')+'</div>';
@@ -2695,7 +2705,8 @@ function renderResult(slug){
   let h=idfHeadHtml();
   h+='<span class="idf-back" id="idfback">&larr; back one step</span>';
   h+='<div class="idf-result"><div class="celltype">'
-    +celltypeLink(ID_CTX.pos, ID_CTX.seg, escHtml(name))+'</div>';
+    +celltypeLink(ID_CTX.pos, escHtml(name),
+                  {nuc:String(ID_CTX.body||""), root:String(ID_CTX.seg||"")})+'</div>';
 
   if(v.kind==="agrees")
     h+='<div class="idf-flag" style="border-color:var(--accent);color:var(--accent)">&#10003; Matches H01&rsquo;s published type (&ldquo;'
@@ -3007,6 +3018,30 @@ const TYPE_GROUPS=[
   {label:"No confident call",    types:["unclassified-neuron","unknown-type","not-in-h01"]}
 ];
 const IDX_BY_TYPE={}, UNASSIGNED_IDX=[];
+/* ── A CELL H01 NEVER LISTED IS FILED UNDER ITS OWN NAME ──────────────────────  2026-09-26
+   Søren: "the endothelial cell did not get its own category in the filter, it is just called cell
+   not in H01's list." "Endothelial cell" is not an H01 type — its nearest is "blood-vessel-cell" —
+   so there was no pool for it and every named added cell landed in one heap.
+
+   The key carries the name so the pool needs nothing else to remember it; poolLabel() takes it
+   back off for the screen. See src/an_added_cell_is_filed_under_its_name.py. */
+const ADDED_POOL = "added:";
+let ADDED_POOLS = [];
+function addedPoolFor(i){
+  if(!HADDED[i]) return "";
+  const nm = hjCellName(i);
+  if(!nm || nm === "Unnamed added cell") return "";
+  return ADDED_POOL + nm;
+}
+function poolLabel(t){
+  const s = String(t||"");
+  return s.indexOf(ADDED_POOL)===0 ? s.slice(ADDED_POOL.length) : longName(s);
+}
+/* TYPE_GROUPS is H01's own vocabulary and cannot name a type nobody has proposed yet. */
+function typeGroups(){
+  if(!ADDED_POOLS.length) return TYPE_GROUPS;
+  return TYPE_GROUPS.concat([{ label:"Not in H01 \u2014 named here", types:ADDED_POOLS.slice() }]);
+}
 /* The only two community identities that move a cell between H01 cell-type pools. Keyed by the
    exact canonical string a guided-ID submission stores (see canonSubmitName in core/ontology.js).
    "microglia"/"opc" are NOT H01 labels -- H01 never separates them -- so they are pools this page
@@ -3031,16 +3066,26 @@ function rebuildTypePools(){
   try { haveIdent=!!HJUMP_IDENTITY_BY_NID; } catch(_tdz){ haveIdent=false; }
   D.CT_NAMES.forEach(function(t){ IDX_BY_TYPE[t]=[]; });
   for(const k in ALWAYS_SHOW_TYPES) IDX_BY_TYPE[k]=[];
+  ADDED_POOLS.forEach(function(k){ delete IDX_BY_TYPE[k]; });
+  ADDED_POOLS=[];
   UNASSIGNED_IDX.length=0;
   for(let i=0;i<N;i++){
     const t=typeName(i);
     const split=haveIdent?h01SplitFor(hjumpIdentityOf(i)):undefined;
-    const bucket=split||t;
+    /* A cell H01 never listed has no published call to be measured against, so the name somebody
+       gave it is not an override of anything — it is the only name it has, and it is what the
+       cell is filed under. A published cell's pool is still H01's, moved only by h01SplitFor
+       (2026-09-26). */
+    const own=addedPoolFor(i);
+    if(own&&!IDX_BY_TYPE[own]){ IDX_BY_TYPE[own]=[]; ADDED_POOLS.push(own); }
+    const bucket=own||split||t;
     if(IDX_BY_TYPE[bucket]) IDX_BY_TYPE[bucket].push(i);
     /* "no confident call" stays keyed on what H01 itself said: a community-resolved cell is no
-       longer uncalled, so a resolved microglia/opc drops out of this list too. */
-    if(H01_NO_CALL[t]&&!split) UNASSIGNED_IDX.push(i);
+       longer uncalled, so a resolved microglia/opc drops out of this list too -- and so does an
+       added cell somebody has just named, by the same rule. */
+    if(H01_NO_CALL[t]&&!split&&!own) UNASSIGNED_IDX.push(i);
   }
+  ADDED_POOLS.sort();
 }
 rebuildTypePools();
 /* Both cell-type lists are redrawn after the community identities land, so a resolved
@@ -3051,7 +3096,7 @@ rebuildTypePools();
 function renderTypeCheckboxes(){
   const box=document.getElementById("filterTypes"); if(!box)return;
   const was=new Set([].slice.call(box.querySelectorAll(".ftype:checked")).map(function(e){ return e.value; }));
-  box.innerHTML=TYPE_GROUPS.map(function(g){
+  box.innerHTML=typeGroups().map(function(g){
     const inner=g.types.filter(function(t){ return (IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length)||ALWAYS_SHOW_TYPES[t]; })
       .map(function(t){
         const n=(IDX_BY_TYPE[t]||[]).length;
@@ -3062,7 +3107,7 @@ function renderTypeCheckboxes(){
           +'>'
           +'<input type="checkbox" class="ftype" value="'+escHtml(t)+'" style="width:auto"'
           +(off?' disabled':'')+'> '
-          +escHtml(longName(t))+' <span class="nsub">'+fmt(n)+'</span></label>'; }).join("");
+          +escHtml(poolLabel(t))+' <span class="nsub">'+fmt(n)+'</span></label>'; }).join("");
     return inner?'<div style="margin-bottom:8px"><div class="nsub" style="text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'
       +escHtml(g.label)+'</div>'+inner+'</div>':"";
   }).join("");
@@ -3070,7 +3115,8 @@ function renderTypeCheckboxes(){
 }
 /* By CATEGORY, as on µJump (2026-09-21): ηJump's groups onto µJump's --cat-* tokens. */
 const TYPE_GROUP_COLOUR={"Neurons — excitatory":"var(--cat-exc)","Neurons — inhibitory":"var(--cat-inh)",
-  "Glia":"var(--cat-glia)","Vascular":"var(--cat-vasc)","No confident call":"var(--cat-other)"};
+  "Glia":"var(--cat-glia)","Vascular":"var(--cat-vasc)","No confident call":"var(--cat-other)",
+  "Not in H01 \u2014 named here":"var(--cat-other)"};
 function syncTypeColour(){
   const s=document.getElementById("randomTypeSelect"); if(!s)return;
   const o=s.selectedOptions&&s.selectedOptions[0];
@@ -3079,10 +3125,10 @@ function syncTypeColour(){
 function renderRandomTypeSelect(){
   const sel=document.getElementById("randomTypeSelect"); if(!sel)return;
   const was=sel.value;
-  sel.innerHTML=TYPE_GROUPS.map(function(g){
+  sel.innerHTML=typeGroups().map(function(g){
     const col=TYPE_GROUP_COLOUR[g.label]||"var(--cat-other)";
     const opts=g.types.filter(function(t){ return IDX_BY_TYPE[t]&&IDX_BY_TYPE[t].length; })
-      .map(function(t){ return '<option value="'+escHtml(t)+'" style="color:'+col+'">'+escHtml(longName(t))+' ('+fmt(IDX_BY_TYPE[t].length)+')</option>'; }).join("");
+      .map(function(t){ return '<option value="'+escHtml(t)+'" style="color:'+col+'">'+escHtml(poolLabel(t))+' ('+fmt(IDX_BY_TYPE[t].length)+')</option>'; }).join("");
     return opts?'<optgroup label="'+escHtml(g.label)+'" style="color:'+col+'">'+opts+'</optgroup>':"";
   }).join("");
   if(was) sel.value=was;
@@ -3984,8 +4030,14 @@ function addRegionBox(){
           /* For the Blender notebook, which colours by type. Same loop and same box test as
              rootIds. H01 publishes no nucleus volume, so nucleus_id is always null; the type
              comes from typeName(i), which is how every other panel on this page names a cell. */
+          /* nucleus_id stays null: H01 publishes no nucleus volume and the notebook fetches a
+             nucleus mesh with that field. trace_nucleus_id is the OTHER question — the id this
+             page's tracings are filed under, which is the cell_bodies object (see
+             UJ.panel.cellIds above). The export reads outlines by it; the notebook never does.
+             2026-09-26, src/the_export_knows_which_id_the_tracer_had.py. */
           if(rid)boxCells.push({type:String(typeName(i)||"unclassified"),
-                                root_id:String(rid),nucleus_id:null});
+                                root_id:String(rid),nucleus_id:null,
+                                trace_nucleus_id:String(HSB[i])});
         }
       }
     }

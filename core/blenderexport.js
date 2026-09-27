@@ -295,6 +295,10 @@ UJ.blender = (function(){
        was sent. One travels now when it is filed against a cell in this export, or when its own
        centre is inside the box. See src/the_blender_export_colours_by_kind.py. */
     tracings = tracings.filter(function(t){
+      /* Read from the dataset for the cells in this export, so the question is already settled
+         (2026-09-26). Without this, a tracing filed against a cell body id on a page whose cells
+         carry no nucleus id matched nothing, was not judged by position either, and vanished. */
+      if (t && t.for_export) return true;
       var nuc = String((t && t.nucleus_id) || "").replace(/^.*:/, "");
       var root = String((t && t.root_id) || "");
       var mine = cells.some(function(c){
@@ -443,7 +447,56 @@ UJ.blender = (function(){
       + String(opts.boxLabel || "box").replace(/\s+/g, "_") + "_blender.ipynb";
   }
 
-  function downloadNotebook(opts){
+  /* ── AND WHAT THE DATASET HOLDS, NOT ONLY WHAT THIS BROWSER KEPT ──────────────  2026-09-26
+     Søren: "the nucleus and whole cell mesh were not included in the notebook - I want them in."
+     They were saved and shared; nothing had loaded them back into that tab, and this took
+     opts.tracings — the pad's own list — as the whole truth.
+
+     Done HERE rather than in each page's click handler: this already receives the cells the export
+     is about, so it has everything it needs to ask. Four call sites change by nothing, which is
+     the point — the fault was one behaviour living in four places.
+
+     A page that wants the old behaviour passes datasetTracings:false. A page without
+     core/tracedoutlines.js loaded gets exactly what it got before.
+     See src/everything_outlined_and_the_dataset_travels.py. */
+  async function datasetTracingsFor(opts){
+    if (opts.datasetTracings === false) return opts.tracings || [];
+    if (typeof tracedStructuresForCells !== "function"
+        || typeof tracedMergeKept !== "function") return opts.tracings || [];
+    var nuc = [], root = [];
+    (opts.cells || []).forEach(function(c){
+      if (!c) return;
+      if (c.nucleus_id) nuc.push(String(c.nucleus_id));
+      /* ── AND THE ID TRACINGS ARE FILED UNDER, WHERE IT IS A DIFFERENT ONE ──────  2026-09-26
+         ηJump's cells carry nucleus_id: null, correctly — H01 publishes no nucleus volume, and
+         section 6 fetches a nucleus mesh with whatever is in that field. Its TRACINGS, though,
+         are filed against the cell_bodies object id (UJ.panel.cellIds answers {nucId: c.body}),
+         so an outline drawn from its cell panel has that id and no root id, and asking only about
+         nucleus_id and root_id never found it. Two names, two questions.
+         See src/the_export_knows_which_id_the_tracer_had.py. */
+      if (c.trace_nucleus_id) nuc.push(String(c.trace_nucleus_id));
+      if (c.root_id) root.push(String(c.root_id));
+    });
+    if (!nuc.length && !root.length) return opts.tracings || [];
+    try {
+      var r = await tracedStructuresForCells({ nuc: nuc, root: root }, opts.say || null);
+      /* BY CONSTRUCTION THEIRS: tracedStructuresForCells was handed these cells' ids and returned
+         only what matched one of them. Saying so here is more reliable than having the filter
+         below work it out again from ids the page may not carry — ηJump's cells have no nucleus
+         id at all. See src/a_fetched_outline_belongs_to_the_export.py. */
+      ((r && r.tracings) || []).forEach(function(t){ if (t) t.for_export = 1; });
+      if (r && r.capped && typeof showSubmitToast === "function")
+        showSubmitToast(false, "These cells have more hand-traced outlines than one download reads "
+          + "at once, so " + r.capped + " of them are not in this notebook. Narrow the filter and "
+          + "download again to get the rest.");
+      return tracedMergeKept(opts.tracings || [], (r && r.tracings) || []);
+    } catch (e){
+      console.warn("[blender export] could not read the dataset's outlines", e);
+      return opts.tracings || [];
+    }
+  }
+  async function downloadNotebook(opts){
+    opts = Object.assign({}, opts, { tracings: await datasetTracingsFor(opts) });
     const nb = buildNotebook(opts);
     const filename = filenameFor(opts);
     const blob = new Blob([JSON.stringify(nb, null, 1)], {type: "application/x-ipynb+json"});
