@@ -320,6 +320,61 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   ok(noName.unassigned, "...and it is in the unassigned pool, where an unnamed cell belongs",
      String(noName.unassigned));
 
+  /* ── AND TICKING THAT CATEGORY FINDS IT ─────────────────────────────────────  2026-09-27
+     Søren, the day after the pool went in: "if i choose a bounding box around that cell and click
+     the filter to show it, there are no matches. If I don't click it, it shows 1 match, that cell."
+     The region box was the same in both of his screenshots; what differed was the ENDOTHELIAL CELL
+     tick. So the category the filter offers found nothing.
+
+     The bucket rule was written twice. rebuildTypePools files a cell under `added:<name>` (or under
+     h01SplitFor's resolved name), and the checkbox carries that key as its value — while the filter
+     compared it against typeName(i), which for an added cell is `not-in-h01`. A checkbox whose
+     label and count come from a pool must match the cells in that pool; one function decides it
+     now, and these two assertions are why. */
+  const ticked = await p.evaluate(async () => {
+    const box = [].slice.call(document.querySelectorAll(".ftype"))
+                  .filter(e => /^added:/.test(e.value) || /endothelial/i.test(e.value))[0];
+    if (!box) return { none: true };
+    [].slice.call(document.querySelectorAll(".ftype:checked,.flayer:checked,.fidentity:checked,.forganelle:checked"))
+      .forEach(e => { e.checked = false; });
+    box.checked = true;
+    const reg = document.getElementById("filterRegionOn");
+    if (reg) reg.checked = false;
+    document.getElementById("filterRun").click();
+    await new Promise(r => setTimeout(r, 1500));
+    return { none: false, value: box.value,
+             n: (FILTER && FILTER.rows) ? FILTER.rows.length : -1,
+             added: (FILTER && FILTER.rows && FILTER.rows.length)
+                    ? !!HADDED[FILTER.rows[0]] : null,
+             say: (document.getElementById("filterStatus") || {}).textContent || "" };
+  });
+  ok(!ticked.none, "the filter offers the added cell's own category as a tickable type",
+     ticked.none ? "no such checkbox" : ticked.value);
+  ok(!ticked.none && ticked.n === 1 && ticked.added === true,
+     "...and ticking it finds that cell",
+     ticked.none ? "-" : ticked.n + " match(es) — " + (ticked.say || "").slice(0, 70));
+
+  /* The same fault from the other side, and it predates the added cells: a microglia/opc cell the
+     community has resolved is filed under "microglia", the checkbox says so with a count, and the
+     filter compared "microglia" against H01's own "microglia/opc". One rule, both callers. */
+  const agree = await p.evaluate(async () => {
+    if (typeof poolOf !== "function") return { missing: true };
+    const out = { missing: false, bad: [] };
+    for (let i = 0; i < N; i++){
+      const p = poolOf(i);
+      if (!(IDX_BY_TYPE[p] || []).length || (IDX_BY_TYPE[p] || []).indexOf(i) < 0){
+        out.bad.push(i + " -> " + p);
+        if (out.bad.length > 3) break;
+      }
+    }
+    return out;
+  });
+  ok(!agree.missing, "one function decides which pool a cell is in",
+     agree.missing ? "the filter and the lists still each have their own copy" : "poolOf");
+  ok(!agree.missing && (agree.bad || []).length === 0,
+     "...so every cell is in the pool that function names — all 47,449 of them",
+     (agree.bad || []).length ? "not in its own pool: " + agree.bad.join(", ") : "every one");
+
   const opened = await p.evaluate(async () => {
     const btn = document.querySelector("#newCellList .jump");
     if (!btn) return { none: true };

@@ -451,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-27 19:19</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-27 19:33</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -3058,12 +3058,34 @@ function h01SplitFor(name){
 }
 /* Shown even at zero: their absence would be indistinguishable from a bug. */
 const ALWAYS_SHOW_TYPES={microglia:1,opc:1};
+/* ── WHICH POOL A CELL IS IN, ONCE ───────────────────────────────────────────  2026-09-27
+   Søren: "if i choose a bounding box around that cell and click the filter to show it, there are
+   no matches." The box was innocent — it is identical in both of his screenshots; the ENDOTHELIAL
+   CELL tick is what differed.
+
+   This rule lived in two places: rebuildTypePools filed a cell under `added:<name>` or under
+   h01SplitFor's resolved name, and runFilter tested the ticked values against typeName(i) — H01's
+   own label, which for an added cell is `not-in-h01`. A checkbox whose label and count come from a
+   pool, matched against something that is not the pool. Measured: 0 of 47,449.
+
+   It was already wrong for microglia and had been since the split pools existed; nothing had
+   resolved one yet, so nobody could tick it. See src/one_rule_for_which_pool_a_cell_is_in.py. */
+function poolOf(i){
+  const own=addedPoolFor(i);
+  if(own) return own;
+  let split;
+  /* HJUMP_IDENTITY_BY_NID is a `let` declared further down and null until its fetch lands, so this
+     is asked through a try and answers H01's own name until the identities arrive — which is what
+     rebuildTypePools did with its `haveIdent` flag, for the same reason. */
+  try { if(HJUMP_IDENTITY_BY_NID) split=h01SplitFor(hjumpIdentityOf(i)); } catch(_tdz){}
+  return split||typeName(i);
+}
 /* Rebuilt once the community identities arrive (see buildIdentityFilterUI). Before that fetch
    resolves HJUMP_IDENTITY_BY_NID is null, hjumpIdentityOf() returns "", and this produces exactly
    H01's own pools -- so the page is correct at first paint and simply gets more specific. */
 function rebuildTypePools(){
-  let haveIdent=false;
-  try { haveIdent=!!HJUMP_IDENTITY_BY_NID; } catch(_tdz){ haveIdent=false; }
+  /* `haveIdent` lived here and is gone: poolOf asks that question now, in one place, and a flag
+     read nowhere is a flag that drifts (2026-09-27). */
   D.CT_NAMES.forEach(function(t){ IDX_BY_TYPE[t]=[]; });
   for(const k in ALWAYS_SHOW_TYPES) IDX_BY_TYPE[k]=[];
   ADDED_POOLS.forEach(function(k){ delete IDX_BY_TYPE[k]; });
@@ -3071,14 +3093,18 @@ function rebuildTypePools(){
   UNASSIGNED_IDX.length=0;
   for(let i=0;i<N;i++){
     const t=typeName(i);
-    const split=haveIdent?h01SplitFor(hjumpIdentityOf(i)):undefined;
     /* A cell H01 never listed has no published call to be measured against, so the name somebody
        gave it is not an override of anything — it is the only name it has, and it is what the
        cell is filed under. A published cell's pool is still H01's, moved only by h01SplitFor
        (2026-09-26). */
-    const own=addedPoolFor(i);
+    /* THROUGH poolOf, and `own` read back out of its answer rather than computed a second time:
+       two expressions for one rule is the bug this is the fix for (2026-09-27). */
+    const bucket=poolOf(i);
+    const own=(bucket.indexOf(ADDED_POOL)===0)?bucket:"";
+    /* And "was it moved by a community identification" is read back out of the same answer, so
+       the unassigned test below cannot disagree with the pool either. */
+    const split=(!own&&bucket!==t)?bucket:undefined;
     if(own&&!IDX_BY_TYPE[own]){ IDX_BY_TYPE[own]=[]; ADDED_POOLS.push(own); }
-    const bucket=own||split||t;
     if(IDX_BY_TYPE[bucket]) IDX_BY_TYPE[bucket].push(i);
     /* "no confident call" stays keyed on what H01 itself said: a community-resolved cell is no
        longer uncalled, so a resolved microglia/opc drops out of this list too -- and so does an
@@ -4287,7 +4313,9 @@ function runFilter(){
         iSet=wantIdentities.length?new Set(wantIdentities):null;
   const rows=[];
   for(let i=0;i<N;i++){
-    if(tSet&&!tSet.has(typeName(i)))continue;
+    /* poolOf, not typeName: the ticked value IS a pool key, and for an added or a
+       community-resolved cell that is not H01's own label (2026-09-27). */
+    if(tSet&&!tSet.has(poolOf(i)))continue;
     if(lSet&&!lSet.has(filterLayerOf(i)))continue;
     if(iSet){
       const cur=hjumpIdentityOf(i);
