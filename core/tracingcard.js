@@ -788,7 +788,7 @@ function tracingCurrentAll(){
   /* THE ID IS SETTLED FIRST, because it is what decides whether a structure is new. It used to
      be assigned after the numbering, which was harmless only while the numbering did not care. */
   if(!TRACING_PENDING.id){
-    const label=groups[0].w.name;
+    const label=groups[0].w.name, kindNow=String(groups[0].w.kind||"");
     /* ── AND THE SAME CELL ────────────────────────────────────────────────────────  2026-09-23
        Søren: "one of the arachnoid barrier cells is missing". It was overwritten. This filter
        matched on the NAME alone, and "Whole cell" is the default name of every cell anybody traces
@@ -818,9 +818,32 @@ function tracingCurrentAll(){
               ||(here.root&&c.root&&c.root===here.root)
               ||(here.at&&c.at&&c.at===here.at));
     };
-    const prior=(TRACINGS_KEPT||[]).filter(function(x){
+    /* ── AND ONLY FOR SOMETHING A CELL HAS ONE OF ──────────────────────────────────  2026-09-27
+       Hesham: "if I'm logging multiple lysosomes I still have to change the color of the annotation
+       between each lysosome — if I don't, the new tracing will replace the old one."
+
+       Name AND cell identifies a WHOLE CELL, because a cell has exactly one. It identifies nothing
+       about a lysosome: a cell has as many as somebody draws, every one of them is named bare
+       "Lysosome" (the number is only added when there is more than one of the kind on the pad), and
+       they are all on the same cell. So the second lysosome found the first and filed itself as its
+       next version. Measured: three lysosomes in three pad sessions came back as ONE id.
+
+       Editing one on purpose is a different route and is unaffected — "Open it in the pad" sets
+       PAD_EDIT_ID / PAD_EDIT_IDS, and editOf() is asked before any of this. What is given up is
+       that pasting the same link twice for one organelle now makes two of them rather than two
+       versions: two rows to merge, against an afternoon of tracing behind a "v2" label. The same
+       trade src/a_second_cell_does_not_take_the_first_ones_id.py made, decided the same way.
+       See src/a_cell_has_one_whole_cell_and_twenty_lysosomes.py. */
+    /* "other" is in, and it is not an exception: under `other` the user TYPED the name, which is
+       the one case where a name is a chosen identifier rather than a kind — tracingSeriesLabel
+       already treats it that way for the numbering, for the same reason. Two tracings both called
+       "Astrocyte at the glia limitans" on one cell are one structure, traced twice. Two called
+       "Lysosome" are two lysosomes. (Found by tracingpanelcheck.js, which went red on five
+       assertions when this rule first read cell-or-nucleus alone.) */
+    const oneEach=(kindNow==="cell"||kindNow==="nucleus"||kindNow==="other");
+    const prior=oneEach?(TRACINGS_KEPT||[]).filter(function(x){
       return x&&x.id&&x.name===label&&sameCell(x);
-    })[0];
+    })[0]:null;
     TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(label);
   }
   /* WHERE THE OTHER STRUCTURES HANG FROM.  2026-09-19
@@ -829,9 +852,14 @@ function tracingCurrentAll(){
      structure: `X__i1 + "__i2"` is the compound id Søren found in Drive, and `X + "__i1"` is worse,
      because that is a real and different lysosome. A fresh base, minted once and kept, is the only
      thing here that cannot already belong to something else. */
+  /* ALWAYS MINTED, 2026-09-27. It was TRACING_PENDING.id whenever nothing was open for editing
+     — so on a whole cell being re-read, whose pending id is that cell's EXISTING id, a second
+     structure drawn beside it became `<that cell's id>__i1`: the compound-id hazard this block's
+     own note from 2026-09-19 describes, still live for that one case. The base is only ever used
+     for inst >= 1, and editOf() has already had its say about those, so a fresh one can never take
+     something else's identity. A draft carries it (baseId), so resuming one keeps every id it had. */
   if(!TRACING_BASE_ID)
-    TRACING_BASE_ID = PAD_EDIT_ID ? UJ.tracing.structureId(groups[0].w.name || "tracing")
-                                  : TRACING_PENDING.id;
+    TRACING_BASE_ID = UJ.tracing.structureId(groups[0].w.name || "tracing");
   /* A WHOLE CELL OPENED ON THE PAD, 2026-09-21: each number knows the shared tracing it came from
      (PAD_EDIT_IDS, tracingOpenCellShared), and is a version of that one. */
   const editOf=function(g){ return (typeof PAD_EDIT_IDS!=="undefined"&&PAD_EDIT_IDS[String(g.inst)])||""; };

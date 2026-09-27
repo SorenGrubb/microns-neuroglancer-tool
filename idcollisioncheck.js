@@ -21,6 +21,29 @@
    A structure is identified by its name AND THE CELL IT IS PART OF. A different nucleus or root is
    a different cell, and nothing about it can be a version of the other.
 
+   ── AND A CELL HAS ONE WHOLE CELL AND TWENTY LYSOSOMES ─────────────────────────────  2026-09-27
+
+   Hesham, through Søren: *"if I'm logging multiple lysosomes I still have to change the color of
+   the annotation between each lysosome — if I don't, the new tracing will replace the old one which
+   will then be turned from a tracing into a point annotation for some reason."*
+
+   Name AND cell is a sound identity for a whole cell, of which a cell has exactly one. It is not an
+   identity for an organelle, of which a cell has as many as somebody draws — and every one of them
+   is called "Lysosome". So the second lysosome on a cell found the first by name, on the same cell,
+   and took its id.
+
+   THE COLOUR IS THE SYMPTOM, NOT THE CAUSE. A structure's colour is INSTANCE_COLOURS[inst], and its
+   id is minted from the same `inst`: the first structure on a pad is `TRACING_PENDING.id` — the id
+   this lookup just handed it — and the rest are `TRACING_BASE_ID + "__i" + inst`, with the base set
+   to that same id. So every pad session on one cell computed the SAME id for its first structure,
+   the same for its second, and so on. Two sessions, and session two's green lysosome replaced
+   session one's green lysosome. Advancing the colour with "+ another one" moved to an index the
+   other session had not reached yet, which is why changing the colour appeared to be the cure.
+
+   Editing an organelle on purpose has its own route and keeps working: "Show the tracings in the
+   dataset" → "Open it in the pad" sets PAD_EDIT_ID / PAD_EDIT_IDS, and `editOf` is consulted before
+   any of this.
+
    Run: node idcollisioncheck.js */
 const { chromium } = require("playwright");
 const page_ = require("./pagepath.js");
@@ -58,14 +81,20 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
        confused. structureId's own uniqueness is structureidcheck.js's business. */
     let minted = 0;
     UJ.tracing.structureId = function(){ return "minted_" + (++minted); };
-    const idFor = (nuc, root, name, kept) => {
+    /* `insts` is how many structures are on the pad: [0] is one, [0,1,2] is three drawn together
+       with "+ another one" pressed twice. Every call is a FRESH PAD SESSION — TRACING_BASE_ID
+       cleared, exactly as tracingKeep leaves it after "Use these contours". */
+    const idFor = (nuc, root, name, kept, what, insts) => {
       TRACINGS_KEPT = kept;
-      TRACING_PENDING = { rings: rings(4), groups: null };
+      const ins = insts || [0];
+      const rs = [];
+      ins.forEach(function(k){ rings(4).forEach(function(r){ rs.push({ z: r.z, points: r.points, inst: k }); }); });
+      TRACING_PENDING = { rings: rs, groups: null };
       TRACING_BASE_ID = "";
       try { PAD_EDIT_ID = ""; PAD_EDIT_IDS = {}; } catch (_e){}
       /* "__cell" is the dropdown value that means a whole cell; it names itself "Whole cell",
          which is the whole point of this check. */
-      set("tracingWhat", "__cell");
+      set("tracingWhat", what || "__cell");
       set("tracingName", name);
       set("tracingType", "traced");
       set("tracingNucId", nuc);
@@ -73,7 +102,10 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
       set("tracingX", ""); set("tracingY", ""); set("tracingZ", "");
       const all = tracingCurrentAll();
       return { id: (all[0] && all[0].id) || (TRACING_PENDING && TRACING_PENDING.id) || "",
+               ids: all.map(function(t){ return String(t.id || ""); }),
+               names: all.map(function(t){ return String(t.name || ""); }),
                name: (all[0] && all[0].name) || "", n: all.length,
+               what: (document.getElementById("tracingWhat") || {}).value || "",
                say: (document.getElementById("tracingStatus") || {}).textContent || "" };
     };
 
@@ -90,8 +122,44 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
                      root_id: "864691135345326066", rings: rings(4) }];
     const R1 = idFor("", "864691135345326066", "Whole cell", keptR);
     const R2 = idFor("", "864691136116229028", "Whole cell", keptR);
+
+    /* ── AND NOW THE LYSOSOMES, ON ONE CELL ──────────────────────────────────────────────── */
+    const LYS = "lysosome";
+    const kept = [];
+    /* EACH STRUCTURE UNDER THE NAME IT WAS ACTUALLY GIVEN. A lysosome drawn alone is named bare
+       "Lysosome" — no number, because tracingCurrentAll only numbers a name when there is more than
+       one of the kind to tell apart. That is what Hesham's seven kept lysosomes all read as on
+       screen, and it is why the name-and-cell key matched every one of them. Pushing the FIRST
+       structure's name onto all of them would have hidden exactly the case under test. */
+    const push = function(r){
+      r.ids.forEach(function(id, k){
+        kept.push({ id: id, name: r.names[k], kind: LYS, nucleus_id: "394298",
+                    root_id: "864691135488318266", rings: rings(4) });
+      });
+      return r;
+    };
+    /* HESHAM'S WORKFLOW: one lysosome, add it, draw the next one. Each pad session starts at
+       inst 0, so each gets colour 0 — and, before today, id 0 as well. */
+    const S1 = push(idFor("394298", "864691135488318266", "", [], LYS, [0]));
+    const S2 = push(idFor("394298", "864691135488318266", "", kept.slice(), LYS, [0]));
+    const S3 = push(idFor("394298", "864691135488318266", "", kept.slice(), LYS, [0]));
+    /* And three drawn together in one session, "+ another one" twice, after those three are in. */
+    const S4 = idFor("394298", "864691135488318266", "", kept.slice(), LYS, [0, 1, 2]);
+    /* Editing one on purpose: the route "Open it in the pad" takes, which must still be a version. */
+    TRACINGS_KEPT = kept.slice();
+    TRACING_PENDING = { rings: rings(4).map(function(r){ return { z: r.z, points: r.points, inst: 0 }; }),
+                        groups: null, id: S1.ids[0] };
+    TRACING_BASE_ID = "";
+    try { PAD_EDIT_ID = S1.ids[0]; PAD_EDIT_IDS = { "0": S1.ids[0] }; } catch (_e){}
+    set("tracingWhat", LYS); set("tracingName", ""); set("tracingType", "traced");
+    set("tracingNucId", "394298"); set("tracingRootId", "864691135488318266");
+    const EDIT = (tracingCurrentAll()[0] || {}).id || "";
+
     return { idA: A.id, idB: B.id, idA2: A2.id, idR1: R1.id, idR2: R2.id,
-             nameA: A.name, nA: A.n, sayA: A.say };
+             nameA: A.name, nA: A.n, sayA: A.say,
+             lysWhat: S1.what, lys1: S1.ids, lys2: S2.ids, lys3: S3.ids, lys4: S4.ids,
+             lysNames: S1.names.concat(S2.names, S3.names),
+             lysEdit: EDIT, lysEditWanted: S1.ids[0] };
   });
 
   console.log("two arachnoid barrier cells, both called “Whole cell”");
@@ -108,6 +176,31 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
      "...matched on the ROOT id too, for a cell with no nucleus", got.idR1);
   ok(got.idR2 !== "whole-cell_r1",
      "...and a different root is a different cell", got.idR2);
+
+  /* ── the lysosomes ─────────────────────────────────────────────────────────────────────── */
+  console.log("\nsix lysosomes on one microglia, every one of them called “Lysosome”");
+  ok(got.lysWhat === "lysosome",
+     "(the fixture really is an organelle, not a whole cell)", got.lysWhat || "(the option is missing)");
+  ok(got.lysNames.every(n => n === "Lysosome"),
+     "(...and all three really are named just “Lysosome”, as his seven are)",
+     got.lysNames.join(" | "));
+  ok(got.lys2[0] !== got.lys1[0],
+     "the second lysosome gets an id of its own, drawn in a pad session of its own",
+     got.lys2[0] === got.lys1[0] ? "BOTH " + got.lys1[0] + " — the second overwrites the first"
+                                 : got.lys1[0] + " then " + got.lys2[0]);
+  ok(got.lys3[0] !== got.lys1[0] && got.lys3[0] !== got.lys2[0],
+     "...and so does the third", got.lys3[0]);
+  const prev = got.lys1.concat(got.lys2, got.lys3);
+  const overlap = got.lys4.filter(id => prev.indexOf(id) >= 0);
+  ok(got.lys4.length === 3 && overlap.length === 0,
+     "...and three more drawn together in one session are three more again",
+     overlap.length ? "reused: " + overlap.join(", ") : got.lys4.join(" | "));
+  ok(new Set(prev.concat(got.lys4)).size === 6,
+     "six lysosomes, six ids — nothing overwrites anything",
+     new Set(prev.concat(got.lys4)).size + " distinct of 6");
+  ok(got.lysEdit === got.lysEditWanted,
+     "and opening one on purpose still files a version of it, not a twin",
+     got.lysEdit + " == " + got.lysEditWanted);
 
   ok(errors.length === 0, "no page errors", errors.join(" | ").slice(0, 200) || "none");
   await b.close();
