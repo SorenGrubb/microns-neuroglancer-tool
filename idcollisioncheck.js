@@ -181,8 +181,12 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
   console.log("\nsix lysosomes on one microglia, every one of them called “Lysosome”");
   ok(got.lysWhat === "lysosome",
      "(the fixture really is an organelle, not a whole cell)", got.lysWhat || "(the option is missing)");
-  ok(got.lysNames.every(n => n === "Lysosome"),
-     "(...and all three really are named just “Lysosome”, as his seven are)",
+  /* NUMBERED 1, 2, 3 since 2026-09-27 — Søren asked for an organelle kind to be numbered always,
+     and the count now includes what this browser has kept but has not yet shared, which is why
+     three saved in three sessions against an EMPTY published index do not all come back
+     "Lysosome 1". They did, for an hour; this check is what found it. */
+  ok(got.lysNames.join(" | ") === "Lysosome 1 | Lysosome 2 | Lysosome 3",
+     "(...and they are numbered 1, 2, 3 — one per pad session, against an empty index)",
      got.lysNames.join(" | "));
   ok(got.lys2[0] !== got.lys1[0],
      "the second lysosome gets an id of its own, drawn in a pad session of its own",

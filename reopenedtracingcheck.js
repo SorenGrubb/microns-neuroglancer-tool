@@ -28,10 +28,15 @@
    a seeded signature would have said "changed". Neither fix works without the other.
 
    WHAT IS ASSERTED
-     - a structure published with no number is recognised as published, and keeps having no number
+     - a structure published with no number is recognised as published
+     - ...and is given the number it is owed, because Søren asked for that on 2026-09-27: "if you
+       add another lysosome to a cell that already has a lysosome they both get a number". This
+       check asserted the opposite for one day — that a bare one KEEPS having no number — which was
+       the contract until he changed it. The assertions below are the new one.
      - ...and one published as "Lysosome 2" comes back as "Lysosome 2"
      - a third organelle drawn beside them gets a number, and not one already taken
-     - pressing Add sends ONLY the new one — the two opened ones are not re-sent
+     - pressing Add sends the new one AND the one that gained a number — a name change is a
+       change — and not the one that was already numbered and untouched
      - ...and the card says so rather than looking as though it failed
      - editing one of them and pressing Add sends that one, under its own structureId
      - ...and it keeps its published number rather than being renumbered for having changed
@@ -113,11 +118,11 @@ const INDEX = STRUCTS.map(s => ({ structureId: s.structureId, kind: "lysosome",
                     ? JSON.stringify(TRACING_EDIT_KNOWN) : "(no such map)" };
   }, [NUC, ROOT]);
   ok(opened.n === 2, "both come onto the pad as two structures", opened.n + " structure(s)");
-  ok(opened.names[0] === "Lysosome",
-     "the one published with no number is still called just “Lysosome”",
+  ok(opened.names[0] === "Lysosome 1",
+     "the one published with no number is given the number it is owed",
      opened.names[0] + "  (edit index " + opened.editIdx + ")");
-  ok(opened.idx[0] === "-",
-     "...and no number is submitted for it, as none was before", opened.idx[0]);
+  ok(opened.idx[0] === "1",
+     "...and that number is submitted with it", opened.idx[0]);
   ok(opened.names[1] === "Lysosome 2" && opened.idx[1] === "2",
      "...and “Lysosome 2” comes back as Lysosome 2", opened.names[1] + " / " + opened.idx[1]);
   ok(opened.ids[0] === "lysosome_A" && opened.ids[1] === "lysosome_B",
@@ -135,17 +140,16 @@ const INDEX = STRUCTS.map(s => ({ structureId: s.structureId, kind: "lysosome",
              ids: all.map(t => String(t.id || "")) };
   });
   ok(third.n === 3, "there are three structures on the pad", third.n + "");
-  ok(third.names[0] === "Lysosome" && third.names[1] === "Lysosome 2",
-     "...and the two that were opened still have the names they were published under",
+  ok(third.names[0] === "Lysosome 1" && third.names[1] === "Lysosome 2",
+     "...the one that was owed 1 has it, and the one published as 2 keeps 2",
      third.names.join(" | "));
-  ok(/^Lysosome \d+$/.test(third.names[2]) && third.names[2] !== "Lysosome 2",
-     "...while the new one gets a number of its own, and not one already taken",
-     third.names[2]);
+  ok(third.names[2] === "Lysosome 3",
+     "...while the new one takes the next free number", third.names[2]);
   ok(third.ids[2] !== "lysosome_A" && third.ids[2] !== "lysosome_B",
      "...under an id of its own", third.ids[2]);
 
   /* ── pressing Add ─────────────────────────────────────────────────────────────────────── */
-  console.log("\npressing Add sends the new one and leaves the others alone");
+  console.log("\npressing Add sends what changed and leaves the rest alone");
   const sent = await p.evaluate(async () => {
     GOOGLE_VERIFIED = true; GOOGLE_CREDENTIAL = "x";
     window.__SENT = [];
@@ -157,11 +161,17 @@ const INDEX = STRUCTS.map(s => ({ structureId: s.structureId, kind: "lysosome",
              names: tr.map(x => String(x.name || "")),
              say: (document.getElementById("tracingStatus") || {}).textContent || "" };
   });
-  ok(sent.ids.length === 1, "exactly one tracing is posted",
+  /* TWO, not one: the new lysosome, and lysosome_A — which gained the number it was owed, and a
+     name change is a change. lysosome_B was already "Lysosome 2" and is untouched, which is the
+     part of yesterday's contract that still holds. */
+  ok(sent.ids.length === 2, "two tracings are posted: the new one and the one that gained a number",
      sent.ids.length + " posted: " + (sent.ids.join(", ") || "(nothing)"));
-  ok(sent.ids.indexOf("lysosome_A") < 0 && sent.ids.indexOf("lysosome_B") < 0,
-     "...and neither of the two that were only opened",
-     sent.ids.filter(i => /lysosome_[AB]/.test(i)).join(", ") || "neither");
+  ok(sent.ids.indexOf("lysosome_B") < 0,
+     "...and not the one that was already numbered and unchanged",
+     sent.ids.indexOf("lysosome_B") < 0 ? "not sent" : "sent anyway");
+  ok(sent.ids.indexOf("lysosome_A") >= 0 && sent.names.indexOf("Lysosome 1") >= 0,
+     "...the one that gained a number went as Lysosome 1",
+     sent.names.join(" | ") || "(nothing)");
   ok(/nothing had changed|not changed|only the rest/i.test(sent.say),
      "...and the card says why they did not go",
      sent.say.replace(/\s+/g, " ").slice(0, 150) || "(said nothing)");
@@ -191,7 +201,7 @@ const INDEX = STRUCTS.map(s => ({ structureId: s.structureId, kind: "lysosome",
   ok(edited.ids.length === 1 && edited.ids[0] === "lysosome_A",
      "the edited one is posted, and only it",
      edited.ids.join(", ") || "(nothing posted)");
-  ok(edited.names[0] === "Lysosome" && edited.idx[0] === "-",
+  ok(edited.names[0] === "Lysosome 1" && edited.idx[0] === "1",
      "...under the name and number it already had, not renumbered for having changed",
      (edited.names[0] || "-") + " / " + edited.idx[0]);
 

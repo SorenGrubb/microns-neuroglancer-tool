@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-09-27 19:55</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-09-27 21:03</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -13302,9 +13302,61 @@ function tracingPublishedIndex(structureId){
   });
   return found;
 }
-function tracingNextIndex(kind, label, nuc, root){
+/* ── WHICH KINDS CARRY A NUMBER ───────────────────────────────────────────────  2026-09-27
+   A cell has one whole cell and one nucleus, so a number on those is noise. Under `other` the user
+   typed the name and it is the identifier they chose. Every ontology organelle kind can occur many
+   times on one cell, and the number is how they are told apart — so it is always given, from the
+   first one. See src/a_cells_organelles_of_a_kind_are_numbered.py. */
+function tracingKindNumbered(kind){
+  var k = String(kind || "");
+  return !!k && k !== "cell" && k !== "nucleus" && k !== "other";
+}
+/* ── THE ONE ALLOCATOR ────────────────────────────────────────────────────────  2026-09-27
+   This cell's structures of this kind that carry NO number, oldest first, each paired with the
+   number it is owed — the lowest that no numbered sibling already has.
+
+   Asked by BOTH consumers: the card, for a bare structure that happens to be open on the pad, and
+   tracingNumberBare, for the ones that are not. Two allocators would hand the same number to two
+   structures, which is the mistake the last four days were made of. */
+function tracingBareOf(kind, label, nuc, root){
   var wantK = String(kind || ""), wantL = tracingSeriesLabel(label);
-  var top = 0;
+  if (!tracingKindNumbered(wantK)) return [];
+  var bare = [], taken = {};
+  (TRACING_SHARED || []).forEach(function(t){
+    if (!t) return;
+    var k = String(t.instanceOf || t.kind || "");
+    var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
+    var sameCell = (nuc && String(t.nucleusId || "") === String(nuc))
+                || (root && String(t.rootId || "") === String(root));
+    if (!same || !sameCell) return;
+    var n = Math.round(Number(t.instanceIndex) || 0);
+    if (n > 0) taken[n] = 1; else bare.push(t);
+  });
+  /* Oldest first, so 1 is the one that was drawn first and the numbering is stable. */
+  bare.sort(function(a, b){
+    return String(a.timestamp || "").localeCompare(String(b.timestamp || ""));
+  });
+  var out = [], n = 1;
+  bare.forEach(function(row){
+    while (taken[n]) n++;
+    out.push({ row: row, index: n }); taken[n] = 1;
+  });
+  return out;
+}
+/* The number a bare published structure is owed, or 0 if it is not one. */
+function tracingBareNumberFor(id, kind, label, nuc, root){
+  var list = tracingBareOf(kind, label, nuc, root), want = String(id || "");
+  for (var i = 0; i < list.length; i++)
+    if (String(list[i].row.structureId || "") === want) return list[i].index;
+  return 0;
+}
+/* `skip` is the ids on the pad. A structure is not its own sibling: a re-add is in TRACINGS_KEPT
+   already, so without this it counted itself and a lone hand-named structure came back "second
+   tracing 2". Found by tracingpanelcheck.js; see src/numbering_does_not_count_itself.py. */
+function tracingNextIndex(kind, label, nuc, root, skip){
+  var wantK = String(kind || ""), wantL = tracingSeriesLabel(label);
+  var top = 0, have = 0, seen = {};
+  (skip || []).forEach(function(id){ if (id) seen[String(id)] = 1; });
   (TRACING_SHARED || []).forEach(function(t){
     if (!t) return;
     var k = String(t.instanceOf || t.kind || "");
@@ -13315,9 +13367,39 @@ function tracingNextIndex(kind, label, nuc, root){
     var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
     var sameCell = (nuc && String(t.nucleusId || "") === String(nuc))
                 || (root && String(t.rootId || "") === String(root));
-    if (same && sameCell && Number(t.instanceIndex) > top) top = Number(t.instanceIndex);
+    if (same && sameCell){
+      if (seen[String(t.structureId || "")]) return;      // on the pad: counted by the caller
+      have++;
+      seen[String(t.structureId || "")] = 1;
+      if (Number(t.instanceIndex) > top) top = Number(t.instanceIndex);
+    }
   });
-  return top + 1;
+  /* ── HOW MANY IT HAS, NOT THE HIGHEST IT CARRIES ──────────────────────────────  2026-09-27
+     This returned top+1, and a structure saved on its own submits no instanceIndex at all — so a
+     cell with seven unnumbered lysosomes answered 1, and the eighth was named "Lysosome" like the
+     rest. Measured on Hesham's cell. Both terms are kept: a cell with one numbered 5 and nothing
+     else must still answer 6. */
+  /* ── AND WHAT THIS BROWSER HAS KEPT BUT NOT YET SHARED ──────────────  2026-09-27
+     Found by idcollisioncheck.js, whose fixture has an empty published index on purpose: three
+     lysosomes saved in three pad sessions all came back "Lysosome 1", because nothing had reached
+     the dataset for the count to find. That is not only a fixture — this card works signed out by
+     design and the published index can be a minute stale, so the same thing happens offline.
+     Counted by id, so a structure in both lists counts once. */
+  (TRACINGS_KEPT || []).forEach(function(t){
+    if (!t || !t.id || seen[String(t.id)]) return;        // already counted, or on the pad
+    var k = String(t.instance_of || t.kind || "");
+    var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
+    var sameCell = (nuc && String(t.nucleus_id || "") === String(nuc))
+                || (root && String(t.root_id || "") === String(root));
+    if (!same || !sameCell) return;
+    have++;
+    if (Number(t.instance_index) > top) top = Number(t.instance_index);
+  });
+  /* THE COUNT IS ONLY MEANINGFUL FOR A KIND A CELL HAS MANY OF (2026-09-27). A cell has one
+     nucleus, so counting nuclei and answering 2 made a lone nucleus "Nucleus 2" — and under
+     `other` the same count inflated a hand-named singleton. Those keep the old answer: one more
+     than the highest number actually carried. Found by tracingpanelcheck.js. */
+  return (tracingKindNumbered(wantK) ? Math.max(top, have) : top) + 1;
 }
 
 function tracingCurrentAll(){
@@ -13425,8 +13507,16 @@ function tracingCurrentAll(){
        "Lysosome" are two lysosomes. (Found by tracingpanelcheck.js, which went red on five
        assertions when this rule first read cell-or-nucleus alone.) */
     const oneEach=(kindNow==="cell"||kindNow==="nucleus"||kindNow==="other");
+    /* BY SERIES, NOT BY THE EXACT NAME (2026-09-27). This compared x.name === label, where label
+       is the BARE name from the form — so once names carry numbers, "second tracing" no longer
+       matched the kept "second tracing 2", a re-add minted a fresh id, and the kept list grew a
+       twin. That is the failure src/a_second_cell_does_not_take_the_first_ones_id.py exists to
+       prevent, arriving from the other direction. tracingSeriesLabel is the comparison
+       tracingNextIndex and tracingBareOf already use for a series; the cell test below is what
+       separates two cells. See src/numbering_does_not_count_itself.py. */
+    const wantSeries=tracingSeriesLabel(label);
     const prior=oneEach?(TRACINGS_KEPT||[]).filter(function(x){
-      return x&&x.id&&x.name===label&&sameCell(x);
+      return x&&x.id&&tracingSeriesLabel(x.name)===wantSeries&&sameCell(x);
     })[0]:null;
     TRACING_PENDING.id=(prior&&prior.id)||UJ.tracing.structureId(label);
   }
@@ -13470,7 +13560,11 @@ function tracingCurrentAll(){
     count[k]=(count[k]||0)+1;
     const id=idOf(g);
     if(tracingIsPublished(id)){ known[g.inst]=1; keep[g.inst]=tracingPublishedIndex(id); return; }
-    if(first[k]===undefined)first[k]=tracingNextIndex(g.w.kind,g.w.name,nid,rid);
+    /* ITS OWN ID AND NOTHING ELSE'S (2026-09-27). Skipping every id on the pad was wrong the
+       other way: the siblings OPENED beside a new structure are real siblings and must be counted,
+       and only the structure asking must not count itself. Both halves were caught by a check —
+       tracingpanelcheck for the self-count, reopenedtracingcheck for the over-skip. */
+    if(first[k]===undefined)first[k]=tracingNextIndex(g.w.kind,g.w.name,nid,rid,[idOf(g)]);
   });
 
   return groups.map(function(g){
@@ -13479,19 +13573,28 @@ function tracingCurrentAll(){
     let index, several;
     if(known[g.inst]){
       index=mine;
+      /* IT WAS PUBLISHED WITHOUT A NUMBER AND IS OWED ONE (2026-09-27). Through the same allocator
+         the siblings that are NOT on the pad go through, so its position in the cell's order is its
+         own and no number is handed out twice. */
+      if(!index&&tracingKindNumbered(g.w.kind))
+        index=tracingBareNumberFor(idOf(g),g.w.kind,g.w.name,nid,rid);
       /* IT IS NAMED THE WAY IT WAS PUBLISHED, whatever else is on the pad (2026-09-27). With a
          number it keeps that number — dropping it would rename "Lysosome 3" to "Lysosome" and make
-         the same object look like a different one. With none it keeps none, which is the case that
-         was being renumbered.
+         the same object look like a different one. With none, it is given the one it is owed
+         (2026-09-27) — and only a kind a cell has many of is owed one at all.
 
          This read `(mine>1)||(count[k]>1)`, which renamed a published "Lysosome 1" to "Lysosome"
          when it was re-added alone — an off-by-one nobody had reached, because a lone "Lysosome 1"
          was never recognised as published to begin with. */
-      several=(mine>0);
+      several=(index>0);
     } else {
       const n=(taken[k]||0); taken[k]=n+1;
       index=first[k]+n;
-      several=(count[k]>1)||(first[k]>1);
+      /* ALWAYS, for a kind a cell can have many of (2026-09-27). It was `(count>1)||(first>1)`,
+         which left a cell's FIRST lysosome bare — and a bare one submits no number, so the next one
+         asked "what is the highest number here" and got 0, and stayed bare too. Søren: "if you add
+         another lysosome to a cell that already has a lysosome they both get a number". */
+      several=(count[k]>1)||(first[k]>1)||tracingKindNumbered(g.w.kind);
     }
     const t={name:UJ.tracing.instanceName(g.w.name,index,several),
              kind:g.w.kind,type:type,
@@ -14266,6 +14369,90 @@ function tracingOpen(){
     +"because it is the only one with a polyline. Paste the address bar back here.");
 }
 
+/* ── AND THE SIBLINGS THAT ARE NOT ON THE PAD ─────────────────────────────────  2026-09-27
+   Søren, asked whether these should be numbered on the save or on a press: "Automatically, on the
+   save." So each unnumbered sibling of a kind just saved is fetched, renamed and re-submitted: one
+   version each, a name-only change, and the card says how many rows it wrote.
+
+   ONE DRIVE READ AND ONE POST EACH. For the ordinary case ahead — a cell with one bare lysosome and
+   a second being added — that is one of each. For Hesham's seven it is seven, once. A read that
+   fails is logged and skipped: the save has already happened, and a structure left unnumbered is
+   recoverable, while a save that threw would not be.
+
+   `skip` is the ids handled on the pad, which took their numbers from the same allocator.
+   See src/a_cells_organelles_of_a_kind_are_numbered.py. */
+async function tracingNumberBare(kind, label, nuc, root, skip){
+  var list = tracingBareOf(kind, label, nuc, root);
+  var mine = list.filter(function(e){
+    return (skip || []).indexOf(String(e.row.structureId || "")) < 0;
+  });
+  if (!mine.length) return 0;
+  var done = 0;
+  for (var i = 0; i < mine.length; i++){
+    var row = mine[i].row, idx = mine[i].index;
+    try {
+      var got = await tracingFetchShared(String(row.structureId));
+      var st = got.st;
+      var base = String(st.name || row.name || "").replace(/\s+\d+$/, "").trim();
+      var nt = { id: st.structureId,
+                 name: UJ.tracing.instanceName(base, idx, true),
+                 kind: st.kind || row.kind || "",
+                 type: st.cellType || row.cellType || "traced",
+                 color: st.color || row.color || "#3a6b5a",
+                 /* EVERYONE WHO DREW ON IT, not whoever pressed Add: a rename is not authorship. */
+                 traced_by: (st.contributors && st.contributors.length)
+                              ? st.contributors.join(", ") : (st.tracedBy || row.tracedBy || ""),
+                 rings: st.rings,
+                 instance_index: idx,
+                 instance_of: st.instanceOf || st.kind || row.kind || "",
+                 nucleus_id: st.nucleusId || "", root_id: st.rootId || "",
+                 cell_coord: st.cellCoord || "",
+                 volume_um3: st.volumeUm3, volume_method: st.volumeMethod };
+      if (tracingPublish(nt, true)){
+        done++;
+        /* The index in hand is now stale, and the next save reads it — so it is told, rather than
+           re-fetched, and a second save numbers nothing. */
+        row.name = nt.name;
+        row.instanceIndex = String(idx);
+        row.instanceOf = nt.instance_of;
+      }
+    } catch (e){
+      console.warn("[uJump tracing] could not number " + row.structureId, e && e.message);
+    }
+  }
+  return done;
+}
+/* Every numbered kind in one save, and one sentence about what it wrote. */
+function tracingNumberBareAfter(all){
+  try {
+    if (!all || !all.length) return;
+    var nuc = String(all[0].nucleus_id || ""), root = String(all[0].root_id || "");
+    var ids = all.map(function(t){ return String(t.id || ""); });
+    var kinds = {};
+    all.forEach(function(t){ if (tracingKindNumbered(t.kind)) kinds[String(t.kind)] = t.name; });
+    var todo = Object.keys(kinds);
+    if (!todo.length) return;
+    todo.reduce(function(chain, k){
+      return chain.then(function(n){
+        return Promise.resolve(tracingNumberBare(k, kinds[k], nuc, root, ids))
+                 .then(function(m){ return n + m; });
+      });
+    }, Promise.resolve(0)).then(function(n){
+      if (!n) return;
+      var el = document.getElementById("tracingStatus");
+      var was = el ? el.textContent : "";
+      tracingSay(was + " " + n + (n === 1 ? " structure" : " structures") + " already on this cell "
+        + "had no number, so " + (n === 1 ? "it was renamed" : "they were renamed") + " \u2014 they "
+        + "are numbered 1 to " + n + " now, in the order they were drawn. That is a new version of "
+        + (n === 1 ? "that one" : "each of them") + " with nothing but the name changed.");
+      /* The rows in hand were patched above, so the list on screen is right; the clock is
+         cleared so the next real read goes to the backend rather than trusting a minute-old
+         index this just changed. */
+      try { TRACING_INDEX_AT = 0; } catch (_e){}
+    }, function(e){ console.warn("[uJump tracing] numbering failed", e && e.message); });
+  } catch (e){ console.warn("[uJump tracing] numbering failed", e && e.message); }
+}
+
 /* ── ADDING A TRACING IS SHARING IT ─────────────────────────────────────────────  2026-09-17
    One button. The tracing is kept in this page -- so the 3D export works signed out and with no
    backend at all -- and posted to the shared record in the same press.
@@ -14372,6 +14559,8 @@ function tracingKeep(){
      +(all.length===1?'It has':'They have')+' NOT reached the dataset yet — sign in with Google '
      +'(the account button, top right) and '+(all.length===1?'it goes':'they go')+' up on '
      +(all.length===1?'its':'their')+' own.');
+  /* After the card's own sentence, because it appends to it (2026-09-27). */
+  tracingNumberBareAfter(all);
   tracingFlushSoon();
   /* ── AND THE TRACED-OUTLINE INDEX IS NOW OUT OF DATE ────────────────  2026-09-24
      Søren, of a macrophage he had just traced: "This macrophage does not show the whole cell trace
