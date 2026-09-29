@@ -38,10 +38,14 @@
      - the packed per-cell table and the geometric classifier agree cell for cell
      - ...including for a point that is nowhere near a nucleus, which is the ST-row path
      - the filter section exists, with one tick per area, and is remembered open/closed
+     - the Excel export carries a "Visual area" column, on every export and not only when the
+       area filter is on, and it holds the area's full name
      - every Shih lab skeleton the state JSON activates is offered as a viewer layer
      - ...and each one builds a layer with the paper's own source and colour
      - the area meshes and the cortical layer meshes are offered too
      - none of the new ticks makes a previewed result go stale (they only add 3D layers)
+     - ticking the branch-order skeleton while the viewer cannot colour it says so, and offers
+       the one viewer that can
 
    Run: node visualareacheck.js */
 const { chromium } = require("playwright");
@@ -148,6 +152,45 @@ const SKELS = [
        "V1 holds more cells than the three higher areas together", r.counts.join(" / "));
   }
 
+  /* The export. buildColumns() is built from a result object, so the column set is asked for
+     twice: once with the area filter switched on and once with it off. The column has to be in
+     both -- it is "always included", the convention Vessel type and Cortical layer already use. */
+  console.log("\nthe export");
+  const ex = await p.evaluate(() => {
+    if (typeof buildColumns !== "function") return { missing: true };
+    const mk = on => {
+      try {
+        return buildColumns({ matches: [], vesselActive: false, vesselDistActive: false,
+          glActive: false, layerActive: false, wmActive: false, regionActive: false,
+          attentionActive: false, v1ColActive: false, areaActive: !!on, nearActive: false,
+          nearIncludeRefActive: false }).map(c => c.header);
+      } catch (e) { return ["ERROR: " + e.message]; }
+    };
+    const on = mk(true), off = mk(false);
+    let value = null, blank = null;
+    const col = (buildColumns({ matches: [], v1ColActive: false, areaActive: false }) || [])
+      .filter(c => c.header === "Visual area")[0];
+    if (col) {
+      value = col.get({ rowArea: 0 });
+      blank = col.get({ rowArea: null });
+    }
+    return { missing: false, on, off, value, blank,
+             layerAt: off.indexOf("Cortical layer"), areaAt: off.indexOf("Visual area") };
+  });
+  if (ex.missing) {
+    ok(false, "the page exposes buildColumns()", "it does not");
+  } else {
+    ok(ex.on.indexOf("Visual area") >= 0, "the export has a Visual area column",
+       ex.on.indexOf("ERROR:") === 0 ? ex.on[0] : (ex.on.indexOf("Visual area") >= 0 ? "present" : ex.on.join(" | ").slice(0, 160)));
+    ok(ex.off.indexOf("Visual area") >= 0,
+       "...on every export, not only when the area filter is on",
+       ex.off.indexOf("Visual area") >= 0 ? "present" : "missing when the filter is off");
+    ok(ex.value === "V1 (VISp)", "...holding the area's full name", String(ex.value));
+    ok(ex.blank === "", "...and blank when there is no area", JSON.stringify(ex.blank));
+    ok(ex.areaAt === ex.layerAt + 1, "...next to Cortical layer",
+       "Cortical layer at " + ex.layerAt + ", Visual area at " + ex.areaAt);
+  }
+
   console.log("\nthe panel");
   const q = await p.evaluate(sk => {
     const ticks = Array.from(document.querySelectorAll(".farea")).map(e => e.value).sort();
@@ -191,6 +234,44 @@ const SKELS = [
   if (staleSafe === null) ok(false, "the stale-ignore list is readable from a check", "it is not");
   else ok(staleSafe.length === 0, "no viewer-only tick makes a previewed result go stale",
           staleSafe.join(", ") || "none do");
+
+  /* The branch-order shader reads the skeleton's per-vertex properties. Spelunker exposes them;
+     ngl.microns-explorer.org does not, and every prop_*() branch is skipped, so the bed draws in
+     the shader's last line -- emitRGB(vec3(0.863, 0.725, 0.157)) = #dcb928, one flat gold. Both
+     were measured on the same layer JSON. The hint must appear for exactly that pair of
+     conditions, and the button must fix it. */
+  console.log("\nthe branch-order viewer hint");
+  const hint = await p.evaluate(() => {
+    const bo = document.getElementById("fss_bo"), v = document.getElementById("viewer"),
+          h = document.getElementById("shihBOHint"), sw = document.getElementById("shihBOSwitch");
+    if (!bo || !v || !h) return { missing: true, bo: !!bo, v: !!v, h: !!h };
+    const shown = () => getComputedStyle(h).display !== "none";
+    const set = (checked, viewer) => {
+      bo.checked = checked; v.value = viewer;
+      bo.dispatchEvent(new Event("change", { bubbles: true }));
+      v.dispatchEvent(new Event("change", { bubbles: true }));
+      return shown();
+    };
+    const offMicrons = set(false, "https://ngl.microns-explorer.org/");
+    const onMicrons  = set(true,  "https://ngl.microns-explorer.org/");
+    const onSpelunk  = set(true,  "https://spelunker.cave-explorer.org/");
+    set(true, "https://ngl.microns-explorer.org/");
+    if (sw) sw.click();
+    const afterClick = { viewer: v.value, shown: shown() };
+    return { missing: false, offMicrons, onMicrons, onSpelunk, afterClick,
+             hasButton: !!sw };
+  });
+  if (hint.missing) {
+    ok(false, "the branch-order hint is on the page",
+       "fss_bo=" + hint.bo + " viewer=" + hint.v + " hint=" + hint.h);
+  } else {
+    ok(hint.onMicrons === true, "ticked, in a viewer that cannot colour it: the hint shows");
+    ok(hint.onSpelunk === false, "...in Spelunker, it does not");
+    ok(hint.offMicrons === false, "...and not at all when the skeleton is not ticked");
+    ok(hint.hasButton && /spelunker/.test(hint.afterClick.viewer) && hint.afterClick.shown === false,
+       "...and the button switches the viewer, which clears it",
+       hint.afterClick.viewer + (hint.afterClick.shown ? " (still showing)" : ""));
+  }
 
   ok(errors.length === 0, "no page errors", errors.join(" | ").slice(0, 200) || "none");
   await p.close();

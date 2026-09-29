@@ -613,7 +613,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-28 20:57</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-29 07:17</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -990,6 +990,7 @@ window.__ujumpActivateTab=UJ.stepthrough.activateTab;
 <label style="font-size:12px" title="The capillary bed, 7,757 branches, coloured by how many branches it is from its nearest blood source or drain — the paper's Figure 1J/K. Carries eight per-vertex properties: branch order from an ACT (1-12) or a CVT (1-8), the geodesic distance versions of both, and the path-order versions. The authors' own shader travels with it, so Neuroglancer shows their sliders; it opens on branch order from the ACT."><input type="checkbox" id="fss_bo" class="fshihskel" value="skelFinal_v7_branch_order"> Capillary bed, coloured by branch order (ACT/CVT)</label>
 </div>
 </div>
+<div id="shihBOHint" style="display:none;margin-top:6px;padding:8px 10px;border:1px solid #d29922;border-radius:7px;background:#221a07;font-size:12px;line-height:1.45;color:var(--ink)">&#9888; Branch-order colours need <b>Spelunker / CAVE explorer</b>. The viewer you have selected does not expose the skeleton&#39;s per-vertex properties to the shader, so every <code>prop_&hellip;()</code> branch is skipped and the whole capillary bed draws in the shader&#39;s fallback colour — one flat gold. The other ten skeletons are unaffected. <button type="button" class="idbtn" id="shihBOSwitch" style="margin-top:6px;padding:4px 10px;font-size:12px;width:auto">Switch the viewer to Spelunker</button></div>
 <label style="margin-top:12px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer" title="Draws the Allen Institute's four area-boundary meshes (gs://allen-minnie-phase3/areameshes) — the same walls the &quot;Which visual area&quot; filter above tests against, so you can see where the boundaries you filtered on actually run. Each is a wall from the pia to the white matter, not a solid volume."><input type="checkbox" id="filterAreaMeshOn" style="width:auto"> Include the visual-area boundary meshes (Allen, areameshes)</label>
 <label style="margin-top:8px;text-transform:none;font-size:13px;display:flex;align-items:center;gap:7px;color:var(--ink);cursor:pointer" title="Draws the Allen Institute's smoothed cortical layer meshes (gs://allen-minnie-phase3/layermeshes_smooth_v2), six surfaces. Independent of the layer bands this tool draws itself from its own fitted geometry — these are the published surfaces."><input type="checkbox" id="filterLayerMeshOn" style="width:auto"> Include the published cortical layer meshes (Allen, layermeshes_smooth_v2)</label>
 <div style="margin-top:14px">
@@ -11507,7 +11508,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         nearDist=nearestRefDistNm(row);
         if(nearDist===null||nearDist>nearMaxNm)return null;
       }
-      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,regionBoxLabel,hasCil,hasCent,nearDist,isRefRow:!!isRefRow};
+      return{row,fine,fineDist,gl,layerLabel,wmDist,v1Bucket,rowArea,regionBoxLabel,hasCil,hasCent,nearDist,isRefRow:!!isRefRow};
     }
     const out=[];
     if(attention){
@@ -11851,6 +11852,13 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      Organelles and extracellular structures filter), no organelle columns are added at all -- same
      "only show it if it's relevant" convention as the glActive/wmActive/
      v1ColActive/regionActive columns just above. */
+  /* ON WINDOW so a check can ask for the column set without downloading a workbook (2026-09-28)
+     -- the same reason fetchAllRootIdProposals is exposed further down. What is worth asserting
+     about a column is which results it appears for, and that is a property of this function, not
+     of the .xlsx that comes out the other end. The assignment sits above the declaration because
+     a function declaration is hoisted to the top of its scope; it is the same function object the
+     download handler calls. */
+  window.buildColumns=buildColumns;
   function buildColumns(result,orgKinds){
     orgKinds=orgKinds||[];
     const cols=[
@@ -11931,6 +11939,12 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       // result.layerActive, so it shows up on every export regardless of whether the layer
       // filter checkboxes are in use.
       {header:"Cortical layer",get:m=>m.layerLabel||""},
+      /* Always included, like Cortical layer above and for the same reason: evalRow() already
+         knows it for every row, so gating it on the area filter being on would withhold something
+         already in hand. Cortical layer is where the cell is down the depth axis; this is where it
+         is across the surface. Blank means no sector matched, which an "N"-space row cannot be --
+         see src/which_visual_area_a_cell_is_in.py for how the four are told apart. */
+      {header:"Visual area",get:m=>(m.rowArea===null||m.rowArea===undefined)?"":((window.AREA_NAMES||[])[m.rowArea]||("area "+m.rowArea))},
       // Always included (same convention as Vessel type/Cortical layer above) -- presence of an
       // ANNOTATION, not a confirmed biological absence; see the "Primary cilium / centriole"
       // filter's own comment in evalRow() for why "No" can just mean "not yet checked".
@@ -12574,6 +12588,48 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     return layers;
   }
   window.shihLayers=shihLayers;
+/* ── THE BRANCH-ORDER COLOURS ONLY EXIST IN ONE VIEWER ─────────────────────  2026-09-29
+   Measured, both ways, on the same layer JSON: spelunker.cave-explorer.org renders the paper's
+   jet colouring and lists the skeleton's per-vertex properties above the shader code, while
+   ngl.microns-explorer.org lists none of them and draws the whole bed in the shader's last line,
+   emitRGB(vec3(0.863, 0.725, 0.157)) = #dcb928. That flat gold is the fallback, not a missing
+   shader -- the control really is ticked and nothing is logged. See
+   src/branch_order_colours_need_spelunker.py.
+
+   The hint appears only when both halves of the problem are true, and the button switches the
+   viewer rather than this code doing it silently: the viewer is his choice, and MICrONS
+   Neuroglancer is the one with the Share button. */
+(function(){
+  var SPELUNKER="https://spelunker.cave-explorer.org/";
+  function viewerHandlesSkeletonProps(){
+    var v=document.getElementById("viewer");
+    return !!(v&&/spelunker|cave-explorer/i.test(v.value));
+  }
+  window.viewerHandlesSkeletonProps=viewerHandlesSkeletonProps;
+  function sync(){
+    var hint=document.getElementById("shihBOHint"),bo=document.getElementById("fss_bo");
+    if(!hint||!bo)return;
+    hint.style.display=(bo.checked&&!viewerHandlesSkeletonProps())?"block":"none";
+  }
+  window.syncShihBOHint=sync;
+  /* readyState, not a bare DOMContentLoaded listener: this script lives far down a 11 MB page and
+     a listener registered after the event has fired never runs, which would leave the hint dead
+     without a single error to show for it. */
+  function wire(){
+    var bo=document.getElementById("fss_bo"),v=document.getElementById("viewer"),
+        sw=document.getElementById("shihBOSwitch");
+    if(bo)bo.addEventListener("change",sync);
+    if(v)v.addEventListener("change",sync);
+    if(sw)sw.addEventListener("click",function(){
+      var sel=document.getElementById("viewer");
+      if(sel){sel.value=SPELUNKER;sel.dispatchEvent(new Event("change",{bubbles:true}));}
+      sync();
+    });
+    sync();
+  }
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",wire);
+  else wire();
+})();
   function buildFilterViewerState(matches,includeVasc,includeEM,includeV1Col,includeVascTrace,includeCentVec,includeCilVec,includeOrgPoints,includeVascSeg){
     /* includeVascSeg is LAST on purpose. Every existing caller passes eight arguments and gets
        `undefined` here, which is falsy, so adding the parameter cannot change what any of them
