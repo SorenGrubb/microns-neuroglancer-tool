@@ -613,7 +613,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-29 07:17</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-30 07:15</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -12897,6 +12897,56 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
     };
   }
 
+  /* THE SECOND SHEET.  2026-09-30
+     Reads the outlines for the matched cells -- the same read the Blender/Colab export does, and
+     capped the same way, because one Drive request per outline is right for a cell and wrong for
+     three hundred -- then hands them to core/tracedoutlines.js's tracedShapeRows(), which is where
+     the geometry and the nucleus-distance rule live. Nothing here knows what circularity is.
+
+     The nucleus fallback is µJump's own: nucleus id -> master-array index -> the MICrONS detection
+     centroid. tracedShapeRows prefers the cell's traced nucleus outline when one was read, and the
+     sheet's "Nucleus centroid from" column says which of the two each row used. */
+/* THE HOOK core/tracingcard.js ASKS ON (2026-09-30). It has no nucleus table of its own -- ωJump
+     and χJump open volumes that have none -- so the distance shown beside an organelle's volume on
+     the pad comes from whichever page can answer. This one can: nucleus id -> master-array index ->
+     the MICrONS detection centroid. A page that cannot simply leaves the hook undefined and the
+     sentence omits the distance rather than inventing one. */
+  window.tracingNucCentroid=function(nid){
+    try{
+      const i=nidToIndex(nid);
+      if(i<0)return null;
+      return {xVox:NX[i],yVox:NY[i],zVox:NZ[i],from:"MICrONS nucleus-detection centroid"};
+    }catch(_e){ return null; }
+  };
+  async function addTracedOrganelleSheet(wb,matches,say){
+    if(typeof tracedShapeRows!=="function"||typeof tracedStructuresForCells!=="function")return "";
+    let got;
+    try{
+      say&&say("Reading outlines\u2026");
+      got=await tracedStructuresForCells(
+        {nuc:matches.map(function(m){return rowNucId(m.row);}),
+         root:matches.map(function(m){return rowRootId(m.row);})},say);
+    }catch(e){ console.warn("[organelle sheet] outlines unavailable",e); return ""; }
+    const rows=tracedShapeRows(got.tracings,{
+      resNm:[UJ_RX,UJ_RY,UJ_RZ],
+      nucCentroid:function(nid){
+        const i=nidToIndex(nid);
+        return i<0?null:{xVox:NX[i],yVox:NY[i],zVox:NZ[i]};
+      },
+      typeOf:function(nid){
+        const i=nidToIndex(nid);
+        return i<0?"":(typeInfo(i)||{}).name||"";
+      }
+    });
+    if(!rows.length)return got.capped?("None of the matched cells has an outline that could be "
+      +"read, and "+got.capped+" more were left unread \u2014 the workbook has the Cells sheet only."):"";
+    const aoa=[TRACED_SHAPE_COLUMNS.slice()];
+    rows.forEach(function(r){ aoa.push(TRACED_SHAPE_COLUMNS.map(function(c){ return r[c]; })); });
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),"Traced organelles");
+    return got.capped?("\u201cTraced organelles\u201d holds "+rows.length+" outlined structure"
+      +(rows.length===1?"":"s")+". "+got.capped+" more were left unread \u2014 narrow the filter to "
+      +"include them."):"";
+  }
   const runBtn=document.getElementById("filterRun");
   const dlBtn=document.getElementById("filterDownload");
   const viewAllBtn=document.getElementById("filterViewerAll");
@@ -13120,8 +13170,19 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const ws=XLSX.utils.aoa_to_sheet(data);
       const wb=XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb,ws,"Cells");
-      XLSX.writeFile(wb,"microns_filtered_cells.xlsx");
-      dlBtn.disabled=false;dlBtn.textContent=dlOrigText;
+      /* ── AND A ROW PER OUTLINED ORGANELLE ──────────────────────────────────  2026-09-30
+         Gary: "We can then spit out lots of data like how many dystrophic lysosomes or
+         mitochondria etc there are per cell etc." That question is asked of ROWS, not of the
+         ever-wider organelle columns on the Cells sheet, so it gets its own sheet. Only written
+         when there is something to write: a filter matching cells nobody has outlined downloads
+         exactly what it downloaded before. See
+         src/the_organelle_sheet_says_what_shape_and_how_far.py. */
+      addTracedOrganelleSheet(wb,lastResult.matches,function(msg){dlBtn.textContent=msg;})
+        .then(function(note){
+          XLSX.writeFile(wb,"microns_filtered_cells.xlsx");
+          dlBtn.disabled=false;dlBtn.textContent=dlOrigText;
+          if(note)reportAlertOnce(note);
+        });
     },10);
   });
 

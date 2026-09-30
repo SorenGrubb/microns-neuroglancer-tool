@@ -407,6 +407,206 @@ async function tracedStructuresForCells(ids, say, opts){
   });
   return {tracings:out,capped:capped};
 }
+
+/* ── ONE ROW PER OUTLINED STRUCTURE ──────────────────────────────────────────────  2026-09-30
+   Gary: "We can then spit out lots of data like how many dystrophic lysosomes or mitochondria etc
+   there are per cell etc." and "I also want to have the distance from the organelle centroid to
+   the nucleus centroid calculated and displayed for each organelle."
+
+   Takes what tracedStructuresForCells() already returned and turns each one into a flat row: the
+   cell it belongs to, what it is, how big it is, ImageJ's four shape descriptors at its widest
+   section and as a median over sections, its 3D centroid, and how far that centroid is from the
+   cell's nucleus.
+
+   WHICH NUCLEUS. The cell's own traced nucleus outline when one is among these tracings, and
+   otherwise whatever `nucCentroid` hands back -- in µJump, the MICrONS nucleus-detection centroid.
+   Two different measurements, so the row says which one it used.
+
+   tracedShapeRows(tracings, opts) -> [row]
+     opts.resNm       [x,y,z] nm per voxel; defaults to 4/4/40
+     opts.nucCentroid function(nucleusId, rootId) -> {xVox,yVox,zVox} or null
+     opts.typeOf      function(nucleusId, rootId) -> cell type string, optional
+
+   Pure: it fetches nothing and touches no DOM, so a check can call it with three contours and
+   read the answer. */
+var TRACED_SHAPE_COLUMNS = [
+  "Nucleus ID", "Root ID", "Cell type", "Structure", "Kind", "Instance",
+  "Sections", "Volume (\u00b5m\u00b3)", "Area at widest section (\u00b5m\u00b2)",
+  "Perimeter at widest section (\u00b5m)",
+  "Circularity (widest)", "Aspect ratio (widest)", "Roundness (widest)", "Solidity (widest)",
+  "Major axis (\u00b5m)", "Minor axis (\u00b5m)",
+  "Circularity (median)", "Aspect ratio (median)", "Roundness (median)", "Solidity (median)",
+  /* THE SOLID, NOT THE SECTION (2026-09-30). Circularity becomes sphericity, and two conventions
+     are in use: Wadell's π^(1/3)(6V)^(2/3)/S and MorphoLibJ's 36πV²/S³, which is Wadell cubed. Both
+     travel, each with its formula IN THE HEADER -- a note elsewhere would not survive this sheet
+     being pasted into another one. Aspect ratio splits into elongation and flatness, which is the
+     gain over 2D: a cigar and a pancake are the same in one section. Roundness has no 3D column
+     because in 2D it was already 1/aspect ratio. The volume and surface the ratios were computed
+     from are reported beside them, so a surprising sphericity can be checked. */
+  "Sphericity (Wadell)", "Sphericity (MorphoLibJ, 36\u03c0V\u00b2/S\u00b3)",
+  "Elongation (3D)", "Flatness (3D)", "Solidity (3D)",
+  "Mesh volume (\u00b5m\u00b3)", "Mesh surface area (\u00b5m\u00b2)",
+  "Centroid X (voxel)", "Centroid Y (voxel)", "Centroid Z (voxel)",
+  "Distance to nucleus centroid (\u00b5m)", "Nucleus centroid from",
+  /* SURFACE TO SURFACE (2026-09-30). A different question from centre to centre, and the one a
+     contact argument needs -- see src/how_far_one_organelle_is_from_another.py. The nucleus one is
+     blank unless somebody outlined the nucleus: a detection centroid is a point, and a point has
+     no surface to be near. Nearest BY SURFACE and nearest BY CENTROID can be different organelles,
+     so both are named. */
+  "Distance to nucleus surface (\u00b5m)",
+  "Nearest organelle (by surface)", "Distance to its surface (\u00b5m)",
+  "Distance to its centroid (\u00b5m)",
+  "Nearest organelle (by centroid)", "Distance to that centroid (\u00b5m)",
+  "Traced by", "Structure ID"
+];
+
+function tracedShapeRows(tracings, opts){
+  opts = opts || {};
+  var res = opts.resNm || [4, 4, 40];
+  if (!window.UJ || !UJ.traceloft || typeof UJ.traceloft.shape !== "function") return [];
+  var list = (tracings || []).filter(function(t){ return t && t.rings && t.rings.length; });
+  /* STRICTLY A NUMBER. isFinite("") is true in JavaScript, because Number("") is 0 -- so the first
+     version of this turned "no nucleus to measure from" into a distance of 0.000, which reads as
+     "this organelle is sitting on the nucleus". Caught by organellesheetcheck.js. */
+  var r3 = function(v){ return (typeof v !== "number" || !isFinite(v)) ? "" : Math.round(v * 1000) / 1000; };
+
+  /* The traced nuclei first, keyed by whichever id the tracer filed them under, so an organelle
+     can ask for its own cell's nucleus before falling back. */
+  var tracedNuc = {};
+  list.forEach(function(t){
+    var kind = String(t.kind || t.instance_of || "").toLowerCase();
+    if (kind !== "nucleus") return;
+    var s = UJ.traceloft.shape(t.rings, res);
+    if (!s || !s.ok || !s.centroid) return;
+    if (t.nucleus_id) tracedNuc["n:" + t.nucleus_id] = s.centroid;
+    if (t.root_id) tracedNuc["r:" + t.root_id] = s.centroid;
+  });
+
+  /* MEASURED ONCE EACH. The point cloud and the shape of every outline are computed up front,
+     because the pairing below asks for each of them many times -- every organelle against every
+     other organelle of its cell. Keyed by position in `list` so a row can find its own. */
+  var cloud = list.map(function(t){
+    try { return UJ.traceloft.surfacePoints(t.rings, res); } catch (e){ return null; }
+  });
+  var shp = list.map(function(t){
+    try { return UJ.traceloft.shape(t.rings, res); } catch (e){ return null; }
+  });
+  /* The solid's own descriptors, from the lofted mesh. Wrapped because a tracing whose contours
+     cannot be lofted must cost the row its 3D columns, not the whole sheet. */
+  var sh3 = list.map(function(t){
+    try { return UJ.traceloft.shape3d ? UJ.traceloft.shape3d(t.rings, res) : null; }
+    catch (e){ return null; }
+  });
+  var kindOf = function(t){ return String(t.kind || t.instance_of || "").toLowerCase(); };
+  var cellKey = function(t){ return String(t.nucleus_id || "") + "|" + String(t.root_id || ""); };
+  /* WHAT MAY BE A NEIGHBOUR: another organelle of the same cell. Not itself; not the whole-cell
+     outline, which encloses everything, so its distance to each organelle says something about the
+     tracing rather than about the cell; and not the nucleus, which has a column of its own. */
+  var isOrganelle = function(t){ var k = kindOf(t); return k !== "cell" && k !== "nucleus"; };
+  var tracedNucCloud = {};
+  list.forEach(function(t, i){
+    if (kindOf(t) !== "nucleus" || !cloud[i] || !cloud[i].length) return;
+    if (t.nucleus_id) tracedNucCloud["n:" + t.nucleus_id] = cloud[i];
+    if (t.root_id) tracedNucCloud["r:" + t.root_id] = cloud[i];
+  });
+  var distNm = function(a, b){
+    if (!a || !b) return null;
+    var dx = (a.xVox - b.xVox) * res[0], dy = (a.yVox - b.yVox) * res[1],
+        dz = (a.zVox - b.zVox) * res[2];
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  };
+
+  var out = [];
+  list.forEach(function(t, ti){
+    var s = shp[ti];
+    if (!s || !s.ok) return;
+    var v = UJ.traceloft.volume(t.rings, res);
+    var nid = String(t.nucleus_id || ""), rid = String(t.root_id || "");
+    var nc = tracedNuc["n:" + nid] || tracedNuc["r:" + rid] || null;
+    var from = nc ? "traced nucleus outline" : "";
+    if (!nc && typeof opts.nucCentroid === "function"){
+      nc = opts.nucCentroid(nid, rid) || null;
+      if (nc) from = "MICrONS nucleus detection";
+    }
+    var dist = "";
+    if (nc && s.centroid){
+      var dx = (s.centroid.xVox - nc.xVox) * res[0],
+          dy = (s.centroid.yVox - nc.yVox) * res[1],
+          dz = (s.centroid.zVox - nc.zVox) * res[2];
+      dist = Math.sqrt(dx * dx + dy * dy + dz * dz) / 1000;   // nm -> µm
+    }
+    /* To the nucleus SURFACE -- only when the nucleus was outlined. */
+    var nucCloud = tracedNucCloud["n:" + nid] || tracedNucCloud["r:" + rid] || null;
+    var nucSurf = "";
+    if (nucCloud && cloud[ti] && cloud[ti] !== nucCloud){
+      var dn = UJ.traceloft.minSurfaceDistNm(cloud[ti], nucCloud);
+      if (dn !== null) nucSurf = dn / 1000;
+    }
+    /* And to the nearest other organelle of the same cell, found twice over: by surface and by
+       centroid. They can be different organelles, which is the point of naming both. */
+    var bestS = null, bestSd = Infinity, bestC = null, bestCd = Infinity;
+    list.forEach(function(o, oi){
+      if (oi === ti || !isOrganelle(o)) return;
+      if (cellKey(o) !== cellKey(t)) return;
+      if (!shp[oi] || !shp[oi].ok) return;
+      if (cloud[ti] && cloud[oi]){
+        var ds = UJ.traceloft.minSurfaceDistNm(cloud[ti], cloud[oi]);
+        if (ds !== null && ds < bestSd){ bestSd = ds; bestS = oi; }
+      }
+      var dc = distNm(s.centroid, shp[oi].centroid);
+      if (dc !== null && dc < bestCd){ bestCd = dc; bestC = oi; }
+    });
+    var nameOf = function(i){ return i === null ? "" : (list[i].name || list[i].kind || "traced"); };
+    var pairCentroid = bestS === null ? "" : distNm(s.centroid, shp[bestS].centroid);
+
+    var d3 = (sh3[ti] && sh3[ti].ok) ? sh3[ti] : null;
+    var top = s.atMaxArea, med = s.median;
+    out.push({
+      "Nucleus ID": nid, "Root ID": rid,
+      "Cell type": (typeof opts.typeOf === "function" ? (opts.typeOf(nid, rid) || "") : (t.type || "")),
+      "Structure": t.name || "", "Kind": t.kind || t.instance_of || "",
+      "Instance": t.instance_index || "",
+      "Sections": s.sections,
+      "Volume (\u00b5m\u00b3)": (v && v.ok) ? r3(v.volumeUm3) : "",
+      "Area at widest section (\u00b5m\u00b2)": r3(top.areaUm2),
+      "Perimeter at widest section (\u00b5m)": r3(top.perimeterUm),
+      "Circularity (widest)": r3(top.circularity),
+      "Aspect ratio (widest)": r3(top.aspectRatio),
+      "Roundness (widest)": r3(top.roundness),
+      "Solidity (widest)": r3(top.solidity),
+      "Major axis (\u00b5m)": r3(top.majorUm),
+      "Minor axis (\u00b5m)": r3(top.minorUm),
+      "Circularity (median)": r3(med.circularity),
+      "Aspect ratio (median)": r3(med.aspectRatio),
+      "Roundness (median)": r3(med.roundness),
+      "Solidity (median)": r3(med.solidity),
+      "Sphericity (Wadell)": r3(d3 ? d3.sphericityWadell : null),
+      "Sphericity (MorphoLibJ, 36\u03c0V\u00b2/S\u00b3)": r3(d3 ? d3.sphericityMorphoLibJ : null),
+      "Elongation (3D)": r3(d3 ? d3.elongation : null),
+      "Flatness (3D)": r3(d3 ? d3.flatness : null),
+      "Solidity (3D)": r3(d3 ? d3.solidity3d : null),
+      "Mesh volume (\u00b5m\u00b3)": r3(d3 ? d3.volumeUm3 : null),
+      "Mesh surface area (\u00b5m\u00b2)": r3(d3 ? d3.surfaceUm2 : null),
+      "Centroid X (voxel)": s.centroid ? Math.round(s.centroid.xVox) : "",
+      "Centroid Y (voxel)": s.centroid ? Math.round(s.centroid.yVox) : "",
+      "Centroid Z (voxel)": s.centroid ? Math.round(s.centroid.zVox) : "",
+      "Distance to nucleus centroid (\u00b5m)": r3(dist),
+      "Nucleus centroid from": from,
+      "Distance to nucleus surface (\u00b5m)": r3(nucSurf === "" ? null : nucSurf),
+      "Nearest organelle (by surface)": nameOf(bestS),
+      "Distance to its surface (\u00b5m)": r3(bestS === null ? null : bestSd / 1000),
+      "Distance to its centroid (\u00b5m)": r3(pairCentroid === "" ? null : pairCentroid / 1000),
+      "Nearest organelle (by centroid)": nameOf(bestC),
+      "Distance to that centroid (\u00b5m)": r3(bestC === null ? null : bestCd / 1000),
+      "Traced by": t.traced_by || "",
+      "Structure ID": t.structure_id || ""
+    });
+  });
+  return out;
+}
+window.tracedShapeRows = tracedShapeRows;
+window.TRACED_SHAPE_COLUMNS = TRACED_SHAPE_COLUMNS;
+
 /* WHAT THE PAD IS HOLDING WINS. A tracing open here may carry edits the dataset has not seen, so
    the local copy takes the id and the dataset fills in everything the browser does not have. */
 function tracedMergeKept(kept, fromDataset){

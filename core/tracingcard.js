@@ -2847,7 +2847,27 @@ function pad3DSoon(){
 function tracingVolumeOf(rings){
   try {
     if (!window.UJ || !UJ.traceloft || !UJ.traceloft.volume) return null;
-    return UJ.traceloft.volume(rings || [], (UJ.cfg && UJ.cfg.res) || [4, 4, 40]);
+    var res = (UJ.cfg && UJ.cfg.res) || [4, 4, 40];
+    var v = UJ.traceloft.volume(rings || [], res);
+    /* ── AND WHAT SHAPE IT IS ──────────────────────────────────────────────  2026-09-30
+       Gary: "could you potentially add a circularity metric to the organelles that are being
+       segmented... I also want to have the distance from the organelle centroid to the nucleus
+       centroid calculated and displayed for each organelle."
+
+       Attached here rather than fetched at each of the four places that render a volume -- two in
+       padVolume, two in tracingVolShow, and two of those four lines are identical, which makes
+       them a poor thing to anchor an edit on. Riding along means every place that shows a volume
+       shows the shape, including the one-line-each rendering when a pad holds several organelles,
+       which is where "for each organelle" actually bites. */
+    if (v && UJ.traceloft.shape){
+      try { v.shape = UJ.traceloft.shape(rings || [], res); } catch (_e){}
+    }
+    /* And in three dimensions (2026-09-30): sphericity, elongation and flatness come from the
+       lofted mesh, which the pad is building for its preview anyway. */
+    if (v && UJ.traceloft.shape3d){
+      try { v.shape3d = UJ.traceloft.shape3d(rings || [], res); } catch (_e){}
+    }
+    return v;
   } catch (e){ return null; }
 }
 /* µm³ at a readable number of digits. An organelle is 0.01 µm³ and a cell is 5,000; one format
@@ -2859,18 +2879,72 @@ function volFmt(v){
   if (v >= 0.01) return v.toFixed(4);
   return v.toExponential(2);
 }
+/* Two decimals is the whole useful range of a shape descriptor: they all live in (0, 1] except the
+   aspect ratio, and a third digit on a hand-clicked outline is noise being reported as measurement. */
+function shapeFmt(v){ return (typeof v === "number" && isFinite(v)) ? v.toFixed(2) : "?"; }
+/* How far this organelle's centre is from the cell's nucleus, and which nucleus that was. Returns
+   "" when the page cannot answer -- ωJump has no nucleus table, and a cell whose id nobody typed
+   has no nucleus to be far from. The hook is window.tracingNucCentroid(nucleusId), which µJump
+   defines; see src/the_card_says_what_shape_the_organelle_is.py. */
+function tracingNucDistSay(shape){
+  try {
+    if (!shape || !shape.ok || !shape.centroid) return "";
+    if (typeof window.tracingNucCentroid !== "function") return "";
+    var el = document.getElementById("tracingNucId");
+    var nid = el ? (el.value || "").trim() : "";
+    if (!nid) return "";
+    var nc = window.tracingNucCentroid(nid);
+    if (!nc || !isFinite(nc.xVox)) return "";
+    var res = (UJ.cfg && UJ.cfg.res) || [4, 4, 40];
+    var dx = (shape.centroid.xVox - nc.xVox) * res[0],
+        dy = (shape.centroid.yVox - nc.yVox) * res[1],
+        dz = (shape.centroid.zVox - nc.zVox) * res[2];
+    var d = Math.sqrt(dx * dx + dy * dy + dz * dz) / 1000;
+    return " Its centre is " + d.toFixed(2) + " \u00b5m from the "
+      + (nc.from || "nucleus") + ".";
+  } catch (e){ return ""; }
+}
+function tracingShapeSay(shape){
+  if (!shape || !shape.ok || !shape.atMaxArea) return "";
+  var t = shape.atMaxArea, m = shape.median || {};
+  var s = " Widest section: circularity " + shapeFmt(t.circularity)
+        + ", aspect ratio " + shapeFmt(t.aspectRatio)
+        + ", roundness " + shapeFmt(t.roundness)
+        + ", solidity " + shapeFmt(t.solidity) + ".";
+  if (shape.sections > 1)
+    s += " Median over " + shape.sections + " sections: " + shapeFmt(m.circularity) + " / "
+       + shapeFmt(m.aspectRatio) + " / " + shapeFmt(m.roundness) + " / " + shapeFmt(m.solidity) + ".";
+  return s + tracingNucDistSay(shape);
+}
+/* THE SOLID, AND WHICH CONVENTION (2026-09-30). Sphericity has two definitions in common use and
+   MorphoLibJ's is Wadell's cubed, so a sentence that just says "sphericity 0.73" is a number
+   nobody can line up with FIJI. Both are named. Elongation and flatness replace the 2D aspect
+   ratio, which is the whole gain of measuring the solid: a cigar and a pancake look alike in one
+   section and score opposite ways round here. */
+function tracingShape3dSay(d3){
+  if (!d3 || !d3.ok) return "";
+  return " In 3D: sphericity " + shapeFmt(d3.sphericityWadell) + " (Wadell) / "
+       + shapeFmt(d3.sphericityMorphoLibJ) + " (MorphoLibJ), elongation "
+       + shapeFmt(d3.elongation) + ", flatness " + shapeFmt(d3.flatness)
+       + (d3.solidity3d !== null && d3.solidity3d !== undefined
+            ? ", solidity " + shapeFmt(d3.solidity3d) : "") + ".";
+}
 function tracingVolumeSay(v){
   if (!v) return "";
   if (!v.ok){
+    /* One section has no volume, but it still has a shape and a place -- which is the whole of
+       what Gary asked for, so it is said here too rather than only once there are two. */
     return v.areaUm2 !== undefined
       ? "Outlined area " + volFmt(v.areaUm2) + " µm² on one section — " + v.reason + "."
+        + tracingShapeSay(v.shape)
       : "";
   }
   return "Volume " + volFmt(v.volumeUm3) + " µm³ (Cavalieri, " + v.sections
     + " section" + (v.sections === 1 ? "" : "s") + " every " + Math.round(v.gapNm) + " nm"
     + (v.evenlySpaced ? "" : ", unevenly spaced") + "). "
     + volFmt(v.volumeTrapezoidUm3) + " µm³ between the outermost contours, which is the "
-    + "lower bound — the difference is what lies past them.";
+    + "lower bound — the difference is what lies past them."
+    + tracingShapeSay(v.shape) + tracingShape3dSay(v.shape3d);
 }
 /* ── DROP REDUNDANT POINTS, ON THE PAD ───────────────────────────────────────  2026-09-22
    Søren: "I don't see anywhere I can reduce the number of points" -- he was on the pad, and the

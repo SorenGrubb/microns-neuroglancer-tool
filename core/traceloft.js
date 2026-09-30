@@ -765,11 +765,475 @@ UJ.traceloft = (function(){
              dropped: dropped, worstNm: Math.round(worst * resNm * 10) / 10 };
   }
 
-  return { loft: loft, volume: volume, interpolate: interpolate, thinSections: thinSections,
+
+  /* ── WHAT SHAPE IT IS ────────────────────────────────────────────────────────  2026-09-30
+     Gary: "could you potentially add a circularity metric to the organelles that are being
+     segmented... in disease, organelles can change shape, so it would be great to have a metric
+     that can prove this". ImageJ's four Shape Descriptors, by ImageJ's definitions, so a number
+     from here and a number off a FIJI ROI belong in the same column. See
+     src/an_organelle_has_a_shape_and_a_distance.py for why all four and not just the one.
+
+     Everything below is exact for a polygon -- area, centroid and the three central second
+     moments are closed-form sums over the edges, not a pixel count. In particular the centroid is
+     the AREA centroid; centroid() above is the mean of the VERTICES, which is the right thing for
+     pairing contours between sections and the wrong thing here.
+
+     shape(rings, resNm) -> { ok, sections, perSection[], atMaxArea, median, centroid }
+       perSection  one entry per z: { z, rings, areaUm2, perimeterUm, circularity, aspectRatio,
+                                      roundness, solidity, majorUm, minorUm, angleDeg, cx, cy }
+       atMaxArea   the descriptors at the section with the greatest area -- the organelle's widest
+                   cross-section, which is the section an electron microscopist would measure
+       median      the median of each descriptor over all sections
+       centroid    the volume-weighted 3D centre, in voxels and in nm */
+
+  /* Signed area, area centroid and the central second moments of one closed polygon, in one pass.
+     mu20 = ∫(x-cx)² dA, mu02 = ∫(y-cy)² dA, mu11 = ∫(x-cx)(y-cy) dA. */
+  function moments(pts){
+    var n = pts.length, a2 = 0, cx = 0, cy = 0, ixx = 0, iyy = 0, ixy = 0, i;
+    for (i = 0; i < n; i++){
+      var p = pts[i], q = pts[(i + 1) % n];
+      var cr = p[0] * q[1] - q[0] * p[1];
+      a2 += cr;
+      cx += (p[0] + q[0]) * cr;
+      cy += (p[1] + q[1]) * cr;
+      iyy += cr * (p[0] * p[0] + p[0] * q[0] + q[0] * q[0]);
+      ixx += cr * (p[1] * p[1] + p[1] * q[1] + q[1] * q[1]);
+      ixy += cr * (p[0] * q[1] + 2 * p[0] * p[1] + 2 * q[0] * q[1] + q[0] * p[1]);
+    }
+    var A = a2 / 2;
+    if (!(Math.abs(A) > 0)) return null;
+    cx = cx / (3 * a2); cy = cy / (3 * a2);
+    var m20 = iyy / 12 - A * cx * cx,
+        m02 = ixx / 12 - A * cy * cy,
+        m11 = ixy / 24 - A * cx * cy;
+    /* Sign follows the winding; every quantity below wants the magnitudes. */
+    var s = A < 0 ? -1 : 1;
+    return { area: Math.abs(A), cx: cx, cy: cy,
+             mu20: s * m20, mu02: s * m02, mu11: s * m11 };
+  }
+
+  function perimeter(pts){
+    var L = 0;
+    for (var i = 0; i < pts.length; i++){
+      var p = pts[i], q = pts[(i + 1) % pts.length];
+      L += Math.sqrt((q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1]));
+    }
+    return L;
+  }
+
+  /* Monotone chain. Returns the hull's vertices counter-clockwise. */
+  function convexHull(pts){
+    var P = pts.slice().sort(function(a, b){ return a[0] - b[0] || a[1] - b[1]; });
+    if (P.length < 3) return P;
+    var cross = function(o, a, b){
+      return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    };
+    var lo = [], hi = [], i;
+    for (i = 0; i < P.length; i++){
+      while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], P[i]) <= 0) lo.pop();
+      lo.push(P[i]);
+    }
+    for (i = P.length - 1; i >= 0; i--){
+      while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], P[i]) <= 0) hi.pop();
+      hi.push(P[i]);
+    }
+    lo.pop(); hi.pop();
+    return lo.concat(hi);
+  }
+
+  /* One section's descriptors, measured on `pts` in MICROMETRES. */
+  function describe(pts){
+    var m = moments(pts);
+    if (!m) return null;
+    var A = m.area, P = perimeter(pts);
+    if (!(A > 0) || !(P > 0)) return null;
+    /* The ellipse with the same second moments, then scaled to the same area -- ImageJ's fit. */
+    var common = Math.sqrt((m.mu20 - m.mu02) * (m.mu20 - m.mu02) + 4 * m.mu11 * m.mu11);
+    var major = 2 * Math.SQRT2 * Math.sqrt(Math.max(0, (m.mu20 + m.mu02 + common) / A));
+    var minor = 2 * Math.SQRT2 * Math.sqrt(Math.max(0, (m.mu20 + m.mu02 - common) / A));
+    if (major > 0 && minor > 0){
+      var k = Math.sqrt(A / (Math.PI * (major / 2) * (minor / 2)));
+      major *= k; minor *= k;
+    }
+    var hull = convexHull(pts), hm = hull.length >= 3 ? moments(hull) : null;
+    /* A traced contour is a polygon, and a polygon's perimeter is shorter than the smooth curve it
+       stands for, so 4πA/P² can land a hair above 1 on a well-clicked circle. Capped, because a
+       circularity of 1.0004 in a spreadsheet is a distraction, not information. */
+    var circ = Math.min(1, 4 * Math.PI * A / (P * P));
+    return { areaUm2: A, perimeterUm: P,
+             circularity: circ,
+             aspectRatio: minor > 0 ? major / minor : null,
+             roundness: major > 0 ? 4 * A / (Math.PI * major * major) : null,
+             solidity: hm && hm.area > 0 ? Math.min(1, A / hm.area) : null,
+             majorUm: major, minorUm: minor,
+             angleDeg: 0.5 * Math.atan2(2 * m.mu11, m.mu20 - m.mu02) * 180 / Math.PI,
+             cx: m.cx, cy: m.cy };
+  }
+
+  function medianOf(xs){
+    var v = xs.filter(function(x){ return x !== null && x !== undefined && isFinite(x); })
+              .sort(function(a, b){ return a - b; });
+    if (!v.length) return null;
+    var h = v.length >> 1;
+    return v.length % 2 ? v[h] : (v[h - 1] + v[h]) / 2;
+  }
+
+  function shape(rings, resNm){
+    var res = resNm || [1, 1, 1];
+    var sx = res[0] / 1000, sy = res[1] / 1000;          // voxel -> µm on the section plane
+    var byZ = {}, zs = [];
+    (rings || []).forEach(function(r){
+      if (!r || !r.points || r.points.length < 3) return;
+      var z = Math.round(r.z);
+      if (!byZ[z]){ byZ[z] = []; zs.push(z); }
+      byZ[z].push(r);
+    });
+    zs.sort(function(a, b){ return a - b; });
+    if (!zs.length) return { ok: false, reason: "nothing traced", sections: 0 };
+    var per = [];
+    zs.forEach(function(z){
+      /* The largest ring is the outline. See the doc comment above for why only one. */
+      var best = null, bestA = -1;
+      byZ[z].forEach(function(r){
+        var a = ringArea(r.points);
+        if (a > bestA){ bestA = a; best = r; }
+      });
+      if (!best) return;
+      var um = best.points.map(function(p){ return [p[0] * sx, p[1] * sy]; });
+      var d = describe(um);
+      if (!d) return;
+      d.z = z; d.rings = byZ[z].length;
+      /* The centroid goes back into voxels, which is the unit every coordinate in this tool is in. */
+      d.cxVox = d.cx / sx; d.cyVox = d.cy / sy;
+      per.push(d);
+    });
+    if (!per.length) return { ok: false, reason: "nothing measurable", sections: 0 };
+
+    var top = per[0], i;
+    for (i = 1; i < per.length; i++) if (per[i].areaUm2 > top.areaUm2) top = per[i];
+
+    var KEYS = ["areaUm2", "perimeterUm", "circularity", "aspectRatio", "roundness", "solidity",
+                "majorUm", "minorUm"];
+    var med = {};
+    KEYS.forEach(function(k){ med[k] = medianOf(per.map(function(s){ return s[k]; })); });
+
+    /* The 3D centre, weighted by how much of the organelle each section stands for -- the same
+       Cavalieri slab volume() gives each section, so the centroid and the volume are the same
+       object seen two ways. With one section the slab is the section. */
+    var gaps = [];
+    for (i = 0; i < per.length - 1; i++) gaps.push((per[i + 1].z - per[i].z) * res[2]);
+    var wx = 0, wy = 0, wz = 0, wsum = 0;
+    for (i = 0; i < per.length; i++){
+      var below = gaps[i - 1] === undefined ? (gaps[i] === undefined ? res[2] : gaps[i]) : gaps[i - 1];
+      var above = gaps[i] === undefined ? (gaps[i - 1] === undefined ? res[2] : gaps[i - 1]) : gaps[i];
+      var w = per[i].areaUm2 * (below + above) / 2;
+      wx += per[i].cxVox * w; wy += per[i].cyVox * w; wz += per[i].z * w; wsum += w;
+    }
+    var cen = wsum > 0
+      ? { xVox: wx / wsum, yVox: wy / wsum, zVox: wz / wsum,
+          xNm: wx / wsum * res[0], yNm: wy / wsum * res[1], zNm: wz / wsum * res[2] }
+      : null;
+
+    return { ok: true, sections: per.length, perSection: per,
+             atMaxArea: top, median: med, centroid: cen,
+             /* Reported so a reader can see the summary was taken from a real section and which. */
+             maxAreaZ: top.z };
+  }
+
+
+  /* ── HOW FAR TWO OUTLINES ARE FROM EACH OTHER ────────────────────────────────  2026-09-30
+     Søren: "calculate the shortest distance from the organelle mesh to the nucleus mesh and ...
+     to the nearest organelle mesh from the same cell".
+
+     surfacePoints(rings, resNm, perContour) -> Float64Array of x,y,z triples in NANOMETRES
+       Every contour resampled at equal arc length -- the same resample() the loft uses, so the
+       points are spread evenly round the outline rather than bunched where somebody clicked.
+
+     minSurfaceDistNm(A, B) -> the smallest distance between the two clouds, in nm
+
+     RESOLUTION ALONG Z IS THE SECTION SPACING. The points only exist on traced sections, so a
+     closest approach that falls between two of them reads slightly long. In plane it is exact to
+     the resample spacing. Deliberately measured on the contours rather than on a lofted surface:
+     a surface built by interpolation would put part of the answer in the interpolator. */
+  function surfacePoints(rings, resNm, perContour){
+    var res = resNm || [1, 1, 1], n = perContour || N;
+    var list = (rings || []).filter(function(r){ return r && r.points && r.points.length >= 3; });
+    var out = new Float64Array(list.length * n * 3), k = 0;
+    list.forEach(function(r){
+      var rs = resample(r.points, n);
+      if (!rs) return;
+      for (var i = 0; i < rs.length; i++){
+        out[k++] = rs[i][0] * res[0];
+        out[k++] = rs[i][1] * res[1];
+        out[k++] = r.z * res[2];
+      }
+    });
+    return out.subarray(0, k);
+  }
+
+  function boundsOf(P){
+    if (!P || !P.length) return null;
+    var b = [P[0], P[1], P[2], P[0], P[1], P[2]];
+    for (var i = 3; i < P.length; i += 3){
+      if (P[i] < b[0]) b[0] = P[i];       if (P[i] > b[3]) b[3] = P[i];
+      if (P[i+1] < b[1]) b[1] = P[i+1];   if (P[i+1] > b[4]) b[4] = P[i+1];
+      if (P[i+2] < b[2]) b[2] = P[i+2];   if (P[i+2] > b[5]) b[5] = P[i+2];
+    }
+    return b;
+  }
+  /* The gap between a point and a box: zero inside it, and otherwise a true lower bound on the
+     distance to anything the box holds -- which is what makes the gate below exact. */
+  function pointBoxGap2(x, y, z, b){
+    var dx = x < b[0] ? b[0] - x : (x > b[3] ? x - b[3] : 0);
+    var dy = y < b[1] ? b[1] - y : (y > b[4] ? y - b[4] : 0);
+    var dz = z < b[2] ? b[2] - z : (z > b[5] ? z - b[5] : 0);
+    return dx * dx + dy * dy + dz * dz;
+  }
+  function minSurfaceDistNm(A, B){
+    if (!A || !B || !A.length || !B.length) return null;
+    var bb = boundsOf(B), best = Infinity, i, j;
+    for (i = 0; i < A.length; i += 3){
+      var ax = A[i], ay = A[i+1], az = A[i+2];
+      /* EXACT, NOT APPROXIMATE. Nothing in B can be nearer to this point than the box holding B
+         is, so a point whose box gap already loses cannot win, and skipping it changes no answer. */
+      if (pointBoxGap2(ax, ay, az, bb) >= best) continue;
+      for (j = 0; j < B.length; j += 3){
+        var dx = ax - B[j], dy = ay - B[j+1], dz = az - B[j+2];
+        var d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < best) best = d2;
+      }
+      if (best === 0) break;
+    }
+    return isFinite(best) ? Math.sqrt(best) : null;
+  }
+
+
+  /* ── THE SAME QUESTIONS IN THREE DIMENSIONS ──────────────────────────────────  2026-09-30
+     shape3d(rings, resNm) -> { ok, volumeUm3, surfaceUm2, hullVolumeUm3,
+                                sphericityWadell, sphericityMorphoLibJ,
+                                elongation, flatness, solidity3d, axesUm, sections }
+
+     EVERYTHING IN µm, FROM resNm. In a serial-section dataset the z step is many times the xy
+     pixel; metrics computed on voxel indices would report every organelle as elongated along z.
+     See src/the_same_questions_in_three_dimensions.py.
+
+     V AND S COME FROM THE SAME OBJECT -- the lofted mesh, which is closed. Voxel faces overestimate
+     surface area, and sphericity cubes the surface, so the estimator matters more here than
+     anywhere else in this file.
+
+     TWO SPHERICITY CONVENTIONS, BOTH NAMED. Wadell π^(1/3)(6V)^(2/3)/S, MorphoLibJ 36πV²/S³ =
+     Wadell³. Reporting one silently is how a number stops lining up with FIJI. */
+
+  /* Eigenvalues of a symmetric 3x3, largest first. Analytic (Smith 1961) -- three eigenvalues do
+     not need an iterative solver, and a solver that sometimes fails to converge is worse than a
+     formula that never does. m = [xx, yy, zz, xy, xz, yz]. */
+  function eig3(m){
+    var xx = m[0], yy = m[1], zz = m[2], xy = m[3], xz = m[4], yz = m[5];
+    var p1 = xy * xy + xz * xz + yz * yz;
+    var q = (xx + yy + zz) / 3;
+    if (p1 === 0) return [xx, yy, zz].sort(function(a, b){ return b - a; });
+    var p2 = (xx - q) * (xx - q) + (yy - q) * (yy - q) + (zz - q) * (zz - q) + 2 * p1;
+    var p = Math.sqrt(p2 / 6);
+    var b00 = (xx - q) / p, b11 = (yy - q) / p, b22 = (zz - q) / p;
+    var b01 = xy / p, b02 = xz / p, b12 = yz / p;
+    var det = b00 * (b11 * b22 - b12 * b12) - b01 * (b01 * b22 - b12 * b02)
+            + b02 * (b01 * b12 - b11 * b02);
+    var r = det / 2;
+    r = r < -1 ? -1 : (r > 1 ? 1 : r);
+    var phi = Math.acos(r) / 3;
+    var e1 = q + 2 * p * Math.cos(phi);
+    var e3 = q + 2 * p * Math.cos(phi + 2 * Math.PI / 3);
+    return [e1, 3 * q - e1 - e3, e3];
+  }
+
+  /* Incremental convex hull, returning its volume. Points are decimated first: a hull is decided
+     by its extremes, and a thousand of them place it as well as ten thousand do. Returns 0 when the
+     cloud is flat or degenerate, which the caller reads as "no solidity to report". */
+  function hullVolume(P){
+    var n = P.length / 3;
+    if (n < 4) return 0;
+    var stride = Math.max(1, Math.floor(n / 1200));
+    var pts = [];
+    for (var i = 0; i < n; i += stride) pts.push([P[i*3], P[i*3+1], P[i*3+2]]);
+    if (pts.length < 4) return 0;
+    var sub = function(a, b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; };
+    var crs = function(a, b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; };
+    var dot = function(a, b){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; };
+    /* A starting tetrahedron: two extremes, then the point furthest from that line, then the point
+       furthest from that plane. Picking the first four in order fails on any sorted input. */
+    var i0 = 0, i1 = 0, k;
+    for (k = 1; k < pts.length; k++){
+      if (pts[k][0] < pts[i0][0]) i0 = k;
+      if (pts[k][0] > pts[i1][0]) i1 = k;
+    }
+    if (i0 === i1) return 0;
+    var d01 = sub(pts[i1], pts[i0]), i2 = -1, best = 0;
+    for (k = 0; k < pts.length; k++){
+      var c = crs(d01, sub(pts[k], pts[i0])), L = dot(c, c);
+      if (L > best){ best = L; i2 = k; }
+    }
+    if (i2 < 0 || best <= 0) return 0;
+    var nrm = crs(d01, sub(pts[i2], pts[i0])), i3 = -1; best = 0;
+    for (k = 0; k < pts.length; k++){
+      var h = Math.abs(dot(nrm, sub(pts[k], pts[i0])));
+      if (h > best){ best = h; i3 = k; }
+    }
+    if (i3 < 0 || best <= 0) return 0;
+    var faces = [];
+    var add = function(a, b, c, inside){
+      var nn = crs(sub(pts[b], pts[a]), sub(pts[c], pts[a]));
+      if (dot(nn, sub(pts[inside], pts[a])) > 0){ var t = b; b = c; c = t;
+        nn = crs(sub(pts[b], pts[a]), sub(pts[c], pts[a])); }
+      faces.push([a, b, c, nn]);
+    };
+    add(i0, i1, i2, i3); add(i0, i1, i3, i2); add(i0, i2, i3, i1); add(i1, i2, i3, i0);
+    /* THE TEST IS A DISTANCE, NOT A DOT PRODUCT.  2026-09-30
+       It was an unnormalised dot against a fixed epsilon, and that works on scattered points and
+       fails on exactly the input this is for. A face normal here has magnitude (edge length)², so
+       at coordinates in nanometres it is ~4e8; floating noise on a point lying EXACTLY in a face's
+       plane then comes out around 4, which sailed past an epsilon of 2e-4 and read as "outside".
+       Traced contours are full of coplanar points -- they are stacked rings -- so face after face
+       was torn out for points already on the hull, and the sphere came back with a hull a hundred
+       times its own bounding box. Dividing by |n| makes it the real distance to the plane, and the
+       epsilon is relative to the cloud's own size. Caught by organelleshapecheck.js. */
+    var lo = [pts[0][0], pts[0][1], pts[0][2]], hi = [pts[0][0], pts[0][1], pts[0][2]];
+    for (k = 1; k < pts.length; k++) for (var c3 = 0; c3 < 3; c3++){
+      if (pts[k][c3] < lo[c3]) lo[c3] = pts[k][c3];
+      if (pts[k][c3] > hi[c3]) hi[c3] = pts[k][c3];
+    }
+    var diag = Math.sqrt((hi[0]-lo[0])*(hi[0]-lo[0]) + (hi[1]-lo[1])*(hi[1]-lo[1])
+                       + (hi[2]-lo[2])*(hi[2]-lo[2]));
+    var eps = 1e-7 * (diag || 1);
+    for (k = 0; k < pts.length; k++){
+      var p = pts[k], vis = [], keep = [], f;
+      for (var fi = 0; fi < faces.length; fi++){
+        f = faces[fi];
+        var nl = Math.sqrt(dot(f[3], f[3])) || 1;
+        if (dot(f[3], sub(p, pts[f[0]])) / nl > eps) vis.push(f); else keep.push(f);
+      }
+      if (!vis.length) continue;
+      /* The horizon: every edge of a visible face that a visible face does not share. */
+      var cnt = {};
+      vis.forEach(function(g){
+        [[g[0], g[1]], [g[1], g[2]], [g[2], g[0]]].forEach(function(e){
+          var key = e[0] < e[1] ? e[0] + "_" + e[1] : e[1] + "_" + e[0];
+          if (cnt[key]) cnt[key].n++; else cnt[key] = { n: 1, a: e[0], b: e[1] };
+        });
+      });
+      faces = keep;
+      var interior = pts[i0], any = false;
+      Object.keys(cnt).forEach(function(key){
+        var e = cnt[key];
+        if (e.n !== 1) return;
+        var nn = crs(sub(pts[e.b], pts[e.a]), sub(p, pts[e.a]));
+        if (!(dot(nn, nn) > 0)) return;
+        /* Outward means away from the hull's inside; any interior point decides it, and the
+           centroid of the seed tetrahedron is always inside. */
+        var cen = [(pts[i0][0]+pts[i1][0]+pts[i2][0]+pts[i3][0])/4,
+                   (pts[i0][1]+pts[i1][1]+pts[i2][1]+pts[i3][1])/4,
+                   (pts[i0][2]+pts[i1][2]+pts[i2][2]+pts[i3][2])/4];
+        var a = e.a, b = e.b;
+        if (dot(nn, sub(cen, pts[a])) > 0){ var t = a; a = b; b = t;
+          nn = crs(sub(pts[b], pts[a]), sub(p, pts[a])); }
+        faces.push([a, b, k, nn]);
+        any = true;
+      });
+      if (!any) return 0;
+      interior = interior;
+    }
+    /* A HULL THAT IS NOT CLOSED HAS NO VOLUME, and a number computed from an open surface is
+       worse than no number: every edge of a closed triangulation is shared by exactly two faces,
+       so this refuses rather than reports. Solidity then reads blank in the sheet. */
+    var edge = {}, openEdges = 0;
+    faces.forEach(function(f){
+      [[f[0], f[1]], [f[1], f[2]], [f[2], f[0]]].forEach(function(e){
+        var key = e[0] < e[1] ? e[0] + "_" + e[1] : e[1] + "_" + e[0];
+        edge[key] = (edge[key] || 0) + 1;
+      });
+    });
+    Object.keys(edge).forEach(function(key){ if (edge[key] !== 2) openEdges++; });
+    if (openEdges) return 0;
+    var vol = 0;
+    faces.forEach(function(f){
+      var a = pts[f[0]], b = pts[f[1]], c = pts[f[2]];
+      vol += dot(a, crs(b, c)) / 6;
+    });
+    return Math.abs(vol);
+  }
+
+  function shape3d(rings, resNm){
+    var res = resNm || [1, 1, 1];
+    var M;
+    try { M = loft(rings, res); } catch (e){ return { ok: false, reason: "could not be lofted" }; }
+    if (!M || !M.indices || M.indices.length < 12 || M.flat || M.sections < 2)
+      return { ok: false, reason: "one section has no depth — trace it on at least two",
+               sections: M ? M.sections : 0 };
+    var P = M.positions, I = M.indices;
+    /* Every triangle makes a tetrahedron with the origin. Signed, so the outside cancels and what
+       is left is the solid -- holes included, which is what makes a torus come out as a torus. */
+    var V = 0, S = 0, cx = 0, cy = 0, cz = 0;
+    var mxx = 0, myy = 0, mzz = 0, mxy = 0, mxz = 0, myz = 0, t;
+    for (t = 0; t < I.length; t += 3){
+      var ia = I[t]*3, ib = I[t+1]*3, ic = I[t+2]*3;
+      var ax = P[ia], ay = P[ia+1], az = P[ia+2];
+      var bx = P[ib], by = P[ib+1], bz = P[ib+2];
+      var gx = P[ic], gy = P[ic+1], gz = P[ic+2];
+      var ux = bx-ax, uy = by-ay, uz = bz-az;
+      var vx = gx-ax, vy = gy-ay, vz = gz-az;
+      var nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+      S += Math.sqrt(nx*nx + ny*ny + nz*nz) / 2;
+      var v6 = ax*(by*gz - bz*gy) - ay*(bx*gz - bz*gx) + az*(bx*gy - by*gx);
+      var v = v6 / 6;
+      V += v;
+      cx += v * (ax+bx+gx) / 4; cy += v * (ay+by+gy) / 4; cz += v * (az+bz+gz) / 4;
+      /* Barycentric: over a tetrahedron with one vertex at the origin,
+         ∫ x_i x_j dV = v/20 · ( (Σ p_i)(Σ p_j) + Σ p_i p_j ). */
+      var sx = ax+bx+gx, sy = ay+by+gy, sz = az+bz+gz;
+      mxx += v * (sx*sx + ax*ax + bx*bx + gx*gx) / 20;
+      myy += v * (sy*sy + ay*ay + by*by + gy*gy) / 20;
+      mzz += v * (sz*sz + az*az + bz*bz + gz*gz) / 20;
+      mxy += v * (sx*sy + ax*ay + bx*by + gx*gy) / 20;
+      mxz += v * (sx*sz + ax*az + bx*bz + gx*gz) / 20;
+      myz += v * (sy*sz + ay*az + by*bz + gy*gz) / 20;
+    }
+    var sgn = V < 0 ? -1 : 1;
+    V *= sgn; cx *= sgn; cy *= sgn; cz *= sgn;
+    mxx *= sgn; myy *= sgn; mzz *= sgn; mxy *= sgn; mxz *= sgn; myz *= sgn;
+    if (!(V > 0) || !(S > 0)) return { ok: false, reason: "no enclosed volume", sections: M.sections };
+    cx /= V; cy /= V; cz /= V;
+    var Cxx = mxx/V - cx*cx, Cyy = myy/V - cy*cy, Czz = mzz/V - cz*cz,
+        Cxy = mxy/V - cx*cy, Cxz = mxz/V - cx*cz, Cyz = myz/V - cy*cz;
+    var ev = eig3([Cxx, Cyy, Czz, Cxy, Cxz, Cyz]);
+    /* The equivalent ellipsoid: semi-axis = sqrt(5·eigenvalue), MorphoLibJ's inertia-ellipsoid
+       convention. Moment ratios, NOT end-to-end lengths -- a 5:1 rod does not score exactly 5. */
+    var a1 = Math.sqrt(Math.max(0, 5 * ev[0])) / 1000,
+        a2 = Math.sqrt(Math.max(0, 5 * ev[1])) / 1000,
+        a3 = Math.sqrt(Math.max(0, 5 * ev[2])) / 1000;
+    var volUm3 = V / 1e9, surfUm2 = S / 1e6;
+    var wadell = Math.pow(Math.PI, 1/3) * Math.pow(6 * volUm3, 2/3) / surfUm2;
+    var hull = hullVolume(P) / 1e9;
+    return { ok: true, sections: M.sections,
+             volumeUm3: volUm3, surfaceUm2: surfUm2,
+             sphericityWadell: Math.min(1, wadell),
+             sphericityMorphoLibJ: Math.min(1, Math.pow(wadell, 3)),
+             elongation: a2 > 0 ? a1 / a2 : null,
+             flatness: a3 > 0 ? a2 / a3 : null,
+             solidity3d: hull > 0 ? Math.min(1, volUm3 / hull) : null,
+             hullVolumeUm3: hull > 0 ? hull : null,
+             axesUm: [a1, a2, a3],
+             centroidNm: [cx, cy, cz] };
+  }
+
+  return { loft: loft, volume: volume, shape: shape, shape3d: shape3d,
+           surfacePoints: surfacePoints, minSurfaceDistNm: minSurfaceDistNm,
+           interpolate: interpolate, thinSections: thinSections,
            _orient: orient, _resample: resample, _bestOffset: bestOffset,
            _signedArea: signedArea, _pairUp: pairUp,
            _ringArea: ringArea, _pointInRing: pointInRing, _areaOfSection: areaOfSection,
-           _nestOf: nestOf, _mergeHoles: mergeHoles, _earClip: earClip, N: N };
+           _nestOf: nestOf, _mergeHoles: mergeHoles, _earClip: earClip,
+           _moments: moments, _perimeter: perimeter, _convexHull: convexHull, _describe: describe,
+           _eig3: eig3, _hullVolume: hullVolume,
+           N: N };
 })();
 if (typeof module !== "undefined" && module.exports)
   module.exports = (typeof window !== "undefined" ? window : global).UJ.traceloft;
