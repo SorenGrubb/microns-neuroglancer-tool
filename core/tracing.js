@@ -538,6 +538,18 @@ UJ.tracing = (function(){
           return { z: Math.round(a.z), areaUm2: Number(a.areaUm2) || 0 };
         });
     }
+    /* ── AND WHAT SHAPE IT IS ─────────────────────────────────────────────────────  2026-09-30
+       Søren: "I would like that these numbers are saved there, so we can do graphs with them."
+
+       An object keyed by SHEET COLUMN, built by core/tracedoutlines.js's tracedMeasurements() from
+       these same contours, and passed through here for the same reason the volume is: this file is
+       the storage shape and knows nothing about geometry, and the figures were on screen before
+       anybody pressed anything. Not whitelisted here -- the backend has the whitelist, because that
+       is the side a hostile client cannot edit (backend/src_the_numbers_are_kept_not_recomputed.py).
+       Absent when the outline could not be measured, rather than present and empty. */
+    if (meta.measurements && typeof meta.measurements === "object"
+        && Object.keys(meta.measurements).length)
+      out.measurements = meta.measurements;
     return out;
   }
 

@@ -2356,6 +2356,46 @@ function tracingShareSig(sub){
             (sub.contours || []).length, c].join("\u0001");
   } catch (_e){ return ""; }
 }
+/* ── WHAT THE TRACING'S MEASUREMENTS ARE, AT THE MOMENT IT IS SHARED ────────  2026-09-30
+   Søren: "I would like that these numbers are saved there, so we can do graphs with them."
+
+   Measured against THE CELL'S OUTLINES THE PAD IS HOLDING, and no others. Not a decision taken
+   lightly: the three relational numbers -- nearest organelle, its surface distance, its centroid
+   distance -- are about a set, and the cell may have outlines in the dataset that are not on the pad.
+   Fetching all of them from Drive on every press would make Add slow for numbers nobody is reading
+   yet, so the row carries `measuredSiblings` and the "Measure this cell" button measures against
+   everything. A row measured against two siblings is then visibly not a row measured against eleven,
+   which is the whole reason that column exists.
+
+   Never throws and never blocks a share: a tracing that cannot be measured is still a tracing. */
+function tracingPublishMeasurements(t){
+  try {
+    if (typeof tracedMeasurements !== "function" || !t || !t.rings || !t.rings.length) return null;
+    const key = String(t.nucleus_id || "") + "|" + String(t.root_id || "");
+    const as = function(k){
+      return { structure_id: k.id, name: k.name || "", kind: k.kind || k.instance_of || "",
+               type: k.type || "", instance_index: k.instance_index || "",
+               nucleus_id: k.nucleus_id || "", root_id: k.root_id || "", rings: k.rings };
+    };
+    const list = (TRACINGS_KEPT || []).filter(function(k){
+      return k && k.id && k.rings && k.rings.length
+          && (String(k.nucleus_id || "") + "|" + String(k.root_id || "")) === key;
+    }).map(as);
+    /* The tracing being shared may not be in the kept list yet -- a first share puts it there
+       afterwards -- and measuring it against a set it is not in would give it no distances at all. */
+    if (!list.some(function(k){ return k.structure_id === t.id; })) list.push(as(t));
+    const rows = tracedMeasurements(list,
+      (typeof window.tracedMeasureOpts === "function") ? window.tracedMeasureOpts()
+                                                       : { resNm: [4, 4, 40] }) || [];
+    for (let i = 0; i < rows.length; i++){
+      if (rows[i].structureId !== t.id) continue;
+      const m = {};
+      Object.keys(rows[i]).forEach(function(k){ if (k !== "structureId") m[k] = rows[i][k]; });
+      return m;
+    }
+  } catch (_e){}
+  return null;
+}
 function tracingPublish(t,quiet){
   if(!t||!t.rings||!t.rings.length)return false;
   const signedIn=(typeof GOOGLE_VERIFIED!=="undefined"&&GOOGLE_VERIFIED)
@@ -2382,7 +2422,11 @@ function tracingPublish(t,quiet){
                                              volumeMethod:t.volume_method,
                                              volumeTrapezoidUm3:t.volume_trapezoid_um3,
                                              sectionGapNm:t.section_gap_nm,
-                                             areaUm2:t.area_um2, areas:t.areas});
+                                             areaUm2:t.area_um2, areas:t.areas,
+                                             /* the shape and the distances, measured the same way
+                                                and for the same reason as the volume -- see
+                                                tracingPublishMeasurements above */
+                                             measurements:tracingPublishMeasurements(t)});
   if(!sub.contours.length)return false;
   /* NOTHING NEW, NOTHING SENT (2026-09-23). The same test tracingPublish already applies to the
      centre annotation below -- whether it MOVED, not whether anything was pressed -- applied to the
@@ -3382,7 +3426,11 @@ function tracingPost(payload){
     .then(function(r){ return r.text(); })
     .then(function(t){
       var d = null; try { d = JSON.parse(t); } catch (_pe){}
-      return (d && (d.ok === true || d.status === "ok")) ? { ok: true }
+      /* THE REST OF THE ANSWER TOO (2026-09-30). It reduced a success to {ok:true}, which is all
+         a tracing needs and throws away what a measurement batch replies -- how many rows it
+         updated, and which structureIds it could not find. Merged, so every existing `res.ok`
+         reads exactly as before. */
+      return (d && (d.ok === true || d.status === "ok")) ? Object.assign({ ok: true }, d)
            : { ok: false, error: (d && d.error) || String(t || "").slice(0, 200) };
     }, function(e){ return { ok: false, offline: true, error: String(e && e.message || e) }; });
 }
@@ -3856,6 +3904,44 @@ async function tracingBrowse(){
    pad, in Neuroglancer, or as a zip. Groups newest first -- the cell somebody is working on now is
    the one most likely to be wanted -- and inside a cell by kind and number, so Lysosome 1, 2, 3
    read in order. See src/the_tracings_group_by_cell.py. */
+
+/* ── RUNNING A MEASUREMENT, AND SAYING WHAT HAPPENED ────────────────────  2026-09-30
+   The progress goes on the button, which is where the eye already is, and the sentence afterwards
+   says three numbers: how many were measured, how many rows the sheet updated, and -- the
+   interesting one -- how many structures the sheet had no row for. That last is the only thing this
+   button can discover that nothing else can: a page and a sheet disagreeing about what exists. */
+async function tracingMeasureRun(btn, go, sayEl){
+  if (!btn) return;
+  const was = btn.textContent, wasDis = btn.disabled;
+  btn.disabled = true;
+  const say = function(m){
+    btn.textContent = m;
+    if (sayEl) sayEl.textContent = "";
+  };
+  let r;
+  try { r = await go(say); }
+  catch (e){ r = { error: String(e && e.message || e) }; }
+  btn.textContent = was; btn.disabled = wasDis;
+  let msg;
+  if (r && r.error){
+    msg = "Nothing was saved \u2014 " + r.error + ".";
+    if (r.updated) msg = r.updated + " row" + (r.updated === 1 ? "" : "s") + " had been saved "
+                       + "before it stopped. Then: " + r.error + ".";
+  } else if (!r || !r.measured){
+    msg = "There was nothing to measure \u2014 no outline could be read.";
+  } else {
+    msg = "Measured " + r.measured + " outline" + (r.measured === 1 ? "" : "s")
+        + " and saved " + r.updated + " row" + (r.updated === 1 ? "" : "s") + " to the sheet.";
+    if (r.missing && r.missing.length)
+      msg += " " + r.missing.length + " had no row in the sheet to write to ("
+           + r.missing.slice(0, 3).join(", ") + (r.missing.length > 3 ? ", \u2026" : "")
+           + ") \u2014 which means the sheet and this page disagree about what exists.";
+    if (r.capped) msg += " " + r.capped + " outline" + (r.capped === 1 ? "" : "s")
+                       + " were left unread because of the per-cell read cap.";
+  }
+  if (sayEl) sayEl.textContent = msg;
+  if (typeof tracingSay === "function") tracingSay(msg);
+}
 function tracingRenderShared(){
   const host = document.getElementById("tracingShared");
   if (!host) return;
@@ -3882,7 +3968,22 @@ function tracingRenderShared(){
     });
   });
   TRACING_SHARED_GROUPS = groups;
+  /* ── THE BACKFILL, AND THE RE-MEASURE ────────────────────────  2026-09-30
+     Two buttons, because there are two occasions. Everything traced before the measurements existed
+     has a row with none, which is the whole dataset once; and a cell's relational numbers go stale
+     the moment another organelle in it is outlined, which is one cell, often. Neither is a new
+     version of anything -- see core/tracedoutlines.js's tracedMeasureAll. */
   host.innerHTML = '<label>In the dataset, by cell — open one to add to it or correct it</label>'
+    + (typeof window.tracedMeasureAll === "function"
+        ? '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px">'
+          + '<button type="button" class="hist-chip" id="tracedMeasureAllBtn" title="Reads every '
+            + 'outline in the dataset, measures it — shape, sphericity, the distances to the '
+            + 'nucleus and to the nearest organelle — and saves the numbers onto its row in the '
+            + 'sheet. It files no new version of any tracing and credits nobody: it only fills in '
+            + 'the measurement columns. Do it once for everything traced before the measurements '
+            + 'existed.">Measure every outline and save the numbers</button>'
+          + '<span class="hint" id="tracedMeasureSay" style="flex:1 1 180px;min-width:0"></span></div>'
+        : "")
     + groups.map(function(g, gi){
         const type = (g.items.filter(function(x){ return x.t.cellType; })[0] || { t: {} }).t.cellType || "";
         return '<div ' + TRACING_CELL_BOX + ' data-g="' + gi + '">'
@@ -3894,7 +3995,14 @@ function tracingRenderShared(){
             + 'tracing of this cell in the viewer, each in its own colour, with the cell.">Neuroglancer</button>'
           + '<button class="idbtn tracingcellzip" data-g="' + gi + '" ' + TRACING_BTN + ' title="A zip '
             + 'of this cell: each tracing&rsquo;s contours (JSON), a mesh of each (OBJ, nm), and an '
-            + 'index.">Download zip</button></div>'
+            + 'index.">Download zip</button>'
+          + (typeof window.tracedMeasureCells === "function"
+              ? '<button class="idbtn tracedmeasurecell" data-g="' + gi + '" ' + TRACING_BTN
+                + ' title="Measures this cell’s outlines together and saves the numbers to the '
+                + 'sheet. Worth doing after outlining another organelle here: each organelle’s '
+                + 'distance to its nearest neighbour is measured against the others, so a new one '
+                + 'makes the old numbers out of date.">Measure this cell</button>' : "")
+          + '</div>'
           + g.items.map(function(x){
               const t = x.t;
               const who = (t.contributors && t.contributors.length) ? t.contributors.join(", ")
@@ -3938,6 +4046,20 @@ function tracingRenderShared(){
   });
   [].slice.call(host.querySelectorAll(".tracingcellzip")).forEach(function(b){
     b.addEventListener("click", function(){ tracingCellZip(groups[Number(b.dataset.g)], b); });
+  });
+  [].slice.call(host.querySelectorAll(".tracedmeasurecell")).forEach(function(b){
+    b.addEventListener("click", function(){
+      const g = groups[Number(b.dataset.g)];
+      if (!g) return;
+      tracingMeasureRun(b, function(say){
+        return window.tracedMeasureCells({ nuc: [g.nuc], root: [g.root] }, say);
+      });
+    });
+  });
+  const allBtn = document.getElementById("tracedMeasureAllBtn");
+  if (allBtn) allBtn.addEventListener("click", function(){
+    tracingMeasureRun(allBtn, function(say){ return window.tracedMeasureAll(say); },
+                      document.getElementById("tracedMeasureSay"));
   });
 }
 var TRACING_SHARED_GROUPS = [];

@@ -613,7 +613,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-30 07:15</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-30 19:47</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -6135,7 +6135,11 @@ function postAndRead(payload){
     .then(function(got){
       var t=got.t;
       var d=null; try{ d=JSON.parse(t); }catch(_pe){}
-      if(d&&(d.ok===true||d.status==="ok"))return {ok:true};
+      /* THE REST OF THE ANSWER TOO (2026-09-30). This reduced every success to {ok:true},
+         which is all a classification needs and throws away what a measurement batch replies:
+         how many rows it updated, and which structureIds it had no row for. Merged, so every
+         existing `res.ok` test reads exactly as before. */
+      if(d&&(d.ok===true||d.status==="ok"))return Object.assign({ok:true},d);
       /* ── A SIGN-IN PAGE IS NOT AN UNREADABLE REPLY ────────────────────────────  2026-09-18
          Søren got a toast beginning `<!DOCTYPE html><html lang="da">` with a nonce and Google's own
          `ppConfig` in it. That is a Google page, in his language, and printing its first 120
@@ -12911,6 +12915,27 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      the pad comes from whichever page can answer. This one can: nucleus id -> master-array index ->
      the MICrONS detection centroid. A page that cannot simply leaves the hook undefined and the
      sentence omits the distance rather than inventing one. */
+  /* ── THE THREE THINGS A MEASUREMENT NEEDS FROM THIS PAGE ─────────────  2026-09-30
+     The voxel size, a nucleus centroid to fall back on when a cell's nucleus was never outlined,
+     and the cell type. Written out ONCE, here, because four callers now want them: the Excel sheet,
+     the sentence beside the volume on the pad, the per-cell Measure button and the whole-dataset
+     one. Two of those definitions existed a day apart in this file, and a nucleus fallback that
+     disagreed with itself between the sheet and the sheet's own backfill is precisely the shape
+     of bug this project keeps finding. ωJump and χJump leave this hook undefined -- they open
+     volumes with no nucleus table -- and those columns are then blank rather than invented. */
+  window.tracedMeasureOpts=function(){
+    return {
+      resNm:[UJ_RX,UJ_RY,UJ_RZ],
+      nucCentroid:function(nid){
+        const i=nidToIndex(nid);
+        return i<0?null:{xVox:NX[i],yVox:NY[i],zVox:NZ[i]};
+      },
+      typeOf:function(nid){
+        const i=nidToIndex(nid);
+        return i<0?"":(typeInfo(i)||{}).name||"";
+      }
+    };
+  };
   window.tracingNucCentroid=function(nid){
     try{
       const i=nidToIndex(nid);
@@ -12927,17 +12952,7 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
         {nuc:matches.map(function(m){return rowNucId(m.row);}),
          root:matches.map(function(m){return rowRootId(m.row);})},say);
     }catch(e){ console.warn("[organelle sheet] outlines unavailable",e); return ""; }
-    const rows=tracedShapeRows(got.tracings,{
-      resNm:[UJ_RX,UJ_RY,UJ_RZ],
-      nucCentroid:function(nid){
-        const i=nidToIndex(nid);
-        return i<0?null:{xVox:NX[i],yVox:NY[i],zVox:NZ[i]};
-      },
-      typeOf:function(nid){
-        const i=nidToIndex(nid);
-        return i<0?"":(typeInfo(i)||{}).name||"";
-      }
-    });
+    const rows=tracedShapeRows(got.tracings,window.tracedMeasureOpts());
     if(!rows.length)return got.capped?("None of the matched cells has an outline that could be "
       +"read, and "+got.capped+" more were left unread \u2014 the workbook has the Cells sheet only."):"";
     const aoa=[TRACED_SHAPE_COLUMNS.slice()];

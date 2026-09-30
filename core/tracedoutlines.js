@@ -361,6 +361,30 @@ if (typeof document !== "undefined"){
 
    Returns { tracings: [...], capped: n }. `capped` is how many were left unread, and the caller
    says so: one Drive read per outline is right for a cell and wrong for three hundred. */
+/* ONE INDEX ENTRY PLUS ITS FETCHED GEOMETRY -> ONE TRACING, the shape tracedShapeRows() measures
+   and blenderexport colours. Extracted from tracedStructuresForCells on 2026-09-30, when the
+   measurement backfill needed the same mapping: two copies of "which id wins, and what is `kind`"
+   would have drifted inside a week, and the four bugs this project has had of that shape all began
+   as a second copy of something small. Null when the geometry could not be read. */
+function tracedOneFrom(t, x){
+  if (!t || !x || !x.st || !x.st.rings || !x.st.rings.length) return null;
+  const one = (UJ.tracing.toTracings([x.st]) || [])[0];
+  if (!one) return null;
+  /* toTracings carries neither of these, and the notebook needs both: `kind` is what
+     colour_policy colours by, and `root_id` is how blenderexport decides a tracing belongs to
+     a cell in this export rather than judging it by where it sits. */
+  one.kind = String(x.st.instanceOf || x.st.kind || t.instanceOf || t.kind || "");
+  const rid = String(x.st.rootId || t.rootId || "");
+  if (rid) one.root_id = rid;
+  const nid = String(x.st.nucleusId || t.nucleusId || "");
+  if (nid && !one.nucleus_id) one.nucleus_id = nid;
+  one.structure_id = String(t.structureId);
+  /* The published number, so a measured row can be told apart from its siblings by name. */
+  if (x.st.instanceIndex || t.instanceIndex)
+    one.instance_index = Number(x.st.instanceIndex || t.instanceIndex) || "";
+  return one;
+}
+
 async function tracedStructuresForCells(ids, say, opts){
   if(typeof REPORT_ENDPOINT==="undefined"||!REPORT_ENDPOINT) return {tracings:[],capped:0};
   if(!window.UJ||!UJ.tracing||!UJ.tracing.fetchMany) return {tracings:[],capped:0};
@@ -390,20 +414,8 @@ async function tracedStructuresForCells(ids, say, opts){
     say&&say("Reading outlines "+d+"/"+n+"\u2026"); });
   const out=[];
   mine.forEach(function(t){
-    const x=res[t.structureId];
-    if(!x||!x.st||!x.st.rings||!x.st.rings.length)return;
-    const one=(UJ.tracing.toTracings([x.st])||[])[0];
-    if(!one)return;
-    /* toTracings carries neither of these, and the notebook needs both: `kind` is what
-       colour_policy colours by, and `root_id` is how blenderexport decides a tracing belongs to
-       a cell in this export rather than judging it by where it sits. */
-    one.kind=String(x.st.instanceOf||x.st.kind||t.instanceOf||t.kind||"");
-    const rid=String(x.st.rootId||t.rootId||"");
-    if(rid)one.root_id=rid;
-    const nid=String(x.st.nucleusId||t.nucleusId||"");
-    if(nid&&!one.nucleus_id)one.nucleus_id=nid;
-    one.structure_id=String(t.structureId);
-    out.push(one);
+    const one=tracedOneFrom(t,res[t.structureId]);
+    if(one)out.push(one);
   });
   return {tracings:out,capped:capped};
 }
@@ -606,6 +618,236 @@ function tracedShapeRows(tracings, opts){
 }
 window.tracedShapeRows = tracedShapeRows;
 window.TRACED_SHAPE_COLUMNS = TRACED_SHAPE_COLUMNS;
+
+/* ── THE SAME NUMBERS, UNDER THE SHEET'S NAMES ───────────────────────────────────  2026-09-30
+   Søren: "I would like that these numbers are saved there, so we can do graphs with them."
+
+   NOT A SECOND MEASUREMENT PASS. tracedShapeRows() above computes everything once; this maps that
+   result onto column names for the Google Sheet. The map is the only place the Excel header and
+   the sheet column meet, which is the point — this project's recurring bug is a value decided by
+   one expression and matched by a second that drifted from it, and a measurement pass written
+   separately for the sheet would be the next one.
+
+   Left column: the Excel header tracedShapeRows produces. Right: the sheet column Code.gs writes.
+   A header without a column, or a column without a header, shows up here on one screen.
+
+   "Sections" IS NOT HERE, DELIBERATELY. The sheet already has a `sections` column, counted in
+   Code.gs from the contours it was posted. Mapping the Excel header onto it would make one number
+   with two authors, which is this project's recurring bug in miniature \u2014 so the backend keeps the
+   one it computes and this map stays disjoint from the columns the row already owns. */
+var TRACED_SHEET_FIELDS = [
+  ["Area at widest section (\u00b5m\u00b2)",   "widestAreaUm2"],
+  ["Perimeter at widest section (\u00b5m)",     "perimeterUm"],
+  ["Circularity (widest)",               "circularity"],
+  ["Aspect ratio (widest)",              "aspectRatio"],
+  ["Roundness (widest)",                 "roundness"],
+  ["Solidity (widest)",                  "solidity"],
+  ["Major axis (\u00b5m)",                      "majorAxisUm"],
+  ["Minor axis (\u00b5m)",                      "minorAxisUm"],
+  ["Circularity (median)",               "circularityMedian"],
+  ["Aspect ratio (median)",              "aspectRatioMedian"],
+  ["Roundness (median)",                 "roundnessMedian"],
+  ["Solidity (median)",                  "solidityMedian"],
+  ["Sphericity (Wadell)",                "sphericityWadell"],
+  ["Sphericity (MorphoLibJ, 36\u03c0V\u00b2/S\u00b3)", "sphericityMorphoLibJ"],
+  ["Elongation (3D)",                    "elongation3d"],
+  ["Flatness (3D)",                      "flatness3d"],
+  ["Solidity (3D)",                      "solidity3d"],
+  ["Mesh volume (\u00b5m\u00b3)",              "meshVolumeUm3"],
+  ["Mesh surface area (\u00b5m\u00b2)",        "meshSurfaceUm2"],
+  ["Centroid X (voxel)",                 "centroidX"],
+  ["Centroid Y (voxel)",                 "centroidY"],
+  ["Centroid Z (voxel)",                 "centroidZ"],
+  ["Distance to nucleus centroid (\u00b5m)",    "distNucleusCentroidUm"],
+  ["Nucleus centroid from",              "nucleusCentroidFrom"],
+  ["Distance to nucleus surface (\u00b5m)",     "distNucleusSurfaceUm"],
+  ["Nearest organelle (by surface)",     "nearestBySurface"],
+  ["Distance to its surface (\u00b5m)",         "distNearestSurfaceUm"],
+  ["Distance to its centroid (\u00b5m)",        "distNearestPairCentroidUm"],
+  ["Nearest organelle (by centroid)",    "nearestByCentroid"],
+  ["Distance to that centroid (\u00b5m)",       "distNearestCentroidUm"]
+];
+
+/* tracedMeasurements(tracings, opts) -> [{structureId, ...the columns above, measuredAt,
+   measuredSiblings}], ready to post. `measuredSiblings` is how many OTHER organelles of that cell
+   were in this measurement — the three relational numbers are only true against that set, and a
+   row measured against three siblings is a different claim from one measured against eleven. */
+function tracedMeasurements(tracings, opts){
+  var rows = tracedShapeRows(tracings, opts) || [];
+  var when = new Date().toISOString();
+  /* Counted from the rows themselves, by the same cell rule and the same "what may be a
+     neighbour" rule the distances used, so the number cannot describe a different set. */
+  var sibs = {};
+  rows.forEach(function(r){
+    var k = String(r["Kind"] || "").toLowerCase();
+    if (k === "cell" || k === "nucleus") return;
+    var key = String(r["Nucleus ID"] || "") + "|" + String(r["Root ID"] || "");
+    sibs[key] = (sibs[key] || 0) + 1;
+  });
+  return rows.filter(function(r){ return r["Structure ID"]; }).map(function(r){
+    var key = String(r["Nucleus ID"] || "") + "|" + String(r["Root ID"] || "");
+    var kind = String(r["Kind"] || "").toLowerCase();
+    var mine = sibs[key] || 0;
+    var m = { structureId: r["Structure ID"] };
+    TRACED_SHEET_FIELDS.forEach(function(p){ m[p[1]] = r[p[0]]; });
+    m.measuredAt = when;
+    m.measuredSiblings = (kind === "cell" || kind === "nucleus") ? mine : Math.max(0, mine - 1);
+    return m;
+  });
+}
+window.tracedMeasurements = tracedMeasurements;
+
+/* ── MEASURING IS ITS OWN REQUEST ───────────────────────────────────  2026-09-30
+   Søren: "I would like that these numbers are saved there, so we can do graphs with them."
+
+   Everything traced before the measurements existed has a row without them, and a tracing's three
+   RELATIONAL numbers -- the nearest organelle, its surface distance, its centroid distance -- go out
+   of date the moment somebody outlines another organelle in the same cell. Both are the same job:
+   read the outlines, measure them together, save the numbers.
+
+   NOT BY RE-SHARING THE TRACINGS. A re-share is a new version of each: a Drive rewrite, a history
+   row, a version number and a name on the credit line, 68 times over, for a change that moves no
+   geometry and that nobody should be credited for. So it posts `traced_measurements`, which the
+   backend answers by writing measurement columns onto rows that already exist and touching nothing
+   else -- see backend/src_the_numbers_are_kept_not_recomputed.py. */
+
+/* THE THREE OPTIONS, FROM WHICHEVER PAGE CAN ANSWER. µJump can: the voxel size, the MICrONS
+   nucleus-detection centroid as a fallback when a cell's nucleus was never outlined, and the cell
+   type. ωJump and χJump open volumes with no nucleus table and leave the hook undefined, and then
+   the columns that need it are simply blank rather than invented. */
+function tracedMeasureOpts_(){
+  /* THE TRAILING UNDERSCORE MATTERS. core/*.js are classic scripts, so a top-level
+     `function tracedMeasureOpts` IS window.tracedMeasureOpts -- this would have called itself for
+     ever the moment a page defined the hook. */
+  if (typeof window.tracedMeasureOpts === "function"){
+    try { return window.tracedMeasureOpts() || { resNm: [4, 4, 40] }; } catch (_e){}
+  }
+  return { resNm: [4, 4, 40] };
+}
+/* Small enough that Apps Script never sees a payload worth worrying about, large enough that 68
+   tracings are one request. Each chunk is answered before the next is sent, so a failure halfway
+   through has saved the chunks before it and says so. */
+const TRACED_MEASURE_BATCH = 200;
+
+/* THE POST, READING ITS WHOLE ANSWER. postAndRead() reduces a success to {ok:true}, and the two
+   numbers worth having here are `updated` and `missing` -- a structureId with no row means the page
+   and the sheet disagree about what exists, which is the one thing this button can discover. */
+async function tracedPostMeasurements(rows){
+  if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT)
+    return { error: "this page has no backend configured" };
+  if (typeof GOOGLE_VERIFIED === "undefined" || !GOOGLE_VERIFIED
+      || typeof GOOGLE_CREDENTIAL === "undefined" || !GOOGLE_CREDENTIAL)
+    return { error: "please sign in with Google first \u2014 the sheet records who wrote what" };
+  const payload = { type: "traced_measurements", rows: rows,
+                    credential: GOOGLE_CREDENTIAL,
+                    reporterName: (typeof REPORTER_NAME !== "undefined" && REPORTER_NAME) || "",
+                    reporterEmail: (typeof REPORTER_EMAIL !== "undefined" && REPORTER_EMAIL) || "" };
+  try { if (UJ && UJ.cfg && UJ.cfg.backend && UJ.cfg.backend.ds) payload.ds = UJ.cfg.backend.ds; }
+  catch (_e){}
+  let text = "";
+  try {
+    const r = await fetch(REPORT_ENDPOINT, { method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+    text = await r.text();
+  } catch (e){ return { error: "could not reach the server (" + String(e && e.message || e) + ")" }; }
+  let d = null; try { d = JSON.parse(text); } catch (_pe){}
+  if (!d){
+    /* An HTML reply is Apps Script serving a sign-in page or its own error page, and the remedy
+       differs -- ujump.html's postAndRead tells the two apart in a sentence. Here it is enough to
+       say the reply was not JSON and put the body where it can be read. */
+    try { console.warn("[measurements] reply was not JSON: " + String(text).slice(0, 300)); }
+    catch (_cw){}
+    return { error: "the server did not answer with JSON \u2014 the deployment may be older than "
+                  + "this page, or need approving again (the console has its reply)" };
+  }
+  if (d.ok !== true) return { error: String(d.error || "the server refused it") };
+  return { updated: Number(d.updated) || 0, missing: (d.missing || []) };
+}
+
+/* Measure a list of tracings TOGETHER -- together because the relational numbers are about the set
+   -- and save them. Returns {measured, updated, missing} or {error}. */
+async function tracedMeasureAndSave(list, say){
+  if (typeof tracedMeasurements !== "function")
+    return { error: "this page cannot measure outlines (core/tracedoutlines.js is older than it)" };
+  if (!list || !list.length) return { measured: 0, updated: 0, missing: [] };
+  say && say("Measuring " + list.length + " outline" + (list.length === 1 ? "" : "s") + "\u2026");
+  let rows;
+  try { rows = tracedMeasurements(list, tracedMeasureOpts_()) || []; }
+  catch (e){ return { error: "could not measure them (" + String(e && e.message || e) + ")" }; }
+  if (!rows.length) return { measured: 0, updated: 0, missing: [] };
+  let updated = 0; const missing = [];
+  for (let i = 0; i < rows.length; i += TRACED_MEASURE_BATCH){
+    const chunk = rows.slice(i, i + TRACED_MEASURE_BATCH);
+    say && say("Saving " + Math.min(i + chunk.length, rows.length) + "/" + rows.length + "\u2026");
+    const r = await tracedPostMeasurements(chunk);
+    if (r.error) return { error: r.error, measured: rows.length, updated: updated, missing: missing };
+    updated += r.updated;
+    (r.missing || []).forEach(function(s){ missing.push(s); });
+  }
+  return { measured: rows.length, updated: updated, missing: missing };
+}
+
+/* One cell's outlines, read the way the Excel sheet reads them. The everyday button: the numbers
+   that go stale are a cell's own, and this costs one Drive read per outline of that cell. */
+async function tracedMeasureCells(ids, say){
+  let got;
+  try { got = await tracedStructuresForCells(ids, say); }
+  catch (e){ return { error: "could not read the outlines (" + String(e && e.message || e) + ")" }; }
+  const out = await tracedMeasureAndSave(got.tracings, say);
+  if (got.capped) out.capped = got.capped;
+  return out;
+}
+
+/* EVERY OUTLINE IN THE DATASET, measured cell by cell. Cell by cell rather than all at once because
+   the relational numbers are only ever about one cell's organelles -- the pairing in
+   tracedShapeRows() already refuses to cross cells -- so measuring a cell at a time gives the same
+   answers while holding one cell's geometry in memory instead of all of it. */
+async function tracedMeasureAll(say){
+  if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT)
+    return { error: "this page has no backend configured" };
+  let index = [];
+  try {
+    say && say("Listing the dataset\u2019s tracings\u2026");
+    const r = await fetch(REPORT_ENDPOINT + "?tracings=1" + tracedOutlinesDsQS());
+    const d = await r.json();
+    index = (d && d.tracings) || [];
+  } catch (e){ return { error: "could not list the tracings (" + String(e && e.message || e) + ")" }; }
+  if (!index.length) return { measured: 0, updated: 0, missing: [], cells: 0 };
+  /* Grouped by the cell key tracedShapeRows pairs within, so each batch is exactly the set the
+     relational numbers are measured against. A tracing filed against neither id is its own group:
+     it has no siblings, and pretending it shares a cell with every other orphan would invent
+     neighbours. */
+  const groups = {};
+  index.forEach(function(t){
+    if (!t || !t.structureId) return;
+    const nid = String(t.nucleusId || ""), rid = String(t.rootId || "");
+    const key = (nid || rid) ? (nid + "|" + rid) : ("solo:" + t.structureId);
+    (groups[key] = groups[key] || { nuc: [], root: [] });
+    if (nid) groups[key].nuc.push(nid);
+    if (rid) groups[key].root.push(rid);
+  });
+  const keys = Object.keys(groups);
+  let measured = 0, updated = 0, capped = 0; const missing = [];
+  for (let i = 0; i < keys.length; i++){
+    const g = groups[keys[i]];
+    const label = "Cell " + (i + 1) + "/" + keys.length;
+    const r = await tracedMeasureCells(g, function(m){ say && say(label + " \u2014 " + m); });
+    if (r.error) return { error: r.error, measured: measured, updated: updated,
+                          missing: missing, cells: i };
+    measured += r.measured || 0;
+    updated += r.updated || 0;
+    capped += r.capped || 0;
+    (r.missing || []).forEach(function(s){ missing.push(s); });
+  }
+  return { measured: measured, updated: updated, missing: missing, cells: keys.length,
+           capped: capped };
+}
+window.tracedMeasureAndSave = tracedMeasureAndSave;
+window.tracedMeasureCells = tracedMeasureCells;
+window.tracedMeasureAll = tracedMeasureAll;
+
+window.TRACED_SHEET_FIELDS = TRACED_SHEET_FIELDS;
+
 
 /* WHAT THE PAD IS HOLDING WINS. A tracing open here may carry edits the dataset has not seen, so
    the local copy takes the id and the dataset fills in everything the browser does not have. */

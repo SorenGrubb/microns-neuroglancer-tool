@@ -251,6 +251,160 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
     ok(card.hook, "µJump answers where a nucleus is");
   }
 
+  /* ── AND THE SHAPE THE GOOGLE SHEET WANTS ───────────────────────────────────  2026-09-30
+     Søren: "I would like that these numbers are saved there, so we can do graphs with them."
+
+     The risk here is not arithmetic, it is drift: two vocabularies for one set of numbers. So the
+     assertion is that the map is total in both directions — every sheet column has a source
+     header that tracedShapeRows actually produces, and no measurement silently fails to travel. */
+  console.log("\nwhat the sheet gets");
+  const sheet = await p.evaluate(() => {
+    if (typeof tracedMeasurements !== "function" || !window.TRACED_SHEET_FIELDS)
+      return { missing: true };
+    const ring = (cx, cy, r, z) => ({ z: z, points: (() => {
+      const o = []; for (let i = 0; i < 128; i++){ const t = 2 * Math.PI * i / 128;
+        o.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); } return o; })() });
+    const stack = (cx, cy, rad) => [ring(cx, cy, rad, 10), ring(cx, cy, rad, 11), ring(cx, cy, rad, 12)];
+    const cell = n => ({ nucleus_id: "111", root_id: "999", structure_id: "sid-" + n, name: n });
+    const list = [
+      Object.assign(cell("Lysosome 1"), { kind: "lysosome", rings: stack(1000, 0, 40) }),
+      Object.assign(cell("Lysosome 2"), { kind: "lysosome", rings: stack(1000, 500, 40) }),
+      Object.assign(cell("Lysosome 3"), { kind: "lysosome", rings: stack(1000, 900, 40) }),
+      Object.assign(cell("Nucleus"),    { kind: "nucleus",  rings: stack(0, 0, 300) })
+    ];
+    const ms = tracedMeasurements(list, { resNm: [4, 4, 40] });
+    const by = {}; ms.forEach(m => { by[m.structureId] = m; });
+    /* Is the map total? Every RIGHT-hand name must appear on a record, and every LEFT-hand name
+       must be a header tracedShapeRows really produces. */
+    const headers = window.TRACED_SHAPE_COLUMNS;
+    const one = ms[0] || {};
+    const missingCols = window.TRACED_SHEET_FIELDS
+      .filter(pair => !(pair[1] in one)).map(pair => pair[1]);
+    const unknownSrc = window.TRACED_SHEET_FIELDS
+      .filter(pair => headers.indexOf(pair[0]) < 0).map(pair => pair[0]);
+    return { missing: false, n: ms.length, by, one,
+             fields: window.TRACED_SHEET_FIELDS.length, missingCols, unknownSrc };
+  });
+  if (sheet.missing) {
+    ok(false, "the page exposes tracedMeasurements() and TRACED_SHEET_FIELDS", "it does not");
+  } else {
+    ok(sheet.n === 4, "one measurement record per outline", sheet.n);
+    ok(sheet.unknownSrc.length === 0,
+       "every sheet column is fed by a header tracedShapeRows really produces",
+       sheet.unknownSrc.join(", ") || "all " + sheet.fields + " map to a real header");
+    ok(sheet.missingCols.length === 0,
+       "...and every one of them arrives on the record",
+       sheet.missingCols.join(", ") || "none missing");
+    ok(!!sheet.one.structureId, "each record names the structure it is about", sheet.one.structureId);
+    ok(typeof sheet.one.sphericityWadell === "number" && sheet.one.sphericityWadell > 0,
+       "the 3D numbers travel under sheet names", sheet.one.sphericityWadell);
+    ok(/^\d{4}-\d\d-\d\dT/.test(sheet.one.measuredAt || ""),
+       "every record is stamped with when it was measured", sheet.one.measuredAt);
+    /* The relational numbers are only true against the set they were measured with, so the count
+       of that set travels with them. Three lysosomes: each has two siblings. */
+    ok(sheet.by["sid-Lysosome 1"].measuredSiblings === 2,
+       "...and with how many sibling organelles it was measured against",
+       sheet.by["sid-Lysosome 1"].measuredSiblings);
+    ok(sheet.by["sid-Nucleus"].measuredSiblings === 3,
+       "the nucleus counts all three, since it is not one of them",
+       sheet.by["sid-Nucleus"].measuredSiblings);
+  }
+
+  /* ── AND THE NUMBERS REACH THE SHEET ─────────────────────────────────────────────  2026-09-30
+     Søren: "But where are they in the Google sheets? I would like that these numbers are saved
+     there, so we can do graphs with them."
+
+     Everything above proves the numbers exist. This proves they are SENT: one POST of type
+     traced_measurements, carrying rows keyed by sheet column, and the answer read back rather than
+     assumed. The backend end of the same contract is backend/gs_harness_measurements.js. */
+  console.log("\nsaving the numbers");
+  const posted = [];
+  /* Registered last, so it wins, and falls through to the blanket stub for everything else. It
+     answers the way Code.gs does -- including a `missing` entry, because "the sheet had no row for
+     this structure" is the one thing this button can discover and the sentence must say it. */
+  await p.route("**script.google.com/**", async r => {
+    const req = r.request();
+    if (req.method() === "POST"){
+      let d = null; try { d = JSON.parse(req.postData() || "null"); } catch (_e){}
+      if (d && d.type === "traced_measurements"){
+        posted.push(d);
+        return r.fulfill({ status: 200, contentType: "application/json",
+          headers: { "Access-Control-Allow-Origin": "*" },
+          body: JSON.stringify({ ok: true, updated: (d.rows || []).length, missing: ["ghost_1"] }) });
+      }
+    }
+    return r.fallback();
+  });
+  const save = await p.evaluate(async () => {
+    if (typeof window.tracedMeasureAndSave !== "function"
+        || typeof window.tracedMeasureCells !== "function"
+        || typeof window.tracedMeasureAll !== "function") return { missing: true };
+    /* Assignment, not window.X = : these are `let` at the top of the page's script, so they live in
+       the global lexical scope where core/*.js reads them and where window never looks. */
+    GOOGLE_VERIFIED = true; GOOGLE_CREDENTIAL = "tok";
+    const ring = (cx, cy, r, z) => ({ z: z, points: (() => {
+      const o = []; for (let i = 0; i < 128; i++){ const t = 2 * Math.PI * i / 128;
+        o.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); } return o; })() });
+    const stack = (cx, cy, rad) => [ring(cx, cy, rad, 10), ring(cx, cy, rad, 11), ring(cx, cy, rad, 12)];
+    const cell = n => ({ nucleus_id: "111", root_id: "999", structure_id: "sid-" + n, name: n });
+    const list = [
+      Object.assign(cell("Lysosome 1"), { kind: "lysosome", rings: stack(1000, 0, 40) }),
+      Object.assign(cell("Lysosome 2"), { kind: "lysosome", rings: stack(1000, 500, 40) })
+    ];
+    const said = [];
+    const out = await window.tracedMeasureAndSave(list, m => said.push(m));
+    return { missing: false, out: out, said: said,
+             hasOpts: typeof window.tracedMeasureOpts === "function",
+             opts: (function(){ try { const o = window.tracedMeasureOpts();
+               return { res: o.resNm, nuc: typeof o.nucCentroid, type: typeof o.typeOf };
+             } catch (e){ return { err: String(e) }; } })() };
+  });
+  if (save.missing){
+    ok(false, "the page exposes the measure-and-save functions", "it does not");
+  } else {
+    ok(save.hasOpts, "µJump answers what a measurement needs from a page");
+    ok(String((save.opts.res || []).join(",")) === "4,4,40",
+       "...starting with the voxel size, so the numbers are in physical units",
+       (save.opts.res || []).join(","));
+    ok(save.opts.nuc === "function" && save.opts.type === "function",
+       "...plus the nucleus fallback and the cell-type lookup, in ONE definition",
+       save.opts.nuc + " / " + save.opts.type);
+    ok(posted.length === 1, "one POST for the batch, not one per outline", posted.length);
+    const d = posted[0] || {};
+    ok(d.type === "traced_measurements",
+       "...of its own type, so it is not mistaken for a new version of the tracings", d.type);
+    ok((d.rows || []).length === 2, "...carrying a row per outline", (d.rows || []).length);
+    ok(!!(d.rows && d.rows[0] && d.rows[0].structureId),
+       "...each naming the structure it is about", d.rows && d.rows[0] && d.rows[0].structureId);
+    ok(!!(d.rows && d.rows[0] && typeof d.rows[0].sphericityWadell === "number"),
+       "...under the sheet's column names", d.rows && d.rows[0] && d.rows[0].sphericityWadell);
+    ok(!!(d.rows && d.rows[0] && d.rows[0].measuredAt && d.rows[0].measuredSiblings === 1),
+       "...stamped, and with the set it was measured against",
+       d.rows && d.rows[0] && d.rows[0].measuredSiblings);
+    ok(!(d.rows && d.rows[0] && ("reporterName" in d.rows[0])),
+       "a measurement row says nothing about who wrote it — that is the backend's to decide");
+    ok(!!d.credential, "the batch is signed", !!d.credential);
+    ok(save.out && save.out.updated === 2, "the answer is read back, not assumed",
+       save.out && save.out.updated);
+    ok(!!(save.out && save.out.missing && save.out.missing[0] === "ghost_1"),
+       "...including the structures the sheet had no row for",
+       JSON.stringify(save.out && save.out.missing));
+    ok(save.said.length > 0, "and it says what it is doing while it does it",
+       (save.said[0] || "").slice(0, 40));
+  }
+  /* Signed out, it must refuse rather than post an unsigned batch. */
+  const refused = await p.evaluate(async () => {
+    GOOGLE_VERIFIED = false; GOOGLE_CREDENTIAL = "";
+    const r = await window.tracedMeasureAndSave([{ structure_id: "x", kind: "lysosome",
+      nucleus_id: "1", rings: [{ z: 0, points: [[0, 0], [40, 0], [40, 40], [0, 40]] },
+                               { z: 1, points: [[0, 0], [40, 0], [40, 40], [0, 40]] }] }]);
+    return r;
+  });
+  ok(!!(refused && refused.error && /sign in/i.test(refused.error)),
+     "signed out, it says so rather than posting an unsigned batch",
+     JSON.stringify(refused));
+  ok(posted.length === 1, "...and nothing more was sent", posted.length);
+
   ok(errors.length === 0, "no page errors", errors.join(" | ").slice(0, 200) || "none");
   await p.close();
   await b.close();
