@@ -237,6 +237,25 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what
     ok(n35 === 0, "...and not with a minnie35 one, where there is no nucleus detection", n35);
   }
 
+  console.log("\na post naming only cells still opens");
+  {
+    /* No coordinate at all, so nothing to centre on -- and the button must still work, with both
+       segments selected, rather than doing nothing. */
+    const r = await p.evaluate(() => {
+      const st = UJ.jumplink.state(UJ.jumplink.scan(
+        "Compare 864691135570733037 with 864691135234029401."));
+      if (!st) return { none: true };
+      const seg = (st.layers || []).filter(l => l.type === "segmentation" && l.segments);
+      return { none: false, hasPos: "position" in st, segLayers: seg.length,
+               segs: (seg[0] || {}).segments || [] };
+    });
+    ok(!r.none, "a state is built even with no coordinate in the post");
+    ok(!r.hasPos, "...with no position, so the viewer opens on its own default", r.hasPos);
+    ok(r.segLayers === 2 && r.segs.length === 2,
+       "...and both ids selected in both segmentations, since prose never says which",
+       r.segLayers + " layers, " + r.segs.length + " segments");
+  }
+
   console.log("\nseveral places in one post open together");
   {
     const r = await p.evaluate(v => {

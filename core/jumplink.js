@@ -281,12 +281,17 @@ function state(hits, opts){
                                : (h.label || h.volume || "") };
                   }) });
   }
-  if (!pos) return null;
-  var st = { dimensions: host.dim, position: pos.slice(),
+  /* A POST MAY NAME CELLS AND NO PLACE. "Compare 864691135570733037 with 864691135234029401" has
+     two references, both real, and neither is a coordinate -- so there is nothing to centre on, and
+     the viewer opens on its own default with both segments already selected. Returning null there
+     would have made the button do nothing, which is the worse of the two answers. */
+  if (!pos && !roots.length && !nucs.length) return null;
+  var st = { dimensions: host.dim,
              crossSectionScale: 3.0, layers: layers,
              selectedLayer: { layer: layers[0] && layers[0].name, visible: true },
              layout: { type: "xy-3d", orthographicProjection: true },
              showDefaultAnnotations: false };
+  if (pos) st.position = pos.slice();
   if (host.bg){ st.crossSectionBackgroundColor = host.bg; st.perspectiveViewBackgroundColor = host.bg; }
   return st;
 }
