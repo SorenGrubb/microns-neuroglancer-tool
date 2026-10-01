@@ -591,6 +591,8 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/bulkorgan.js"></script>
 <!-- The traced-outline layer for "Open all matches", extracted from this file 2026-09-21. -->
 <script src="core/tracedoutlines.js"></script>
+<!-- A coordinate or root id written in a comment becomes a link to the place it names -- core/jumplink.js, 2026-10-01. -->
+<script src="core/jumplink.js"></script>
 <script src="core/panel.js"></script>
 <script src="core/tree.js"></script>
 <script src="core/report.js"></script>
@@ -613,7 +615,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-09-30 19:47</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-01 05:55</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -7739,7 +7741,7 @@ function renderUserReportedCell(ur,panel){
     :'<span class="tag" style="background:color-mix(in srgb,var(--gold) 15%,transparent);color:var(--gold);border:1px solid var(--gold)" title="Logged by another tool user through the ‘report a new cell’ flow — not yet reviewed or confirmed by Søren. Treat as a lead worth checking, not a verified identification.">user-reported, unverified</span>';
   oh+='<div class="celltype">'+celltypeLink(ur.pos,isUnclassified?"Unclassified cell":escHtml(ur.identified))+'</div>';
   oh+='<div class="meta">Reported by '+escHtml(who)+(ur.certainty?' &middot; certainty '+escHtml(ur.certainty)+'/5':'')+'</div>';
-  if(ur.comment)oh+='<div class="meta">'+escHtml(ur.comment)+'</div>';
+  if(ur.comment)oh+='<div class="meta">'+jumpLinkHtml(ur.comment)+'</div>';
   oh+='<div class="meta">'+(ur.dist<50?"at":ur.dist.toFixed(0)+" nm from")+' voxel ('+coordSpan(ur.pos[0],ur.pos[1],ur.pos[2])+') &mdash; this is the reporter’s own estimated location; the minnie35/Img35 imagery here has no MICrONS nucleus detection to compare against.</div>';
   oh+=renderLocationDiagram(ur.pos,{root:ur.rootId,nuc:ur.nucRootId});
   /* 2026-08-09 (Søren: "cells lacking nuclei should allow assignment of a nucleus ID, future
@@ -12933,6 +12935,48 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       typeOf:function(nid){
         const i=nidToIndex(nid);
         return i<0?"":(typeInfo(i)||{}).name||"";
+      }
+    };
+  };
+  /* ── WHAT A REFERENCE IN SOMEBODY'S PROSE CAN BE RESOLVED AGAINST ─────  2026-10-01
+     core/jumplink.js reads a comment and finds the places named in it. It deliberately knows
+     nothing about this dataset: a triple of numbers is a coordinate only if it lands inside one of
+     the two imaged volumes, and a bare number is a cell only if it is in the nucleus table. Both
+     answers are here, and only here.
+
+     minnie65 IS FIRST, AND THE ORDER IS THE TIE-BREAK. The two slabs touch in z -- 592,640 to
+     594,400 nm belongs to both -- and a point in the seam should be reported as the volume that
+     has segmentation and nucleus detection over it. Left to chance this would be decided by
+     whichever entry an iteration reached first.
+
+     The EM extents are the same two constants the region-filter diagram draws, read rather than
+     copied. The viewer is whichever one is picked at the top of the Jump tab, read at call time so
+     changing it changes the next link rather than needing a re-render. */
+  window.jumpLinkHost=function(){
+    return {
+      resNm:[UJ_RX,UJ_RY,UJ_RZ],
+      volumes:[
+        {key:"minnie65",label:"minnie65",bb:window.MINNIE65_EM_BB,
+         em:SRC.em,seg:SRC.seg,nuc:SRC.nuc},
+        /* No `nuc`: there is no MICrONS nucleus detection over minnie35, and an empty nuclei
+           layer out here would look like a dataset with nothing in it. */
+        {key:"minnie35",label:"minnie35",bb:window.MINNIE35_EM_BB,
+         em:SRC.em35,seg:SRC.seg35}
+      ],
+      dim:DIM, emShader:EM_SHADER_CONTROLS, bg:ngBgColor(),
+      viewer:function(){
+        const el=document.getElementById("viewer");
+        return el?el.value:"https://spelunker.cave-explorer.org/";
+      },
+      /* THE LOOKUP THAT STOPS THIS BEING A GUESS. -1 means "not a cell in this volume", and the
+         number then stays as the text somebody typed. */
+      nucleus:function(nid){
+        try{
+          const i=nidToIndex(nid);
+          if(i<0)return null;
+          return {xVox:NX[i],yVox:NY[i],zVox:NZ[i],volume:"minnie65",
+                  label:(typeInfo(i)||{}).name||""};
+        }catch(_e){ return null; }
       }
     };
   };

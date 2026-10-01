@@ -497,6 +497,13 @@ function mergeCellHistory(changeItems,annoItems){
    A LINK IN A SUMMARY IS A TRAP: a click on the ↗, the star or a copyable id would both do its own
    job AND toggle the fold. The summary swallows the toggle for anything clickable inside it, so
    only bare space folds the card. */
+/* The comment, with the places it names made clickable -- core/jumplink.js, 2026-10-01. Falls
+   back to plain escaped text when the module is not there: these files are deployed one at a time,
+   and a page that arrives before the module it wants must lose the links, not the comment. */
+function jumpLinkHtml(s){
+  try { if (window.UJ && UJ.jumplink) return UJ.jumplink.html(s); } catch (_e){}
+  return escHtml(s);
+}
 function cellCardFold(panel, lastInHeadSel){
   if (!panel || panel.querySelector(":scope > details.cellfold")) return;
   const head = panel.querySelector(":scope > .celltype");
@@ -555,7 +562,7 @@ function renderCellHistory(items,nucleusId,rootId,coord){
         ?'<span class="old">'+escHtml(h.previousIdentity)+'</span> &rarr; '+escHtml(h.newIdentity||"(unnamed)")
         :escHtml(h.newIdentity||"(unnamed)");
       const cert=h.certainty?'<div class="chist-cert">Certainty: '+escHtml(String(h.certainty))+'/5</div>':"";
-      const comment=h.comment?'<div class="chist-comment">“'+escHtml(h.comment)+'”</div>':"";
+      const comment=h.comment?'<div class="chist-comment">“'+jumpLinkHtml(h.comment)+'”</div>':"";
       const restoreBtn=(h.canRestore&&nucleusId&&h.timestamp)
         ?'<button class="idbtn chist-restore-btn" data-ts="'+escHtml(String(h.timestamp))+'" style="padding:2px 8px;font-size:11px;margin-top:5px">'+(h.isOwn?"Correct this":"Restore this version")+'</button>'
         :"";
@@ -569,7 +576,7 @@ function renderCellHistory(items,nucleusId,rootId,coord){
     const statusClass=h.status==="resolved"?"st-resolved":(String(h.status||"").indexOf("unresolved")===0?"st-unresolved":"st-recorded");
     const identLine=h.identified?'<div class="chist-change">'+escHtml(h.identified)+(h.registered?' <span class="old">(was: '+escHtml(h.registered)+')</span>':'')+'</div>':"";
     const cert=h.certainty?'<div class="chist-cert">Certainty: '+escHtml(String(h.certainty))+'/5</div>':"";
-    const note=h.note?'<div class="chist-comment">“'+escHtml(h.note)+'”</div>':"";
+    const note=h.note?'<div class="chist-comment">“'+jumpLinkHtml(h.note)+'”</div>':"";
     const groupTag=h.groupId?'<span class="chist-group">group '+escHtml(String(h.groupId))+(h.subIndex?(' &middot; sub '+escHtml(String(h.subIndex))+(h.subCount?'/'+escHtml(String(h.subCount)):'')):'')+'</span>':"";
     return '<div class="chist-row">'
       +'<div class="chist-top"><span class="chist-type">'+escHtml(annotationTypeLabel(h.type))+'</span>'+groupTag+'</div>'

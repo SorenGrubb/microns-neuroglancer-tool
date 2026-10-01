@@ -405,6 +405,60 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
      JSON.stringify(refused));
   ok(posted.length === 1, "...and nothing more was sent", posted.length);
 
+  /* ── AND IT HAPPENS BY ITSELF ────────────────────────────────────────────────────  2026-10-01
+     Søren, having run the backfill once: "do I have to do this constantly or does it do it every
+     time a lysosome is submitted? If so, we should hide this again."
+
+     It does now. Adding a tracing schedules a re-measure of ITS CELL -- not just the tracing, since
+     the siblings' nearest-organelle numbers are the ones that went stale -- coalesced so five
+     organelles added at once are one pass, and delayed so Apps Script has appended the row before
+     anything reads the index. */
+  console.log("\nand a cell re-measures itself when you add to it");
+  {
+    const cardSrc = fs.readFileSync(page_("core/tracingcard.js"), "utf8");
+    ok(/tracingRemeasureCell\(t\.nucleus_id,\s*t\.root_id\)/.test(cardSrc),
+       "sharing a tracing schedules its cell's re-measure");
+    ok(!/tracedMeasureAllBtn/.test(cardSrc),
+       "...and the one-off backfill button is gone, now that it is not needed");
+    const stillThere = await p.evaluate(() => typeof window.tracedMeasureAll === "function");
+    ok(stillThere, "...while tracedMeasureAll() stays on window for the next dataset's migration");
+  }
+  const auto = await p.evaluate(async () => {
+    if (typeof tracingRemeasureCell !== "function") return { missing: true };
+    GOOGLE_VERIFIED = true; GOOGLE_CREDENTIAL = "tok";
+    /* Stand in for the real thing, so this tests the SCHEDULING -- what is coalesced, what is
+       separate, what is skipped -- rather than re-testing the measuring above. */
+    const calls = [];
+    const real = window.tracedMeasureCells;
+    window.tracedMeasureCells = async (ids) => {
+      calls.push(String((ids.nuc || [])[0] || "") + "|" + String((ids.root || [])[0] || ""));
+      return { measured: 1, updated: 1, missing: [] };
+    };
+    TRACING_REMEASURE_WAIT = 60;
+    /* The same cell twice and another once: three shares, two passes. */
+    tracingRemeasureCell("111", "999");
+    tracingRemeasureCell("111", "999");
+    tracingRemeasureCell("222", "888");
+    /* A tracing filed against neither id has no cell, and must not become one. */
+    tracingRemeasureCell("", "");
+    const during = calls.length;
+    await new Promise(r => setTimeout(r, 400));
+    window.tracedMeasureCells = real;
+    return { missing: false, during: during, calls: calls };
+  });
+  if (auto.missing){
+    ok(false, "the page schedules a re-measure after a share", "tracingRemeasureCell is not there");
+  } else {
+    ok(auto.during === 0, "nothing is measured while the share is still going out",
+       auto.during + " call(s) before the wait");
+    ok(auto.calls.length === 2, "three shares across two cells become two passes, not three",
+       auto.calls.length + ": " + auto.calls.join(" "));
+    ok(auto.calls.indexOf("111|999") >= 0 && auto.calls.indexOf("222|888") >= 0,
+       "...one for each cell that gained something", auto.calls.join(" "));
+    ok(auto.calls.indexOf("|") < 0,
+       "...and none for a tracing filed against neither id, which has no cell to re-measure");
+  }
+
   ok(errors.length === 0, "no page errors", errors.join(" | ").slice(0, 200) || "none");
   await p.close();
   await b.close();
