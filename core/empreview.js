@@ -241,6 +241,10 @@ function drawMeshes(host, parts){
   geos.forEach(function(g, i){
     if (i === leadAt) return;
     ghosts.push({ geo: g,
+                  /* PASSED ON, not re-derived from the colour. core/mesh3d.js's "look at the
+                     nucleus" and "show one of them" buttons need to know which surface is which,
+                     and this function has known since it was written. 2026-10-03. */
+                  what: parts[i].what,
                   alpha: parts[i].what === "cell" ? 0.14 : 0.35,
                   tint: parts[i].what === "cell" ? CELL : NUC });
   });
@@ -257,6 +261,7 @@ function drawMeshes(host, parts){
      cameras. */
   if (!host.__empView) host.__empView = { yaw: 0.6, pitch: 0.3, dist: 1.9 };
   M.show(host, geos[leadAt], { ghosts: ghosts, view: host.__empView,
+                               what: parts[leadAt].what,
                                tint: (leadAt === nucAt) ? NUC : CELL,
                                emptyMessage: "That cell has no mesh to draw." });
 }
@@ -350,8 +355,11 @@ async function open(hostEl, pos, opts){
       });
       if (!m || !m.positions || !m.positions.length){ note("that cell has no mesh to draw", true);
                                                       cellBtn.disabled = false; return; }
-      /* core/mesh.js hands back MICROMETRES; core/nucmesh.js hands back nanometres. Saying so at
-         each call is what keeps the two in one frame -- see core/mesh3d.js's note on unitNm. */
+      /* BOTH hand back MICROMETRES -- core/mesh.js and core/nucmesh.js, which converts on the
+         way out for exactly this reason. This comment used to say they differed, which is worse
+         than no comment: it is confidently wrong and it sits where somebody would look to check.
+         Saying so at each call is what keeps the two in one frame -- see core/mesh3d.js on
+         unitNm. */
       parts.unshift({ what: "cell", mesh: m, unitNm: 1000 });
       drawMeshes(host3d, parts);
       note("cell " + at.root + (at.nuc ? ", nucleus " + at.nuc : ""));
@@ -373,7 +381,13 @@ async function open(hostEl, pos, opts){
       var n = await UJ.nucmesh.fetchNucleus(at.nuc);
       if (!n || !n.positions.length){ note("nucleus " + at.nuc + " has no mesh in the nuclei volume",
                                            true); nucBtn.disabled = false; return; }
-      parts.push({ what: "nucleus", mesh: n, unitNm: 1 });
+      /* MICROMETRES, like the cell. core/nucmesh.js divides by 1000 on the way out -- its own
+         closing comment says "NANOMETRES IN, MICROMETRES OUT -- the unit core/mesh.js hands back"
+         -- and this read it as nanometres, so the nucleus was drawn a thousand times too small and
+         the joint frame stretched from the origin to the cell to cover the gap. The panel said so
+         the whole time: "0.0 x 0.0 x 0.0 um - 21,208 triangles". 2026-10-03, from Søren's
+         screenshots. core/tracingcard.js has always passed 1000 here. */
+      parts.push({ what: "nucleus", mesh: n, unitNm: 1000 });
       drawMeshes(host3d, parts);
       note("cell " + at.root + ", nucleus " + at.nuc
            + (at.nucFrom ? " (" + at.nucFrom + ")" : ""));

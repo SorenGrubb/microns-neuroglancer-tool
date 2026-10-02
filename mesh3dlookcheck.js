@@ -239,9 +239,11 @@ const GREY = [0.72, 0.72, 0.72];
        "resting " + resting.toFixed(0) + ", peak " + peak.toFixed(0)
        + " (+" + (100 * (peak / resting - 1)).toFixed(0) + "%)");
     /* WAITED OUT RATHER THAN ASSUMED. Twelve samples six frames apart cover about 1.2 s and
-       the pass is 1.5, so the last sample caught the light still on its way out \u2014 a fact
-       about the sampling, not about the sweep. */
-    await p1.waitForTimeout(900);
+       the sweep is three passes of 1.5 s, so the last sample catches the light still on its
+       way round \u2014 a fact about the sampling, not about the sweep. Waited past the whole
+       4.5 s rather than past one pass: when Søren asked for three, this line was the only
+       thing in the suite that failed, which is the check doing its job. */
+    await p1.waitForTimeout(4200);
     const settled = (await p1.evaluate(STATS)).maxL;
     ok(Math.abs(settled - resting) < 0.5,
        "...and when it has passed, the picture is the one it started from: it adds light and "

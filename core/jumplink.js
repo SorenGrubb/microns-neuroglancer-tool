@@ -72,7 +72,15 @@ function esc(s){
    there is a build guard that says so. Nanometres are tried second, for a number copied out of a
    paper or a mesh file. A triple that is inside neither volume in either reading is not a
    coordinate, and this returns null rather than linking to somewhere nobody meant. */
+/* ── ONE CONTAINMENT TEST, AND IT LIVES IN core/volumes.js ─────────────────────  2026-10-03
+   It was written here, because this was the only thing that needed it. The pad, the cell card, the
+   mesh fetch and the EM preview need it too now that minnie35 is being drawn, and four copies of
+   "is this point in that box" is four chances for one of them to be the wrong one. The fallback is
+   the same three lines rather than a refusal: core/volumes.js is loaded before this file on every
+   page that has one, and a page that somehow has not loaded it should still linkify. */
 function inBox(nm, bb){
+  if (window.UJ && UJ.volumes && UJ.volumes.inBox) return UJ.volumes.inBox(nm, bb);
+  if (!nm || !bb) return false;
   return nm[0] >= bb.xmin && nm[0] <= bb.xmax
       && nm[1] >= bb.ymin && nm[1] <= bb.ymax
       && nm[2] >= bb.zmin && nm[2] <= bb.zmax;

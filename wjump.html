@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-10-02 18:48</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-10-02 19:27</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -11156,11 +11156,12 @@ UJ.mesh3d = (function(){
     var GHOSTS = (o.ghosts || []).map(function(g){
       if (!g || !g.geo || g.geo.empty || !g.geo.idx || !g.geo.idx.length) return null;
       var d = upload(g.geo);
-      return d ? { d: d, tint: g.tint || null, alpha: (g.alpha === undefined ? 0.22 : g.alpha) } : null;
+      return d ? { d: d, tint: g.tint || null, what: g.what || "",
+                   alpha: (g.alpha === undefined ? 0.22 : g.alpha) } : null;
     }).filter(Boolean);
     /* `o.alpha` is the SUBJECT's opacity, 1 unless a caller says otherwise. The cell panel sets
        it below 1 when it has a nucleus to show inside the cell. */
-    var ALL = [{ d: MAIN, tint: o.tint || null,
+    var ALL = [{ d: MAIN, tint: o.tint || null, what: o.what || "",
                  alpha: (o.alpha === undefined ? 1 : o.alpha) }].concat(GHOSTS);
     gl.enable(gl.DEPTH_TEST);
     function drawOne(d, tint, alpha){
@@ -11213,20 +11214,111 @@ UJ.mesh3d = (function(){
       if (reduced() || typeof requestAnimationFrame !== "function"){ PULSE = -1; paint(); return; }
       var t0 = (typeof performance !== "undefined" && performance.now) ? performance.now()
                                                                        : Date.now();
-      var me = ++sweeping, SPAN = 1500;
+      /* THREE, at Søren's asking, as one event rather than three: "I think it should go at least
+         3 times". Back to back, so what ends it is what started it and a second press cannot
+         leave two overlapping. */
+      var me = ++sweeping, SPAN = 1500, PASSES = 3;
       (function step(){
         if (me !== sweeping) return;                 // a second sweep replaces the first
         var now = (typeof performance !== "undefined" && performance.now) ? performance.now()
                                                                           : Date.now();
         var k = (now - t0) / SPAN;
-        if (k >= 1){ PULSE = -1; paint(); return; }
+        if (k >= PASSES){ PULSE = -1; paint(); return; }
         /* From just outside one end to just outside the other, so the band enters and leaves
-           rather than appearing on the surface and vanishing off it. */
-        PULSE = -0.12 + k * 1.24;
+           rather than appearing on the surface and vanishing off it. k % 1 restarts it for each
+           pass; between passes the band is briefly outside the model, which is the beat that makes
+           three passes read as three rather than as one long flicker. */
+        PULSE = -0.12 + (k % 1) * 1.24;
         paint();
         requestAnimationFrame(step);
       })();
     }
+    /* ── TURNING IT SLOWLY ────────────────────────────────────────────────────  2026-10-03
+       A toggle, not a one-shot: "make the model rotate" is a state somebody turns on while they
+       look at something else. A drag still works while it runs, because the drag writes the same
+       view.yaw this does and the next frame carries on from wherever the hand left it.
+
+       NOT SUPPRESSED BY prefers-reduced-motion, and that is deliberate rather than an oversight:
+       the preference is about animation nobody asked for. This one is a button somebody pressed,
+       and taking it away would leave them with a control that does nothing. */
+    /* ── SHOWING ONE OF THEM ──────────────────────────────────────────────────  2026-10-03
+       Søren: "Also a button to only show nucleus or only show root ID". Three states on one
+       button, because the strip is meant to stay small.
+
+       BY WHAT A SURFACE IS, not by its colour and not by whether it is the subject: core/empreview
+       makes the NUCLEUS the subject and the cell a ghost, the pad does the opposite, and a rule
+       about subjects would hide the wrong thing in one of the two.
+
+       A SURFACE WITH NO `what` IS ALWAYS DRAWN. That is the tracing on the pad — the user's own
+       work and the reason the panel is open. "Only the nucleus" means the nucleus and the outline
+       you drew, not a panel that has quietly thrown the drawing away. */
+    var ISO = "all";
+    function isoShows(it){
+      if (ISO === "cell") return it.what !== "nucleus";
+      if (ISO === "nucleus") return it.what !== "cell";
+      return true;
+    }
+    function isoCan(){
+      var has = {};
+      ALL.forEach(function(it){ if (it.what) has[it.what] = 1; });
+      return !!(has.cell && has.nucleus);
+    }
+    function isoNext(){
+      ISO = ISO === "all" ? "cell" : ISO === "cell" ? "nucleus" : "all";
+      paint();
+      return ISO;
+    }
+
+    var spinning = 0;
+    function spin(){
+      if (spinning){ spinning = 0; return false; }
+      var me = ++spinning;
+      var last = (typeof performance !== "undefined" && performance.now) ? performance.now()
+                                                                        : Date.now();
+      (function step(){
+        if (spinning !== me) return;
+        var now = (typeof performance !== "undefined" && performance.now) ? performance.now()
+                                                                          : Date.now();
+        /* Radians a second, not radians a frame: a 120 Hz screen must not turn it twice as fast. */
+        view.yaw += (now - last) * 0.00045;
+        last = now;
+        paint();
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(step);
+        else spinning = 0;
+      })();
+      return true;
+    }
+
+    /* ── LOOKING AT THE NUCLEUS ───────────────────────────────────────────────  2026-10-03
+       The ghost that says it is one, in model units measured from the frame's mid — which is where
+       prepare() put every vertex, so its own lo/hi midpoint IS that offset. Toggles back to the
+       whole cell, and remembers the distance it came from rather than guessing one. */
+    var wasAt = null;
+    function nucleusGeo(){
+      var g = (o.ghosts || []).filter(function(x){ return x && x.what === "nucleus" && x.geo; })[0];
+      if (g) return g.geo;
+      /* core/empreview.js makes the NUCLEUS the subject and the cell the ghost -- what you are
+         looking at, and what you look through. A search that only walked the ghosts would miss it
+         in the panel most likely to want this button. */
+      return (o.what === "nucleus") ? geo : null;
+    }
+    function lookAtNucleus(){
+      var ng = nucleusGeo();
+      if (!ng) return false;
+      if (wasAt){ view.target = wasAt.target; view.dist = wasAt.dist; wasAt = null; paint(); return false; }
+      wasAt = { target: view.target || null, dist: view.dist };
+      /* lo/hi are ABSOLUTE and mid is the frame's centre, so the nucleus's own centre relative to
+         that frame is its box midpoint minus the frame mid — which is exactly what its vertices
+         were shifted by. */
+      view.target = [ (ng.lo[0] + ng.hi[0]) / 2 - ng.mid[0],
+                      (ng.lo[1] + ng.hi[1]) / 2 - ng.mid[1],
+                      (ng.lo[2] + ng.hi[2]) / 2 - ng.mid[2] ];
+      var rn = (ng.radius || 0) / (ng.span || geo.span || 1);
+      view.dist = Math.max(rn / (Math.tan(0.9 / 2) * 0.70), 0.05);
+      paint();
+      return true;
+    }
+
     var FOV = 0.9, FILL = 0.88;
     function fitDist(aspect){
       var rn = (geo.radius || 0) / (geo.span || 1);
@@ -11286,7 +11378,17 @@ UJ.mesh3d = (function(){
         gl.useProgram(prog);
         gl.enableVertexAttribArray(aP); gl.enableVertexAttribArray(aN);
       }
-      var mv = mul(translate(0, 0, -view.dist), mul(rotX(view.pitch), mul(rotY(view.yaw), norm)));
+      /* ── WHAT THE CAMERA IS LOOKING AT ────────────────────────────────────  2026-10-03
+         It could only ever orbit the middle of the frame, which is fine for one object and no use
+         at all for "zoom in on the nucleus": a nucleus is off-centre in its cell by definition, and
+         there was nowhere to put that offset. `view.target` is a point in MODEL units (the same
+         units geo.lo/hi are in, measured from the frame's mid), translated out before the rotation
+         so the orbit happens around it. Absent, it is the origin and every panel is as it was. */
+      var tg = view.target || null;
+      var base = tg ? mul(translate(-tg[0] / (geo.span || 1), -tg[1] / (geo.span || 1),
+                                    -tg[2] / (geo.span || 1)), norm)
+                    : norm;
+      var mv = mul(translate(0, 0, -view.dist), mul(rotX(view.pitch), mul(rotY(view.yaw), base)));
       gl.uniformMatrix4fv(uMvp, false, mul(perspective(FOV, w/h, 0.01, 100), mv));
       gl.uniformMatrix4fv(uMv, false, mv);
       gl.uniform3fv(uBg, b2);
@@ -11320,7 +11422,10 @@ UJ.mesh3d = (function(){
          them. Depth TESTING stays on throughout, which is what keeps "inside" legible. Every
          earlier caller lands in the first branch exactly as before. */
       var opaque = [], clear = [];
-      ALL.forEach(function(it){ (it.alpha >= 1 ? opaque : clear).push(it); });
+      ALL.forEach(function(it){
+        if (!isoShows(it)) return;
+        (it.alpha >= 1 ? opaque : clear).push(it);
+      });
       gl.disable(gl.BLEND); gl.depthMask(true);
       opaque.forEach(function(it){ drawOne(it.d, it.tint || themeTint(), 1); });
       if (clear.length){
@@ -11409,14 +11514,28 @@ UJ.mesh3d = (function(){
     var tb = document.getElementById("themeToggleBtn");
     if (tb) tb.addEventListener("click", function(){ setTimeout(paint, 0); });
     paint();
-    LAST = { gl: gl, paint: paint, canvas: canvas, sweep: sweep };
+    LAST = { gl: gl, paint: paint, canvas: canvas, sweep: sweep,
+             spin: spin, nucleus: lookAtNucleus, iso: isoNext, isoCan: isoCan,
+             isoNow: function(){ return ISO; } };
     /* ── ONCE PER MODEL, NOT ONCE PER DRAW ────────────────────────────────────  2026-10-03
        The tracing pad rebuilds this panel after every closed contour. Sweeping on every show()
        would make the animation the thing you watch while drawing rather than something that
        happens when a cell arrives. Keyed on the model: a triangle count and a radius together are
        specific enough that two different cells practically never collide, and insensitive to the
        camera, the tint and the alpha, which are the things that change on a redraw. */
-    var key = (geo.triangles || 0) + ":" + Math.round((geo.radius || 0) * 10);
+    /* ── THE GHOSTS ARE PART OF THE MODEL ─────────────────────────────────────  2026-10-03
+       Søren: "The lightning kinda blimped before the 3D mesh had finished loading." It did, and
+       this line is why: show() is called as soon as the SUBJECT is ready — a lofted tracing, which
+       takes a millisecond — and the cell and nucleus meshes are megabytes that arrive afterwards
+       and call show() again. Keyed on the subject alone, those arrivals were "the same model,
+       redrawn", so the light had already been and gone through an outline.
+
+       Counting the ghosts makes the cell landing exactly what it looks like: a new thing to light.
+       And a redraw that changes only the camera, the tint or the alpha still changes nothing here,
+       which is what keeps the pad from sweeping after every contour. */
+    var key = (geo.triangles || 0) + ":" + Math.round((geo.radius || 0) * 10)
+            + "|" + (o.ghosts || []).map(function(g){
+                return (g && g.geo && g.geo.triangles) || 0; }).join(",");
     if (key !== SWEPT){ SWEPT = key; sweep(); }
     return paint;
   }
@@ -11454,6 +11573,93 @@ UJ.mesh3d = (function(){
   /* Run the light through again — for a button, a double-click, or a tool that wants to point
      at the panel. Silent on a page whose panel has gone. */
   function sweepAgain(){ if (LAST && LAST.sweep) LAST.sweep(); }
+
+  /* ── THREE BUTTONS IN THE CORNER ────────────────────────────────────────────────  2026-10-03
+     Søren: "there should be a button in the corner of the 3D window to fire it again. Also a button
+     to make the model rotate and a button to make it zoom in on the nucleus. You can use icons
+     instead of text to make the buttons smaller."
+
+     GLYPHS RATHER THAN SVG: one character each, nothing to fetch, and they take the page's own
+     colour and size. Each carries a title and an aria-label, because an icon is a rebus and a
+     rebus is not a label.
+
+     THE NUCLEUS BUTTON IS CONDITIONAL, and on the caller SAYING so: a ghost marked
+     `what: "nucleus"`, which is the word core/empreview.js already uses for its own parts. Guessing
+     from the tint would work today and break the day somebody retunes a colour. */
+  function hasNucleus(o){
+    /* A nucleus AND something else: one surface filling the frame has nowhere to come in from, and
+       a button that can only ever do nothing is worse than no button. Caught by
+       mesh3dtoolscheck.js on its first run. 2026-10-03. */
+    var others = ((o && o.ghosts) || []).length;
+    var isNuc = !!(o && o.what === "nucleus")
+             || ((o && o.ghosts) || []).some(function(g){ return g && g.what === "nucleus"; });
+    return isNuc && others > 0;
+  }
+  /* Something to isolate means BOTH are here — a panel holding one surface has nothing to take
+     away, and a button that only ever does nothing is worse than no button. */
+  function hasBoth(o){
+    var has = {};
+    if (o && o.what) has[o.what] = 1;
+    (o && o.ghosts || []).forEach(function(g){ if (g && g.what) has[g.what] = 1; });
+    return !!(has.cell && has.nucleus);
+  }
+  /* The glyph says what is ON SCREEN, not what the press will do — that way round needs no
+     explaining. The title says what the press will do. */
+  var ISO_FACE = { all:     ["\u25c9", "Showing the cell and the nucleus",
+                             "Showing both. Press to show the cell on its own."],
+                   cell:    ["\u25cb", "Showing the cell on its own",
+                             "Showing the cell on its own. Press to show the nucleus on its own."],
+                   nucleus: ["\u25cf", "Showing the nucleus on its own",
+                             "Showing the nucleus on its own. Press to show both again."] };
+  function toolsHtml(o){
+    var b = function(cls, glyph, label, title){
+      return "<button type='button' class='m3d-tool " + cls + "' aria-label='" + esc(label)
+           + "' title='" + esc(title) + "'>" + glyph + "</button>";
+    };
+    return "<div class='m3d-tools'>"
+      + b("m3d-spin", "\u27f3", "Turn it slowly",
+          "Turns the model slowly so you can see it from every side. Press again to stop. Dragging "
+          + "still works while it turns.")
+      + b("m3d-sweep", "\u2726", "Run the light through it again",
+          "Sends a band of light out from the centre of the structure, three times. It is the "
+          + "surface it crosses that lights up, so a gap in it shows as a gap the light goes past.")
+      + (hasBoth(o)
+          ? b("m3d-iso", ISO_FACE.all[0], ISO_FACE.all[1], ISO_FACE.all[2])
+          : "")
+      + (hasNucleus(o)
+          ? b("m3d-nuc", "\u2299", "Look at the nucleus",
+              "Moves the camera onto the nucleus and comes in close. Press again to go back to the "
+              + "whole cell.")
+          : "")
+      + "</div>";
+  }
+  function wireTools(host, o){
+    var stage = host.querySelector(".m3d-stage");
+    if (!stage) return;
+    var on = function(sel, f){
+      var el = stage.querySelector(sel);
+      if (el) el.addEventListener("click", function(e){ e.preventDefault(); e.stopPropagation(); f(el); });
+    };
+    on(".m3d-sweep", function(){ sweepAgain(); });
+    on(".m3d-spin", function(el){
+      var now = LAST && LAST.spin ? LAST.spin() : false;
+      el.setAttribute("aria-pressed", now ? "true" : "false");
+      el.classList.toggle("m3d-on", !!now);
+    });
+    on(".m3d-iso", function(el){
+      var now = LAST && LAST.iso ? LAST.iso() : "all";
+      var face = ISO_FACE[now] || ISO_FACE.all;
+      el.textContent = face[0];
+      el.setAttribute("aria-label", face[1]);
+      el.setAttribute("title", face[2]);
+      el.classList.toggle("m3d-on", now !== "all");
+    });
+    on(".m3d-nuc", function(el){
+      var now = LAST && LAST.nucleus ? LAST.nucleus() : false;
+      el.setAttribute("aria-pressed", now ? "true" : "false");
+      el.classList.toggle("m3d-on", !!now);
+    });
+  }
 
   function probe(){
     if (!LAST) return -1;
@@ -11508,9 +11714,14 @@ UJ.mesh3d = (function(){
         + esc(o.emptyMessage || "No mesh geometry for this cell.") + "</div></div>";
       return null;
     }
-    host.innerHTML = "<div class='m3d'><canvas class='m3d-canvas'></canvas>"
+    /* A stage round the canvas so the buttons have something to be positioned inside. Every
+       selector anywhere else is a descendant one (.m3d-canvas, .m3d-note), so nothing else has to
+       know this exists. */
+    host.innerHTML = "<div class='m3d'><div class='m3d-stage'>"
+      + "<canvas class='m3d-canvas'></canvas>" + toolsHtml(o) + "</div>"
       + "<div class='m3d-note'></div></div>";
     var canvas = host.querySelector(".m3d-canvas"), note = host.querySelector(".m3d-note");
+    wireTools(host, o);
     var um = [0,1,2].map(function(i){ return (geo.hi[i]-geo.lo[i]) / 1000; });
 
     /* The size is printed and labelled, and that is not throat-clearing: a ten-fold error in
@@ -11555,7 +11766,19 @@ UJ.mesh3d = (function(){
        tool -- µJump's is `padding:1px 8px;font-size:11px;vertical-align:middle`, βJump's is
        `flex:1;min-width:150px` in a flex row -- so a fixed rule here could only ever match one of
        them. copyShape() below lifts each tool's own sizing off the button it sits beside. */
-    + ".m3d-btn{}";
+    + ".m3d-btn{}"
+    /* ── THE CORNER BUTTONS ──────────────────────────────────────────────────────  2026-10-03
+       The strip is pointer-events:none and only the buttons take pointers, because the canvas
+       under it is turned by dragging and pinched to zoom: a strip that swallowed a drag starting
+       anywhere near the corner would read as the model sticking. */
+    + ".m3d-stage{position:relative}"
+    + ".m3d-tools{position:absolute;top:8px;right:8px;display:flex;gap:5px;pointer-events:none}"
+    + ".m3d-tool{pointer-events:auto;width:26px;height:26px;line-height:1;display:flex;"
+    + "align-items:center;justify-content:center;font-size:14px;cursor:pointer;"
+    + "border:1px solid var(--line,#333);border-radius:7px;background:var(--card,#1a1a1a);"
+    + "color:var(--ink,#eee);opacity:.62;transition:opacity .15s,background .15s}"
+    + ".m3d-tool:hover,.m3d-tool:focus-visible{opacity:1}"
+    + ".m3d-tool.m3d-on{opacity:1;border-color:var(--accent,#49b0ff);color:var(--accent,#49b0ff)}"
   function injectStyle(){
     if (document.getElementById("m3d-style")) return;
     var s = document.createElement("style");
@@ -16946,6 +17169,9 @@ async function pad3DDraw(){
     const drawn = siblings.concat(ghosts.map(function(x){
       return { geo: tracingM3D().prepare(x.mesh.positions, x.mesh.indices,
                                       { unitNm: 1000, frame: frame }),
+               /* "cell" or "nucleus", for the panel's own buttons. It was already in hand here and
+                  dropped on the way in. 2026-10-03. */
+               what: x.what,
                /* The cell fainter than the nucleus: it is the larger surface and the one you are
                   most often looking THROUGH. */
                alpha: x.what === "cell" ? 0.14 : 0.35,

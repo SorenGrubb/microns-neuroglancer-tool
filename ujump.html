@@ -550,6 +550,9 @@ document.addEventListener("DOMContentLoaded", function(){
   if (e) e.innerHTML = UJ_RX + "\u00b7" + UJ_RY + "\u00b7" + UJ_RZ + " nm";
 });
 </script>
+<!-- WHICH IMAGED VOLUME A COORDINATE IS IN. 2026-10-03. First, because core/jumplink.js, the
+     mesh fetch, the pad and the EM preview all resolve against it. -->
+<script src="core/volumes.js"></script>
 <script src="core/mesh.js"></script>
 <!-- Show in 3D, installed onto the .meshdl[data-root] buttons. -->
 <script src="core/mesh3d.js"></script>
@@ -625,7 +628,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-02 18:48</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-02 19:27</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -13057,14 +13060,13 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
   window.jumpLinkHost=function(){
     return {
       resNm:[UJ_RX,UJ_RY,UJ_RZ],
-      volumes:[
-        {key:"minnie65",label:"minnie65",bb:window.MINNIE65_EM_BB,
-         em:SRC.em,seg:SRC.seg,nuc:SRC.nuc},
-        /* No `nuc`: there is no MICrONS nucleus detection over minnie35, and an empty nuclei
-           layer out here would look like a dataset with nothing in it. */
-        {key:"minnie35",label:"minnie35",bb:window.MINNIE35_EM_BB,
-         em:SRC.em35,seg:SRC.seg35}
-      ],
+      /* ── THE REGISTRY, NOT A SECOND LIST ───────────────────────────────────────  2026-10-03
+         These two were written out here, and the pad and the cell card could not see them. They
+         are declared once now, beside their bounding boxes, and this reads that — so a source
+         corrected in one place is corrected for the viewer links, the pad, the EM preview and the
+         mesh fetch together. The empty array is for a page that somehow has no registry: jumplink
+         then links nothing, which is what it did before any of this existed. */
+      volumes:(window.UJ&&UJ.volumes)?UJ.volumes.all():[],
       dim:DIM, emShader:EM_SHADER_CONTROLS, bg:ngBgColor(),
       /* The cell see-through, the nucleus inside it — the same two the cell-identity link uses,
          read rather than copied. */
@@ -13377,6 +13379,34 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      earlier, non-IIFE-wrapped script) can reuse the exact same verified dataset extents
      instead of hardcoding a second copy that could drift out of sync with this one. */
   window.MINNIE65_EM_BB=MINNIE65_EM_BB;window.MINNIE35_EM_BB=MINNIE35_EM_BB;
+  /* ── AND THE REGISTRY EVERYTHING ELSE ASKS ────────────────────────────────────  2026-10-03
+     Søren: "We should enable EM section, meshes and 3D structure also for minnie35 data."
+
+     Declared HERE, beside the boxes, because the boxes are the half of a volume that is easy to
+     get wrong and they should not be two scrolls away from the sources they describe. SRC is
+     defined far above this and is a plain global, so it is in hand by the time this runs.
+
+     ORDER IS PRIORITY: the two slabs overlap by forty-four sections, and a point in the seam is
+     reported as minnie65, which is the one with segmentation, nuclei and cell types over it.
+
+     minnie35 CARRIES NO `nuc`. There is no MICrONS nucleus detection over it, and an empty nuclei
+     layer out there would look like a dataset with nothing in it. Its mesh store is the `mesh`
+     directory its own segmentation info names; minnie65's is seg_m1300's, which is a different
+     segmentation from minnie65/seg and the one every root id in this tool comes from. */
+  if (window.UJ && UJ.volumes) UJ.volumes.configure([
+    { key:"minnie65", label:"minnie65", bb:MINNIE65_EM_BB,
+      em:SRC.em, seg:SRC.seg, nuc:SRC.nuc,
+      mesh:{ meshBase:"https://storage.googleapis.com/iarpa_microns/minnie/minnie65/seg_m1300/mesh/",
+             meshBaseAlt:"https://storage.googleapis.com/storage/v1/b/iarpa_microns/o/"
+                        +"minnie%2Fminnie65%2Fseg_m1300%2Fmesh%2F",
+             meshBaseAltSuffix:".shard?alt=media" } },
+    { key:"minnie35", label:"minnie35", bb:MINNIE35_EM_BB,
+      em:SRC.em35, seg:SRC.seg35,
+      mesh:{ meshBase:"https://storage.googleapis.com/iarpa_microns/minnie/minnie35/seg/mesh/",
+             meshBaseAlt:"https://storage.googleapis.com/storage/v1/b/iarpa_microns/o/"
+                        +"minnie%2Fminnie35%2Fseg%2Fmesh%2F",
+             meshBaseAltSuffix:".shard?alt=media" } }
+  ]);
   /* boxes: array of {a0,a1,b0,b1,color} -- one entry per user-defined region box, drawn as
      its own colour-matched translucent rect (see REGION_BOX_COLORS for how colours are
      assigned). Was originally a single box (boxA0..boxB1) before multi-box support was added;

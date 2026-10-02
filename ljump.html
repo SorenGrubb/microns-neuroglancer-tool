@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-02 18:48</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-02 19:27</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1366,6 +1366,10 @@ UJ.cfg.bulk = {
      order does not matter. -->
 <script src="core/charts.js"></script>
 <!-- A coordinate or root id written in a comment becomes a link to the place it names -- core/jumplink.js, 2026-10-01. -->
+<!-- The volume registry core/jumplink.js resolves a coordinate against. This tool declares
+     one volume, so nothing here changes; it is loaded so that the containment test is the
+     same code on every page rather than jumplink's own fallback copy. 2026-10-03. -->
+<script src="core/volumes.js"></script>
 <script src="core/jumplink.js"></script>
 <script src="core/panel.js"></script>
 <script src="core/tree.js"></script>

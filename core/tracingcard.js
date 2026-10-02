@@ -2895,6 +2895,9 @@ async function pad3DDraw(){
     const drawn = siblings.concat(ghosts.map(function(x){
       return { geo: tracingM3D().prepare(x.mesh.positions, x.mesh.indices,
                                       { unitNm: 1000, frame: frame }),
+               /* "cell" or "nucleus", for the panel's own buttons. It was already in hand here and
+                  dropped on the way in. 2026-10-03. */
+               what: x.what,
                /* The cell fainter than the nucleus: it is the larger surface and the one you are
                   most often looking THROUGH. */
                alpha: x.what === "cell" ? 0.14 : 0.35,
