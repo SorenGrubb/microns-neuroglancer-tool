@@ -256,6 +256,37 @@ const SHOW = `(w => {
        "settled " + r.quiet + " bright px, peak " + r.best);
   }
 
+  /* ── EVERY CALLER SAYS WHICH SURFACE IS WHICH ─────────────────────────  2026-10-03
+     Søren, on the cell card: "I only see two buttons". The contract has three callers and one of
+     them — inside core/mesh3d.js itself, in the install() path that decorates every tool's mesh
+     download button — built its ghost without `what`. hasBoth() then answered no and the two
+     buttons were never rendered: silently, because a missing field reads as "there is no nucleus
+     here", which is a perfectly good thing for it to mean.
+
+     READ OFF THE SOURCE, and deliberately. The failure is not a wrong value a driven test could
+     observe; it is a field nobody wrote, in a call site that may not exist yet. Blunt, and the
+     right instrument for this one. */
+  console.log("\nevery ghost that is a nucleus says so");
+  {
+    const fs = require("fs");
+    const files = ["mesh3d.js", "empreview.js", "tracingcard.js"];
+    const bad = [];
+    for (const f of files){
+      const src = fs.readFileSync(core(f), "utf8");
+      /* Object literals mentioning the nucleus tint. One per line in all three files, which is
+         what makes a line-based scan honest here rather than merely convenient. */
+      src.split("\n").forEach((line, i) => {
+        if (!/tint:\s*(NUC_TINT|NUC)\b/.test(line)) return;
+        if (!/\bgeo\s*:/.test(line)) return;             // a ghost, not a tint being passed along
+        if (!/\bwhat\s*:/.test(line)) bad.push(f + ":" + (i + 1) + "  " + line.trim().slice(0, 70));
+      });
+    }
+    ok(bad.length === 0,
+       "a ghost drawn in the nucleus tint always carries what:\"nucleus\" — the buttons read the "
+       + "contract, not the colour, and a caller that forgets it loses them without a word",
+       bad.join("  |  ") || files.length + " files clean");
+  }
+
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
   process.exit(fails ? 1 : 0);

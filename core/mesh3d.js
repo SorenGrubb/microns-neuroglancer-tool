@@ -1220,12 +1220,18 @@ UJ.mesh3d = (function(){
              picture rather than where it is in the cell, which looks right and is a lie. */
           var nucId = dl.getAttribute("data-nucid") || "";
           return nucleusMeshFor(nucId).then(function(nm){
-            var opts2 = { lead: lead, emptyMessage: "This cell has no mesh geometry to draw." };
+            var opts2 = { what: "cell", lead: lead,
+                          emptyMessage: "This cell has no mesh geometry to draw." };
             if (nm && nm.positions && nm.positions.length){
               var ng = prepare(nm.positions, nm.indices,
                                { unitNm: 1000, frame: { mid: geo.mid, span: geo.span } });
               if (!ng.empty){
-                opts2.ghosts = [{ geo: ng, tint: NUC_TINT, alpha: 1 }];
+                /* `what` IS THE CONTRACT the panel's buttons read — see hasBoth() and
+                   nucleusGeo(). Without it this panel showed two buttons where it should show
+                   four, and did so silently, because a missing field reads as "there is no
+                   nucleus here", which is a perfectly reasonable thing for it to mean.
+                   2026-10-03, from Søren: "I only see two buttons". */
+                opts2.ghosts = [{ geo: ng, what: "nucleus", tint: NUC_TINT, alpha: 1 }];
                 /* The cell goes see-through ONLY now that there is something inside it to see --
                    the notebook's rule, and for its reason: transparency with nothing behind it
                    costs contrast and shows nothing. */
