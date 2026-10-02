@@ -197,7 +197,7 @@ function m3d(){
 }
 
 /* Both surfaces share ONE frame, or the nucleus is drawn centred on itself and appears to be the
-   size of the cell -- a picture, and a lie about scale. The same rule the tracing pad follows. */
+   size of the cell — a picture, and a lie about scale. The same rule the tracing pad follows. */
 function drawMeshes(host, parts){
   var M = m3d();
   if (!M || !parts.length) return;
@@ -216,16 +216,49 @@ function drawMeshes(host, parts){
   var geos = parts.map(function(p){
     return M.prepare(p.mesh.positions, p.mesh.indices, { unitNm: p.unitNm, frame: frame });
   });
-  /* The CELL is the subject and the nucleus sits inside it, so the cell is the see-through one --
-     and the nucleus is BLUE, which is what it is in the Blender export, the cell panel and the pad.
-     blender/colour_policy.py reserves hues 200-250 for nuclei, so the cell is a neutral grey rather
-     than the blue-grey it would otherwise want to be. */
-  var lead = geos[0], ghosts = [];
-  for (var i = 1; i < geos.length; i++)
-    ghosts.push({ geo: geos[i], alpha: 0.95,
-                  tint: (M.NUC_TINT || [0.23, 0.45, 0.85]) });
-  M.show(host, lead, { ghosts: ghosts, tint: [0.72, 0.72, 0.74],
-                       emptyMessage: "That cell has no mesh to draw." });
+
+  /* ── THE NUCLEUS IS THE SOLID ONE, AND THE CELL IS WHAT YOU LOOK THROUGH ────  2026-10-03
+     Søren: "I don't see the nucleus inside the cell."
+
+     He could not, and it was this function's fault: the CELL was the lead, which mesh3d draws
+     opaque, so the nucleus sat behind an unbroken grey surface. Ghosts are drawn with depth
+     writes off precisely so they never hide what is inside them — but the thing hiding the
+     nucleus was not a ghost, it was the subject.
+
+     Inverted, and it is the arrangement the tracing pad and the cell card already use: whatever is
+     INSIDE is the subject, and the big surface around it is see-through. The cell gets the fainter
+     of the two alphas because it is the larger surface and the one you are most often looking
+     through. Blue is the nucleus, here as in the cell card, the pad and the Blender export
+     (blender/colour_policy.py reserves hues 200-250 for nuclei, so the cell is a neutral grey
+     rather than the blue-grey it would otherwise want to be).
+
+     With only the cell loaded it is the subject, because there is nothing inside it yet. */
+  var nucAt = -1;
+  parts.forEach(function(p, i){ if (p.what === "nucleus") nucAt = i; });
+  var leadAt = nucAt >= 0 ? nucAt : 0;
+  var NUC = M.NUC_TINT || [0.23, 0.45, 0.85], CELL = [0.72, 0.72, 0.74];
+  var ghosts = [];
+  geos.forEach(function(g, i){
+    if (i === leadAt) return;
+    ghosts.push({ geo: g,
+                  alpha: parts[i].what === "cell" ? 0.14 : 0.35,
+                  tint: parts[i].what === "cell" ? CELL : NUC });
+  });
+
+  /* ── AND THE CAMERA SURVIVES THE REDRAW ────────────────────────  2026-10-03
+     Søren: "When I turned the cell in the 3D view and then clicked its nucleus, then suddenly the
+     center of the 3D view changed."
+
+     Adding the nucleus redraws the panel, and a redraw built a fresh camera every time — so the
+     angle somebody had just turned to was thrown away at the exact moment they asked to see more
+     of it. core/mesh3d.js has taken an `o.view` object since 2026-09-17 and MUTATES it as the
+     pointer turns the model; handing the same object back is all that was needed. Kept on the host
+     element rather than in a module variable, because two previews open in one thread are two
+     cameras. */
+  if (!host.__empView) host.__empView = { yaw: 0.6, pitch: 0.3, dist: 1.9 };
+  M.show(host, geos[leadAt], { ghosts: ghosts, view: host.__empView,
+                               tint: (leadAt === nucAt) ? NUC : CELL,
+                               emptyMessage: "That cell has no mesh to draw." });
 }
 
 async function open(hostEl, pos, opts){
@@ -352,6 +385,6 @@ async function open(hostEl, pos, opts){
 function close(hostEl){ if (hostEl) hostEl.innerHTML = ""; }
 function isOpen(hostEl){ return !!(hostEl && hostEl.querySelector(".emp")); }
 
-UJ.empreview = { open: open, close: close, isOpen: isOpen,
+UJ.empreview = { open: open, close: close, isOpen: isOpen, _draw: drawMeshes,
                  _scaleBar: scaleBar, _stampCoord: stampCoord, _cellAt: cellAt, W: W, H: H };
 })();

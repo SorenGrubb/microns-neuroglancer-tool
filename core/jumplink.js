@@ -250,11 +250,24 @@ function state(hits, opts){
                             name: "EM (" + (v.label || v.key) + ")",
                             shaderControls: host.emShader });
   });
+  /* ── SEE-THROUGH ONLY WHERE THERE IS SOMETHING INSIDE ──────────────  2026-10-03
+     Søren: "The nucleus should be visible through the soma in the neuroglancer view also. Use same
+     settings as for the cell identity cell name neuroglancer link." A solid soma hides the nucleus
+     in it, and the cell-identity link has turned the cell down to 0.35 for that reason since it was
+     written. The two numbers come from the host rather than being repeated here, so retuning them
+     moves every link this tool writes.
+
+     Conditional on the nuclei layer actually being in the state: a cell with nothing inside it
+     should stay solid, because solid is the right picture for a lone cell. */
+  var wantNuc = host.volumes.some(function(v){
+    return v.nuc && (v.key === here || nucs.length); });
+  var alpha = host.alpha || {};
   host.volumes.forEach(function(v){
     if (!v.seg) return;
     var s = { type: "segmentation", source: v.seg, tab: "source",
               name: "segmentation (" + (v.label || v.key) + ")", notSelectedAlpha: 0.05 };
     if (roots.length) s.segments = roots.slice();
+    if (wantNuc) s.objectAlpha = (alpha.cell === undefined ? 0.35 : alpha.cell);
     layers.push(s);
   });
   /* NUCLEI ONLY WHERE THERE ARE ANY. minnie35 has no nucleus detection over it, so a nuclei layer
@@ -263,7 +276,8 @@ function state(hits, opts){
     if (!v.nuc) return;
     if (v.key !== here && !nucs.length) return;
     var nl = { type: "segmentation", source: v.nuc, tab: "source", name: "nuclei",
-               notSelectedAlpha: 0.05, objectAlpha: 0.4 };
+               notSelectedAlpha: 0.05,
+               objectAlpha: (alpha.nuc === undefined ? 0.4 : alpha.nuc) };
     if (nucs.length) nl.segments = nucs.slice();
     layers.push(nl);
   });

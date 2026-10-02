@@ -256,6 +256,77 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what
   ok(/3D/.test(titles.cellTxt) && /nucleus/i.test(titles.nucTxt),
      "...and they say which is which", titles.cellTxt + " / " + titles.nucTxt);
 
+  /* ── WHAT IS SOLID, AND WHAT THE CAMERA DOES ────────────────────────────────────────────
+     Søren: "I don't see the nucleus inside the cell", and "When I turned the cell in the 3D view
+     and then clicked its nucleus, then suddenly the center of the 3D view changed."
+
+     Both were in drawMeshes: the CELL was the lead, which mesh3d draws opaque, so the nucleus was
+     behind it; and every redraw built a fresh camera. Driven here through the real module, with
+     two tiny meshes, because neither is visible in markup. */
+  console.log("\nthe nucleus is the solid one and the cell is see-through");
+  const meshes = await p.evaluate(() => {
+    /* A cube, as positions+indices, at a size and offset the caller picks. */
+    const cube = (s2, off) => {
+      const o = off || [0, 0, 0], P2 = [];
+      [[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]].forEach(c => {
+        P2.push(o[0] + c[0] * s2, o[1] + c[1] * s2, o[2] + c[2] * s2); });
+      const I = [0,1,2, 0,2,3, 4,6,5, 4,7,6, 0,4,5, 0,5,1,
+                 1,5,6, 1,6,2, 2,6,7, 2,7,3, 3,7,4, 3,4,0];
+      return { positions: new Float32Array(P2), indices: new Uint32Array(I) };
+    };
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    window.__3d = host;
+    /* What show() was handed, rather than what the pixels look like: the arrangement IS the fix. */
+    const calls = [];
+    const M = (window.UJ.mesh3dCore && UJ.mesh3dCore.prepare) ? UJ.mesh3dCore : UJ.mesh3d;
+    const realShow = M.show;
+    M.show = function(h, geo, o){ calls.push({ o: o, geo: geo }); return realShow.apply(this, arguments); };
+
+    /* The cell alone first — the button order anybody uses. */
+    UJ.empreview._draw(host, [{ what: "cell", mesh: cube(40), unitNm: 1000 }]);
+    const first = calls[calls.length - 1];
+    /* Turn it, the way a pointer would. */
+    host.__empView.yaw = 1.234; host.__empView.pitch = 0.777; host.__empView.dist = 2.5;
+    /* Then the nucleus. */
+    UJ.empreview._draw(host, [{ what: "cell", mesh: cube(40), unitNm: 1000 },
+                              { what: "nucleus", mesh: cube(8000, [16000, 16000, 16000]), unitNm: 1 }]);
+    const second = calls[calls.length - 1];
+    M.show = realShow;
+    const tintOf = c => (c.o.tint || []).join(",");
+    return {
+      calls: calls.length,
+      firstGhosts: (first.o.ghosts || []).length,
+      secondGhosts: (second.o.ghosts || []).length,
+      secondGhostAlpha: ((second.o.ghosts || [])[0] || {}).alpha,
+      firstTint: tintOf(first), secondTint: tintOf(second),
+      sameView: first.o.view === second.o.view,
+      viewKept: JSON.stringify(second.o.view)
+    };
+  });
+  ok(meshes.calls === 2, "two draws: the cell, then the cell and its nucleus", meshes.calls);
+  ok(meshes.firstGhosts === 0, "the cell alone is the subject, with nothing around it",
+     meshes.firstGhosts + " ghost(s)");
+  ok(meshes.secondGhosts === 1,
+     "ONCE THE NUCLEUS IS THERE IT IS THE SUBJECT and the cell becomes the thing you look through",
+     meshes.secondGhosts + " ghost(s)");
+  ok(meshes.secondGhostAlpha === 0.14,
+     "...at the fainter of the two alphas, being the larger surface", meshes.secondGhostAlpha);
+  ok(meshes.firstTint !== meshes.secondTint,
+     "...and the subject's colour changes with it", meshes.firstTint + " -> " + meshes.secondTint);
+  /* BLUE MEANS b > r AND b > g, not three particular digits: NUC_TINT is 0.227/0.447/0.847 and
+     asserting "0.23" made this check fail over a rounding it has no opinion about. */
+  const t = meshes.secondTint.split(",").map(Number);
+  ok(t[2] > t[0] && t[2] > t[1],
+     "...to the blue a nucleus is everywhere else in these tools",
+     t.map(x => Math.round(x * 100) / 100).join(", "));
+
+  console.log("\nand the angle you turned to survives adding it");
+  ok(meshes.sameView,
+     "the SAME camera object is handed back, which is what mesh3d mutates in place");
+  ok(/1\.234/.test(meshes.viewKept) && /0\.777/.test(meshes.viewKept),
+     "...so the yaw and pitch you turned to are still there after the redraw", meshes.viewKept);
+
   console.log("\nnothing is read for a coordinate nobody asked about");
   const lazy = await p.evaluate(async () => {
     /* ITS OWN SLOT, not a count of every picture on the page: the sections above deliberately open

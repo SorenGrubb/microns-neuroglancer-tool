@@ -237,6 +237,44 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what
     ok(n35 === 0, "...and not with a minnie35 one, where there is no nucleus detection", n35);
   }
 
+  /* ── THE NUCLEUS SHOWS THROUGH THE SOMA ─────────────────────────────────────────────────
+     Søren, on a link opened from a Discussion post: "The nucleus should be visible through the soma
+     in the neuroglancer view also. Use same settings as for the cell identity cell name neuroglancer
+     link." A solid soma hides what is inside it. */
+  console.log("\na cell with a nucleus in it is see-through");
+  {
+    const r = await p.evaluate(v => {
+      const st = UJ.jumplink.state(UJ.jumplink.scan("at " + v.join(", ")));
+      const seg = (st.layers || []).filter(l => l.type === "segmentation" && /segmentation/.test(l.name));
+      const nuc = (st.layers || []).filter(l => /nuclei/.test(l.name || ""))[0];
+      const host = window.jumpLinkHost();
+      return { segAlpha: seg.map(l => l.objectAlpha),
+               nucAlpha: nuc ? nuc.objectAlpha : null,
+               hostAlpha: host.alpha || null };
+    }, fx.in65);
+    ok(r.segAlpha.every(a => a === 0.35),
+       "the cell segmentation is turned down so the nucleus reads through it",
+       JSON.stringify(r.segAlpha));
+    ok(r.nucAlpha === 0.4, "...and the nuclei layer has its own", r.nucAlpha);
+    ok(!!(r.hostAlpha && r.hostAlpha.cell === 0.35 && r.hostAlpha.nuc === 0.4),
+       "...BOTH READ FROM THE PAGE, which is where the cell-identity link gets them, rather than "
+       + "written down a second time here", JSON.stringify(r.hostAlpha));
+  }
+  {
+    /* And a point with no nuclei layer keeps its cell solid: see-through is for seeing something
+       inside, and there is nothing inside. */
+    const r = await p.evaluate(v => {
+      const st = UJ.jumplink.state(UJ.jumplink.scan("at " + v.join(", ")));
+      const seg = (st.layers || []).filter(l => l.type === "segmentation" && /segmentation/.test(l.name));
+      return { nuclei: (st.layers || []).filter(l => /nuclei/.test(l.name || "")).length,
+               alphas: seg.map(l => l.objectAlpha === undefined ? "solid" : l.objectAlpha) };
+    }, fx.in35);
+    ok(r.nuclei === 0, "a minnie35 point has no nuclei layer (the premise)", r.nuclei);
+    ok(r.alphas.every(a => a === "solid"),
+       "...so its cell stays solid, which is the right picture for a lone cell",
+       JSON.stringify(r.alphas));
+  }
+
   console.log("\na post naming only cells still opens");
   {
     /* No coordinate at all, so nothing to centre on -- and the button must still work, with both

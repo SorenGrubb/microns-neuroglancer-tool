@@ -86,6 +86,40 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what
   await p.goto("file://" + page_("ujump.html"));
   await p.waitForTimeout(5000);
 
+  /* ── WHERE THE PANEL ACTUALLY IS ────────────────────────────────────────────────────────
+     Søren, with a screenshot of the Discussion tab showing the credit card at the top of it:
+     "This part should be moved to the bottom."
+
+     The card was not misplaced; the PANEL was. It had been inserted as a sibling of .wrap, with
+     BODY for a parent, because its anchor was `</div></div>` before the data block — two closing
+     tags that turned out to be the credit card's and .wrap's. It matched exactly once, so the
+     generator reported ok. A unique anchor in the wrong place is still the wrong place.
+
+     So this asserts the NESTING, which no amount of matching the right string can fake. */
+  console.log("\nthe panel is a panel of this page");
+  const place = await p.evaluate(() => {
+    const panel = document.querySelector('[data-tabpanel="forum"]');
+    const wrap = document.querySelector(".wrap");
+    const credit = [].slice.call(document.querySelectorAll(".card"))
+      .filter(c => /This tool was made by/.test(c.textContent))[0];
+    const kids = wrap ? [].slice.call(wrap.children) : [];
+    return { parent: panel ? panel.parentElement.className || panel.parentElement.tagName : "none",
+             inWrap: !!(wrap && panel && panel.parentElement === wrap),
+             panels: kids.filter(k => k.hasAttribute && k.hasAttribute("data-tabpanel")).length,
+             panelIdx: kids.indexOf(panel),
+             creditIdx: kids.indexOf(credit),
+             creditLast: !!(credit && wrap && credit === kids[kids.length - 1]),
+             width: panel ? Math.round(panel.getBoundingClientRect().width) : 0,
+             wrapWidth: wrap ? Math.round(wrap.getBoundingClientRect().width) : 0 };
+  });
+  ok(place.inWrap, "the Discussion panel is inside the page column, like every other panel",
+     "its parent is " + place.parent);
+  ok(place.panels === 5, "there are five tab panels in the page", place.panels);
+  ok(place.creditIdx > place.panelIdx,
+     "AND THE CREDIT CARD COMES AFTER IT — which is what he asked for, and what it had always been "
+     + "on every other tab", "panel at " + place.panelIdx + ", credit at " + place.creditIdx);
+  ok(place.creditLast, "...as the last thing on the page");
+
   console.log("\nnothing is read until somebody asks for it");
   ok(forumGets.length === 0, "the forum is not fetched on page load",
      forumGets.length + " request(s)");
@@ -102,9 +136,18 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what
   await p.waitForTimeout(500);
   ok(forumGets.length === 1, "...and going back and forth does not read it again",
      forumGets.length + " request(s)");
-  const shown = await p.evaluate(() =>
-    document.querySelector('[data-tabpanel="forum"]').className);
-  ok(/active/.test(shown), "the panel is the one on screen", shown);
+  const shown = await p.evaluate(() => {
+    const panel = document.querySelector('[data-tabpanel="forum"]');
+    const wrap = document.querySelector(".wrap");
+    return { cls: panel.className,
+             /* MEASURED WITH THE TAB OPEN. A hidden panel has no box at all, so asking this before
+                the click reads 0 and says nothing about the layout. */
+             w: Math.round(panel.getBoundingClientRect().width),
+             wrapW: Math.round(wrap.getBoundingClientRect().width) };
+  });
+  ok(/active/.test(shown.cls), "the panel is the one on screen", shown.cls);
+  ok(shown.w > 0 && shown.w <= shown.wrapW,
+     "...and it is the page's width, not the window's", shown.w + " of " + shown.wrapW);
 
   /* ── THE INDEX, THE THREAD, THE BOX UNDERNEATH ──────────────────────────────────────────
      Søren: "the index should be on the left side of the screen and then the window to show the
