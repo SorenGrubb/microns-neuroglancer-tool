@@ -595,6 +595,9 @@ document.addEventListener("DOMContentLoaded", function(){
 <script src="core/jumplink.js"></script>
 <!-- The Discussion tab: findings, bugs and ideas, with the places a post names made
      clickable by core/jumplink.js above. 2026-10-01. -->
+<!-- A coordinate becomes a picture: the EM here, its scale bar, and the cell in 3D beside it
+     -- core/empreview.js, 2026-10-02. Before core/forum.js, which opens one per coordinate. -->
+<script src="core/empreview.js"></script>
 <script src="core/forum.js"></script>
 <script src="core/panel.js"></script>
 <script src="core/tree.js"></script>
@@ -618,7 +621,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-01 20:49</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-02 07:19</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -12978,6 +12981,44 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
      The EM extents are the same two constants the region-filter diagram draws, read rather than
      copied. The viewer is whichever one is picked at the top of the Jump tab, read at call time so
      changing it changes the next link rather than needing a re-render. */
+  /* ── WHAT A PICTURE OF A COORDINATE NEEDS FROM THIS PAGE ────────────  2026-10-02
+     core/empreview.js draws 19.2 µm of EM at a coordinate, finds the cell whose segmentation
+     covers it, and draws that cell and its nucleus in 3D beside it. It knows none of the sources:
+     the EM, the segmentation and the nuclei volumes are this page's, and so is the contrast window
+     -- EM_WINDOW is read from EM_SHADER_CONTROLS, which is what this page sends Neuroglancer, so
+     the pad, the cell card, this preview and every link written here cannot drift apart.
+
+     minnie65 ONLY, deliberately. UJ.emtiles keeps ONE configured source and the tracing pad has
+     already pointed it at minnie65; re-pointing it for a minnie35 coordinate would silently move
+     the pad to the other volume. The preview says the EM could not be read there instead.
+
+     viewerUrl is core/jumplink.js's, so the picture opens the same view the sentence's link does
+     -- both volumes' imagery and segmentation -- rather than a second state built here that could
+     disagree with it. */
+  window.emPreviewHost=function(){
+    return {
+      res:[UJ_RX,UJ_RY,UJ_RZ],
+      em:SRC.em, seg:SRC.seg, nuc:SRC.nuc,
+      window:{lo:EM_WINDOW.lo,hi:EM_WINDOW.hi},
+      /* One alpha for every overlay this page paints, like the window above it. */
+      segAlpha:EM_SEG_ALPHA,
+      /* So a post that names a CELL and no place still has somewhere to draw: the nucleus
+         detection's own centroid, from the table this page already holds. */
+      nucleusAt:function(nid){
+        try{
+          const i=nidToIndex(nid);
+          return i<0?null:[NX[i],NY[i],NZ[i]];
+        }catch(_e){ return null; }
+      },
+      viewerUrl:function(pos){
+        try{
+          if(window.UJ&&UJ.jumplink)
+            return UJ.jumplink.url(UJ.jumplink.scan(pos.join(", ")));
+        }catch(_e){}
+        return "";
+      }
+    };
+  };
   window.jumpLinkHost=function(){
     return {
       resNm:[UJ_RX,UJ_RY,UJ_RZ],

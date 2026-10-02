@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-10-01 20:51</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-10-02 07:20</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -14398,8 +14398,27 @@ function tracingCurrentAll(){
     const here=cellOf({nucleus_id:nid,root_id:rid,cell_coord:tracingCellAtVal()});
     const sameCell=function(x){
       const c=cellOf(x);
-      return !!((here.nuc&&c.nuc&&c.nuc===here.nuc)
-              ||(here.root&&c.root&&c.root===here.root)
+      /* ── A DISAGREEMENT COUNTS, NOT ONLY AN AGREEMENT ──────────────  2026-10-02
+         Søren, on ηJump: "I traced a nucleus and then I traced another nucleus right after... they
+         had exactly the same structureID... everything else was different for them except color
+         and rootID (it is a large weird root ID)."
+
+         This read "any ONE positive match is enough", so his two nuclei -- different nucleus ids,
+         one shared H01 root id -- matched on the root, and the nucleus ids that disagreed were
+         never consulted. H01's segmentation merges; a root id there can cover many cells, which
+         is what a large weird root id IS. More than one cell sharing a root id was never the
+         problem: a test that could only look for agreement was.
+
+         A NUCLEUS ID SETTLES IT BOTH WAYS when both have one. It is the cell's own name, and the
+         2026-09-23 note already says why it is the one to trust: a root id moves when the
+         segmentation is proofread and a nucleus id does not. So a proofread cell still keeps its
+         id (its nucleus agrees), and two nuclei inside one merged segment are two cells.
+
+         The root and the coordinate keep their old meaning for everything else, because a cell
+         traced from a point inside a process has a root id and nothing else, and that is the case
+         the root test was added for. The root id is not wrong here; it is WEAKER. */
+      if(here.nuc&&c.nuc) return c.nuc===here.nuc;
+      return !!((here.root&&c.root&&c.root===here.root)
               ||(here.at&&c.at&&c.at===here.at));
     };
     /* ── AND ONLY FOR SOMETHING A CELL HAS ONE OF ──────────────────────────────────  2026-09-27

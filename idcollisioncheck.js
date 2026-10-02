@@ -117,6 +117,28 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
     const B = idFor("286159", "", "Whole cell", keptA);
     /* Cell A again, edited: same name AND same nucleus, so it must keep its id. */
     const A2 = idFor("286849", "", "Whole cell", keptA);
+    /* ── TWO NUCLEI UNDER ONE MERGED SEGMENT ──────────────────────────────────  2026-10-02
+       Søren, on ηJump: "I traced a nucleus and then I traced another nucleus right after. It moved
+       the first one to traced structures history when I added the second one... they had exactly
+       the same structureID, even though everything else was different for them except color and
+       rootID (it is a large weird root ID)."
+
+       H01's segmentation merges: one root id can cover many cells, which is what "a large weird
+       root ID" means. So the two nuclei had DIFFERENT nucleus ids and THE SAME root id -- and
+       sameCell() took any one positive match as enough, so the root agreed, the nucleus was never
+       consulted, and the second nucleus filed itself as the first one's next version. */
+    const H01ROOT = "6198781614";
+    const keptH = [{ id: "nucleus_1790886747285_df2b", name: "Nucleus", kind: "nucleus",
+                     nucleus_id: "61360735", root_id: H01ROOT, rings: rings(4) }];
+    const H1 = idFor("38762771", H01ROOT, "Nucleus", keptH, "__nucleus");
+    /* And the thing that rule is FOR must still work: the same nucleus, re-read, keeps its id. */
+    const H2 = idFor("61360735", H01ROOT, "Nucleus", keptH, "__nucleus");
+    /* A root id still identifies a cell when there is no nucleus id to consult -- H01 merges are
+       the exception, not the rule, and this is the case the 2026-09-23 fix added it for. */
+    const H3 = idFor("", H01ROOT, "Nucleus", [{ id: "nucleus_rootonly", name: "Nucleus",
+                     kind: "nucleus", nucleus_id: "", root_id: H01ROOT, rings: rings(4) }],
+                     "__nucleus");
+
     /* And by ROOT id, for a cell with no nucleus. */
     const keptR = [{ id: "whole-cell_r1", name: "Whole cell", kind: "cell", nucleus_id: "",
                      root_id: "864691135345326066", rings: rings(4) }];
@@ -155,7 +177,8 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
     set("tracingNucId", "394298"); set("tracingRootId", "864691135488318266");
     const EDIT = (tracingCurrentAll()[0] || {}).id || "";
 
-    return { idA: A.id, idB: B.id, idA2: A2.id, idR1: R1.id, idR2: R2.id,
+    return { idH1: H1.id, idH2: H2.id, idH3: H3.id,
+             idA: A.id, idB: B.id, idA2: A2.id, idR1: R1.id, idR2: R2.id,
              nameA: A.name, nA: A.n, sayA: A.say,
              lysWhat: S1.what, lys1: S1.ids, lys2: S2.ids, lys3: S3.ids, lys4: S4.ids,
              lysNames: S1.names.concat(S2.names, S3.names),
@@ -176,6 +199,20 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what + (d
      "...matched on the ROOT id too, for a cell with no nucleus", got.idR1);
   ok(got.idR2 !== "whole-cell_r1",
      "...and a different root is a different cell", got.idR2);
+
+  /* ── ηJUMP: TWO NUCLEI UNDER ONE MERGED ROOT ID ───────────────────────────────────────── */
+  console.log("\ntwo nuclei sharing one merged H01 root id");
+  ok(got.idH1 !== "nucleus_1790886747285_df2b",
+     "a DIFFERENT nucleus id is a different cell, whatever the root id says",
+     got.idH1 === "nucleus_1790886747285_df2b"
+       ? "took the first one's id — the second nucleus overwrites the first"
+       : got.idH1);
+  ok(got.idH2 === "nucleus_1790886747285_df2b",
+     "...while the SAME nucleus re-read still keeps its id, which is what the rule is for",
+     got.idH2);
+  ok(got.idH3 === "nucleus_rootonly",
+     "...and a root id still identifies a cell when there is no nucleus id to consult",
+     got.idH3);
 
   /* ── the lysosomes ─────────────────────────────────────────────────────────────────────── */
   console.log("\nsix lysosomes on one microglia, every one of them called “Lysosome”");
