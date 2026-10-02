@@ -2041,32 +2041,57 @@ function link(annotations){
          because the point is that nobody has to press the button -- and because a fixed wait is a
          race that passes until the run ahead of it gets slower, which is how this section started
          failing on 2026-09-18 with nothing wrong in it. */
-      /* Waits for the autosave to SETTLE, not merely to happen: it fires after every contour, so
-         the first value it writes is a half-drawn draft and reading that would assert against a
-         state nobody is in. Two identical reads a few hundred ms apart is what "caught up" means,
-         and it is not a stopwatch -- a fixed wait is a race that passes until the run ahead of it
-         gets slower, which is how this section started failing on 2026-09-18 with nothing wrong
-         in it. */
-      let raw = null, prev = null, same = 0;
-      for (let i = 0; i < 80; i++){
-        await new Promise(r => setTimeout(r, 100));
-        raw = JSON.stringify(draftRead());
-        if (raw && raw === prev){ if (++same >= 4) break; } else same = 0;
-        prev = raw;
+      /* ── "NO DRAFT YET" IS NOT A SETTLED DRAFT ────────────────────────  2026-10-03
+         This was one loop asking two questions, and it got the first one wrong in a way that only
+         showed up as a flake. draftRead() is null until the autosave fires; JSON.stringify(null)
+         is the STRING "null", which is truthy -- so four consecutive reads of nothing satisfied
+         "the value has stopped changing" and the loop left after half a second with raw = "null".
+         JSON.parse handed back null and the assertion under it threw, taking the rest of the file
+         with it. The eight-second budget below it was never once spent.
+
+         So: wait for the draft to EXIST, then wait for it to SETTLE. The autosave is coalesced to
+         about a second, so the first wait is for one tick; the second is because the save fires
+         after every contour and the first thing it writes is a half-drawn draft, which is a state
+         nobody is in. Neither is a stopwatch -- a fixed wait is a race that passes until the run
+         ahead of it gets slower, which is how this section started failing on 2026-09-18 with
+         nothing wrong in it. */
+      const read = function(){
+        var s = JSON.stringify(draftRead());
+        return (s && s !== "null" && s !== "undefined") ? s : null;   // the whole bug, in one line
+      };
+      const until = async function(ms, f){
+        const end = Date.now() + ms;
+        for (;;){
+          const v = f();
+          if (v) return v;
+          if (Date.now() > end) return null;
+          await new Promise(r => setTimeout(r, 50));
+        }
+      };
+      let raw = await until(20000, read), prev = null, same = 0;
+      if (raw) for (let i = 0; i < 200; i++){
+        await new Promise(r => setTimeout(r, 150));
+        const s = read();
+        if (s){ raw = s; if (s === prev){ if (++same >= 4) break; } else same = 0; }
+        prev = s;
       }
       return { raw: !!raw, d: raw ? JSON.parse(raw) : null,
                bar: document.getElementById("tracingDraftBar").textContent,
                vol: document.getElementById("tracePadVol").textContent,
                zs: PAD.rings.map(r => r.z).join(",") };
     }, { src: stub.toString() });
-    ok(saved.raw && saved.d.rings.length === 2,
+    /* Read through `D` from here on. When no draft ever arrived this section reports three
+       failures and the file carries on; dereferencing a null here cost the hundred-odd assertions
+       after it, which is a worse answer than the one it was trying to give. */
+    const D = saved.d || {};
+    ok(saved.raw && (D.rings || []).length === 2,
        "the pad saves itself as you draw — no button pressed",
-       saved.d && saved.d.rings.length + " contours");
-    ok(saved.d.pending.length === 1,
-       "...including the contour still being drawn", saved.d.pending.length + " vertex");
-    ok(saved.d.editId === "hers_1" && saved.d.nucId === "253863",
+       saved.raw ? (D.rings || []).length + " contours" : "the autosave never fired in 20 s");
+    ok((D.pending || []).length === 1,
+       "...including the contour still being drawn", (D.pending || []).length + " vertex");
+    ok(D.editId === "hers_1" && D.nucId === "253863",
        "...and WHICH tracing it is, with what has been filled in",
-       saved.d.editId + " / " + saved.d.nucId);
+       (D.editId || "—") + " / " + (D.nucId || "—"));
     /* "tracings", plural, and with a title on each row since 2026-09-19: the card lists every
        unfinished tracing rather than the one most recently saved. */
     ok(/Unfinished tracings/.test(saved.bar) && /Lysosome/.test(saved.bar),

@@ -78,7 +78,13 @@ UJ.emtiles = (function(){
             u16: cfg.u16 || null,
             /* A replacement JPEG decoder, (ArrayBuffer) -> Promise<{data, width, height}> with one
                byte per pixel. For a check running where there is no browser; a page passes none. */
-            decodeJpeg: cfg.decodeJpeg || null };
+            decodeJpeg: cfg.decodeJpeg || null,
+            /* ── DECODERS THE PAGE BROUGHT WITH IT ────────────────────────  2026-10-03
+               {encoding: fn}, same contract as decodeJpeg. Named here rather than read off cfg at
+               use time because CFG is this module's whole idea of its configuration, and a field
+               that lived only on the caller's object would be the one thing a reconfigure could
+               not take away — which is exactly what the pad's tick needs it to do. */
+            decoders: cfg.decoders || null };
     return CFG;
   }
 
@@ -106,7 +112,13 @@ UJ.emtiles = (function(){
      extent (smaller than ch at the volume's edge), which a JPEG's own width and height report. */
   var RAW_SEEN = (typeof WeakMap !== "undefined") ? new WeakMap() : null;
   async function decodeChunk(buf, scale, ch, shape){
-    if (String(scale.encoding || "raw") !== "jpeg"){
+    var enc = String(scale.encoding || "raw");
+    /* Reachable only on a volume where EVERY scale is one nothing can read, since realScales drops
+       the rest -- which is precisely the case where saying nothing would mean noise on screen. */
+    if (!canRead(enc))
+      throw new Error("this volume's " + enc + " chunks need a decoder this page does not have "
+                      + "— it reads raw, jpeg, and whatever the host configured");
+    if (enc === "raw"){
       /* RAW, AT THE NOMINAL STRIDE. 2026-09-21. An edge chunk is clipped to the volume, and the
          section reads every chunk with the nominal stride -- so an edge chunk read as it came
          sheared every row. Laid back into the nominal chunk here, as a JPEG edge chunk is below. */
@@ -130,8 +142,13 @@ UJ.emtiles = (function(){
       if (RAW_SEEN) RAW_SEEN.set(buf, full);
       return full;
     }
+    /* ANY DECODED CHUNK, NOT ONLY A JPEG ONE.  2026-10-03
+       Below here was jpeg-specific only in which function it called: the LAYOUT -- an image
+       chunk_x wide and chunk_y x chunk_z tall, the sections stacked down it -- is what the
+       precomputed format says, not what JPEG says. So the decoder is chosen by encoding and the
+       rest is shared, which is how a jxl chunk costs this file four lines rather than a branch. */
     if (JPEG_SEEN && JPEG_SEEN.has(buf)) return JPEG_SEEN.get(buf);
-    var img = await ((CFG && CFG.decodeJpeg) || browserJpeg)(buf);
+    var img = await decoderFor(enc)(buf);
     var nx = img.width, ny = shape[1], nz = Math.round(img.height / Math.max(1, ny));
     var a;
     if (nx === ch[0] && ny === ch[1] && nz === ch[2]) a = img.data;
@@ -151,13 +168,68 @@ UJ.emtiles = (function(){
      anything computes a finest-z or indexes a mip, so every later number counts real scales only.
      Refuses to empty the list: a skipScales that matched everything is a typo, and one dead mip is
      a better failure than no imagery at all. */
+  /* ── ...AND SCALES WHOSE ENCODING THIS FILE CANNOT DECODE ────────────  2026-10-03
+     Eyewire II's mouse retina serves 16, 32 and 64 nm as `jxl` (JPEG XL) and only 128 and 256 nm
+     as jpeg. decodeChunk below has two branches, jpeg and raw, so a jxl chunk read as raw is a
+     compressed bitstream interpreted as grey values: noise, drawn confidently, with nothing
+     anywhere to say so. It looks like tissue, which is what makes it worse than a blank canvas.
+
+     ASKED OF THE DECODER, NOT WRITTEN DOWN PER DATASET. The first draft of this named the three
+     jxl keys in ωJump's skipScales -- a hand-maintained list of what the decoder cannot do,
+     living in a config file beside a decoder that also knows. One value decided in one place and
+     matched in a second that drifts from it is this project's recurring bug; CAN_READ is the one
+     place, and every tool and every caller inherits it.
+
+     Chrome has no JPEG XL decoder, which is why there is no third branch. Neuroglancer carries a
+     WASM one, so the viewer links are unaffected and open at the full 16 nm -- it is the in-page
+     section, and only that, which stops at 128 nm on this volume. CFG.decodeJpeg is the seam if
+     we ever carry a decoder here: add the encoding to CAN_READ and the levels come back. */
+  /* ── ...AND WHAT A HOST BROUGHT WITH IT ──────────────────────────  2026-10-03
+     CFG.decoders is {encoding: fn(buf) -> {data, width, height}}, the same shape CFG.decodeJpeg
+     has. A page that loads one puts the encoding here and the levels come back; a page that does
+     not is exactly as it was. Søren asked for this because at the Eyewire retina's 128 nm jpeg
+     level a lysosome is four pixels across — a whole cell can be outlined there, an organelle
+     cannot. core/jxl.js is the first such decoder.
+
+     STILL ONE QUESTION WITH ONE ANSWER. The readable encodings are the base two plus the keys of
+     the map that holds the functions. Nothing else writes the list down, which is the whole
+     reason this is here and not in a per-dataset skipScales. */
+  var CAN_READ = { raw: 1, jpeg: 1 };
+  function canRead(enc){
+    return !!(CAN_READ[enc] || (CFG && CFG.decoders && CFG.decoders[enc]));
+  }
+  function decoderFor(enc){
+    if (enc === "jpeg") return (CFG && CFG.decodeJpeg) || browserJpeg;
+    return (CFG && CFG.decoders && CFG.decoders[enc]) || null;
+  }
   function realScales(info){
     var skip = (CFG && CFG.skipScales) || [];
-    if (!skip.length) return info.scales;
-    var kept = info.scales.filter(function(s){ return skip.indexOf(s.key) < 0; });
+    var kept = info.scales.filter(function(s){
+      return skip.indexOf(s.key) < 0 && canRead(String(s.encoding || "raw"));
+    });
+    /* A list that emptied the volume is a skipScales typo, or a volume this module cannot read at
+       all. One dead mip is a better failure than no imagery -- and in the second case decodeChunk
+       says what happened rather than letting the picture lie about it. */
     return kept.length ? kept : info.scales;
   }
   function configured(){ return !!CFG; }
+
+  /* ── WHAT THIS VOLUME SERVES THAT NOTHING CONFIGURED CAN READ ──────────────  2026-10-03
+     realScales() drops those levels, and once they are dropped nothing downstream can tell whether
+     the volume had any -- a page cannot distinguish "this volume only publishes 128 nm" from
+     "this volume publishes 16 nm in a format we cannot open". The pad's JPEG XL tick is the
+     difference between those two: it should appear on the Eyewire retina and nowhere else.
+
+     Returns the encodings, not a boolean, because the next one of these will not be jxl. */
+  async function unreadableEncodings(){
+    if (!CFG) return [];
+    var info = await UJ.segread._getInfo(CFG.em), seen = {}, out = [];
+    (info.scales || []).forEach(function(s){
+      var e = String(s.encoding || "raw");
+      if (!canRead(e) && !seen[e]){ seen[e] = 1; out.push(e); }
+    });
+    return out;
+  }
 
   /* Mips whose z resolution is still the finest one. See the header: past that a section is a
      slab. Returned coarsest-first is not wanted -- the index IS the mip, so the caller can say
@@ -413,7 +485,8 @@ UJ.emtiles = (function(){
     return view;
   }
 
-  return { configure: configure, configured: configured, drawSection: drawSection,
+  return { configure: configure, configured: configured,
+           unreadableEncodings: unreadableEncodings, drawSection: drawSection,
            scaleAt: scaleAt, sectionScales: sectionScales, _toScale: toScale, _toTool: toTool,
            _decodeChunk: decodeChunk };
 })();

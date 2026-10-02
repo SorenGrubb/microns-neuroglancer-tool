@@ -159,11 +159,35 @@ function tracingSources(){
   /* segInfo/nucInfo and segOffsetNm/nucOffsetNm too, 2026-09-21: χJump's cb2 segmentation
      keeps its info elsewhere and sits 1,216 sections below its EM. Dropped here, every configure
      the card makes would read it at the EM's z. See core/segread.js. */
+  /* ── AND THE DECODERS THE PAD HAS BEEN ASKED TO USE ────────────────────────  2026-10-03
+     Empty on every volume whose levels the browser can already read, which is all but one of the
+     sixty-eight this family offers. See tracingDecoders() and the tick beside the pad. */
   return { em: o.em || "", seg: o.seg || "", nuc: o.nuc || "", res: res,
-           skipScales: o.skipScales || [],
+           skipScales: o.skipScales || [], decoders: o.decoders || tracingDecoders(),
            segInfo: o.segInfo || "", nucInfo: o.nucInfo || "",
            segOffsetNm: o.segOffsetNm || null, nucOffsetNm: o.nucOffsetNm || null,
            u16: o.u16 || null };
+}
+/* ── A DECODER THE PAGE WENT AND FETCHED ─────────────────────────────────────  2026-10-03
+   Eyewire II's retina publishes 16, 32 and 64 nm as JPEG XL, which Chrome cannot read, so without
+   this the pad opens at the volume's 128 nm jpeg level and a lysosome is four pixels across.
+
+   NULL UNTIL THE TICK IS TICKED AND THE DECODER IS UP, both of them. Null means core/emtiles.js
+   drops those levels, which is exactly right while there is nothing to decode them with — a menu
+   offering 16 nm before the worker has booted would draw noise or nothing.
+
+   THE BUFFER IS COPIED, and this is the expensive mistake not to make. core/segread.js caches a
+   chunk's ArrayBuffer by URL and range and core/emtiles.js caches the decoded plane in a WeakMap
+   keyed on that same buffer; transferring it to the worker DETACHES it, so the next read of that
+   chunk -- the one the cache exists to make free -- would get zero bytes. A quarter of a megabyte
+   of copy against a 45 ms decode is not a trade worth thinking about twice. */
+var PAD_FINE = false;
+function tracingDecoders(){
+  try {
+    if (!PAD_FINE) return null;
+    if (!(window.UJ && UJ.jxl && UJ.jxl.ready())) return null;
+    return { jxl: function(buf){ return UJ.jxl.decode(buf.slice(0)); } };
+  } catch (_e){ return null; }
 }
 /* ── THIS DATASET'S CONTRAST, NOT minnie65's ──────────────  2026-09-20
    core/emtiles.js stretches [lo,hi] to black-white and defaults to 86/172. Those are minnie65's
@@ -5674,6 +5698,11 @@ function wirePad(){
   /* REMEMBERED, because somebody with a pen display has a pen display every day. Per browser, like
      the theme; it is a preference about the hand doing the drawing, not about the tracing. */
   try { padTipsWire(); } catch (_e){}
+  /* NOT REMEMBERED, unlike the pen. The pen is a fact about the hand doing the drawing and is the
+     same every day; this is a trade against one volume\'s download, and starting a session by
+     silently fetching 1.7 MB because of something ticked last week is not a kindness. */
+  const fine = document.getElementById("tracePadFine");
+  if (fine) fine.addEventListener("change", function(){ padFineSet(fine.checked); });
   const pen = document.getElementById("tracePadPen");
   if (pen){
     try { pen.checked = tracingStore().getItem(TRACING_PEN_KEY) === "1"; } catch (_e){}
@@ -6214,6 +6243,13 @@ function tracingCardHtml(){
     "     written over by whatever happens next -- so whatever the overlay had said about itself was gone",
     "     before he could read it. What the segmentation did belongs beside its own tick. -->",
     "<span class=\"hint\" id=\"tracePadSegSay\" style=\"flex:1 1 100%\"></span>",
+    "<!-- A DECODER THE BROWSER DOES NOT HAVE.  2026-10-03. Eyewire II\'s retina serves its finest",
+    "     three levels as JPEG XL; Chrome cannot read them, so the pad opens at its 128 nm jpeg level",
+    "     where a lysosome is four pixels across. Hidden on every volume that does not need it --",
+    "     emtiles says which those are -- and off until asked on the one that does, because the",
+    "     decoder is 1.7 MB and a chunk takes 45 ms against the browser\'s 8. -->",
+    "<label id=\"tracePadFineWrap\" style=\"display:none;font-size:12px;align-items:center;gap:6px;flex:0 0 auto\" title=\"This volume publishes its finest levels in JPEG XL, which this browser cannot read, so the pad is showing you the coarsest ones it can. Ticking this fetches a JPEG XL decoder (about 1.7 MB, once) and the finer levels appear in the menu on the left. They are slower: about 45 ms a chunk against 8 for the levels you have now, and a view is around twenty chunks. The decoding happens off the page\u2019s own thread, so nothing freezes while it loads.\"><input type=\"checkbox\" id=\"tracePadFine\"> the finest levels (fetches a decoder)</label>",
+    "<span class=\"hint\" id=\"tracePadFineSay\" style=\"flex:1 1 100%\"></span>",
     "</div>",
     "<div style=\"position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111\">",
     "<!-- TIPS, 2026-09-22 (src/the_pad_gives_tips.py): the tick on the left turns them off. -->",
@@ -6621,6 +6657,54 @@ async function padRelabelMips(){
   if (wide0 >= 0 && chunk0 && chunk1 && chunk0 >= chunk1)
     sel.options[wide0].textContent =
       sel.options[wide0].textContent.replace(/, slower to load$/, "");
+  try { await padFineOffer(); } catch (_e){}
+  return true;
+}
+
+/* ── OFFER THE DECODER ONLY WHERE IT WOULD DO SOMETHING ────────────────────────  2026-10-03
+   Asked of core/emtiles.js rather than of the dataset row, because emtiles is the thing that
+   dropped the levels and the only thing that knows a volume HAD any. On the sixty-seven volumes
+   whose levels the browser can already read this leaves the label hidden and does nothing else.
+
+   Hidden rather than absent once ticked: the tick stays on screen so it can be unticked, which is
+   how somebody who tried the 16 nm level and found it too slow gets back to the fast one. */
+async function padFineOffer(){
+  var wrap = document.getElementById("tracePadFineWrap");
+  if (!wrap) return false;
+  var want = [];
+  try { want = await UJ.emtiles.unreadableEncodings(); } catch (_e){ want = []; }
+  var can = !!(window.UJ && UJ.jxl && UJ.jxl.supported());
+  var offer = (PAD_FINE || (want.indexOf("jxl") >= 0)) && can;
+  wrap.style.display = offer ? "flex" : "none";
+  return offer;
+}
+
+/* The tick itself. Three things happen, in this order, and the order is the point: the decoder has
+   to be UP before emtiles is reconfigured, because tracingDecoders() returns null until it is --
+   reconfiguring first would quietly set no decoders and leave the menu unchanged, which looks
+   exactly like the tick not working. */
+async function padFineSet(on){
+  var say = document.getElementById("tracePadFineSay");
+  var box = document.getElementById("tracePadFine");
+  var tell = function(t){ if (say) say.textContent = t || ""; };
+  if (on){
+    tell("Fetching the JPEG XL decoder (about 1.7 MB, once)\u2026");
+    try { await UJ.jxl.start(); }
+    catch (e){
+      PAD_FINE = false; if (box) box.checked = false;
+      tell("The decoder would not load: " + ((e && e.message) || e)
+           + " \u2014 the pad is still on the levels it can read.");
+      return false;
+    }
+  }
+  PAD_FINE = !!on;
+  try { UJ.emtiles.configure(tracingSources()); } catch (_e){}
+  try { await padRelabelMips(); } catch (_e){}
+  try { await padDraw(); } catch (_e){}
+  tell(on
+    ? "The finer levels are in the menu on the left. About 45 ms a chunk against 8, and a view is "
+      + "around twenty chunks \u2014 decoded off the page\u2019s own thread, so nothing freezes."
+    : "Back to the levels the browser reads itself.");
   return true;
 }
 

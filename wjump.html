@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-10-02 15:17</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-10-02 17:02</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -324,9 +324,9 @@ try{var _t=localStorage.getItem("ujump_theme");
        has been wrong twice: it said twenty-six volumes and 2,922 boxes while the roster was 41
        and 14,532, because prose is the one thing in this file nothing checks. Now the numbers
        come from the same array the picker reads, so they cannot drift again. -->
-  <p class="hint">61 volumes are open, listed smallest first with the number of
+  <p class="hint">62 volumes are open, listed smallest first with the number of
   40&nbsp;&micro;m boxes each one takes &mdash; 1 for the smallest, 3,672 for the
-  largest, 13,031 across the roster. The map above sizes itself to whichever volume you pick
+  largest, 16,298 across the roster. The map above sizes itself to whichever volume you pick
   and keeps one scale across its panels, so a distance in one is the same distance in another.</p>
   <p class="hint"><b>Nothing you name here is scored.</b> There is no ground truth for cell
   identity in these volumes &mdash; only what the community converges on. Organelles are a
@@ -595,6 +595,46 @@ var PROV_ISHIBASHI = {
             "et al. 2021, BossDB",
   doi: "https://doi.org/10.60533/BOSS-2021-4MZE",
   terms: { note: BOSS_NOTE } };
+
+/* ── THE EYEWIRE II CONSORTIUM, which is a provider unlike any other here ────────────────
+   Every other row on this roster is a finished, published dataset. This one is a LIVE PROJECT:
+   the imagery is out, the segmentation is being proofread by a community of about 120 labs, and
+   the producers run an onboarding for people who want the rest of it.
+
+   SO THE NOTE CARRIES THE WAY IN, not just the usual disclaimer. ωJump offers this volume's EM
+   because its bucket serves it to anybody, without credentials, and we link rather than
+   redistribute -- the same basis as the twenty-three WEBKNOSSOS rows. But a user who gets
+   interested in a cell here should be told, on the card, that the segmentation, meshes and
+   skeletons exist and how to ask for them, rather than concluding this retina has none.
+
+   NO REUSE LICENCE IS INVENTED. The preprint is a bioRxiv posting and says nothing about the
+   pixels; "the bucket is readable" is a fact about a server, not a grant. Written down as the
+   basis, with the DOI to check it against, exactly as the escape hatch in wjumpcheck.js demands.
+
+   The year is stated rather than parsed: the citation ends "bioRxiv (2026)" and the index table
+   reads a trailing "(YYYY)", but the next version of this line will name a journal. */
+var PROV_EYEWIRE2 = {
+  year: 2026,
+  name: "Eyewire II consortium (Euler lab, T\u00fcbingen, and Seung lab, Princeton)",
+  licence: "publicly served \u2014 no reuse licence stated",
+  licenceUrl: "https://doi.org/10.64898/2026.05.28.727403",
+  portal: "https://eyewire.ai/",
+  bucket: "stroeh_sem_mouse_retina",
+  citation: "Str\u00f6h, Ebert, Fadjukov, Lause, Oesterle, Franke, Huang, Lu, Matsliah, Berson, " +
+            "Sherathiya, Gonschorek, Schubert, David, Sorek, Sterling, Serafetinidis, Singer, " +
+            "Tsukamoto, Maeyama, Omi, Schwartz, Berens, Seung, Euler and the Eyewire II " +
+            "Consortium, \u201cEyewire II \u2013 A connectomic resource for resolving cell types " +
+            "and circuits of the mouse retina\u201d, bioRxiv (2026)",
+  doi: "https://doi.org/10.64898/2026.05.28.727403",
+  terms: { basis: "the image volume is served from the producers' own Google Cloud Storage " +
+                  "bucket without credentials, verified 2026-10-03 by reading its info and " +
+                  "rendering it cross-origin; the preprint's own data statement directs readers " +
+                  "to eyewire.ai/ew2_access for the rest of the resource",
+           verifiedFrom: "https://doi.org/10.64898/2026.05.28.727403",
+           note: "\u03c9Jump links to the Eyewire II bucket and redistributes nothing. The "
+               + "segmentation, meshes and skeletons are NOT here \u2014 they sit behind a CAVE "
+               + "permission on the datastack stroeh-mouse-retina, and anyone can ask for it at "
+               + "eyewire.ai/ew2_access." } };
 
 UJ.cfg.datasets = [
   { id:"jrc_mus-meissner-corpuscle-1", tissue:"Meissner corpuscle", species:"mouse",
@@ -1472,6 +1512,32 @@ UJ.cfg.datasets = [
     shape:[1344,4608,6656], res_nm:4, tier:"em", enabled:true,
     source:"precomputed://s3://bossdb-open-data/Ishibashi2021/EM2/em",
     provider:PROV_ISHIBASHI },
+
+  /* ── THE SECOND LARGEST VOLUME HERE, AND THE LAST RETINA IN THE GROUP ─────────────────
+     1.31 x 1.31 mm of mouse retina, 82.6 µm deep: 3,267 boxes at 40 µm, a fifth of the roster's
+     16,298, and second only to wk-h5-l23-msem's 3,672. It goes last in the array because the
+     picker orders within a group by size and this is the biggest retina by three orders of
+     magnitude -- the Ishibashi blocks beside it are one box each.
+
+     EM ONLY, AND THE ROW SAYS SO BY HAVING NO SEGMENTATION LAYER. Its segmentation is
+     graphene://, lives on minnie.microns-daf.com, and needs a CAVE `view` permission that we do
+     not have; see PROV_EYEWIRE2's note for where to ask.
+
+     GEOMETRY READ FROM ITS OWN info, 2026-10-03, NOT FROM THE PAPER. Five scales, 16/32/64 nm
+     jxl and 128/256 nm jpeg, all five keeping a 40 nm section, chunk 128x128x16. The paper says
+     8 nm and 1 mm²; the published image/v2 starts at 16 nm and 81920 of those is 1.31 mm.
+     The jxl levels need no mention here -- core/emtiles.js drops what it cannot decode, so the
+     pad lands on 128 nm by itself and the viewer link, which Neuroglancer serves, opens at 16.
+
+     origin is the info's voxel_offset, (z,y,x) like `shape`: one section, 40 nm. It changes no
+     box boundary at 40 µm, and it is written down so that nothing has to assume it is zero.
+
+     NO em_range YET. Read one off the viewer's Rendering panel when convenient; until then the
+     page stretches 0-255 and the pad's own tighten does the work. */
+  { id:"ew2-stroeh-retina", tissue:"retina (Eyewire II)", species:"mouse",
+    shape:[2064,81920,81920], res_nm:[40,16,16], origin:[1,0,0], tier:"em", enabled:true,
+    source:"precomputed://gs://stroeh_sem_mouse_retina/image/v2",
+    provider:PROV_EYEWIRE2 },
 
 ];
 
@@ -8176,6 +8242,214 @@ UJ.organellelink = (function(){
            _inSection: inSection, _inRing: inRing, _bySection: bySection };
 })();
 </script>
+<script>/* core/jxl.js — JPEG XL chunks, decoded off the main thread.                         2026-10-03
+
+   Eyewire II's mouse retina (ωJump's `ew2-stroeh-retina`) serves its finest three levels as `jxl`
+   and only its coarsest two as jpeg. Chrome has no JPEG XL decoder, so core/emtiles.js drops the
+   levels it cannot read and the pad lands on 128 nm — where a lysosome is FOUR PIXELS across. A
+   whole cell can be outlined there. An organelle cannot.
+
+   Søren, given the measurements below: *"Lazy + opt-in, in a Worker"*. All three words are load-
+   bearing, and each one is answering a measured number rather than a preference.
+
+   MEASURED FIRST, in Chromium, on real JPEG XL encoded at this volume's own settings
+   (128×2048 grey chunks, which is what a 128×128×16 chunk is):
+
+       jxl-oxide-wasm   1.70 MB wasm   45 ms  lossless (its 16 nm)   110 ms  q75 (its 32/64 nm)
+       @jsquash/jxl     0.85 MB wasm   75 ms                          97 ms
+       the browser's own JPEG                                           8 ms
+
+   jxl-oxide wins where it matters — the 16 nm level is the one you trace on, and it is lossless —
+   so that is what is vendored. Note that the LOSSY levels are the slow ones: jxl-oxide's modular
+   path beats its VarDCT path. Nothing about that is obvious, which is why it was measured.
+
+   LAZY, because 1.7 MB is a real download and 62 of ωJump's 63 volumes will never want it. Nothing
+   is fetched, no worker is spawned, until someone asks for a finer level on a volume that needs
+   one. A page that never opens the retina is byte for byte the page it was.
+
+   OPT-IN, because 45 ms against 8 ms is not a free upgrade: a pad view is about twenty chunks, so
+   the finest level costs about a second where the jpeg level costs a sixth of one. That is a trade
+   the person tracing should make, on the tick beside the pad, not one made for them at mount.
+
+   IN A WORKER, because the alternative is a second of frozen page per section. Measured on the
+   same ten chunks: 466 ms in a worker with the main thread ticking 46 times out of a possible 47 —
+   that is, not blocked at all. The decode cost does not go away; the page stops wearing it.
+
+   WHY A MODULE WORKER FROM A BLOB. The vendored decoder is an ES module whose wasm sits beside it
+   and is found through import.meta.url, so it has to be imported rather than script-loaded, and a
+   worker that imports needs type:"module". Building it from a Blob rather than a file of its own
+   keeps the whole thing inside this file — which ωJump needs, since ωJump inlines core/ and has no
+   second file to serve. The glue's URL is passed in ABSOLUTE, because a blob: URL has no base for
+   a relative one to resolve against.
+
+   WHAT COMES BACK is {data, width, height}, one byte per pixel — the contract core/emtiles.js's
+   CFG.decoders asks for, which is the contract CFG.decodeJpeg has had since H01. The worker does
+   the PNG round trip (jxl-oxide hands out a PNG, not raw pixels) and the greyscale extraction on
+   its own thread, so what crosses back is the finished plane and nothing else.
+
+   ONE WORKER, ONE DECODE AT A TIME. core/emtiles.js already runs six chunk fetches at once; the
+   decodes queue behind each other in the worker, which is what keeps peak memory to one decoded
+   plane rather than six. The fetches are the part worth overlapping and they still are.
+
+   Run: node jxlcheck.js */
+var UJ = UJ || {};
+UJ.jxl = (function(){
+  "use strict";
+
+  /* Where the vendored decoder lives, as a URL a worker can import. Default: core/vendor/ beside
+     the page, which is where every tool in this family serves core/ from. A host that keeps it
+     elsewhere says so once. */
+  var BASE = "";
+  function configure(cfg){ if (cfg && cfg.base) BASE = String(cfg.base); }
+  function baseUrl(){
+    if (BASE) return BASE;
+    try { return new URL("core/vendor/", location.href).href; }
+    catch (_e){ return "core/vendor/"; }
+  }
+  function glueUrl(){
+    try { return new URL("jxl_oxide_wasm.js", baseUrl()).href; }
+    catch (_e){ return baseUrl() + "jxl_oxide_wasm.js"; }
+  }
+
+  /* Everything this needs of the browser. Said as one question so the caller can ask it before
+     offering the tick, rather than offering a tick that throws. */
+  function supported(){
+    return typeof Worker !== "undefined"
+        && typeof Blob !== "undefined"
+        && typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+        && typeof OffscreenCanvas !== "undefined"
+        && typeof createImageBitmap === "function";
+  }
+
+  /* ── THE WORKER ──────────────────────────────────────────────────────────────────────────────
+     A string, because it is built from a Blob. Kept as an array of lines for the same reason the
+     pad's markup is: a 30-line program inside one string literal is a program nobody will read.
+
+     `boot` is separate from a decode so the download can be started — and reported — before the
+     first chunk arrives, which is what lets the tick say "loading the decoder" instead of the pad
+     simply sitting there for two seconds. */
+  var WORKER_SRC = [
+    "let M = null;",
+    "self.onmessage = async function(e){",
+    "  const m = e.data;",
+    "  if (m.t === 'boot'){",
+    "    try {",
+    "      const g = await import(m.glue);",
+    "      await g.default();",
+    "      M = g;",
+    "      self.postMessage({ t: 'ready', v: g.version ? g.version() : '' });",
+    "    } catch (err){ self.postMessage({ t: 'boom', m: String((err && err.message) || err) }); }",
+    "    return;",
+    "  }",
+    "  if (!M){ self.postMessage({ t: 'err', id: m.id, m: 'the decoder is not loaded' }); return; }",
+    "  try {",
+    "    const im = new M.JxlImage();",
+    "    im.feedBytes(new Uint8Array(m.buf));",
+    "    if (!im.tryInit()) throw new Error('not a complete JPEG XL codestream');",
+    "    /* jxl-oxide hands out a PNG rather than raw pixels, so the round trip happens here",
+    "       rather than on the page: decode, encode, decode, take one channel. Measured at about",
+    "       a fifth of the total; it is the price of this library's API, not of JPEG XL. */",
+    "    const png = im.render().encodeToPng();",
+    "    const bm = await createImageBitmap(new Blob([png], { type: 'image/png' }));",
+    "    const cv = new OffscreenCanvas(bm.width, bm.height), g2 = cv.getContext('2d');",
+    "    g2.drawImage(bm, 0, 0);",
+    "    const rgba = g2.getImageData(0, 0, bm.width, bm.height).data;",
+    "    const out = new Uint8Array(bm.width * bm.height);",
+    "    for (let k = 0, j = 0; k < out.length; k++, j += 4) out[k] = rgba[j];",
+    "    const w = bm.width, h = bm.height;",
+    "    if (bm.close) bm.close();",
+    "    self.postMessage({ t: 'ok', id: m.id, data: out, width: w, height: h }, [out.buffer]);",
+    "  } catch (err){ self.postMessage({ t: 'err', id: m.id, m: String((err && err.message) || err) }); }",
+    "};"
+  ].join("\n");
+
+  /* A seam for the check, and for nothing else: node has no Worker, and a check that pulled 1.7 MB
+     of wasm over the network would be testing somebody else's library in the dark. What this file
+     owns is the PROTOCOL — boot once, queue by id, hand each result to the caller that asked —
+     and that is what a stand-in can exercise honestly. */
+  var MAKE = null;
+  function _workerFactory(f){ MAKE = f || null; }
+  function spawn(){
+    if (MAKE) return MAKE(WORKER_SRC);
+    var url = URL.createObjectURL(new Blob([WORKER_SRC], { type: "text/javascript" }));
+    return new Worker(url, { type: "module" });
+  }
+
+  var worker = null, booting = null, version = "", seq = 0, waiting = {};
+
+  function ready(){ return !!worker && !!version; }
+
+  /* Boots on the first call and is the same promise thereafter, so twenty chunks arriving at once
+     download one decoder rather than twenty. A boot that FAILS clears itself: a page that was
+     offline when the user first ticked the box should be able to tick it again. */
+  function start(){
+    if (booting) return booting;
+    /* MAKE, when a check has installed one, IS the support: node has no Worker and no
+       OffscreenCanvas, and the protocol this module owns can still be driven honestly there. */
+    if (!MAKE && !supported())
+      return Promise.reject(new Error("this browser cannot run the JPEG XL decoder "
+                                      + "(it needs workers and OffscreenCanvas)"));
+    booting = new Promise(function(res, rej){
+      var w;
+      try { w = spawn(); }
+      catch (e){ rej(new Error("could not start the decoder: " + ((e && e.message) || e))); return; }
+      w.onmessage = function(e){
+        var m = e.data || {};
+        if (m.t === "ready"){ worker = w; version = m.v || "unknown"; res(version); return; }
+        if (m.t === "boom"){ rej(new Error("the JPEG XL decoder would not load: " + m.m)); return; }
+        /* Anything else this early is a reply to nothing; dropped rather than guessed at. */
+      };
+      w.onerror = function(e){ rej(new Error("the JPEG XL decoder would not load: "
+                                             + ((e && e.message) || "worker error"))); };
+      w.postMessage({ t: "boot", glue: glueUrl() });
+    });
+    booting.then(function(){ wire(); }, function(){ booting = null; });
+    return booting;
+  }
+
+  /* The steady-state handler, installed once the boot reply has been taken. Replies are matched by
+     id and nothing else: the worker answers in the order it finishes, which is not necessarily the
+     order it was asked, and a queue that assumed otherwise would hand one chunk's pixels to
+     another chunk's caller — the kind of mistake that looks like a tracing in the wrong place. */
+  function wire(){
+    worker.onmessage = function(e){
+      var m = e.data || {}, hold = waiting[m.id];
+      if (!hold) return;
+      delete waiting[m.id];
+      if (m.t === "ok") hold.res({ data: m.data, width: m.width, height: m.height });
+      else hold.rej(new Error(m.m || "the JPEG XL decoder failed"));
+    };
+    worker.onerror = function(){
+      /* A worker that died takes every outstanding decode with it, and says so to each of them
+         rather than leaving twenty promises pending forever. */
+      Object.keys(waiting).forEach(function(k){
+        waiting[k].rej(new Error("the JPEG XL decoder stopped")); delete waiting[k];
+      });
+      worker = null; booting = null; version = "";
+    };
+  }
+
+  /* (ArrayBuffer) -> Promise<{data, width, height}>, one byte per pixel: core/emtiles.js's
+     CFG.decoders contract. The buffer is TRANSFERRED, so the caller must not keep it — emtiles
+     hands over a copy for exactly this reason (see tracingDecoders in core/tracingcard.js). */
+  async function decode(buf){
+    await start();
+    var id = ++seq;
+    return new Promise(function(res, rej){
+      waiting[id] = { res: res, rej: rej };
+      try { worker.postMessage({ t: "go", id: id, buf: buf }, [buf]); }
+      catch (e){ delete waiting[id]; rej(new Error("could not hand the chunk over: "
+                                                   + ((e && e.message) || e))); }
+    });
+  }
+
+  return { configure: configure, supported: supported, ready: ready, start: start,
+           decode: decode, version: function(){ return version; },
+           _src: WORKER_SRC, _glueUrl: glueUrl, _workerFactory: _workerFactory,
+           _reset: function(){ worker = null; booting = null; version = ""; waiting = {}; seq = 0; } };
+})();
+if (typeof module !== "undefined" && module.exports) module.exports = UJ.jxl;
+</script>
 <script>/* core/emtiles.js — one section of EM, in the page.                                   2026-09-17
 
    Søren: *"A polygon tool is much easier for the user. Can you try to implement it?"* No viewer a
@@ -8256,7 +8530,13 @@ UJ.emtiles = (function(){
             u16: cfg.u16 || null,
             /* A replacement JPEG decoder, (ArrayBuffer) -> Promise<{data, width, height}> with one
                byte per pixel. For a check running where there is no browser; a page passes none. */
-            decodeJpeg: cfg.decodeJpeg || null };
+            decodeJpeg: cfg.decodeJpeg || null,
+            /* ── DECODERS THE PAGE BROUGHT WITH IT ────────────────────────  2026-10-03
+               {encoding: fn}, same contract as decodeJpeg. Named here rather than read off cfg at
+               use time because CFG is this module's whole idea of its configuration, and a field
+               that lived only on the caller's object would be the one thing a reconfigure could
+               not take away — which is exactly what the pad's tick needs it to do. */
+            decoders: cfg.decoders || null };
     return CFG;
   }
 
@@ -8284,7 +8564,13 @@ UJ.emtiles = (function(){
      extent (smaller than ch at the volume's edge), which a JPEG's own width and height report. */
   var RAW_SEEN = (typeof WeakMap !== "undefined") ? new WeakMap() : null;
   async function decodeChunk(buf, scale, ch, shape){
-    if (String(scale.encoding || "raw") !== "jpeg"){
+    var enc = String(scale.encoding || "raw");
+    /* Reachable only on a volume where EVERY scale is one nothing can read, since realScales drops
+       the rest -- which is precisely the case where saying nothing would mean noise on screen. */
+    if (!canRead(enc))
+      throw new Error("this volume's " + enc + " chunks need a decoder this page does not have "
+                      + "— it reads raw, jpeg, and whatever the host configured");
+    if (enc === "raw"){
       /* RAW, AT THE NOMINAL STRIDE. 2026-09-21. An edge chunk is clipped to the volume, and the
          section reads every chunk with the nominal stride -- so an edge chunk read as it came
          sheared every row. Laid back into the nominal chunk here, as a JPEG edge chunk is below. */
@@ -8308,8 +8594,13 @@ UJ.emtiles = (function(){
       if (RAW_SEEN) RAW_SEEN.set(buf, full);
       return full;
     }
+    /* ANY DECODED CHUNK, NOT ONLY A JPEG ONE.  2026-10-03
+       Below here was jpeg-specific only in which function it called: the LAYOUT -- an image
+       chunk_x wide and chunk_y x chunk_z tall, the sections stacked down it -- is what the
+       precomputed format says, not what JPEG says. So the decoder is chosen by encoding and the
+       rest is shared, which is how a jxl chunk costs this file four lines rather than a branch. */
     if (JPEG_SEEN && JPEG_SEEN.has(buf)) return JPEG_SEEN.get(buf);
-    var img = await ((CFG && CFG.decodeJpeg) || browserJpeg)(buf);
+    var img = await decoderFor(enc)(buf);
     var nx = img.width, ny = shape[1], nz = Math.round(img.height / Math.max(1, ny));
     var a;
     if (nx === ch[0] && ny === ch[1] && nz === ch[2]) a = img.data;
@@ -8329,13 +8620,68 @@ UJ.emtiles = (function(){
      anything computes a finest-z or indexes a mip, so every later number counts real scales only.
      Refuses to empty the list: a skipScales that matched everything is a typo, and one dead mip is
      a better failure than no imagery at all. */
+  /* ── ...AND SCALES WHOSE ENCODING THIS FILE CANNOT DECODE ────────────  2026-10-03
+     Eyewire II's mouse retina serves 16, 32 and 64 nm as `jxl` (JPEG XL) and only 128 and 256 nm
+     as jpeg. decodeChunk below has two branches, jpeg and raw, so a jxl chunk read as raw is a
+     compressed bitstream interpreted as grey values: noise, drawn confidently, with nothing
+     anywhere to say so. It looks like tissue, which is what makes it worse than a blank canvas.
+
+     ASKED OF THE DECODER, NOT WRITTEN DOWN PER DATASET. The first draft of this named the three
+     jxl keys in ωJump's skipScales -- a hand-maintained list of what the decoder cannot do,
+     living in a config file beside a decoder that also knows. One value decided in one place and
+     matched in a second that drifts from it is this project's recurring bug; CAN_READ is the one
+     place, and every tool and every caller inherits it.
+
+     Chrome has no JPEG XL decoder, which is why there is no third branch. Neuroglancer carries a
+     WASM one, so the viewer links are unaffected and open at the full 16 nm -- it is the in-page
+     section, and only that, which stops at 128 nm on this volume. CFG.decodeJpeg is the seam if
+     we ever carry a decoder here: add the encoding to CAN_READ and the levels come back. */
+  /* ── ...AND WHAT A HOST BROUGHT WITH IT ──────────────────────────  2026-10-03
+     CFG.decoders is {encoding: fn(buf) -> {data, width, height}}, the same shape CFG.decodeJpeg
+     has. A page that loads one puts the encoding here and the levels come back; a page that does
+     not is exactly as it was. Søren asked for this because at the Eyewire retina's 128 nm jpeg
+     level a lysosome is four pixels across — a whole cell can be outlined there, an organelle
+     cannot. core/jxl.js is the first such decoder.
+
+     STILL ONE QUESTION WITH ONE ANSWER. The readable encodings are the base two plus the keys of
+     the map that holds the functions. Nothing else writes the list down, which is the whole
+     reason this is here and not in a per-dataset skipScales. */
+  var CAN_READ = { raw: 1, jpeg: 1 };
+  function canRead(enc){
+    return !!(CAN_READ[enc] || (CFG && CFG.decoders && CFG.decoders[enc]));
+  }
+  function decoderFor(enc){
+    if (enc === "jpeg") return (CFG && CFG.decodeJpeg) || browserJpeg;
+    return (CFG && CFG.decoders && CFG.decoders[enc]) || null;
+  }
   function realScales(info){
     var skip = (CFG && CFG.skipScales) || [];
-    if (!skip.length) return info.scales;
-    var kept = info.scales.filter(function(s){ return skip.indexOf(s.key) < 0; });
+    var kept = info.scales.filter(function(s){
+      return skip.indexOf(s.key) < 0 && canRead(String(s.encoding || "raw"));
+    });
+    /* A list that emptied the volume is a skipScales typo, or a volume this module cannot read at
+       all. One dead mip is a better failure than no imagery -- and in the second case decodeChunk
+       says what happened rather than letting the picture lie about it. */
     return kept.length ? kept : info.scales;
   }
   function configured(){ return !!CFG; }
+
+  /* ── WHAT THIS VOLUME SERVES THAT NOTHING CONFIGURED CAN READ ──────────────  2026-10-03
+     realScales() drops those levels, and once they are dropped nothing downstream can tell whether
+     the volume had any -- a page cannot distinguish "this volume only publishes 128 nm" from
+     "this volume publishes 16 nm in a format we cannot open". The pad's JPEG XL tick is the
+     difference between those two: it should appear on the Eyewire retina and nowhere else.
+
+     Returns the encodings, not a boolean, because the next one of these will not be jxl. */
+  async function unreadableEncodings(){
+    if (!CFG) return [];
+    var info = await UJ.segread._getInfo(CFG.em), seen = {}, out = [];
+    (info.scales || []).forEach(function(s){
+      var e = String(s.encoding || "raw");
+      if (!canRead(e) && !seen[e]){ seen[e] = 1; out.push(e); }
+    });
+    return out;
+  }
 
   /* Mips whose z resolution is still the finest one. See the header: past that a section is a
      slab. Returned coarsest-first is not wanted -- the index IS the mip, so the caller can say
@@ -8591,7 +8937,8 @@ UJ.emtiles = (function(){
     return view;
   }
 
-  return { configure: configure, configured: configured, drawSection: drawSection,
+  return { configure: configure, configured: configured,
+           unreadableEncodings: unreadableEncodings, drawSection: drawSection,
            scaleAt: scaleAt, sectionScales: sectionScales, _toScale: toScale, _toTool: toTool,
            _decodeChunk: decodeChunk };
 })();
@@ -13606,11 +13953,35 @@ function tracingSources(){
   /* segInfo/nucInfo and segOffsetNm/nucOffsetNm too, 2026-09-21: χJump's cb2 segmentation
      keeps its info elsewhere and sits 1,216 sections below its EM. Dropped here, every configure
      the card makes would read it at the EM's z. See core/segread.js. */
+  /* ── AND THE DECODERS THE PAD HAS BEEN ASKED TO USE ────────────────────────  2026-10-03
+     Empty on every volume whose levels the browser can already read, which is all but one of the
+     sixty-eight this family offers. See tracingDecoders() and the tick beside the pad. */
   return { em: o.em || "", seg: o.seg || "", nuc: o.nuc || "", res: res,
-           skipScales: o.skipScales || [],
+           skipScales: o.skipScales || [], decoders: o.decoders || tracingDecoders(),
            segInfo: o.segInfo || "", nucInfo: o.nucInfo || "",
            segOffsetNm: o.segOffsetNm || null, nucOffsetNm: o.nucOffsetNm || null,
            u16: o.u16 || null };
+}
+/* ── A DECODER THE PAGE WENT AND FETCHED ─────────────────────────────────────  2026-10-03
+   Eyewire II's retina publishes 16, 32 and 64 nm as JPEG XL, which Chrome cannot read, so without
+   this the pad opens at the volume's 128 nm jpeg level and a lysosome is four pixels across.
+
+   NULL UNTIL THE TICK IS TICKED AND THE DECODER IS UP, both of them. Null means core/emtiles.js
+   drops those levels, which is exactly right while there is nothing to decode them with — a menu
+   offering 16 nm before the worker has booted would draw noise or nothing.
+
+   THE BUFFER IS COPIED, and this is the expensive mistake not to make. core/segread.js caches a
+   chunk's ArrayBuffer by URL and range and core/emtiles.js caches the decoded plane in a WeakMap
+   keyed on that same buffer; transferring it to the worker DETACHES it, so the next read of that
+   chunk -- the one the cache exists to make free -- would get zero bytes. A quarter of a megabyte
+   of copy against a 45 ms decode is not a trade worth thinking about twice. */
+var PAD_FINE = false;
+function tracingDecoders(){
+  try {
+    if (!PAD_FINE) return null;
+    if (!(window.UJ && UJ.jxl && UJ.jxl.ready())) return null;
+    return { jxl: function(buf){ return UJ.jxl.decode(buf.slice(0)); } };
+  } catch (_e){ return null; }
 }
 /* ── THIS DATASET'S CONTRAST, NOT minnie65's ──────────────  2026-09-20
    core/emtiles.js stretches [lo,hi] to black-white and defaults to 86/172. Those are minnie65's
@@ -19121,6 +19492,11 @@ function wirePad(){
   /* REMEMBERED, because somebody with a pen display has a pen display every day. Per browser, like
      the theme; it is a preference about the hand doing the drawing, not about the tracing. */
   try { padTipsWire(); } catch (_e){}
+  /* NOT REMEMBERED, unlike the pen. The pen is a fact about the hand doing the drawing and is the
+     same every day; this is a trade against one volume\'s download, and starting a session by
+     silently fetching 1.7 MB because of something ticked last week is not a kindness. */
+  const fine = document.getElementById("tracePadFine");
+  if (fine) fine.addEventListener("change", function(){ padFineSet(fine.checked); });
   const pen = document.getElementById("tracePadPen");
   if (pen){
     try { pen.checked = tracingStore().getItem(TRACING_PEN_KEY) === "1"; } catch (_e){}
@@ -19661,6 +20037,13 @@ function tracingCardHtml(){
     "     written over by whatever happens next -- so whatever the overlay had said about itself was gone",
     "     before he could read it. What the segmentation did belongs beside its own tick. -->",
     "<span class=\"hint\" id=\"tracePadSegSay\" style=\"flex:1 1 100%\"></span>",
+    "<!-- A DECODER THE BROWSER DOES NOT HAVE.  2026-10-03. Eyewire II\'s retina serves its finest",
+    "     three levels as JPEG XL; Chrome cannot read them, so the pad opens at its 128 nm jpeg level",
+    "     where a lysosome is four pixels across. Hidden on every volume that does not need it --",
+    "     emtiles says which those are -- and off until asked on the one that does, because the",
+    "     decoder is 1.7 MB and a chunk takes 45 ms against the browser\'s 8. -->",
+    "<label id=\"tracePadFineWrap\" style=\"display:none;font-size:12px;align-items:center;gap:6px;flex:0 0 auto\" title=\"This volume publishes its finest levels in JPEG XL, which this browser cannot read, so the pad is showing you the coarsest ones it can. Ticking this fetches a JPEG XL decoder (about 1.7 MB, once) and the finer levels appear in the menu on the left. They are slower: about 45 ms a chunk against 8 for the levels you have now, and a view is around twenty chunks. The decoding happens off the page\u2019s own thread, so nothing freezes while it loads.\"><input type=\"checkbox\" id=\"tracePadFine\"> the finest levels (fetches a decoder)</label>",
+    "<span class=\"hint\" id=\"tracePadFineSay\" style=\"flex:1 1 100%\"></span>",
     "</div>",
     "<div style=\"position:relative;margin-top:8px;overflow:auto;border:1px solid var(--line);border-radius:7px;background:#111\">",
     "<!-- TIPS, 2026-09-22 (src/the_pad_gives_tips.py): the tick on the left turns them off. -->",
@@ -20068,6 +20451,54 @@ async function padRelabelMips(){
   if (wide0 >= 0 && chunk0 && chunk1 && chunk0 >= chunk1)
     sel.options[wide0].textContent =
       sel.options[wide0].textContent.replace(/, slower to load$/, "");
+  try { await padFineOffer(); } catch (_e){}
+  return true;
+}
+
+/* ── OFFER THE DECODER ONLY WHERE IT WOULD DO SOMETHING ────────────────────────  2026-10-03
+   Asked of core/emtiles.js rather than of the dataset row, because emtiles is the thing that
+   dropped the levels and the only thing that knows a volume HAD any. On the sixty-seven volumes
+   whose levels the browser can already read this leaves the label hidden and does nothing else.
+
+   Hidden rather than absent once ticked: the tick stays on screen so it can be unticked, which is
+   how somebody who tried the 16 nm level and found it too slow gets back to the fast one. */
+async function padFineOffer(){
+  var wrap = document.getElementById("tracePadFineWrap");
+  if (!wrap) return false;
+  var want = [];
+  try { want = await UJ.emtiles.unreadableEncodings(); } catch (_e){ want = []; }
+  var can = !!(window.UJ && UJ.jxl && UJ.jxl.supported());
+  var offer = (PAD_FINE || (want.indexOf("jxl") >= 0)) && can;
+  wrap.style.display = offer ? "flex" : "none";
+  return offer;
+}
+
+/* The tick itself. Three things happen, in this order, and the order is the point: the decoder has
+   to be UP before emtiles is reconfigured, because tracingDecoders() returns null until it is --
+   reconfiguring first would quietly set no decoders and leave the menu unchanged, which looks
+   exactly like the tick not working. */
+async function padFineSet(on){
+  var say = document.getElementById("tracePadFineSay");
+  var box = document.getElementById("tracePadFine");
+  var tell = function(t){ if (say) say.textContent = t || ""; };
+  if (on){
+    tell("Fetching the JPEG XL decoder (about 1.7 MB, once)\u2026");
+    try { await UJ.jxl.start(); }
+    catch (e){
+      PAD_FINE = false; if (box) box.checked = false;
+      tell("The decoder would not load: " + ((e && e.message) || e)
+           + " \u2014 the pad is still on the levels it can read.");
+      return false;
+    }
+  }
+  PAD_FINE = !!on;
+  try { UJ.emtiles.configure(tracingSources()); } catch (_e){}
+  try { await padRelabelMips(); } catch (_e){}
+  try { await padDraw(); } catch (_e){}
+  tell(on
+    ? "The finer levels are in the menu on the left. About 45 ms a chunk against 8, and a view is "
+      + "around twenty chunks \u2014 decoded off the page\u2019s own thread, so nothing freezes."
+    : "Back to the levels the browser reads itself.");
   return true;
 }
 

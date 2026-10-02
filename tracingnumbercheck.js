@@ -23,6 +23,24 @@
    It drives tracingCurrentAll on the real page — the numbering, the naming and the ids all come out
    of that one function, so asserting anything less than its output would be asserting a step.
 
+   ── THE FIRST ONE IS "LYSOSOME 1" NOW, NOT "LYSOSOME" ────────────────────  2026-10-03
+
+   Two assertions here said a lone first lysosome comes out bare, which was true until
+   2026-09-27 and is the opposite of what Søren asked for that day: *"can we force the
+   numbering, so that if you add another lysosome to a cell that already has a lysosome they
+   both get a number, first one is 1 and second one is 2"*.
+
+   Bare-because-alone was SELF-PERPETUATING, which is why it had to go: a structure drawn on
+   its own submitted no instance_index at all, so the next one asked "what is the highest
+   number on this cell", got 0, and came out bare too. Hesham drew seven lysosomes one at a
+   time and every one of them was called "Lysosome".
+
+   This file was missed when reopenedtracingcheck.js and idcollisioncheck.js were re-pointed
+   at the new rule, and it sat red for six days. The contract it asserts now:
+   an ontology organelle kind is ALWAYS numbered, from the first one; a whole cell and a
+   nucleus never are; a hand-named "something else" keeps the old rule, because there the name
+   is the identifier the user chose. See claude/a-cells-organelles-of-a-kind-are-numbered.md.
+
    Run: node tracingnumbercheck.js */
 const { chromium } = require("playwright");
 const page_ = require("./pagepath.js");
@@ -89,7 +107,8 @@ function shared(sid, index, name){
     const a = await ask([], "", 0);
     const b2 = await ask([shared("lys-a", 1)], "", 0);
     const c = await ask([shared("lys-a", 1), shared("lys-b", 2)], "", 0);
-    ok(a[0] && a[0].name === "Lysosome", "the first is just “Lysosome” — there is no series yet",
+    ok(a[0] && a[0].name === "Lysosome 1",
+       "the first is “Lysosome 1” — numbered from the first one, or the second is bare too",
        a[0] && a[0].name);
     ok(b2[0] && b2[0].name === "Lysosome 2", "the second is 2", b2[0] && b2[0].name);
     ok(c[0] && c[0].name === "Lysosome 3", "the third is 3", c[0] && c[0].name);
@@ -148,7 +167,9 @@ function shared(sid, index, name){
        work is recorded. A label that turns out to collide is a label to fix; refusing would lose
        the tracing. */
     const got = await ask([], "", 0);
-    ok(got.length === 1 && got[0].name === "Lysosome",
+    /* "Lysosome 1" rather than bare since 2026-09-27 — the comment above already said
+       "numbering starts at 1" while the line under it still wanted the old answer. */
+    ok(got.length === 1 && got[0].name === "Lysosome 1",
        "it is submitted, with the number it can justify", got[0] && got[0].name);
   }
 

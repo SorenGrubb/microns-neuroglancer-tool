@@ -19,6 +19,23 @@
    So: ids are asserted against the shared index, not just against each other. A new structure's id
    must be one that nothing else owns.
 
+   ── AND THE BASE IS NOW ALWAYS MINTED, NOT THE PAD'S OWN ID ──────────────  2026-10-03
+
+   Two assertions here said the siblings hang off the pad's own id — X, X__i1, X__i2 — which was
+   the rule until 2026-09-27 and is no longer one. TRACING_BASE_ID is freshly minted every time,
+   and the reason is this check's own hazard arriving from inside the page rather than from
+   Drive: open a WHOLE CELL from the dataset and TRACING_PENDING.id is that cell's EXISTING id,
+   so a second structure drawn beside it would be filed as `<that cell's id>__i1` — a real and
+   different structure's name.
+
+   WHAT IT COSTS, stated because it is a real loss: structures drawn in one sitting no longer
+   share a filename stem, and Søren reads those filenames. What it buys is the thing this file
+   exists for. A minted base is only ever used for inst >= 1, editOf() has already answered for
+   the ones opened from the dataset, and a fresh id can belong to nothing.
+
+   This file was missed when reopenedtracingcheck.js and idcollisioncheck.js were re-pointed at
+   the new rule on the 27th, and it sat red for six days.
+
    Run: node tracingidcheck.js */
 const { chromium } = require("playwright");
 const page_ = require("./pagepath.js");
@@ -91,10 +108,21 @@ function shared(sid, index){
     const got = idsOf(r);
     ok(got.length === 3, "three ids come out", got.length);
     ok(got[0] === r.pending, "the first is the pad's own id", got[0]);
-    ok(got[1] === got[0] + "__i1" && got[2] === got[0] + "__i2",
-       "...and the others are __i1 and __i2 off it, exactly as before", got.join("  "));
-    ok(r.base === got[0], "the base IS the pad's id when nothing was opened", r.base);
-    ok(!/__i/.test(String(got[0])), "and the base itself carries no suffix", got[0]);
+    ok(got[1] === r.base + "__i1" && got[2] === r.base + "__i2",
+       "...and the others are __i1 and __i2 off the BASE, which is where they hang from now",
+       got.join("  "));
+    /* The property that replaced "the base is the pad's id": it is a fresh one, so the thing
+       a sibling is named after cannot be a structure that already exists. Asserted as the
+       SHAPE of a minted id and as being nobody else's, not as a literal, because it carries a
+       timestamp. */
+    ok(r.base && r.base !== got[0] && /_\d{10,}_/.test(r.base),
+       "the base is minted fresh rather than borrowed from the pad", r.base);
+    ok(!got.slice(1).some(id => id === r.base),
+       "...and the base itself is submitted as nothing — it is a stem, not a structure",
+       got.join("  "));
+    ok(!/__i/.test(String(got[0])) && !/__i/.test(String(r.base)),
+       "and neither the first structure nor the base carries a suffix",
+       got[0] + " / " + r.base);
   }
 
   console.log("\nediting a suffixed tracing — the compound id Søren found in Drive");

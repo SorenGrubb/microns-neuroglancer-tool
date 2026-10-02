@@ -515,6 +515,136 @@ console.log("\na JPEG chunk, read in the raw layout");
   E.configure({ em: "precomputed://https://example/em", res: [4, 4, 40] });
 }
 
+
+/* ── AN ENCODING THIS FILE CANNOT READ ────────────────────────────  2026-10-03
+   Eyewire II's mouse retina, read live from its own info on 2026-10-03. Its finest three levels
+   are `jxl` and its coarsest two are jpeg, and every one of the five keeps a 40 nm section -- so
+   nothing in the z rule saves this module from the jxl ones. decodeChunk reads anything that is
+   not jpeg as raw bytes, which on a JPEG XL bitstream is noise that looks like tissue.
+
+   Chrome has no JPEG XL decoder (Neuroglancer carries a WASM one, which is why the viewer link
+   shows all five levels and the pad cannot). Until this page carries one too, those levels are
+   not imagery this module has: it drops them, and if a volume were ALL of them it says so. */
+console.log("\nan encoding this file cannot read is dropped, not drawn");
+{
+  const sc = (key, r, size, enc) => ({ key: key, resolution: r, size: size,
+    voxel_offset: [0, 0, 1], chunk_sizes: [[128, 128, 16]], encoding: enc });
+  const EW2 = { type: "image", data_type: "uint8", num_channels: 1, scales: [
+    sc("16_16_40",   [16, 16, 40],   [81920, 81920, 2064], "jxl"),
+    sc("32_32_40",   [32, 32, 40],   [40960, 40960, 2064], "jxl"),
+    sc("64_64_40",   [64, 64, 40],   [20480, 20480, 2064], "jxl"),
+    sc("128_128_40", [128, 128, 40], [10240, 10240, 2064], "jpeg"),
+    sc("256_256_40", [256, 256, 40], [5120, 5120, 2064],   "jpeg") ] };
+  const EW2_EM = "precomputed://https://example/ew2";
+  sandbox.INFO_FOR = { "https://example/ew2": EW2 };
+  E.configure({ em: EW2_EM, res: [16, 16, 40] });
+
+  const kept = E.sectionScales(EW2);
+  ok(kept.length === 2 && kept.every(s => s.encoding === "jpeg"),
+     "the three jxl levels are not offered \u2014 the z rule keeps all five, the decoder does not",
+     kept.map(s => s.key).join(" ") || "none");
+
+  const at0 = await E.scaleAt(0);
+  ok(at0.scale.key === "128_128_40" && at0.sectionNm === 40 && at0.slab === 1,
+     "...so mip 0 is the finest level that is really readable, still one section per plane",
+     at0.scale.key + ", " + at0.sectionNm + " nm, slab " + at0.slab);
+
+  const any = await E.scaleAt(0, true);
+  ok(any.scale.key === "128_128_40",
+     "...and slabOk does not reach them either: this is not a z limit, it is a decoder limit",
+     any.scale.key);
+
+  /* The volume with nothing readable in it at all. realScales refuses to empty the list, so the
+     jxl scales come back -- and THAT is the path where silence would mean noise on screen. */
+  let said = "";
+  try { await E._decodeChunk(new ArrayBuffer(4), EW2.scales[0], [128, 128, 16], [128, 128, 16]); }
+  catch (e){ said = String((e && e.message) || e); }
+  ok(/jxl/.test(said) && /decoder/.test(said),
+     "...and a jxl chunk that reached the decoder anyway says so rather than drawing noise",
+     said || "nothing thrown \u2014 it drew the bitstream as grey values");
+
+  sandbox.INFO_FOR = null;
+  E.configure({ em: "precomputed://https://example/em", res: [4, 4, 40] });
+  ok(E.sectionScales(INFO).length === 3,
+     "...and a volume whose every level is raw is exactly as it was", E.sectionScales(INFO).length);
+}
+
+
+/* ── ...AND A HOST THAT BRINGS ONE GETS THEM BACK ──────────────────────  2026-10-03
+   The section above drops what this file cannot decode. Søren asked for the other half: at the
+   retina's 128 nm jpeg level a lysosome is four pixels, so a page carrying a JPEG XL decoder
+   should get the 16 nm levels back rather than being told they do not exist.
+
+   CFG.decoders is {encoding: fn(buf) -> {data, width, height}} — the same shape CFG.decodeJpeg
+   already has, because a decoded chunk is a decoded chunk whatever produced it. canRead() is base
+   plus those keys and nothing else consults a literal, so "what can be read" stays the one
+   question with the one answer that this morning's change made it.
+
+   STUBBED. What is under test is the routing: the scale comes back, the chunk reaches the named
+   decoder, the result is laid out exactly as a JPEG's is, and an encoding with no decoder still
+   says so. jxl-oxide decoding JPEG XL correctly is jxl-oxide's business. */
+console.log("\n...and a host that brings a decoder gets those levels back");
+{
+  const sc = (key, r, size, enc) => ({ key: key, resolution: r, size: size,
+    voxel_offset: [0, 0, 1], chunk_sizes: [[128, 128, 16]], encoding: enc });
+  const EW2 = { type: "image", data_type: "uint8", num_channels: 1, scales: [
+    sc("16_16_40",   [16, 16, 40],   [81920, 81920, 2064], "jxl"),
+    sc("32_32_40",   [32, 32, 40],   [40960, 40960, 2064], "jxl"),
+    sc("64_64_40",   [64, 64, 40],   [20480, 20480, 2064], "jxl"),
+    sc("128_128_40", [128, 128, 40], [10240, 10240, 2064], "jpeg"),
+    sc("256_256_40", [256, 256, 40], [5120, 5120, 2064],   "jpeg") ] };
+  sandbox.INFO_FOR = { "https://example/ew2": EW2 };
+
+  let asked = 0;
+  const f = (x, y, z) => (x * 7 + y * 3 + z * 13) & 255;
+  const stacked = (nx, ny, nz) => {
+    const d = new Uint8Array(nx * ny * nz);
+    for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++)
+      d[(z * ny + y) * nx + x] = f(x, y, z);
+    return d;
+  };
+  E.configure({ em: "precomputed://https://example/ew2", res: [16, 16, 40],
+                decoders: { jxl: async function(){ asked++;
+                  return { data: stacked(8, 8, 4), width: 8, height: 32 }; } } });
+
+  const kept = E.sectionScales(EW2);
+  ok(kept.length === 5 && kept[0].key === "16_16_40",
+     "all five levels are readable once a jxl decoder is in the config",
+     kept.map(s => s.key).join(" "));
+  const at0 = await E.scaleAt(0);
+  ok(at0.scale.key === "16_16_40" && at0.slab === 1,
+     "...so mip 0 is the volume's finest again, one section per plane", at0.scale.key);
+
+  /* The chunk goes to the decoder the host named, and comes back in the raw layout — the same
+     assertion the JPEG section makes, because the whole point is that it is the same path. */
+  const sj = { key: "16_16_40", encoding: "jxl", chunk_sizes: [[8, 8, 4]] };
+  const before = asked;
+  const full = await E._decodeChunk(new ArrayBuffer(4), sj, [8, 8, 4], [8, 8, 4]);
+  let bad = 0;
+  for (let z = 0; z < 4; z++) for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++)
+    if (full[x + 8 * (y + 8 * z)] !== f(x, y, z)) bad++;
+  ok(asked === before + 1 && bad === 0,
+     "a jxl chunk goes to the host's decoder and lands at (x, y, z)",
+     (asked - before) + " call(s), " + bad + " wrong of 256");
+
+  /* One decoder does not make every encoding readable. */
+  let said = "";
+  try { await E._decodeChunk(new ArrayBuffer(4), { key: "k", encoding: "avif", chunk_sizes: [[2, 2, 1]] },
+                             [2, 2, 1], [2, 2, 1]); }
+  catch (e){ said = String((e && e.message) || e); }
+  ok(/avif/.test(said),
+     "...while an encoding nothing was supplied for still says so", said || "nothing thrown");
+
+  /* And taking the decoder away puts the volume back where this morning left it — the levels
+     are a property of the configuration, not a door that stays open once opened. */
+  E.configure({ em: "precomputed://https://example/ew2", res: [16, 16, 40] });
+  ok(E.sectionScales(EW2).length === 2,
+     "...and configuring without it drops them again", E.sectionScales(EW2).map(s => s.key).join(" "));
+
+  sandbox.INFO_FOR = null;
+  E.configure({ em: "precomputed://https://example/em", res: [4, 4, 40] });
+}
+
 console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
 process.exit(fails ? 1 : 0);
 
