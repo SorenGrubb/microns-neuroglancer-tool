@@ -1040,6 +1040,12 @@ UJ.mesh3d = (function(){
         + geo.oversize.axis + ", and the whole volume is only "
         + (geo.oversize.max/1000).toFixed(1) + " µm. Something is wrong with the mesh transform "
         + "rather than with this cell.</span>";
+    /* ── AND THE CALLER'S LAST WORD ───────────────────────────────────────────  2026-10-03
+       `lead` is a sentence above the size line; this is one below it, and χJump's orientation
+       paragraph is why it exists -- "up is towards the pia" is about the PICTURE, where the size
+       line is about the measurement, so it belongs the other side of it. After the oversize
+       warning as well: nothing should come between that and the shape it is warning about. */
+    if (o.tail) note.innerHTML += "<br>" + o.tail;
 
     try { draw(canvas, geo, o); }
     catch (e){

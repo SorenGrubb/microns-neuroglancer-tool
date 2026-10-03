@@ -455,7 +455,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-10-02 20:15</span></p>
+ctrl-shift-R.">build 2026-10-03 06:43</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -2979,67 +2979,22 @@ UJ.mesh3d = (function(){
       vo += nmv.length; io += p.idx.length;
     }); });
 
-    var nrm = new Float32Array(nV);
-    for (var t = 0; t + 2 < idx.length; t += 3){
-      var a = idx[t]*3, b = idx[t+1]*3, c = idx[t+2]*3;
-      var ux = pos[b]-pos[a], uy = pos[b+1]-pos[a+1], uz = pos[b+2]-pos[a+2];
-      var vx = pos[c]-pos[a], vy = pos[c+1]-pos[a+1], vz = pos[c+2]-pos[a+2];
-      var nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
-      nrm[a]+=nx; nrm[a+1]+=ny; nrm[a+2]+=nz;
-      nrm[b]+=nx; nrm[b+1]+=ny; nrm[b+2]+=nz;
-      nrm[c]+=nx; nrm[c+1]+=ny; nrm[c+2]+=nz;
-    }
+    /* ── ASSEMBLED HERE, PREPARED THERE ───────────────────────────────────────  2026-10-03
+       Everything above this line is χJump's: cb2's legacy fragments, decoded and concatenated into
+       one buffer, in NANOMETRES, through this page's own mesh transform. Everything that used to
+       be below it -- per-vertex normals, the bounding box, the re-centring for float32, the
+       oversize guard -- is what core/mesh3d.js's prepare() does for every other tool, and was a
+       copy of it.
 
-    var lo = [Infinity,Infinity,Infinity], hi = [-Infinity,-Infinity,-Infinity];
-    for (var i2 = 0; i2 < pos.length; i2 += 3)
-      for (var k = 0; k < 3; k++){
-        if (pos[i2+k] < lo[k]) lo[k] = pos[i2+k];
-        if (pos[i2+k] > hi[k]) hi[k] = pos[i2+k];
-      }
-    if (!isFinite(lo[0])){ lo = [0,0,0]; hi = [0,0,0]; }
+       `extentNm` carries the guard across unchanged: no assembly can be larger than the volume,
+       compared against the block's own depth rather than against a fixture, because a fixture can
+       share a mistake with the code it tests and the block cannot. That is the guard that caught
+       a ten-fold error in the mesh transform.
 
-    /* Re-centred on the assembly, in place, and this is not a tidy-up.
-
-       A float32 holds about seven significant digits. A vertex 400 µm into the volume is 4e5 nm,
-       where the spacing between representable values is ~0.03 nm -- fine. But these coordinates
-       come from a matrix with 1e9 in it, so an unlucky volume or a future one could easily put
-       them at 1e11, where float32 steps in units of ~8 µm and a neurite 2 µm across collapses
-       into a staircase. Subtracting the centre first costs one pass and removes the question:
-       what the buffer holds is always an offset within one cell, never a position in the world.
-
-       lo/hi stay ABSOLUTE, because that is what the panel reports and what somebody would compare
-       against neuroglancer. */
-    var mid = [ (lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2 ];
-    for (var i3 = 0; i3 < pos.length; i3 += 3){
-      pos[i3]   -= mid[0];
-      pos[i3+1] -= mid[1];
-      pos[i3+2] -= mid[2];
-    }
-    /* ── NO ASSEMBLY CAN BE LARGER THAN THE VOLUME ────────────────────────────────────────
-       A fact about the data that no transform can be right and violate, and the cheapest possible
-       guard on meshVertexToNm -- three comparisons against numbers the config already states.
-
-       It exists because a ten-fold error in that matrix shipped. The z factor was 40e9 where it
-       should have been 4e9, derived cleanly from real numbers in the authors' own template and
-       wrong anyway, and what it produced was a cell 444 µm deep in a block 48 µm deep. Every
-       suite passed: the fixtures were cubes built with the same wrong matrix, so they agreed with
-       it perfectly. Only the DATA disagreed, and only because Søren looked at a picture and said
-       it was stretched.
-
-       So this compares against the volume rather than against a fixture. A fixture can share a
-       mistake with the code it tests; the block's own depth cannot. */
-    var extent = UJ.xjump.extentNm(), oversize = null;
-    for (var a = 0; a < 3; a++){
-      var got = hi[a] - lo[a];
-      if (got > extent[a] * 1.02){
-        oversize = { axis: "xyz".charAt(a), got: got, max: extent[a] };
-        break;
-      }
-    }
-    return { pos: pos, idx: idx, nrm: nrm, lo: lo, hi: hi, mid: mid, centred: true,
-             span: Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) || 1,
-             oversize: oversize,
-             vertices: nV/3, triangles: idx.length/3 };
+       AND IT COMES BACK WITH A RADIUS, which this function never computed. The shared camera fits
+       to the bounding sphere rather than the box -- so the subject holds still while you drag --
+       and the travelling light is ranged on it. */
+    return m3dCore().prepare(pos, idx, { extentNm: UJ.xjump.extentNm() });
   }
 
   /* ── is this nucleus inside this fragment? ─────────────────────────────────────────────────
@@ -3169,245 +3124,22 @@ UJ.mesh3d = (function(){
     });
   }
 
-  /* ── the smallest amount of matrix maths that draws a rotatable solid ─────────────────────── */
-  function mul(a, b){                       // column-major 4x4, as WebGL wants
-    var o = new Float32Array(16);
-    for (var c = 0; c < 4; c++) for (var r = 0; r < 4; r++){
-      var s = 0; for (var k = 0; k < 4; k++) s += a[k*4+r] * b[c*4+k];
-      o[c*4+r] = s;
-    }
-    return o;
+  /* ── THE RENDERER IS NOT HERE ANY MORE ──────────────────────────────────────  2026-10-03
+     About 230 lines stood here: two shaders, the matrix helpers, modelScale's y flip and a draw()
+     that opened its own WebGL context. Every one of them had a better-maintained twin in
+     core/mesh3d.js, which this page has loaded as UJ.mesh3dCore since 2026-09-21 and was
+     shadowing. See src/one_renderer_for_every_tool.py.
+
+     THE Y FLIP WENT WITH IT AND IS STILL THERE. modelScale's `o[5] = -s` existed because the
+     data's y runs down and WebGL's runs up -- Søren, 2026-09-01: "When showing the 3D models in
+     xJump they are upside down." core/mesh3d.js has the same flip in the same place, so this is a
+     move rather than a loss, and xjump3dcheck.js asserts the orientation sentence that lets it be
+     settled by eye. */
+  function m3dCore(){
+    if (!(window.UJ && UJ.mesh3dCore && UJ.mesh3dCore.prepare))
+      throw new Error("core/mesh3d.js is not loaded — the renderer lives there");
+    return UJ.mesh3dCore;
   }
-  function perspective(fovy, aspect, near, far){
-    var f = 1/Math.tan(fovy/2), o = new Float32Array(16);
-    o[0]=f/aspect; o[5]=f; o[10]=(far+near)/(near-far); o[11]=-1;
-    o[14]=2*far*near/(near-far);
-    return o;
-  }
-  function rotY(a){ var c=Math.cos(a), s=Math.sin(a), o=new Float32Array(16);
-    o[0]=c; o[2]=-s; o[5]=1; o[8]=s; o[10]=c; o[15]=1; return o; }
-  function rotX(a){ var c=Math.cos(a), s=Math.sin(a), o=new Float32Array(16);
-    o[0]=1; o[5]=c; o[6]=s; o[9]=-s; o[10]=c; o[15]=1; return o; }
-  function translate(x,y,z){ var o=new Float32Array(16);
-    o[0]=o[5]=o[10]=o[15]=1; o[12]=x; o[13]=y; o[14]=z; return o; }
-  function scale(s){ var o=new Float32Array(16); o[0]=o[5]=o[10]=s; o[15]=1; return o; }
-  /* Y IS DOWN IN THE DATA AND UP ON THE SCREEN, and that is the whole of this.
-
-     Søren, 2026-09-01: "When showing the 3D models in xJump they are upside down." They were --
-     and so were the ones in µJump, δJump, πJump, ηJump and βJump, which share the other copy of
-     this renderer. Neuroglancer and every volume in this family use the image-row convention:
-     y increases DOWNWARD, towards the ventral side. WebGL's clip space is the opposite, +y up. So
-     geometry handed straight to the GPU is drawn mirrored top-to-bottom, and a Purkinje cell
-     appears with its dendritic tree underneath its soma.
-
-     core/mesh.js has corrected for exactly this since it started writing .glb files -- see
-     flipYForGLTF() -- and neither in-page renderer ever did. Nobody noticed because a granule cell
-     looks much the same either way up; a Purkinje cell does not.
-
-     Corrected in the MODEL MATRIX rather than in the buffers, deliberately. The buffers are also
-     what the point-in-mesh nucleus test compares against and what the .glb exporter is handed, and
-     both of those want the real frame -- the exporter applies its own flip. Flipping the geometry
-     would silently break the join and double-flip every download.
-
-     Safe here for two reasons that are properties of this renderer, not luck: there is no
-     CULL_FACE, so reversing the handedness cannot turn faces into holes; and the fragment shader
-     is two-sided, so the normals -- which this same matrix transforms, correctly, since
-     diag(1,-1,1) is its own inverse-transpose -- stay right. */
-  function modelScale(s){
-    var o = new Float32Array(16);
-    o[0] = s; o[5] = -s; o[10] = s; o[15] = 1;
-    return o;
-  }
-
-  var VS = [
-    "attribute vec3 p; attribute vec3 n;",
-    "uniform mat4 mvp; uniform mat4 mv;",
-    "varying vec3 vn;",
-    "void main(){ vn = normalize((mv * vec4(n, 0.0)).xyz);",
-    "  gl_Position = mvp * vec4(p, 1.0); }"
-  ].join("\n");
-  /* Two lights and a rim term rather than one lambert: a single headlight on a tubular neurite
-     flattens it into a silhouette, which is exactly the shape information somebody is looking at
-     this panel to judge. */
-  var FS = [
-    "precision mediump float; varying vec3 vn; uniform vec3 tint;",
-    /* TWO-SIDED. Back faces are lit with the normal flipped rather than discarded, because these
-       meshes come from an automatic segmentation and their winding is not guaranteed to be
-       consistent. With culling on, a fragment whose triangles happen to be wound the other way
-       renders as a hole -- and a hole in a cell is exactly what somebody here is looking FOR, so
-       an artefact shaped like one is worse than a little wasted fill rate. */
-    "void main(){ vec3 n = normalize(vn); if (!gl_FrontFacing) n = -n;",
-    "  float key  = max(dot(n, normalize(vec3( 0.4, 0.6, 0.8))), 0.0);",
-    "  float fill = max(dot(n, normalize(vec3(-0.5,-0.3, 0.4))), 0.0) * 0.35;",
-    "  float rim  = pow(1.0 - abs(n.z), 3.0) * 0.35;",
-    "  gl_FragColor = vec4(tint * (0.18 + key * 0.75 + fill) + rim, 1.0); }"
-  ].join("\n");
-
-  function compile(gl, type, src){
-    var s = gl.createShader(type);
-    gl.shaderSource(s, src); gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
-      throw new Error("shader: " + gl.getShaderInfoLog(s));
-    return s;
-  }
-
-  function draw(canvas, geo, tint){
-    var gl = canvas.getContext("webgl", { antialias: true, alpha: false })
-          || canvas.getContext("experimental-webgl", { antialias: true, alpha: false });
-    if (!gl) throw new Error("no WebGL");
-    /* Indices past 65,535 need the 32-bit element extension. Without it the draw would silently
-       wrap and paint a shredded version of the cell, which is worse than not drawing: it looks
-       like a segmentation problem. So it is checked, and the fallback is to say so. */
-    var big = geo.vertices > 65535;
-    if (big && !gl.getExtension("OES_element_index_uint"))
-      throw new Error("this assembly has " + geo.vertices.toLocaleString() + " vertices and this "
-        + "browser cannot index past 65,535 — open it in the viewer instead");
-
-    var prog = gl.createProgram();
-    gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
-    gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
-      throw new Error("link: " + gl.getProgramInfoLog(prog));
-    gl.useProgram(prog);
-
-    function buf(data, target){
-      var b = gl.createBuffer();
-      gl.bindBuffer(target, b); gl.bufferData(target, data, gl.STATIC_DRAW); return b;
-    }
-    var pb = buf(geo.pos, gl.ARRAY_BUFFER), nb = buf(geo.nrm, gl.ARRAY_BUFFER);
-    var ib = buf(big ? geo.idx : new Uint16Array(geo.idx), gl.ELEMENT_ARRAY_BUFFER);
-    var aP = gl.getAttribLocation(prog, "p"), aN = gl.getAttribLocation(prog, "n");
-    gl.enableVertexAttribArray(aP); gl.enableVertexAttribArray(aN);
-    var uMvp = gl.getUniformLocation(prog, "mvp"), uMv = gl.getUniformLocation(prog, "mv"),
-        uTint = gl.getUniformLocation(prog, "tint");
-    gl.enable(gl.DEPTH_TEST);
-    /* No CULL_FACE -- see the fragment shader. */
-
-    /* combine() already centred the buffer (see its comment on float32 precision), so all that is
-       left is normalising the longest side to 1 -- and the camera below then never has to know
-       anything about how big a cerebellar fragment is. */
-    var norm = modelScale(1 / (geo.span || 1));
-
-    /* dist is in units of the object's longest side, which combine() normalised to 1. At a 0.9 rad
-       field of view the visible height here is about 1.7, so the cell fills roughly 60% of the
-       panel from the opening angle -- close enough to read, far enough that turning it does not
-       swing a long fragment off the edge. */
-    var view = { yaw: 0.6, pitch: 0.3, dist: 1.9 };
-    function paint(){
-      var w = canvas.clientWidth || 480, h = canvas.clientHeight || 300;
-      /* devicePixelRatio, capped: an uncapped 3× on a phone is nine times the fragments for a
-         panel nobody is inspecting pixel by pixel. */
-      var dpr = Math.min(window.devicePixelRatio || 1, 2);
-      if (canvas.width !== Math.round(w*dpr) || canvas.height !== Math.round(h*dpr)){
-        canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
-      }
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      var bg = (typeof currentTheme === "function" && currentTheme() === "light")
-             ? [0.965, 0.969, 0.976] : [0.059, 0.071, 0.086];
-      gl.clearColor(bg[0], bg[1], bg[2], 1);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      var mv = mul(translate(0, 0, -view.dist), mul(rotX(view.pitch), mul(rotY(view.yaw), norm)));
-      var mvp = mul(perspective(0.9, w/h, 0.01, 100), mv);
-      gl.uniformMatrix4fv(uMvp, false, mvp);
-      gl.uniformMatrix4fv(uMv, false, mv);
-      gl.uniform3fv(uTint, tint);
-      gl.bindBuffer(gl.ARRAY_BUFFER, pb); gl.vertexAttribPointer(aP, 3, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, nb); gl.vertexAttribPointer(aN, 3, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
-      gl.drawElements(gl.TRIANGLES, geo.idx.length,
-                      big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, 0);
-    }
-
-    /* ── ONE FINGER TURNS IT, TWO FINGERS ZOOM ────────────────────────────────────  2026-09-17
-       Søren: *"It works well on mobile phone, however I want to have the option to zoom in or our
-       in the 3D window by using 2 fingers."* A wheel is the only way to zoom this panel had, and a
-       phone has no wheel -- so on a phone the model could be turned and never approached.
-
-       Every pointer down on the canvas is tracked rather than just the first, because that is the
-       only way to know a second one has arrived. With two down the gesture is a PINCH and nothing
-       else: rotation is suspended while it lasts, or the first finger's travel would spin the model
-       during every zoom, which feels like a fault in the model rather than in the gesture. Lifting
-       back to one finger re-anchors the rotation where that finger IS, so the model does not jump
-       by however far the pinch moved it.
-
-       `touch-action:none` on the canvas is what lets any of this happen at all -- without it the
-       browser takes the second finger for its own page zoom and the canvas never sees it.
-
-       The wheel keeps working unchanged, and the two cannot interfere: a trackpad pinch arrives as
-       a wheel event with ctrlKey, not as two pointers. */
-    var down = null, touches = {}, nTouch = 0, pinch = null;
-    function gap(){
-      var ids = Object.keys(touches);
-      if (ids.length < 2) return 0;
-      var a = touches[ids[0]], b = touches[ids[1]];
-      return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
-    }
-    canvas.addEventListener("pointerdown", function(e){
-      if (!touches[e.pointerId]) nTouch++;
-      touches[e.pointerId] = { x:e.clientX, y:e.clientY };
-      if (nTouch >= 2){
-        down = null;                       // a pinch is not a drag, however it started
-        pinch = { gap: gap() || 1, dist: view.dist };
-      } else {
-        down = { x:e.clientX, y:e.clientY, yaw:view.yaw, pitch:view.pitch };
-      }
-      canvas.setPointerCapture(e.pointerId);
-    });
-    canvas.addEventListener("pointermove", function(e){
-      if (touches[e.pointerId]) touches[e.pointerId] = { x:e.clientX, y:e.clientY };
-      if (pinch && nTouch >= 2){
-        var g = gap();
-        if (g > 0){
-          /* Fingers apart is closer, the way every map behaves. Clamped to the same range the
-             wheel is, so neither way of zooming can reach somewhere the other cannot. */
-          view.dist = Math.max(0.6, Math.min(12, pinch.dist * pinch.gap / g));
-          paint();
-        }
-        return;
-      }
-      if (!down) return;
-      view.yaw = down.yaw + (e.clientX - down.x) * 0.01;
-      /* Clamped just short of the poles: past them the model appears to spin the wrong way, which
-         reads as a bug in the mesh rather than in the camera. */
-      view.pitch = Math.max(-1.5, Math.min(1.5, down.pitch + (e.clientY - down.y) * 0.01));
-      paint();
-    });
-    function lift(e){
-      if (touches[e.pointerId]){ delete touches[e.pointerId]; nTouch = Math.max(0, nTouch - 1); }
-      if (nTouch < 2) pinch = null;
-      if (nTouch === 1){
-        /* RE-ANCHORED on the finger still down, at the angle the model is at now. Without this the
-           model snaps back by the whole distance the remaining finger travelled during the pinch. */
-        var id = Object.keys(touches)[0], t = touches[id];
-        down = { x:t.x, y:t.y, yaw:view.yaw, pitch:view.pitch };
-      } else if (nTouch === 0) down = null;
-    }
-    canvas.addEventListener("pointerup", lift);
-    canvas.addEventListener("pointercancel", lift);
-    canvas.addEventListener("wheel", function(e){
-      e.preventDefault();
-      view.dist = Math.max(0.6, Math.min(12, view.dist * (e.deltaY > 0 ? 1.12 : 0.89)));
-      paint();
-    }, { passive: false });
-    /* The panel follows the theme like everything else -- and unlike the viewer, this canvas IS
-       on the page, so it has to be repainted rather than merely re-styled. */
-    var btn = document.getElementById("themeToggleBtn");
-    if (btn) btn.addEventListener("click", function(){ setTimeout(paint, 0); });
-    paint();
-    /* Kept so a check can ask whether anything was actually PAINTED, which is the one question
-       jsdom cannot answer and which a suite of green ticks would otherwise leave open. It has to
-       be gl and paint together: without preserveDrawingBuffer -- which is off, because keeping a
-       full-size copy of every frame for a panel nobody screenshots is a real cost -- readPixels
-       is only valid in the same turn as the draw. So a probe must repaint and read immediately,
-       and that means it needs the same context, not a second getContext() on the same canvas
-       (which returns the first context and ignores the attributes, so asking for
-       preserveDrawingBuffer after the fact does nothing at all -- a trap this suite fell into
-       once and reported "nothing was drawn" about a panel that was drawing perfectly). */
-    LAST = { gl: gl, paint: paint, canvas: canvas };
-    return paint;
-  }
-  var LAST = null;
 
   function esc(s){ return String(s == null ? "" : s)
     .replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
@@ -3443,67 +3175,47 @@ UJ.mesh3d = (function(){
       }
 
       var geo = combine(have);
-      var umSpan = [0,1,2].map(function(i){ return (geo.hi[i]-geo.lo[i]) / 1000; });
-      host.innerHTML = "<div class='m3d'>"
-        + "<canvas class='m3d-canvas'></canvas>"
-        + "<div class='m3d-note'></div></div>";
-      var canvas = host.querySelector(".m3d-canvas");
-      var note = host.querySelector(".m3d-note");
 
-      /* THE COVERAGE LINE, written BEFORE anything is drawn and never taken away by a drawing
-         failure. It is the sentence that decides whether the picture above it means what it
-         appears to mean, and it is just as true on a machine with no WebGL as on one with it.
-         Writing it after draw() -- which is how this was first written -- meant that the people
-         most likely to be confused, the ones who got no picture at all, were the only ones not
-         told why the picture would have been incomplete. */
+      /* THE COVERAGE LINE, written as the panel's `lead` so it sits ABOVE the size and can never
+         be taken away by a drawing failure. It is the sentence that decides whether the picture
+         means what it appears to mean, and it is just as true on a machine with no WebGL. */
       var cov = have.length === ids.length
         ? "<span class='ok'>all " + ids.length + " fragments drawn</span>"
         : "<b>" + have.length + " of " + ids.length + " fragments drawn</b> — "
           + none.length + " ha" + (none.length === 1 ? "s" : "ve")
           + " no published mesh, so the cell is larger than what you see here"
           + (unk.length ? "; " + unk.length + " could not be checked" : "");
-      note.innerHTML = cov
-        /* The size is printed and labelled as derived, and that label is not throat-clearing: it
-           is what let a ten-fold error in the mesh transform be caught by reading one line. */
-        + "<br><span class='hint'>"
-        + umSpan.map(function(v){ return v.toFixed(1); }).join(" × ") + " µm "
-        + "(from the viewer's own mesh transform — worth checking against neuroglancer once) · "
-        + geo.triangles.toLocaleString() + " triangles · drag to turn, scroll to zoom</span>"
-        /* WHICH WAY UP, SAID RATHER THAN LEFT TO BE JUDGED. Søren reported the models upside down,
-           it was fixed, and he reported it again from a cached page -- and neither of us could
-           settle it from a picture without first agreeing what "up" ought to mean for a cerebellar
-           cell. A line under the panel makes the drawing answer that itself: if the tree is not on
-           the side this line says it should be, the picture is wrong and there is nothing to
-           debate. The orientation only holds while the view has not been turned, so it says so. */
+
+      /* ── WHICH WAY UP, SAID RATHER THAN LEFT TO BE JUDGED ────────────────────────────────
+         Søren reported the models upside down, it was fixed, and he reported it again from a
+         cached page -- and neither of us could settle it from a picture without first agreeing
+         what "up" ought to mean for a cerebellar cell. A line under the panel makes the drawing
+         answer that itself: if the tree is not on the side this line says it should be, the
+         picture is wrong and there is nothing to debate. It is the panel's `tail` because it is
+         about the PICTURE, where the size line above it is about the measurement. The orientation
+         only holds while the view has not been turned, so it says so. */
+      var tail = "<span class='hint'>The size above comes from the viewer's own mesh transform — "
+        + "worth checking against neuroglancer once.</span>"
         + "<br><span class='hint'>Before you turn it: <b>up</b> is towards the pia (molecular "
         + "layer), <b>down</b> is deeper (granular layer, then white matter). A Purkinje cell's "
         + "dendritic tree should be above its soma.</span>";
-      if (geo.oversize)
-        note.innerHTML += "<br><b style='color:var(--bad)'>This cannot be right.</b> "
-          + "<span class='hint'>The assembly measures "
-          + (geo.oversize.got / 1000).toFixed(1) + " µm along " + geo.oversize.axis
-          + ", and the whole block is only " + (geo.oversize.max / 1000).toFixed(1)
-          + " µm. Something is wrong with the mesh transform rather than with your assembly — the "
-          + "shape above is stretched by whatever that factor is.</span>";
 
       /* The page's own --accent, as floats: #166534 light, #4ade80 dark. Written as numbers
          because a shader cannot read a CSS variable -- so if the accent ever changes, this is the
          second place it has to change, and xjumpcheck asserts the two agree. */
       var tint = (typeof currentTheme === "function" && currentTheme() === "light")
                ? [0.086, 0.396, 0.204] : [0.290, 0.871, 0.502];
-      try { draw(canvas, geo, tint); }
-      catch (e){
-        /* The canvas goes; the coverage line stays. A DIFFERENT class, deliberately: with both
-           carrying .m3d-note, the first match in the document would be this failure rather than
-           the coverage sentence, and anything reading the panel -- a check, or a person skimming
-           -- would find the wrong one. */
-        var msg = host.ownerDocument.createElement("div");
-        msg.className = "m3d-err";
-        msg.innerHTML = "Could not draw it here: " + esc(e.message)
-          + ". Use <b>Open in the viewer</b> instead.";
-        canvas.parentNode.replaceChild(msg, canvas);
-        return null;
-      }
+
+      /* ── AND THE SHARED RENDERER DRAWS IT ────────────────────────────────────  2026-10-03
+         Søren: "I don't see the function in xJump". The corner buttons, the lighting rig and the
+         travelling light had not failed here -- they were never in the copy of the renderer this
+         file used to carry. core/mesh3d.js is already on the page; it was only being shadowed.
+
+         It owns the markup, the note, the WebGL failure path and the theme repaint from here on.
+         H01 publishes no nucleus meshes, so two of the four buttons rightly do not appear: they
+         are offered on `what`, and nothing here says "nucleus". */
+      m3dCore().show(host, geo, { what: "cell", tint: tint, lead: cov, tail: tail,
+                                  emptyMessage: "This assembly has no geometry to draw." });
       return geo;
     }).catch(function(e){
       if (mine !== SEQ) return null;
@@ -3516,19 +3228,22 @@ UJ.mesh3d = (function(){
   function hide(host){ if (host) host.innerHTML = ""; }
 
   /* Repaint and count the distinct colours in the frame, in one turn. A cleared panel has one
-     colour; a lit solid has hundreds. Returns -1 if nothing has been drawn yet. */
+     colour; a lit solid has hundreds. Returns -1 if nothing has been drawn yet.
+
+     Through the shared renderer's probePixels, which is the same one-turn trick for the same
+     reason: readPixels is valid only in the turn that drew, and a second getContext() returns the
+     first context and ignores the attributes, so a probe that asks for preserveDrawingBuffer after
+     the fact silently reads a cleared buffer. 2026-10-03. */
   function probe(){
-    if (!LAST) return -1;
-    LAST.paint();
-    var gl = LAST.gl, c = LAST.canvas;
-    var px = new Uint8Array(c.width * c.height * 4);
-    gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    var M = window.UJ && UJ.mesh3dCore;
+    if (!M || !M.probePixels) return -1;
     var seen = {}, n = 0;
-    for (var i = 0; i < px.length; i += 4){
-      var k = px[i] + "," + px[i+1] + "," + px[i+2];
+    var got = M.probePixels(function(r, g, b){
+      var k = r + "," + g + "," + b;
       if (!seen[k]){ seen[k] = 1; n++; }
-    }
-    return n;
+      return false;
+    });
+    return got < 0 ? -1 : n;
   }
 
   /* ── .glb, PowerPoint and volume, through core/mesh.js ────────────────────────────────────
@@ -3624,11 +3339,12 @@ UJ.mesh3d = (function(){
            /* Exposed for the checks: the format decoder and the combiner are the two places a
               silent wrong answer could live, and both are testable without a browser. probe() is
               the one that needs a browser -- see its comment. */
-           decodeLegacy: decodeLegacy, combine: combine, toNm: toNm, probe: probe,
-           /* Exposed so a check can draw geometry whose right-way-up is known by hand and
-              look at the pixels -- see upcheck.js. "Upside down" is not a thing any
-              assertion about matrices really tests. */
-           draw: draw };
+           decodeLegacy: decodeLegacy, combine: combine, toNm: toNm, probe: probe };
+           /* NO `draw` ANY MORE. It was exposed so upcheck.js could draw geometry whose
+              right-way-up is known by hand and look at the pixels -- "upside down" is not a thing
+              any assertion about matrices really tests. That check now draws through
+              UJ.mesh3dCore.draw, which is the renderer this page actually uses, so it is testing
+              the real path rather than a fork of it. 2026-10-03. */
 })();
 </script>
 <script>/* ── χJump application ──────────────────────────────────────────────────────────────────────
