@@ -340,7 +340,18 @@ UJ.mesh3d = (function(){
     "void main(){",
     "  vec2 d = (uv - vec2(0.5, 0.54)) * vec2(1.0, 1.22);",
     "  float g = smoothstep(0.78, 0.04, length(d));",
-    "  gl_FragColor = vec4(bg + (bg + vec3(0.06)) * lift * g, 1.0); }"
+    /* ── WHICH WAY ROUND, FROM THE SIGN OF THE LIFT ──────────────────────────  2026-10-03
+       A dark field is shaped by light in its middle; a light field is shaped by shadow at its
+       edges. The light theme had the dark theme's gradient with the sign flipped, which put a
+       grey smudge behind the specimen and left the rim white -- a lit stage inside out, and what
+       Søren meant by "the ambient ligt also looks bad in light mode".
+
+       READ OFF THE SIGN rather than passed beside it. A second uniform saying "and vignette this
+       one" would be a value decided by one expression and matched by a second, which is the shape
+       of most of the bugs this file has had. Negative lift means a light field, and a light field
+       vignettes. */
+    "  float gg = lift < 0.0 ? 1.0 - g : g;",
+    "  gl_FragColor = vec4(bg + (bg + vec3(0.06)) * lift * gg, 1.0); }"
   ].join("\n");
 
   function compile(gl, type, src){
@@ -566,10 +577,27 @@ UJ.mesh3d = (function(){
          in the panel most likely to want this button. */
       return (o.what === "nucleus") ? geo : null;
     }
+    /* ── HOW CLOSE YOU MAY GET ────────────────────────────────────────────────  2026-10-03
+       Søren: "we can zoom all the way in when using the zoom button". The wheel and the pinch each
+       carried their own copy of [0.6, 12] -- the pinch's under a comment promising it was the same
+       range as the wheel's -- and "look at the nucleus" arrived with a third floor of its own,
+       several times nearer. Press it and you were inside the nucleus; scroll in from there and the
+       wheel's floor pulled you BACK OUT, which reads as the panel jumping rather than as a limit.
+
+       `nearest` is the floor in force NOW. Framing something smaller than the model lowers it to
+       exactly the distance that framing chose -- so the hand can follow the button in, and neither
+       can pass through the thing you asked to look at -- and leaving that view puts it back. */
+    var DIST_FAR = 12, DIST_NEAR = 0.6, nearest = DIST_NEAR;
+    function clampDist(d){ return Math.max(nearest, Math.min(DIST_FAR, d)); }
+
     function lookAtNucleus(){
       var ng = nucleusGeo();
       if (!ng) return false;
-      if (wasAt){ view.target = wasAt.target; view.dist = wasAt.dist; wasAt = null; paint(); return false; }
+      if (wasAt){
+        view.target = wasAt.target; view.dist = wasAt.dist;
+        nearest = DIST_NEAR;                  // the ordinary floor comes back with the view
+        wasAt = null; paint(); return false;
+      }
       wasAt = { target: view.target || null, dist: view.dist };
       /* lo/hi are ABSOLUTE and mid is the frame's centre, so the nucleus's own centre relative to
          that frame is its box midpoint minus the frame mid — which is exactly what its vertices
@@ -577,8 +605,17 @@ UJ.mesh3d = (function(){
       view.target = [ (ng.lo[0] + ng.hi[0]) / 2 - ng.mid[0],
                       (ng.lo[1] + ng.hi[1]) / 2 - ng.mid[1],
                       (ng.lo[2] + ng.hi[2]) / 2 - ng.mid[2] ];
-      var rn = (ng.radius || 0) / (ng.span || geo.span || 1);
-      view.dist = Math.max(rn / (Math.tan(0.9 / 2) * 0.70), 0.05);
+      /* geo.span, NOT ng.span. Everything the camera does is in units of the main geometry's
+         span -- view.target is divided by it three lines up. A ghost prepared with the cell's
+         frame reports the cell's span and the two agreed by accident; one prepared without a frame
+         reports its own, and this framed the nucleus from four times too far out. 2026-10-03. */
+      var rn = (ng.radius || 0) / (geo.span || 1);
+      /* 0.70 rather than FILL: a nucleus wants a little of its cell around it to be a nucleus
+         IN something rather than a ball. The framing distance also becomes the floor, so the
+         wheel can come in to exactly here and no further. */
+      var want = rn / (Math.tan(FOV / 2) * 0.70);
+      nearest = Math.min(DIST_NEAR, Math.max(want, 0.02));
+      view.dist = clampDist(want);
       paint();
       return true;
     }
@@ -633,9 +670,12 @@ UJ.mesh3d = (function(){
         gl.enableVertexAttribArray(aQ);
         gl.vertexAttribPointer(aQ, 2, gl.FLOAT, false, 0, 0);
         gl.uniform3fv(uBgC, b2);
-        /* Lifted on a dark field, where there is room above the background to lift into; barely
-           at all on a light one, where the same lift would wash out to paper. */
-        gl.uniform1f(uLift, isLight() ? -0.05 : 0.55);
+        /* Lifted on a dark field, where there is room above the background to lift into;
+           NEGATIVE on a light one, which the shader reads as "vignette" rather than "glow" -- so
+           this is shadow laid along the edges and not murk poured into the middle. -0.05 was the
+           amount that made the light panel look dirty rather than lit: a departure you could
+           measure (13 of 255) and not one you could see as deliberate. 2026-10-03. */
+        gl.uniform1f(uLift, isLight() ? -0.13 : 0.55);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.disableVertexAttribArray(aQ);
         gl.depthMask(true); gl.enable(gl.DEPTH_TEST);
@@ -741,9 +781,10 @@ UJ.mesh3d = (function(){
       if (pinch && nTouch >= 2){
         var g = gap();
         if (g > 0){
-          /* Fingers apart is closer, the way every map behaves. Clamped to the same range the
-             wheel is, so neither way of zooming can reach somewhere the other cannot. */
-          view.dist = Math.max(0.6, Math.min(12, pinch.dist * pinch.gap / g));
+          /* Fingers apart is closer, the way every map behaves. Through clampDist, so that
+             "the same range the wheel is" is a fact rather than a promise made by a comment
+             beside a second copy of the numbers. */
+          view.dist = clampDist(pinch.dist * pinch.gap / g);
           paint();
         }
         return;
@@ -769,7 +810,7 @@ UJ.mesh3d = (function(){
     canvas.addEventListener("pointercancel", lift);
     canvas.addEventListener("wheel", function(e){
       e.preventDefault();
-      view.dist = Math.max(0.6, Math.min(12, view.dist * (e.deltaY > 0 ? 1.12 : 0.89)));
+      view.dist = clampDist(view.dist * (e.deltaY > 0 ? 1.12 : 0.89));
       paint();
     }, { passive:false });
     /* The panel is ON the page, so a theme change has to REPAINT it -- CSS cannot reach inside a
@@ -1037,10 +1078,23 @@ UJ.mesh3d = (function(){
        anywhere near the corner would read as the model sticking. */
     + ".m3d-stage{position:relative}"
     + ".m3d-tools{position:absolute;top:8px;right:8px;display:flex;gap:5px;pointer-events:none}"
+    /* ── THE FALLBACK IS A VARIABLE, NOT A COLOUR ──────────────────────────────  2026-10-03
+       `var(--card,#1a1a1a)` was a statement about the theme made by a file that cannot see the
+       theme. `--card` is declared on χJump and ωJump; the other six pages call the same colour
+       `--panel`, so six of eight took that literal dark grey -- invisible in the dark theme,
+       and in the light theme a charcoal square under a #1f2328 glyph. Søren: "The buttons don't
+       work in light mode". The chain ends at `--bg`, which all eight declare, so the colour is
+       always the page's own; the literal at the end is unreachable on any real page and is there
+       so the rule is still valid CSS in a harness.
+
+       AND .82 RATHER THAN .62. The opacity mixes the whole button -- border, fill and glyph --
+       into the canvas behind it, which on a dark field is a soft touch and on a white one is most
+       of the contrast gone before the glyph is drawn. */
     + ".m3d-tool{pointer-events:auto;width:26px;height:26px;line-height:1;display:flex;"
     + "align-items:center;justify-content:center;font-size:14px;cursor:pointer;"
-    + "border:1px solid var(--line,#333);border-radius:7px;background:var(--card,#1a1a1a);"
-    + "color:var(--ink,#eee);opacity:.62;transition:opacity .15s,background .15s}"
+    + "border:1px solid var(--line,#333);border-radius:7px;"
+    + "background:var(--card,var(--panel,var(--bg,#1a1a1a)));"
+    + "color:var(--ink,#eee);opacity:.82;transition:opacity .15s,background .15s}"
     + ".m3d-tool:hover,.m3d-tool:focus-visible{opacity:1}"
     + ".m3d-tool.m3d-on{opacity:1;border-color:var(--accent,#49b0ff);color:var(--accent,#49b0ff)}"
   function injectStyle(){
