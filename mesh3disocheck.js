@@ -104,6 +104,51 @@ const SOLIDITY = `(() => {
      + "buttons that disagree about one state are worse than one button",
      nucOnly.nucLit ? "lit" : "dark");
 
+  /* ── AND IT IS ACTUALLY ON SCREEN ─────────────────────────────────────────────────────────
+     The assertion I should have written the first time. "The camera moved and came in" is a
+     statement about two numbers, and both were right while the panel was empty: Søren, with the
+     nucleus isolated in µJump's cell card, *"When I isolate the nucleus it disappear from the
+     view. When I press zoom, it does not focus on the cell soma."*
+
+     The fixture below is a pyramidal cell's proportions rather than a ball: a soma with a 500 µm
+     apical dendrite, so the bounding box's centre is 200 µm from the nucleus. That offset is the
+     whole bug -- it was being applied to the camera WITHOUT the model matrix's y flip, so the
+     further the nucleus sat from the middle, the further the camera aimed past it. A nucleus near
+     the centre of its box looks fine, which is why a round test cell passed. */
+  console.log("\n...and the nucleus is in the picture, not merely aimed at");
+  const seen = await p.evaluate(`(() => {
+    const M = UJ.mesh3d, ball = ${BALL}, h = document.getElementById("h"); h.innerHTML = "";
+    const P = [], I = [];
+    const add = g => { const b0 = P.length/3;
+      for (let i = 0; i < g.positions.length; i++) P.push(g.positions[i]);
+      for (let i = 0; i < g.indices.length; i++) I.push(g.indices[i] + b0); };
+    add(ball(9, 0, 0, 0));                                  // the soma
+    for (let k = 1; k <= 25; k++) add(ball(1.2, 0, -k*20, 0));   // 500 µm of apical dendrite
+    const cell = { positions: new Float32Array(P), indices: new Uint32Array(I) };
+    const nb = ball(5, 1, 0, 0);                            // a 10 µm nucleus at the soma
+    const gc = M.prepare(cell.positions, cell.indices, { unitNm: 1000 });
+    const gn = M.prepare(nb.positions, nb.indices,
+                         { unitNm: 1000, frame: { mid: gc.mid, span: gc.span } });
+    window.__v = {};
+    M.show(h, gc, { what: "cell", alpha: 0.30, view: window.__v,
+                    ghosts: [{ geo: gn, what: "nucleus", tint: M.NUC_TINT, alpha: 1 }] });
+    const blue = () => M.probePixels((r,g,b) => b > r + 30 && b > g + 20);
+    const both = blue();
+    document.querySelector(".m3d-iso").click();             // all -> cell
+    document.querySelector(".m3d-iso").click();             // cell -> nucleus
+    return { both: both, isolated: blue(),
+             offsetUm: Math.round((window.__v.target || [0,0,0])[1] / 1000) };
+  })()`);
+  ok(seen.isolated > 3000,
+     "the isolated nucleus fills the panel — the camera's aim is in the model's own frame, which "
+     + "is scaled AND flipped in y, and the offset was being applied unflipped: the nucleus landed "
+     + "twice its offset away from where the camera was looking",
+     seen.both + " blue px with the whole cell, " + seen.isolated + " isolated, nucleus "
+     + seen.offsetUm + " µm off the box centre");
+
+  await p.evaluate(SETUP);
+  await p.evaluate(CLICK(".m3d-iso"));
+  await p.evaluate(CLICK(".m3d-iso"));
   const back = await p.evaluate(CLICK(".m3d-iso"));          // nucleus -> all
   ok(Math.abs(back.dist - start.dist) < 1e-6 && !back.target,
      "coming back to both puts the camera back where it was, rather than leaving you zoomed into "

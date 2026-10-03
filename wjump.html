@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-10-03 08:13</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-10-03 08:49</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -11479,8 +11479,21 @@ UJ.mesh3d = (function(){
          units geo.lo/hi are in, measured from the frame's mid), translated out before the rotation
          so the orbit happens around it. Absent, it is the origin and every panel is as it was. */
       var tg = view.target || null;
-      var base = tg ? mul(translate(-tg[0] / (geo.span || 1), -tg[1] / (geo.span || 1),
-                                    -tg[2] / (geo.span || 1)), norm)
+      /* ── THROUGH `norm`, NOT AROUND IT ───────────────────────────────────────  2026-10-03
+         `norm` is modelScale(1/span) and modelScale is diag(s, -s, s): the y is flipped, because
+         the data's y runs down and WebGL's runs up. Dividing the target by the span by hand took
+         the scale and missed the flip, so a nucleus `d` above the box's centre was DRAWN `d`
+         below it and the camera was sent `d` above -- twice the offset apart, with the camera
+         parked a nucleus-radius from where it was looking. Søren: "When I isolate the nucleus it
+         disappear from the view."
+
+         A round test cell hides it entirely: the error is proportional to the offset, and his is
+         a pyramidal cell whose 500 µm apical dendrite puts the box centre 200 µm from the soma.
+
+         Taken off norm's own diagonal rather than rewritten, so the scale and the flip have one
+         source. A second copy here would look right and be wrong only on the cells that need it
+         most. */
+      var base = tg ? mul(translate(-tg[0] * norm[0], -tg[1] * norm[5], -tg[2] * norm[10]), norm)
                     : norm;
       var mv = mul(translate(0, 0, -view.dist), mul(rotX(view.pitch), mul(rotY(view.yaw), base)));
       gl.uniformMatrix4fv(uMvp, false, mul(perspective(FOV, w/h, 0.01, 100), mv));
