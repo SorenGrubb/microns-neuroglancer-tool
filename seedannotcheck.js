@@ -23,7 +23,12 @@ const pagepath = require("./pagepath.js"), pathM = require("path");
    from there and from the tool folder alike. 2026-09-21. */
 const page = (name) => {
   const here = [pathM.join(__dirname, name), pathM.join(__dirname, "..", "wjump-build", name),
-                pathM.join(process.cwd(), "..", "wjump-build", name)]
+                pathM.join(process.cwd(), "..", "wjump-build", name),
+                /* The working copy, where the served folder and the build folders are one level
+                   apart rather than siblings. It never mattered while a stale wjump_config.js sat
+                   in the served folder and the first candidate found it; that copy has gone.
+                   2026-10-03. */
+                pathM.join(__dirname, "..", "xw", "wjump-build", name)]
                  .filter(fs.existsSync)[0];
   return here || pagepath(name);
 };
