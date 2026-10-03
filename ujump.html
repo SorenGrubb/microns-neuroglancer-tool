@@ -628,7 +628,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-03 08:49</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-03 15:57</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -13045,6 +13045,18 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       nucleusAt:function(nid){
         try{
           const i=nidToIndex(nid);
+          return i<0?null:[NX[i],NY[i],NZ[i]];
+        }catch(_e){ return null; }
+      },
+      /* And the same for a ROOT id, so a post naming only a cell has somewhere to draw. Søren:
+         "Clicking the root ID does nothing at all." Through rootIdToIndex(), which is the lazy
+         reverse map this page already builds for its own root-ID search box -- not a second one,
+         so a cell this page can find by searching is a cell the Discussion can draw. It knows only
+         this tool's OWN resolved root ids, which is what the search box says about itself too;
+         core/forum.js says so rather than going quiet when it comes back empty. 2026-10-03. */
+      cellAt:function(rid){
+        try{
+          const i=rootIdToIndex(rid);
           return i<0?null:[NX[i],NY[i],NZ[i]];
         }catch(_e){ return null; }
       },

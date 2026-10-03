@@ -333,6 +333,119 @@ const ok = (c, what, d) => { console.log((c ? "  ok   " : "  FAIL ") + what
   ok(!!prev.coord2 && prev.coord2 !== prev.coord1,
      "...and it is the second one now", prev.coord1 + " -> " + prev.coord2);
 
+  /* ── AND A ROOT ID IS A LINK YOU CAN CLICK ───────────────────────────────────────────────
+     Søren, on a phone, with a post whose root id was purple and inert: *"Clicking the root ID does
+     nothing at all. I think clicking it or the nucleus ID should show it in Neuroglancer or as a 2D
+     and 3d window."*
+
+     The handler took the coordinate from THE LINK, and a root id has none -- so it returned, and a
+     link that returns is indistinguishable from a link that is broken. A nucleus id had already
+     been given a fallback for exactly this reason ("its link used to do nothing, which looks
+     exactly like a broken link"); the root id never got one.
+
+     TWO SEPARATE CASES, and the first needs nothing from the page at all: a post that names a place
+     AND a cell is one picture of the two -- idsOf() has been gathering both since it was written,
+     so the root link should open what the coordinate link opens. */
+  console.log("\nclicking a root id in a post that also names a place");
+  const rootWith = await p.evaluate(async () => {
+    const slot = document.querySelector("#forumCard .forumprev");
+    const links = document.querySelectorAll("#forumCard .forumbody a[data-jl]");
+    /* PUT THE PREVIOUS PICTURE AWAY FIRST. The section above leaves one open, and "is there an
+       .emp in the slot" would then be answered by it -- this assertion passed before the fix was
+       written, which is the oldest way for a check to be worthless. */
+    links[1].click();
+    await new Promise(r => setTimeout(r, 400));
+    const cleared = !slot.querySelector(".emp");
+    /* p1's body is two coordinates and then the segment id, so the LAST link is the root. */
+    const a2 = links[links.length - 1];
+    const was = cleared;
+    a2.click();
+    await new Promise(r => setTimeout(r, 1600));
+    const cv = document.querySelector("#forumCard .emp-cv");
+    return { text: a2.textContent, drew: !!slot.querySelector(".emp"),
+             coord: cv && cv.dataset ? cv.dataset.coord : "",
+             was: was,
+             say: (document.querySelector("#forumCard .emp-say") || {}).textContent || "" };
+  });
+  ok(/864691135570733037/.test(rootWith.text), "the last link is the root id", rootWith.text);
+  ok(rootWith.was, "the previous picture is away, so this one is the root id's", rootWith.was);
+  ok(rootWith.drew,
+     "clicking it draws the picture — the post names a place, and a sentence naming a place and a "
+     + "cell is asking for one picture of the two",
+     rootWith.drew ? rootWith.coord : "nothing drawn: " + rootWith.say);
+  ok(!!rootWith.coord, "...at a coordinate from the post", rootWith.coord);
+
+  /* ── AND A POST THAT NAMES ONLY A CELL ───────────────────────────────────────────────────
+     There is no coordinate to fall back on, so the page has to place the cell: µJump already holds
+     the nucleus table and already has rootIdToIndex() for its own root-id search box. Where it
+     cannot -- a community-proposed root, another volume's cell, or this harness, whose table is
+     empty -- the link SAYS so. The one thing it must not do is what it did: nothing. */
+  console.log("\nand one that names only a cell");
+  const rootOnly = await p.evaluate(async () => {
+    UJ.forum._set([{ postId: "p3", scope: "volume", kind: "question", title: "Only a root",
+                     body: "What if I only post rootID: 864691135194795306",
+                     authorName: "S\u00f8ren Grubb", timestamp: new Date().toISOString(),
+                     replyTo: "", isMine: true }], false);
+    UJ.forum._open("p3");
+    const slot = document.querySelector("#forumCard .forumprev");
+    const a2 = document.querySelector("#forumCard .forumbody a[data-jl]");
+    const before = slot ? slot.innerHTML.length : -1;
+    a2.click();
+    await new Promise(r => setTimeout(r, 1600));
+    return { before: before, after: slot ? slot.innerHTML.length : -1,
+             text: (slot || {}).textContent || "",
+             drew: !!(slot && slot.querySelector(".emp")) };
+  });
+  ok(rootOnly.before === 0, "nothing is in the slot before the click", rootOnly.before);
+  ok(rootOnly.after > 0,
+     "clicking a root id with no place in the post leaves something behind — a picture where the "
+     + "page can place the cell, and a sentence where it cannot. Not nothing.",
+     rootOnly.drew ? "drew the picture" : rootOnly.text.replace(/\s+/g, " ").slice(0, 90));
+  ok(rootOnly.drew || /864691135194795306/.test(rootOnly.text),
+     "...and the sentence names the id it could not place, so it reads as an answer rather than a "
+     + "failure", rootOnly.text.replace(/\s+/g, " ").slice(0, 90));
+
+  /* ── AND ONE IT CANNOT PLACE AT ALL ──────────────────────────────────────────────────────
+     rootIdToIndex() knows only this tool's OWN resolved root ids -- a community-proposed root, or
+     a cell in another volume, is not in it, and the search box says so about itself. That case
+     used to be silence, which is the whole fault; it has to be a sentence. Asserted separately
+     because the post above happens to name a cell this page CAN place, so it never reaches here. */
+  console.log("\nand one it cannot place at all");
+  const stranger = await p.evaluate(async () => {
+    UJ.forum._set([{ postId: "p4", scope: "volume", kind: "question", title: "A stranger",
+                     body: "Has anyone seen 864691100000000001 before?",
+                     authorName: "Somebody", timestamp: new Date().toISOString(),
+                     replyTo: "", isMine: false }], false);
+    UJ.forum._open("p4");
+    const slot = document.querySelector("#forumCard .forumprev");
+    const a2 = document.querySelector("#forumCard .forumbody a[data-jl]");
+    if (!a2) return { noLink: true };
+    a2.click();
+    await new Promise(r => setTimeout(r, 900));
+    return { text: (slot || {}).textContent || "",
+             drew: !!(slot && slot.querySelector(".emp")),
+             said: !!(slot && slot.querySelector(".forumnoplace")),
+             viewer: !!(slot && slot.querySelector(".forumnoplace a[href]")) };
+  });
+  ok(!stranger.noLink && !stranger.drew && stranger.said,
+     "a root id this page has never resolved gets a sentence rather than silence",
+     stranger.noLink ? "it was not even a link"
+       : (stranger.text || "").replace(/\s+/g, " ").slice(0, 100));
+  ok(stranger.viewer,
+     "...with a Neuroglancer link in it, which is the one answer that works for any id at all",
+     stranger.viewer ? "offered" : "no link");
+
+  /* The page's half of the contract. nucleusAt() has been there since a post could name a nucleus;
+     this is the same thing for the root id, and µJump already has the reverse map behind it. */
+  const host = await p.evaluate(() => {
+    const h = (typeof window.emPreviewHost === "function") ? window.emPreviewHost() : null;
+    return { has: !!(h && typeof h.cellAt === "function"),
+             nuc: !!(h && typeof h.nucleusAt === "function") };
+  });
+  ok(host.nuc, "the page can place a nucleus, as it always could");
+  ok(host.has, "...and now a root id too, through the reverse map its own search box uses",
+     host.has ? "cellAt is there" : "no cellAt on emPreviewHost()");
+
   console.log("\none place needs no open-all button");
   const single = await p.evaluate(() => {
     UJ.forum._set([{ postId: "p2", scope: "volume", kind: "bug", title: "One thing",

@@ -202,6 +202,23 @@ function nucleusPos(nid){
   } catch (_e){}
   return null;
 }
+/* The same question for a ROOT id. µJump answers it from the nucleus table it already holds,
+   through the reverse map its own root-id search box uses; a page without one simply says no, and
+   the caller then falls back to the post's own coordinate. 2026-10-03. */
+function cellPos(rid){
+  try {
+    var cfg = (typeof window.emPreviewHost === "function") ? window.emPreviewHost() : null;
+    if (cfg && typeof cfg.cellAt === "function") return cfg.cellAt(rid) || null;
+  } catch (_e){}
+  return null;
+}
+/* Neuroglancer, for an id this page cannot place. It is the one answer that works for any id at
+   all -- a community-proposed root, another volume's cell -- and it is half of what was asked for:
+   "clicking it ... should show it in Neuroglancer or as a 2D and 3d window". */
+function viewerUrlFor(h){
+  try { if (window.UJ && UJ.jumplink) return UJ.jumplink.url([h]) || ""; } catch (_e){}
+  return "";
+}
 
 /* ── THE THREADS ──────────────────────────────────────────────────────────────────────────────
    A thread is a post with no replyTo, plus everything pointing at it. One level: a reply to a reply
@@ -471,11 +488,41 @@ function wirePreviews(host){
            the EM should also show segmentation." A sentence naming a place and a cell is asking for
            one picture of the two, and which word came first does not matter. */
         var ids = idsOf(hs);
+        /* ── CLICKING A THING SHOWS THAT THING ────────────────────────────────────  2026-10-03
+           One rule for three kinds, which is easier to predict than three rules. A coordinate goes
+           to that coordinate; a nucleus id to that nucleus, as it has since "a post naming only a
+           nucleus has no coordinate to centre on, and its link used to do nothing, which looks
+           exactly like a broken link"; and a root id to that cell, which is the case that was
+           left out and the one Søren hit: "Clicking the root ID does nothing at all."
+
+           ONLY THEN THE POST'S OWN COORDINATE. A sentence naming a place and a cell is asking for
+           one picture of the two -- idsOf() above has assumed that since it was written -- so an
+           id this page cannot place still has somewhere to be drawn when the sentence says where.
+           Last, because the thing you clicked wins over the thing beside it. */
         var at = h.voxel;
-        /* AND A CELL WITH NO PLACE STILL HAS ONE: a post naming only a nucleus has no coordinate to
-           centre on, and its link used to do nothing, which looks exactly like a broken link. */
         if (!at && h.kind === "nucleus") at = nucleusPos(h.id);
-        if (!at) return;
+        if (!at && h.kind === "root") at = cellPos(h.id);
+        if (!at) at = (hs.filter(function(x){ return x.voxel; })[0] || {}).voxel || null;
+        if (!at){
+          /* NOT NOTHING. rootIdToIndex only knows this tool's own resolved root ids: a
+             community-proposed root, or a cell in another volume, is not in it. Silence there is
+             the fault being fixed, so this says which id it was and offers the one answer that
+             works for any id at all. */
+          ev.preventDefault();
+          ev.stopPropagation();
+          var u = viewerUrlFor(h);
+          open = "";
+          slot.innerHTML = "<p class='forumnoplace' style='font-size:12px;color:var(--mut);"
+            + "margin:6px 0;line-height:1.5'>Nothing on this page knows where <b>"
+            + esc(h.id || h.text || "that") + "</b> is — it may be a community-proposed root id, "
+            + "or a cell in another volume. "
+            + (u ? "<a href='" + esc(u) + "' target='_blank' rel='noopener'>Open it in "
+                   + "Neuroglancer</a>, or add a coordinate to the post and the picture will "
+                   + "draw here."
+                 : "Add a coordinate to the post and the picture will draw here.")
+            + "</p>";
+          return;
+        }
         ev.preventDefault();
         ev.stopPropagation();
         var key = at.join(",");
