@@ -60,6 +60,11 @@ const SETUP = `(() => {
   await p.setContent('<!doctype html><meta charset="utf-8"><style>'
     + ':root{--bg:#0d1117;--panel:#161b22;--line:#2a313c;--ink:#e6edf3;--mut:#8b949e;'
     + '--accent:#27e0b3;--bad:#f85149}body{margin:0;background:var(--bg)}'
+    /* The light block as well, because the last section below encodes a GIF in both themes and the
+       light one is the harder of the two: its field's middle is the page's own white, hard against
+       the top of the range. 2026-10-04. */
+    + ':root[data-theme="light"]{--bg:#ffffff;--panel:#f6f8fa;--line:#d0d7de;--ink:#1f2328;'
+    + '--mut:#57606a;--accent:#0f766e;--bad:#cf222e}'
     + '#h{width:620px;height:320px}.logo{display:none}</style>'
     /* The mark every page in this family wears, in the markup they all write it in: the tool's own
        letter in the accent colour and the word in the ink. core/mesh3dshot.js reads it off the page
@@ -317,6 +322,51 @@ const SETUP = `(() => {
   ok(/hello%20world|hello\+world/.test(share.urls.join(" ")),
      "...and the caption travels in the ones that take text", 
      share.urls.filter(u => /hello/.test(u)).length + " of 3 carry it");
+
+  /* ── AND THE GIF IS NOT A SET OF SLABS ────────────────────────────────────────────────────
+     Søren, asked where the rings were: the exported PNG and the rotating GIF, not the panel on
+     screen. The panel measures clean and so does the PNG; the GIF measured a run of 351 identical
+     pixels across a 1240px row, which is a quarter of the picture in one flat colour.
+
+     THE GIF HAS ITS OWN QUANTISER AND IT IS MUCH COARSER THAN EIGHT BITS. gifenc keys every pixel
+     by rgb888_to_rgb565 both when it chooses the palette and when it looks one up, so the smallest
+     difference it can see is 8 of 255 on red and blue. The field spans eighteen levels. The shader's
+     half-level of dither is sized for a framebuffer and is simply invisible here.
+
+     MEASURED IN THE DECODED FILE, not in the canvas it came from — the whole point is that the two
+     disagreed. Decode the GIF back into an image, walk a row across the background, and take the
+     longest run of one identical pixel. Both themes, because the light one is where it failed
+     worst. 2026-10-04. */
+  console.log("\nand the turn survives the GIF's own quantiser");
+  for (const theme of ["dark", "light"]) {
+    const slab = await p.evaluate(`(async () => {
+      document.documentElement.setAttribute("data-theme", ${JSON.stringify(theme)});
+      ${SETUP};
+      const blob = await UJ.mesh3dshot.turnBlob({ frames: 8, fps: 12 });
+      const url = URL.createObjectURL(blob);
+      const img = await new Promise((res, rej) => {
+        const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      c.getContext("2d").drawImage(img, 0, 0);
+      /* A row above the model and below the two lines of title: field, and nothing else. */
+      const d = c.getContext("2d").getImageData(0, Math.round(c.height * 0.22), c.width, 1).data;
+      let best = 1, run = 1, k;
+      for (k = 1; k < c.width; k++){
+        const same = d[k*4] === d[(k-1)*4] && d[k*4+1] === d[(k-1)*4+1]
+                  && d[k*4+2] === d[(k-1)*4+2];
+        if (same) run++; else { if (run > best) best = run; run = 1; }
+      }
+      if (run > best) best = run;
+      URL.revokeObjectURL(url);
+      return { w: c.width, flat: best, bytes: blob.size };
+    })()`);
+    ok(slab.flat <= 20,
+       theme + ": no slab of one colour across the field — undithered it was 234 px (dark) and "
+       + "351 px (light) of a 1240 px row",
+       slab.flat + " px across " + slab.w + ", " + (slab.bytes / 1048576).toFixed(2) + " MB");
+  }
+  await p.evaluate(`document.documentElement.removeAttribute("data-theme")`);
 
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");

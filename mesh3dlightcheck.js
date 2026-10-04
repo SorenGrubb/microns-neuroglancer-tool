@@ -261,6 +261,54 @@ const SPECK = `(() => ({ positions:new Float32Array([0,0,0, 1,0,0, 0,1,0]),
        band.flat + " px of one value across " + band.width);
   }
 
+  /* ── AND THE FALLOFF HAS NO CORNER IN IT ──────────────────────────────────────────────────
+     Søren, after the dither: *"It is still too clear borders."*
+
+     THE EYE DOES NOT SEE BRIGHTNESS, IT SEES THE CHANGE IN BRIGHTNESS -- and what makes an edge is
+     the change in THAT. A field can be perfectly monotonic and still show a ring, if its slope
+     stops changing at one radius and resumes at another. So the thing to assert is the SECOND
+     difference, as a share of the whole range: a profile that falls 20 levels with no step in the
+     slope bigger than a fiftieth of that has nowhere for an edge to be.
+
+     MEASURED ALONG A ROW, NOT IN ANNULI. The first attempt averaged concentric bands and reported a
+     slope that collapsed to a tenth partway out -- in BOTH themes, at the same band index, whatever
+     the shader did, because past the radius where a circle leaves the top and bottom of a wide
+     canvas each band is a different SHAPE and the average is measuring the frame rather than the
+     field. A straight run out from the centre, averaged over 37 rows so the dither cancels, has no
+     geometry of its own. 2026-10-04. */
+  console.log("\nthe falloff has no corner in it");
+  for (const theme of ["dark", "light"]) {
+    const prof = await p.evaluate(`(() => {
+      document.documentElement.setAttribute("data-theme", ${JSON.stringify(theme)});
+      const M = UJ.mesh3d, h = document.getElementById("h"); h.innerHTML = "";
+      const t = ${SPECK}();
+      const g = M.prepare(t.positions, t.indices, { unitNm: 1000 });
+      M.show(h, g, { what: "cell", view: { dist: 900, yaw: 0, pitch: 0 } });
+      const cv = h.querySelector(".m3d-canvas");
+      const W = cv.width, H = cv.height, N = 20;
+      const y0 = Math.round(H*0.46) - 18, y1 = Math.round(H*0.46) + 18, cx = Math.round(W/2);
+      const sum = new Array(N).fill(0), cnt = new Array(N).fill(0);
+      M.probePixels((r,g2,b2,x,y) => {
+        if (y < y0 || y > y1 || x < cx) return false;
+        const k = Math.min(N-1, Math.floor((x - cx) / (W - cx) * N));
+        sum[k] += 0.2126*r + 0.7152*g2 + 0.0722*b2; cnt[k]++;
+        return false; });
+      const v = sum.map((s,i) => cnt[i] ? s/cnt[i] : 0);
+      const d1 = [], d2 = [];
+      for (let i = 1; i < N; i++) d1.push(v[i] - v[i-1]);
+      for (let i = 1; i < d1.length; i++) d2.push(Math.abs(d1[i] - d1[i-1]));
+      const span = Math.max.apply(null, v) - Math.min.apply(null, v);
+      return { span: +span.toFixed(2), bend: +Math.max.apply(null, d2).toFixed(2),
+               share: +(Math.max.apply(null, d2) / span).toFixed(3),
+               slope: d1.map(x => +x.toFixed(2)) };
+    })()`);
+    ok(prof.span >= 6 && prof.share <= 0.02,
+       theme + ": the slope out from the middle changes smoothly — a kink of more than a fiftieth "
+       + "of the range is a radius the eye can find",
+       "span " + prof.span + ", worst bend " + prof.bend + " ("
+       + (100 * prof.share).toFixed(1) + "%), slope " + prof.slope.join(" "));
+  }
+
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
   process.exit(fails ? 1 : 0);

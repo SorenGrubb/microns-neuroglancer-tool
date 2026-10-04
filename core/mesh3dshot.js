@@ -336,13 +336,47 @@ UJ.mesh3dshot = (function(){
       return new Blob([enc.bytes()], { type: "image/gif" });
     });
   }
+  /* ── TWELVE LEVELS OF GRAIN, FOR A MACHINE THAT COUNTS IN THIRTY-TWOS ──────────────────────
+     Søren, asked where the rings are: the exported PNG and the rotating GIF, not the panel. The
+     PNG measures clean — 2px of one value across 1240. The GIF measured 351. This is why.
+
+     gifenc keys every pixel by rgb888_to_rgb565, in `quantize` when it chooses the palette and in
+     `applyPalette` when it looks one up. The smallest difference either can see is 8 of 255 on red
+     and blue and 4 on green. The field spans eighteen levels in the light theme: two bins. The
+     half-level of noise in the shader was sized for a framebuffer's eight bits and is invisible at
+     this grid, so the gradient arrived as flat slabs with hard joins.
+
+     TWELVE LEVELS, then — half as much again as a 5-bit step. Eight is not enough, because the
+     light field's middle is the page's own white at 253.7 and its bin starts at 248: four down is
+     still the same bin and four up clamps, so the brightest plateau could not break up at all. The
+     flat run across a 1240px row goes 44px at eight, 8px at ten, 6px at twelve.
+
+     Equally on all three channels, so a grey stays a grey; and from ign(x, y), which depends on
+     position alone, so the grain is a fixed texture the model turns underneath rather than
+     something that crawls from frame to frame. A white-noise hash in its place measured 254px:
+     uniform random values clump, and a clump on one side of a boundary is a flat patch. ign is
+     low-discrepancy, which is precisely the property that stops that.
+
+     The same function as the shader's, in JavaScript. A GIF cannot hold more than three values
+     across this ramp whatever is done to it; what it can hold is three values mixed. 2026-10-04. */
+  function grain(d, w){
+    var i, x, y, t;
+    for (i = 0; i < d.length; i += 4){
+      x = (i >> 2) % w; y = (i >> 2) / w | 0;
+      t = (x * 0.06711056 + y * 0.00583715) % 1;
+      t = (52.9829189 * t) % 1 - 0.5;
+      d[i] += t * 12; d[i + 1] += t * 12; d[i + 2] += t * 12;
+    }
+    return d;
+  }
+
   /* One frame, right way up, with the same furniture on it, as the flat RGBA the encoder wants. */
   function frameRGBA(f, deco){
     var p = paint(f);
     if (deco.fixed) drawBar(p.ctx, f.w, f.h, deco.fixed);
     if (deco.lines && deco.lines.length) drawTitle(p.ctx, f.w, f.h, deco.lines);
     if (deco.mark !== false) drawMark(p.ctx, f.w, f.h);
-    return p.ctx.getImageData(0, 0, f.w, f.h).data;
+    return grain(p.ctx.getImageData(0, 0, f.w, f.h).data, f.w);
   }
 
   /* ── WHAT TO SAY ABOUT IT ─────────────────────────────────────────────────────────────────

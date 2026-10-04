@@ -363,7 +363,28 @@ UJ.mesh3d = (function(){
     "float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }",
     "void main(){",
     "  vec2 d = (uv - vec2(0.5, 0.54)) * vec2(1.0, 1.22);",
-    "  float g = smoothstep(0.78, 0.04, length(d));",
+    /* ── A GAUSSIAN, BECAUSE IT NEVER ARRIVES ANYWHERE ───────────────────────  2026-10-04
+       Søren, after the banding was dithered away: "It is still too clear borders."
+
+       AND THE FIRST ANSWER TO THAT WAS WRONG, which is worth more here than the right one. I
+       averaged the field in concentric bands, read a slope that fell to -3.3 and then collapsed to
+       -0.3 partway out, and concluded that smoothstep's flat ends were drawing a ring. They were
+       not. The same collapse appeared at the same band index with a Gaussian in place, in both
+       themes — because past the radius where a circle leaves the top and bottom of a wide canvas,
+       every further band is a different SHAPE, and the average was measuring the frame. Measured
+       instead along a straight run out from the middle, smoothstep's slope is as smooth as this
+       one's: neither has a kink worth 1% of its range.
+
+       SO THIS IS NOT A FIX FOR WHAT HE SAW, and the record should not pretend otherwise. It is
+       kept for two smaller reasons that did survive the measurement. exp(-k·d²) is smooth at every
+       order everywhere and is still falling at the corner of the frame, so there is no radius at
+       which anything changes, by construction rather than by measurement. And at k = 3.2 the range
+       it crosses is a fifth shallower than smoothstep's — 18 levels against 23 in the light theme,
+       9 against 11 in the dark — which is a fifth fewer 8-bit boundaries for the dither to hide.
+
+       What he is seeing has not been reproduced here. The field leaves this shader with no flat
+       patch wider than 2px and no kink; whatever is quantising it is downstream. */
+    "  float g = exp(-3.2 * dot(d, d));",
     /* ── WHICH WAY ROUND, FROM THE SIGN OF THE LIFT ──────────────────────────  2026-10-03
        A dark field is shaped by light in its middle; a light field is shaped by shadow at its
        edges. The light theme had the dark theme's gradient with the sign flipped, which put a
