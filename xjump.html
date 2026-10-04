@@ -455,7 +455,7 @@ try{var _t=localStorage.getItem("ujump_theme");
 <p class="sub">Assemble cells from fragments &middot; <span id="dslabel"></span>
 &middot; <span class="build" title="When this file was built. If it does not match the file you
 think you are looking at, your browser is showing you a cached copy — reload with
-ctrl-shift-R.">build 2026-10-03 08:13</span></p>
+ctrl-shift-R.">build 2026-10-03 22:03</span></p>
 
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">&#128269; Jump</button>
@@ -1287,6 +1287,9 @@ UJ.cfg.mesh = {
 <script>window.UJ = window.UJ || {}; UJ.mesh3dNoAutoInstall = true;</script>
 <script src="core/mesh3d.js"></script>
 <script>UJ.mesh3dCore = UJ.mesh3d;</script>
+<!-- core/mesh3dshot.js, 2026-10-03: the picture and the turn. It asks for UJ.mesh3dCore first,
+     which on this page is the renderer and on the other seven is the same object. -->
+<script src="core/mesh3dshot.js"></script>
 <!-- core/points.js -- how a points total is turned into something a person reads. Small enough
      that every tool in the family carries it, which is what makes "whole numbers everywhere"
      mean everywhere: the same fix made in one tool's own chip reached that tool only, and

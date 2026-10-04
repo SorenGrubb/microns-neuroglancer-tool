@@ -1,4 +1,4 @@
-# core/vendor — the JPEG XL decoder
+# core/vendor — the JPEG XL decoder, and the GIF encoder
 
 `jxl_oxide_wasm.js` and `jxl_oxide_wasm_bg.wasm` are **jxl-oxide-wasm 0.12.6**, unmodified, exactly
 as published on npm (`npm pack jxl-oxide-wasm`). Wonwoo Choi, MIT OR Apache-2.0 — both licence
@@ -38,3 +38,45 @@ it otherwise, and sixty-two of ωJump's sixty-three volumes never will.
 `npm pack jxl-oxide-wasm`, copy `jxl_oxide_wasm.js` and `jxl_oxide_wasm_bg.wasm` here, run
 `node jxlcheck.js` and `node padjxlcheck.js`. Neither of those loads the real wasm — they drive the
 protocol — so open the Eyewire retina in ωJump and tick the box once by hand as well.
+
+
+---
+
+# `gifenc.js` — the GIF encoder
+
+**gifenc 1.0.3**, unmodified, exactly as published on npm (`npm pack gifenc`). Matt DesLauriers,
+MIT — the licence text is beside it as `LICENSE-MIT-gifenc.md`.
+Source: https://github.com/mattdesl/gifenc
+
+Søren, 2026-10-03: *"a button to export the view of the show in 3D as an image with scalebar or as
+a movie that rotates 360 degrees with the current view."* A GIF because it drops into PowerPoint,
+Word, Slack and a web page; nothing in a browser can write MP4, and WebM — smaller and prettier —
+is not played by PowerPoint on Windows.
+
+## What it costs
+
+Measured before it was committed to, on a branching cell at the panel's own retina size
+(1240 × 600), in Chromium:
+
+| frames | file | grab | palette | encode |
+|---|---|---|---|---|
+| 36 | 0.15 MB | 1.4 s | 31 ms | 0.3 s |
+| 48 | 0.21 MB | 2.0 s | 34 ms | 0.4 s |
+| 64 | 0.27 MB | 2.8 s | 37 ms | 0.5 s |
+
+Far smaller than a GIF usually is, for two reasons: the field behind the model is flat, and the
+palette is taken **once for the whole turn** from three frames a third of a turn apart. The lighting
+does not change as the model turns, so a palette per frame would be slower and the file bigger.
+
+## How it is loaded
+
+Never, unless somebody exports a turn. `core/mesh3dshot.js` fetches this file on the first one and
+evaluates it with `new Function("exports", src)` into an object of its own — which is why the file
+here is byte-identical to the published CommonJS build, with no browser shim glued to the front and
+nothing added to the page's globals.
+
+## Updating it
+
+`npm pack gifenc`, copy `dist/gifenc.js` here, run `node shotcheck.js`. That check hands the source
+straight in rather than fetching it, so it holds on a machine with no network — then export one
+turn by hand from a tool and look at it.
