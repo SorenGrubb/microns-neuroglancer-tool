@@ -431,12 +431,14 @@ UJ.mesh3d = (function(){
     var GHOSTS = (o.ghosts || []).map(function(g){
       if (!g || !g.geo || g.geo.empty || !g.geo.idx || !g.geo.idx.length) return null;
       var d = upload(g.geo);
-      return d ? { d: d, tint: g.tint || null, what: g.what || "",
+      return d ? { d: d, tint: g.tint || null, what: g.what || "", label: g.label || "",
                    alpha: (g.alpha === undefined ? 0.22 : g.alpha) } : null;
     }).filter(Boolean);
     /* `o.alpha` is the SUBJECT's opacity, 1 unless a caller says otherwise. The cell panel sets
        it below 1 when it has a nucleus to show inside the cell. */
-    var ALL = [{ d: MAIN, tint: o.tint || null, what: o.what || "",
+    /* `label` is free text for a reader — "Cell 864691135194795306", "Mitochondrion 3" — and
+       sits BESIDE `what`, which stays the contract this file's own buttons read. 2026-10-04. */
+    var ALL = [{ d: MAIN, tint: o.tint || null, what: o.what || "", label: o.label || "",
                  alpha: (o.alpha === undefined ? 1 : o.alpha) }].concat(GHOSTS);
     gl.enable(gl.DEPTH_TEST);
     function drawOne(d, tint, alpha){
@@ -904,6 +906,17 @@ UJ.mesh3d = (function(){
              spin: spin, nucleus: lookAtNucleus, iso: isoNext, isoCan: isoCan,
              isoNow: function(){ return ISO; },
              framedNow: function(){ return framedNuc; },
+             /* ── WHAT IS ON SCREEN, IN ORDER ───────────────────────────────────────  2026-10-04
+                Only what is actually drawn: the isolate button hides a surface, and a corner block
+                naming something the reader cannot see is worse than no block. Unnamed surfaces are
+                left out rather than listed as blanks. */
+             legend: function(){
+               return ALL.filter(function(it){ return it.label && isoShows(it); })
+                         .map(function(it){
+                           return { what: it.what, label: it.label,
+                                    tint: it.tint ? it.tint.slice() : null };
+                         });
+             },
              /* ── WHAT A PIXEL IS WORTH ─────────────────────────────────────────  2026-10-03
                 In NANOMETRES. 2·dist·tan(FOV/2) is the visible height at the model's own centre
                 plane in MODEL units, and a model unit is geo.span nanometres; divided by the
@@ -1006,6 +1019,12 @@ UJ.mesh3d = (function(){
     if (!LAST || !LAST.turn) return 0;
     return LAST.turn(n, each);
   }
+  /* What the open panel is drawing, named. core/mesh3dshot.js writes this into the picture's
+     top-left corner and into the text of a post, from the one call — so the two cannot disagree
+     about what is in the picture. */
+  function legend(){
+    return (LAST && LAST.legend) ? LAST.legend() : [];
+  }
   /* Whether anything can be saved from here: the module that writes the files, and a panel to
      write one of. */
   function canSave(){
@@ -1073,6 +1092,11 @@ UJ.mesh3d = (function(){
         + "<div class='m3d-saves' hidden>"
         + "<button type='button' class='m3d-savepng'>Picture (PNG)</button>"
         + "<button type='button' class='m3d-savegif'>Turn (GIF)</button>"
+        /* Søren: "a share option to share it on Bluesky/LinkedIn/X". Both of them, as above --
+           X and Bluesky animate a GIF and LinkedIn tends to flatten one, so which to send is a
+           decision per post rather than one this menu should make. 2026-10-04. */
+        + "<button type='button' class='m3d-sharepng m3d-saveshare'>Share picture</button>"
+        + "<button type='button' class='m3d-sharegif m3d-saveshare'>Share turn</button>"
         + "</div>"
       : "";
     return "<div class='m3d-tools'>"
@@ -1135,6 +1159,53 @@ UJ.mesh3d = (function(){
     };
     on(".m3d-savepng", function(el){ run("png", el); });
     on(".m3d-savegif", function(el){ run("gif", el); });
+
+    /* ── AND SHARING IT ───────────────────────────────────────────────────────────  2026-10-04
+       The module takes whichever route the browser offers and says which one it took; this writes
+       that into the panel's own note. The two leave the person with different work — on a phone
+       the file is already attached and there is nothing more to do, on a desktop it is on the
+       clipboard and has to be pasted — and a button that did the right thing silently would look
+       broken on half the machines it runs on. */
+    var sharing = false;
+    var shareRun = function(what, el){
+      if (sharing || !window.UJ || !UJ.mesh3dshot || !UJ.mesh3dshot.shareView) return;
+      sharing = true;
+      var was = el.textContent;
+      el.textContent = "preparing\u2026";
+      var note = host.querySelector(".m3d-note");
+      UJ.mesh3dshot.shareView({ what: what, name: (o && o.saveName) || "cell" })
+        .then(function(r){
+          if (!note || !r || r.how === "cancelled") return;
+          var say;
+          if (r.how === "sheet")
+            say = "Shared \u2014 pick where it goes in the sheet.";
+          else {
+            var nets = UJ.mesh3dshot.nets().map(function(n){
+              return "<a href='" + esc(UJ.mesh3dshot.composerUrl(n.key, r.text))
+                   + "' target='_blank' rel='noopener'>" + esc(n.name) + "</a>";
+            }).join(" \u00b7 ");
+            say = (r.how === "clipboard"
+                   ? "The picture is on your clipboard and the text is written for you \u2014 open "
+                   : "Saved as <b>" + esc(r.file || "the file") + "</b> \u2014 a GIF cannot go on a "
+                     + "clipboard, so attach it yourself in ")
+                + nets + " and paste.";
+          }
+          note.innerHTML += "<br><span class='hint'>" + say + "</span>";
+        })
+        .catch(function(e){
+          if (note) note.innerHTML += "<br><b style='color:var(--bad)'>Could not share that: "
+            + esc(e && e.message ? e.message : String(e)) + "</b>";
+        })
+        .then(function(){
+          sharing = false;
+          el.textContent = was;
+          if (menu) menu.hidden = true;
+          var sv = stage.querySelector(".m3d-save");
+          if (sv) sv.classList.remove("m3d-on");
+        });
+    };
+    on(".m3d-sharepng", function(el){ shareRun("picture", el); });
+    on(".m3d-sharegif", function(el){ shareRun("turn", el); });
     on(".m3d-spin", function(el){
       var now = LAST && LAST.spin ? LAST.spin() : false;
       el.setAttribute("aria-pressed", now ? "true" : "false");
@@ -1310,6 +1381,9 @@ UJ.mesh3d = (function(){
     + "border:1px solid var(--line,#333);border-radius:7px;"
     + "background:var(--card,var(--panel,var(--bg,#1a1a1a)));color:var(--ink,#eee)}"
     + ".m3d-saves button:hover,.m3d-saves button:focus-visible{border-color:var(--accent,#49b0ff)}"
+    /* A rule above the first of the two, so saving and sharing read as two groups rather than four
+       equal choices. */
+    + ".m3d-saves button.m3d-saveshare:first-of-type{margin-top:3px}"
   function injectStyle(){
     if (document.getElementById("m3d-style")) return;
     var s = document.createElement("style");
@@ -1488,6 +1562,10 @@ UJ.mesh3d = (function(){
           var nucId = dl.getAttribute("data-nucid") || "";
           return nucleusMeshFor(nucId).then(function(nm){
             var opts2 = { what: "cell", lead: lead,
+                          /* For the exported picture's corner and for the file's name. Both ids
+                             are in hand here and neither was being passed on. 2026-10-04. */
+                          label: "Cell " + root,
+                          saveName: "cell_" + root,
                           emptyMessage: "This cell has no mesh geometry to draw." };
             if (nm && nm.positions && nm.positions.length){
               var ng = prepare(nm.positions, nm.indices,
@@ -1498,7 +1576,8 @@ UJ.mesh3d = (function(){
                    four, and did so silently, because a missing field reads as "there is no
                    nucleus here", which is a perfectly reasonable thing for it to mean.
                    2026-10-03, from Søren: "I only see two buttons". */
-                opts2.ghosts = [{ geo: ng, what: "nucleus", tint: NUC_TINT, alpha: 1 }];
+                opts2.ghosts = [{ geo: ng, what: "nucleus", label: "Nucleus " + nucId,
+                                  tint: NUC_TINT, alpha: 1 }];
                 /* The cell goes see-through ONLY now that there is something inside it to see --
                    the notebook's rule, and for its reason: transparency with nothing behind it
                    costs contrast and shows nothing. */
@@ -1549,6 +1628,7 @@ UJ.mesh3d = (function(){
   return { prepare: prepare, draw: draw, show: show, install: install, probe: probe,
            sweep: sweepAgain,
            probePixels: probePixels, frame: frame, turn: turn, canSave: canSave,
+           legend: legend,
            NUC_TINT: NUC_TINT, NUC_COLOR: NUC_COLOR,
            pointInGeometry: pointInGeometry, nucleiInside: nucleiInside,
            injectStyle: injectStyle, themeTint: themeTint, themeBg: themeBg };

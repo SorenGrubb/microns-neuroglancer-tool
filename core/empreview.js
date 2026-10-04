@@ -245,6 +245,8 @@ function drawMeshes(host, parts){
                      nucleus" and "show one of them" buttons need to know which surface is which,
                      and this function has known since it was written. 2026-10-03. */
                   what: parts[i].what,
+                  /* And the name, for the exported picture's corner. 2026-10-04. */
+                  label: parts[i].label || "",
                   alpha: parts[i].what === "cell" ? 0.14 : 0.35,
                   tint: parts[i].what === "cell" ? CELL : NUC });
   });
@@ -262,6 +264,8 @@ function drawMeshes(host, parts){
   if (!host.__empView) host.__empView = { yaw: 0.6, pitch: 0.3, dist: 1.9 };
   M.show(host, geos[leadAt], { ghosts: ghosts, view: host.__empView,
                                what: parts[leadAt].what,
+                               label: parts[leadAt].label || "",
+                               saveName: parts[leadAt].saveName || "cell",
                                tint: (leadAt === nucAt) ? NUC : CELL,
                                emptyMessage: "That cell has no mesh to draw." });
 }
@@ -360,7 +364,8 @@ async function open(hostEl, pos, opts){
          than no comment: it is confidently wrong and it sits where somebody would look to check.
          Saying so at each call is what keeps the two in one frame -- see core/mesh3d.js on
          unitNm. */
-      parts.unshift({ what: "cell", mesh: m, unitNm: 1000 });
+      parts.unshift({ what: "cell", mesh: m, unitNm: 1000,
+                      label: "Cell " + at.root, saveName: "cell_" + at.root });
       drawMeshes(host3d, parts);
       note("cell " + at.root + (at.nuc ? ", nucleus " + at.nuc : ""));
     } catch (e){ note("the cell’s mesh could not be read: " + String(e && e.message || e), true); }
@@ -387,7 +392,7 @@ async function open(hostEl, pos, opts){
          the joint frame stretched from the origin to the cell to cover the gap. The panel said so
          the whole time: "0.0 x 0.0 x 0.0 um - 21,208 triangles". 2026-10-03, from Søren's
          screenshots. core/tracingcard.js has always passed 1000 here. */
-      parts.push({ what: "nucleus", mesh: n, unitNm: 1000 });
+      parts.push({ what: "nucleus", mesh: n, unitNm: 1000, label: "Nucleus " + at.nuc });
       drawMeshes(host3d, parts);
       note("cell " + at.root + ", nucleus " + at.nuc
            + (at.nucFrom ? " (" + at.nucFrom + ")" : ""));

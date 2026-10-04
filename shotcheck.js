@@ -60,7 +60,13 @@ const SETUP = `(() => {
   await p.setContent('<!doctype html><meta charset="utf-8"><style>'
     + ':root{--bg:#0d1117;--panel:#161b22;--line:#2a313c;--ink:#e6edf3;--mut:#8b949e;'
     + '--accent:#27e0b3;--bad:#f85149}body{margin:0;background:var(--bg)}'
-    + '#h{width:620px;height:320px}</style><div id="h"></div>');
+    + '#h{width:620px;height:320px}.logo{display:none}</style>'
+    /* The mark every page in this family wears, in the markup they all write it in: the tool's own
+       letter in the accent colour and the word in the ink. core/mesh3dshot.js reads it off the page
+       rather than carrying a picture of one, so the harness has to have it for there to be
+       anything to read. Hidden, because this check is about the exported file, not the layout. */
+    + '<h1 class="logo"><span class="mu">\u00b5</span><span class="jm">Jump</span></h1>'
+    + '<div id="h"></div>');
   await p.addScriptTag({ path: core("mesh3d.js") });
   await p.addScriptTag({ path: core("mesh3dshot.js") });
   /* The encoder is handed in rather than fetched: this page is about:blank, and a check that
@@ -203,6 +209,72 @@ const SETUP = `(() => {
      "the camera is put back where it was — a turn is an export, not a navigation",
      gif.yawBack ? "same yaw" : "the model was left turned");
 
+  /* ── WHAT IS IN THE PICTURE, SAID ON THE PICTURE ─────────────────────────────────────────
+     Søren: *"we also need to have a tool logo in the lower right corner and the cell name and
+     organelle names in the top left corner. Make sure it does not overcrowd the image."*
+
+     The panel knows what it is drawing — every surface carries a `what` and now a `label` — so the
+     caption and the corner block are the same list, read once. The cap is what keeps the promise
+     about overcrowding: four lines and then a count, never more. */
+  console.log("\nthe picture says what is in it");
+  const legend = await p.evaluate(`(() => {
+    const M = UJ.mesh3d, ball = ${BALL}, h = document.getElementById("h"); h.innerHTML = "";
+    const cell = ball(50,0,0,0), nuc = ball(8,12,6,0);
+    const gc = M.prepare(cell.positions, cell.indices, { unitNm: 1000 });
+    const gn = M.prepare(nuc.positions, nuc.indices,
+                         { unitNm: 1000, frame: { mid: gc.mid, span: gc.span } });
+    window.__v = {};
+    M.show(h, gc, { what: "cell", label: "Cell 864691135194795306", alpha: 0.3, view: window.__v,
+                    ghosts: [{ geo: gn, what: "nucleus", label: "Nucleus 485387",
+                               tint: M.NUC_TINT, alpha: 1 }] });
+    return { legend: M.legend().map(q => q.label), caption: UJ.mesh3dshot.captionFor() };
+  })()`);
+  ok(legend.legend.length === 2 && /864691135194795306/.test(legend.legend[0]),
+     "the panel hands back what it is drawing, in the words the caller gave it",
+     legend.legend.join(" / "));
+  ok(/864691135194795306/.test(legend.caption) && /485387/.test(legend.caption),
+     "...and the caption names the cell and what is in it", legend.caption.slice(0, 110));
+
+  const marks = await p.evaluate(`(async () => {
+    const blob = await UJ.mesh3dshot.imageBlob();
+    const url = URL.createObjectURL(blob);
+    const img = await new Promise((res, rej) => {
+      const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const c = document.createElement("canvas");
+    c.width = img.width; c.height = img.height;
+    const cx = c.getContext("2d"); cx.drawImage(img, 0, 0);
+    const d = cx.getImageData(0, 0, c.width, c.height).data;
+    const ink = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim();
+    const hx = parseInt(ink.replace("#",""), 16);
+    const near = (i) => Math.abs(d[i] - ((hx>>16)&255)) < 40 && Math.abs(d[i+1] - ((hx>>8)&255)) < 40
+                     && Math.abs(d[i+2] - (hx&255)) < 40;
+    /* How much ink is in each corner, as a share of that corner's pixels. A block of type is a few
+       per cent; an empty corner is none. */
+    const inked = (x0, y0, x1, y1) => {
+      let n = 0, t = 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++){ t++; if (near((y*c.width+x)*4)) n++; }
+      return n / t;
+    };
+    const W = c.width, H = c.height;
+    URL.revokeObjectURL(url);
+    return { topLeft: inked(0, 0, Math.round(W*0.45), Math.round(H*0.22)),
+             bottomRight: inked(Math.round(W*0.62), Math.round(H*0.82), W, H),
+             topRight: inked(Math.round(W*0.70), 0, W, Math.round(H*0.14)),
+             middle: inked(Math.round(W*0.3), Math.round(H*0.35), Math.round(W*0.7), Math.round(H*0.65)) };
+  })()`);
+  ok(marks.topLeft > 0.004,
+     "the cell's name and what is in it are written in the top-left corner",
+     (marks.topLeft * 100).toFixed(2) + "% of that corner is ink");
+  ok(marks.bottomRight > 0.004,
+     "...and the tool's own wordmark in the bottom-right, read off the page's own logo rather than "
+     + "a picture of one copied in here",
+     (marks.bottomRight * 100).toFixed(2) + "%");
+  ok(marks.topLeft < 0.12 && marks.bottomRight < 0.12,
+     "...and neither of them is a wall of text. Søren: \"Make sure it does not overcrowd the "
+     + "image.\" Four lines and then a count, never more.",
+     "top-left " + (marks.topLeft * 100).toFixed(1) + "%, bottom-right "
+       + (marks.bottomRight * 100).toFixed(1) + "%");
+
   console.log("\nand the button that does it");
   const btn = await p.evaluate(`(() => {
     const h = document.getElementById("h");
@@ -216,11 +288,35 @@ const SETUP = `(() => {
                                .map(e => e.textContent.trim()) : [] };
   })()`);
   ok(btn.has, "there is a save button in the strip", btn.n + " buttons");
-  ok(btn.choices.length === 2,
-     "...and it offers the two things, rather than guessing which one you meant",
+  ok(btn.choices.length === 4,
+     "...and it offers four things: save the picture, save the turn, share each",
      btn.choices.join(" / ") || "no menu");
-  ok(/image|png/i.test(btn.choices.join(" ")) && /turn|gif|rotat/i.test(btn.choices.join(" ")),
+  ok(/picture|png/i.test(btn.choices.join(" ")) && /turn|gif|rotat/i.test(btn.choices.join(" ")),
      "...the picture and the turn", btn.choices.join(" / "));
+  ok(btn.choices.filter(t => /share/i.test(t)).length === 2,
+     "...and both of them can be shared, because X and Bluesky animate a GIF and LinkedIn tends to "
+     + "flatten one — which to send is a decision per post",
+     btn.choices.filter(t => /share/i.test(t)).join(" / ") || "no share entries");
+
+  /* ── THE THREE PLACES, AND WHAT CAN ACTUALLY CARRY A PICTURE ─────────────────────────────
+     Not one of them takes an image through a link. Asserted here because it is the fact the whole
+     design turns on, and because a composer URL that quietly stopped matching would leave the
+     desktop route opening a 404 with the caption on the clipboard and no way to tell. */
+  console.log("\nand the three places it can go");
+  const share = await p.evaluate(`(() => {
+    const S = UJ.mesh3dshot;
+    const names = S.nets().map(n => n.name);
+    const urls = S.nets().map(n => S.composerUrl(n.key, "hello world"));
+    return { names: names, urls: urls };
+  })()`);
+  ok(/bluesky/i.test(share.names.join(" ")) && /linkedin/i.test(share.names.join(" "))
+     && /\bX\b/.test(share.names.join(" ")),
+     "Bluesky, LinkedIn and X", share.names.join(", "));
+  ok(share.urls.every(u => /^https:\/\//.test(u)),
+     "...each with a composer to open", share.urls.map(u => u.split("/")[2]).join(", "));
+  ok(/hello%20world|hello\+world/.test(share.urls.join(" ")),
+     "...and the caption travels in the ones that take text", 
+     share.urls.filter(u => /hello/.test(u)).length + " of 3 carry it");
 
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");

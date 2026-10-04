@@ -2889,15 +2889,28 @@ async function pad3DDraw(){
       /* pad3DTint rather than padInstTint, 2026-09-19: the siblings asked the palette directly,
          which was right while the pad was the only route that could have several structures and
          wrong the moment a pasted link could. */
-      siblings.push({ geo: q, tint: pad3DTint(lofts[i].inst), alpha: 1 });
+      siblings.push({ geo: q, tint: pad3DTint(lofts[i].inst), alpha: 1,
+                      label: padLoftName(lofts[i]) });
     });
 
+    /* ── WHAT A TRACED STRUCTURE IS CALLED ───────────────────────────────────────  2026-10-04
+       Its annotation layer, which on the pad is the organelle: "mitochondrion", "lysosome". Søren,
+       on what a shared picture should say: "if there are organelles, then also which organelles."
+       The group has carried the name since the layers panel was written; nothing had ever asked it
+       for the panel's sake. A layer with no name is left unlabelled rather than called
+       "(unnamed layer)" on a picture somebody is about to post. */
+    function padLoftName(L){
+      var g = (tracingGroups() || []).filter(function(x){ return x.inst === L.inst; })[0];
+      var nm = (g && g.layer ? String(g.layer) : "").trim();
+      return nm ? (nm.charAt(0).toUpperCase() + nm.slice(1)) : "";
+    }
     const drawn = siblings.concat(ghosts.map(function(x){
       return { geo: tracingM3D().prepare(x.mesh.positions, x.mesh.indices,
                                       { unitNm: 1000, frame: frame }),
                /* "cell" or "nucleus", for the panel's own buttons. It was already in hand here and
                   dropped on the way in. 2026-10-03. */
                what: x.what,
+               label: x.label || "",
                /* The cell fainter than the nucleus: it is the larger surface and the one you are
                   most often looking THROUGH. */
                alpha: x.what === "cell" ? 0.14 : 0.35,
