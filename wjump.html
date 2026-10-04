@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-10-04 06:12</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-10-04 06:36</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -11026,6 +11026,17 @@ UJ.mesh3d = (function(){
        one-and-a-half seconds after a model arrives. */
     "uniform float pulse;",
     "vec3 lin(vec3 c){ return c * c; }",
+    /* ── HALF A LEVEL OF NOISE, BEFORE THE EIGHT BITS ────────────────────────  2026-10-04
+       Søren: "The background looks bad because the circles are visible and not a gradient." They
+       were: a shallow gradient crosses an 8-bit level every seventeen pixels, and on a radial
+       falloff each of those steps is a circle. Half a level of noise moves the boundary off the
+       line and into a pattern nobody can see.
+
+       INTERLEAVED GRADIENT NOISE, not the usual fract(sin(dot(p, k))) hash: this shader is mediump
+       and that hash wants highp. On a phone it collapses into a pattern of its own, which would
+       have traded rings for stripes. This one was designed for mediump and for exactly this job. */
+    "float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }",
+
     "void main(){",
     "  vec3 n = normalize(vn); if (!gl_FrontFacing) n = -n;",
     "  vec3 V = vec3(0.0, 0.0, 1.0);",
@@ -11058,7 +11069,10 @@ UJ.mesh3d = (function(){
     "  }",
     "  float f = clamp((vz - fog.x) / max(fog.y - fog.x, 0.0001), 0.0, 1.0);",
     "  col = mix(col, lin(bg), f * 0.45);",
-    "  gl_FragColor = vec4(sqrt(max(col, 0.0)), alpha); }"
+    /* The depth cue carries a large smooth surface toward the background over the same shallow
+       range the field uses, and a soma is exactly the broad gentle curvature that bands. Applied
+       AFTER the sqrt, because that is where the eight bits are. 2026-10-04. */
+    "  gl_FragColor = vec4(sqrt(max(col, 0.0)) + (ign(gl_FragCoord.xy) - 0.5) * 2.0 / 255.0, alpha); }"
   ].join("\n");
 
   /* ── THE FIELD THE MODEL SITS IN ──────────────────────────────────────────────  2026-10-03
@@ -11073,6 +11087,16 @@ UJ.mesh3d = (function(){
   ].join("\n");
   var FS_BG = [
     "precision mediump float; varying vec2 uv; uniform vec3 bg; uniform float lift;",
+    /* ── HALF A LEVEL OF NOISE, BEFORE THE EIGHT BITS ────────────────────────  2026-10-04
+       Søren: "The background looks bad because the circles are visible and not a gradient." They
+       were: a shallow gradient crosses an 8-bit level every seventeen pixels, and on a radial
+       falloff each of those steps is a circle. Half a level of noise moves the boundary off the
+       line and into a pattern nobody can see.
+
+       INTERLEAVED GRADIENT NOISE, not the usual fract(sin(dot(p, k))) hash: this shader is mediump
+       and that hash wants highp. On a phone it collapses into a pattern of its own, which would
+       have traded rings for stripes. This one was designed for mediump and for exactly this job. */
+    "float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }",
     "void main(){",
     "  vec2 d = (uv - vec2(0.5, 0.54)) * vec2(1.0, 1.22);",
     "  float g = smoothstep(0.78, 0.04, length(d));",
@@ -11087,7 +11111,8 @@ UJ.mesh3d = (function(){
        of most of the bugs this file has had. Negative lift means a light field, and a light field
        vignettes. */
     "  float gg = lift < 0.0 ? 1.0 - g : g;",
-    "  gl_FragColor = vec4(bg + (bg + vec3(0.06)) * lift * gg, 1.0); }"
+    "  vec3 col = bg + (bg + vec3(0.06)) * lift * gg;",
+    "  gl_FragColor = vec4(col + (ign(gl_FragCoord.xy) - 0.5) * 2.0 / 255.0, 1.0); }"
   ].join("\n");
 
   function compile(gl, type, src){

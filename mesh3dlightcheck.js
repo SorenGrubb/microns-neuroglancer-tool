@@ -224,6 +224,43 @@ const SPECK = `(() => ({ positions:new Float32Array([0,0,0, 1,0,0, 0,1,0]),
        f.lift + " of 255 (" + f.mid.join(",") + " vs " + f.corner.join(",") + ")");
   }
 
+  /* ── AND IT IS A GRADIENT, NOT A SET OF RINGS ─────────────────────────────────────────────
+     Søren, with an exported picture: *"The background looks bad because the circles are visible
+     and not a gradient."*
+
+     The gradient is real and smooth; the 8-bit buffer it lands in is not. It spans about 35 levels
+     across 600 pixels, so each level is seventeen pixels wide — and because the falloff is radial,
+     those steps are concentric CIRCLES. Mach banding, and the eye is very good at it: the flat
+     patches look flatter than they are and the joins read as edges.
+
+     MEASURED AS THE WIDEST FLAT PATCH along a line that crosses the whole field. Banding gives runs
+     of one identical 8-bit triple sixty pixels wide; a dithered gradient gives none longer than a
+     few. Counting "steps" instead would pass a picture with the same number of narrower bands. */
+  console.log("\nthe field is a gradient, not a set of rings");
+  for (const theme of ["dark", "light"]) {
+    const band = await p.evaluate(`(() => {
+      document.documentElement.setAttribute("data-theme", ${JSON.stringify(theme)});
+      const M = UJ.mesh3d, h = document.getElementById("h"); h.innerHTML = "";
+      const t = ${SPECK}();
+      const g = M.prepare(t.positions, t.indices, { unitNm: 1000 });
+      M.show(h, g, { what: "cell", view: { dist: 600, yaw: 0, pitch: 0 } });
+      const cv = h.querySelector(".m3d-canvas");
+      const row = Math.round(cv.height * 0.25);
+      const line = [];
+      M.probePixels((r,g2,b2,x,y) => { if (y === row) line[x] = r + "," + g2 + "," + b2; return false; });
+      let best = 1, run = 1;
+      for (let i = 1; i < line.length; i++){
+        if (line[i] === line[i-1]) run++; else { if (run > best) best = run; run = 1; }
+      }
+      if (run > best) best = run;
+      return { width: line.length, flat: best };
+    })()`);
+    ok(band.flat <= 8,
+       theme + ": no flat patch wider than a few pixels — the steps were 58 to 68 wide, which on a "
+       + "radial falloff is a set of visible rings",
+       band.flat + " px of one value across " + band.width);
+  }
+
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
   process.exit(fails ? 1 : 0);
