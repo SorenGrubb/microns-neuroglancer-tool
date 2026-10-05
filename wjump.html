@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-10-05 20:42</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-10-05 21:19</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -19557,6 +19557,64 @@ function draftOpenFile(f){
   r.onerror = function(){ padSay("That file could not be read.", true); };
   r.readAsText(f);
 }
+/* ── A DRAFT WITH ITS CONTOURS IN HAND ─────────────────────────  2026-10-05
+   The list is an index: a draft that lives on the account carries its counts and not one
+   coordinate, which is what makes listing it cheap. Anything that wants the rings has to ask first.
+
+   "Resume it" has always done that, inline. "Save to file" needs exactly the same thing, and a
+   second copy of one request is the shape of fault this file has spent the week on -- two
+   expressions that agree until one of them is changed. So it is one helper, and both go through it.
+
+   `then` is called with a draft that definitely has rings. It is not called at all when there is
+   nothing to call it with, which is the honest answer to "there is no copy of this anywhere I can
+   reach". */
+function draftWithRings(id, d, then){
+  const stale = d && d.staler;
+  if ((!d || d.remote || stale) && id && draftSignedIn()){
+    padSay("Fetching that tracing from your account\u2026");
+    fetch(REPORT_ENDPOINT + "?drafts=" + encodeURIComponent(GOOGLE_CREDENTIAL) + tracingDsQS()
+          + "&draftId=" + encodeURIComponent(id))
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (!j || !j.ok || !j.draft){
+          padSay("That tracing could not be read from your account"
+            + (j && j.error ? ": " + j.error : "") + ".", true);
+          return;
+        }
+        var got = j.draft;
+        got.id = id;
+        /* Written to this browser as it arrives, so the pad is reading the same copy everything
+           else does and a reload does not have to fetch it again. */
+        draftStore.put(got);
+        then(got);
+      })
+      .catch(function(e){
+        padSay("Could not reach your account to fetch that tracing: "
+          + String(e && e.message || e), true);
+      });
+    return;
+  }
+  if (!d) return;
+  then(d);
+}
+/* ── AND THE BUTTON THAT PUTS IT THERE ──────────────────────────  2026-10-05
+   A file is the one destination with no quota, no sign-in, no deploy and no backend behind it. It
+   was written automatically when the browser refused storage and by nothing else, so on the evening
+   a whole cell existed in one tab and nowhere else the way to save it was a console command. */
+function draftSaveToFile(id){
+  const d = id ? draftStore.get(id) : draftRead();
+  if (!d && !id){ padSay("There is no unfinished tracing to save.", true); return; }
+  draftWithRings(id, d, function(got){
+    if (draftToFile(got))
+      padSay("Saved to \u201c" + draftFileName(got) + "\u201d \u2014 "
+        + ((got.rings || []).length) + " contour"
+        + (((got.rings || []).length) === 1 ? "" : "s")
+        + ". That file goes back on the pad through \u201cOpen a draft file\u201d below, on any "
+        + "machine and with nobody signed in.");
+    else
+      padSay("That tracing could not be written to a file.", true);
+  });
+}
 function draftRender(){
   /* Wired here rather than where the card is built, because this runs on load whether or not there
      is a draft to list -- and the one moment somebody needs to open a rescue file is when there is
@@ -19604,12 +19662,20 @@ function draftRender(){
               ? '<span class="hint" style="flex:0 0 auto">on the pad now</span>'
               : '<button type="button" class="hist-chip draftres" data-id="' + escHtml(d.id) + '">'
                 + 'Resume it</button>')
+          /* BEFORE Discard, and on every row including one that is only on the account —
+             that one has no contours in the index and is fetched first. 2026-10-05. */
+          + '<button type="button" class="hist-chip draftfile" data-id="' + escHtml(d.id) + '" '
+            + 'title="Write this unfinished tracing to a .json file. No quota, no sign-in — and '
+            + 'it comes back through “Open a draft file” below.">Save to file</button>'
           + '<button type="button" class="hist-chip draftdrop" data-id="' + escHtml(d.id) + '">'
             + 'Discard</button>'
           + '</div>';
       }).join("");
   [].slice.call(bar.querySelectorAll(".draftres")).forEach(function(b){
     b.addEventListener("click", function(){ draftResume(b.dataset.id); });
+  });
+  [].slice.call(bar.querySelectorAll(".draftfile")).forEach(function(b){
+    b.addEventListener("click", function(){ draftSaveToFile(b.dataset.id); });
   });
   [].slice.call(bar.querySelectorAll(".draftdrop")).forEach(function(b){
     b.addEventListener("click", function(){
@@ -19632,34 +19698,13 @@ function draftResume(id){
      a draft started on another machine therefore has to be asked for before it can be drawn. The
      same route brings back a NEWER server copy of one that is also here, so carrying on from the
      laptop on the desktop resumes the laptop's version. */
-  const stale = d && d.staler;
-  if ((!d || d.remote || stale) && id && draftSignedIn()){
-    padSay("Fetching that tracing from your account\u2026");
-    fetch(REPORT_ENDPOINT + "?drafts=" + encodeURIComponent(GOOGLE_CREDENTIAL) + tracingDsQS()
-          + "&draftId=" + encodeURIComponent(id))
-      .then(function(r){ return r.json(); })
-      .then(function(j){
-        if (!j || !j.ok || !j.draft){
-          padSay("That tracing could not be read from your account"
-            + (j && j.error ? ": " + j.error : "") + ".", true);
-          return;
-        }
-        var got = j.draft;
-        got.id = id;
-        /* Written to this browser as it arrives, so the pad is reading the same copy everything
-           else does and a reload does not have to fetch it again. */
-        draftStore.put(got);
-        TRACING_DRAFT_ID = id;
-        draftResumeFrom(got);
-      })
-      .catch(function(e){
-        padSay("Could not reach your account to fetch that tracing: "
-          + String(e && e.message || e), true);
-      });
-    return;
-  }
-  if (!d) return;
-  draftResumeFrom(d);
+  draftWithRings(id, d, function(got){
+    /* ADOPTED HERE AND NOT IN THE HELPER: saving a draft to a file must not make it the one the pad
+       is about to write over. The fetch is shared; what each button does with what comes back is
+       not. */
+    TRACING_DRAFT_ID = got.id || id || TRACING_DRAFT_ID;
+    draftResumeFrom(got);
+  });
 }
 /* The half that puts a draft on the pad, split out so it can be reached both by the local path
    above and by the one that had to fetch first. */

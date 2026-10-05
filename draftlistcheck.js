@@ -157,6 +157,61 @@ const MAKE = `(function(what, nuc, nRings, z0){
     ok(!got.__absent && (got.left||[]).join(",") === "10,19", "...and only that one goes", (got.left||[]).join(" / "));
   }
 
+  /* ── AND EVERY ROW CAN BE PUT ON DISK ──────────────────────────────────
+     Søren, on the evening a whole cell existed in one browser tab and nowhere else: *"Make the
+     Save to file button on every draft row, so you never type a console command for this again."*
+
+     draftToFile() has existed since 4 October and was reachable only by the RESCUE path — the
+     browser refusing storage — so the one destination with no quota, no sign-in and no deploy
+     behind it could only be reached by the failure it was written for. */
+  console.log("\nand every one of them can be put on a disk");
+  {
+    const got = await ask(p, () => {
+      const out = {};
+      (function(){ const S = tracingStore();
+        for (let i = S.length - 1; i >= 0; i--){ const k = S.key(i); if (/draft/.test(k)) S.removeItem(k); } })();
+      const rings = (n) => { const a = [];
+        for (let k = 0; k < n; k++) a.push({ z: 700 + k, inst: 0, points: [[1, 2], [3, 4], [5, 6]] });
+        return a; };
+      draftStore.put({ v: 2, id: "keepsafe", title: "Whole cell \u00b7 Endothelial cell 61360735",
+                       at: new Date().toISOString(), rings: rings(47), pending: [], z: 700 });
+      draftStore.put({ v: 2, id: "other", title: "Nucleus", at: new Date().toISOString(),
+                       rings: rings(9), pending: [], z: 700 });
+      draftRender();
+      const btns = [].slice.call(document.querySelectorAll("#tracingDraftBar .draftfile"));
+      out.buttons = btns.length;
+      out.rows = document.querySelectorAll("#tracingDraftBar .draftdrop").length;
+      /* The writer stood in for, so the check reads what WOULD have gone to disk. */
+      const wrote = [];
+      const real = tracingSaveBlob;
+      tracingSaveBlob = function(blob, name){ wrote.push({ name: name, bytes: blob.size }); };
+      const one = btns.filter(function(b){ return b.dataset.id === "keepsafe"; })[0];
+      if (one) one.click();
+      tracingSaveBlob = real;
+      out.wrote = wrote;
+      out.said = (document.getElementById("tracePadSay") || {}).textContent || "";
+      /* AND NOTHING WAS TAKEN FROM THE LIST OR PUT ON THE PAD — saving a copy is not resuming
+         one, and not discarding one either. */
+      out.stillThere = draftStore.list().length;
+      out.padId = TRACING_DRAFT_ID;
+      return out;
+    });
+    ok(!got.__absent && got.buttons === got.rows && got.buttons === 2,
+       "there is a Save to file on EVERY row, not only on the one that failed to store",
+       (got.buttons||got.__absent) + " buttons for " + got.rows + " rows");
+    ok(!got.__absent && (got.wrote||[]).length === 1
+       && /^Whole_cell.*61360735.*\.json$/.test((got.wrote[0]||{}).name || ""),
+       "...and pressing it writes that draft's own file, named for what is on the pad",
+       JSON.stringify(((got.wrote||[])[0]||{}).name || got.__absent || "nothing"));
+    ok(!got.__absent && /Open a draft file/i.test(got.said||""),
+       "...and says how to get it back in, because a rescue file nobody can reload is a souvenir",
+       JSON.stringify((got.said||"").slice(0, 90)));
+    ok(!got.__absent && got.stillThere === 2 && got.padId !== "keepsafe",
+       "...while taking nothing out of the list and putting nothing on the pad — a copy is not "
+       + "a resume and not a discard",
+       (got.stillThere||got.__absent) + " drafts, pad on " + JSON.stringify(got.padId||""));
+  }
+
   console.log("\na draft saved before today is adopted, and its old copy is left alone");
   {
     const got = await ask(p, () => {
