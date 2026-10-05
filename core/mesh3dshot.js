@@ -202,17 +202,19 @@ UJ.mesh3dshot = (function(){
      clean picture rather than three blanks — and the caption below, which reads this same list,
      cannot then disagree with the corner about what is in the frame.
 
-     `vox` ON THE COORDINATE, which the tool's own on-screen labels do not bother with because they
-     are surrounded by a sentence that says it. A posted picture has no sentence around it. Voxels
-     rather than micrometres for ujump.html's reason: they paste straight back into Neuroglancer's
-     position box and micrometres do not. 2026-10-04. */
+     VOXELS, AND IT DOES NOT SAY SO. Added on 4 October on the argument that a posted picture has
+     no sentence around it to supply the unit; dropped on the 5th, on Søren's *"Drop the vox after
+     the coordinates"*, which is the better argument: whoever reads a MICrONS coordinate knows what
+     it is, and the one thing anybody does with it is paste it into Neuroglancer's position box,
+     which wants those three numbers and not a fourth word. Voxels rather than micrometres for
+     ujump.html's reason -- micrometres do not paste back. 2026-10-05. */
   function legendLines(){
     var L = null;
     try { L = m3d().legend(); } catch (_e){ return []; }
     if (!L) return [];
     var out = [], k = L.kinds || [];
     if (L.verdict) out.push(L.verdict);
-    if (L.atVox) out.push(L.atVox[0] + ", " + L.atVox[1] + ", " + L.atVox[2] + " vox");
+    if (L.atVox) out.push(L.atVox[0] + ", " + L.atVox[1] + ", " + L.atVox[2]);
     if (k.length) out.push(k.length <= MAX_KINDS ? k.join(", ")
                            : k.slice(0, MAX_KINDS - 1).join(", ")
                              + " + " + (k.length - (MAX_KINDS - 1)) + " more");

@@ -246,7 +246,8 @@ const SETUP = `(() => {
                              { geo: g1, label: "Mitochondrion", alpha: 1 },
                              { geo: g2, label: "mitochondrion", alpha: 1 },
                              { geo: gl2, label: "Lysosome", alpha: 1 }] });
-    return { L: M.legend(), caption: UJ.mesh3dshot.captionFor() };
+    return { L: M.legend(), caption: UJ.mesh3dshot.captionFor(),
+             lines: UJ.mesh3dshot.legendLines() };
   })()`);
   ok(legend.L.verdict === "Pyramidal cell",
      "the panel hands back the VERDICT, not the root id", legend.L.verdict);
@@ -257,6 +258,23 @@ const SETUP = `(() => {
      "...and the organelles as KINDS — two mitochondria are one word, and neither the cell nor the "
      + "nucleus is a kind",
      legend.L.kinds.join(", ") + " (from 5 surfaces)");
+  /* ── AND THE LINE IS THREE NUMBERS ────────────────────────────────────────────────────────
+     Søren, of the corner block: *"Drop the vox after the coordinates"*. It said "216448, 164096,
+     21360 vox" from 4 October until the 5th, on the argument that a posted picture has no sentence
+     around it to supply the unit. Whoever reads a MICrONS coordinate knows what it is, and the one
+     thing anybody does with it is paste it into Neuroglancer's position box, which wants those
+     three numbers and not a fourth word.
+
+     ASSERTED ON THE DRAWN LINE, not on legend.atVox, which is an array of numbers and could never
+     have carried the word. 2026-10-05. */
+  ok(/^\d+, \d+, \d+$/.test(legend.lines[1] || ""),
+     "the corner's coordinate line is three numbers and nothing else — it used to end in \" vox\"",
+     JSON.stringify(legend.lines[1]));
+  /* The scale bar's own µm is not this: it labels a bar, it does not label the coordinate. */
+  ok(!/\bvox\b/.test(legend.caption),
+     "...and the caption, which is this same list read twice, does not put the unit back",
+     legend.caption.slice(0, 90));
+
   ok(/Pyramidal cell/.test(legend.caption) && /216448, 164096, 21360/.test(legend.caption)
      && /Mitochondrion/.test(legend.caption),
      "...and the caption says the same three things, read off the same call",
