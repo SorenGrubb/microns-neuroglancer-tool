@@ -376,20 +376,76 @@ const SETUP = `(() => {
       c.getContext("2d").drawImage(img, 0, 0);
       /* A row above the model and below the two lines of title: field, and nothing else. */
       const d = c.getContext("2d").getImageData(0, Math.round(c.height * 0.22), c.width, 1).data;
+      /* ── THE STEP, NOT THE RUN ──────────────────────────────────────────────────────────
+         This counted the widest run of one identical value, which was the right proxy while the
+         steps were eight levels high: a slab of one colour 351 pixels wide. Since the palette
+         carries an exact ramp of the field's own colours the steps are ONE level, and a run is
+         then as wide as a level of a very shallow gradient happens to be -- 74 pixels here, and
+         perfectly smooth. The run length stopped meaning anything; what makes a band visible is
+         how FAR apart two neighbouring values are, so that is what is measured now. The run is
+         still reported, because it is the number the old failures were quoted in. 2026-10-05. */
+      /* THE LEFT MARGIN, because the model has edges and they are not bands. The first version of
+         this measured the whole row and reported a 60-level step at x=191 in both themes -- the
+         cell's own silhouette, which is exactly what a step measurement should find and exactly
+         what it must not fail on. The model is framed in the middle; the outer sixth of the row is
+         field and nothing else. */
+      const edgeTo = Math.round(c.width * 0.16);
       let best = 1, run = 1, k;
-      for (k = 1; k < c.width; k++){
-        const same = d[k*4] === d[(k-1)*4] && d[k*4+1] === d[(k-1)*4+1]
-                  && d[k*4+2] === d[(k-1)*4+2];
-        if (same) run++; else { if (run > best) best = run; run = 1; }
+      for (k = 1; k < edgeTo; k++){
+        if (d[k*4] === d[(k-1)*4] && d[k*4+1] === d[(k-1)*4+1] && d[k*4+2] === d[(k-1)*4+2]) run++;
+        else { if (run > best) best = run; run = 1; }
       }
       if (run > best) best = run;
+      /* ── AVERAGED FIRST, BECAUSE THE DITHER IS NOT A BAND ────────────────────────────────
+         Measuring the step between neighbouring pixels measures the dither: three levels of grain
+         puts three levels between two neighbours by design, and the first version of this failed
+         the dark theme on exactly that. A band is a step in the LOCAL AVERAGE -- eight pixels is
+         wider than the dither's pattern and far narrower than any band this has ever produced --
+         so the row is averaged into blocks and the step is taken between those. */
+      let step = 0, prev = null;
+      for (k = 0; k + 8 <= edgeTo; k += 8){
+        let r = 0, g2 = 0, b2 = 0, j;
+        for (j = 0; j < 8; j++){ r += d[(k+j)*4]; g2 += d[(k+j)*4+1]; b2 += d[(k+j)*4+2]; }
+        const avg = [r/8, g2/8, b2/8];
+        if (prev) step = Math.max(step, Math.abs(avg[0]-prev[0]), Math.abs(avg[1]-prev[1]),
+                                  Math.abs(avg[2]-prev[2]));
+        prev = avg;
+      }
+      step = Math.round(step * 10) / 10;
       URL.revokeObjectURL(url);
-      return { w: c.width, flat: best, bytes: blob.size };
+      /* The colour table and the first frame's disposal, read out of the bytes rather than
+         inferred: index 0 is what a decoder paints between loops. */
+      const raw = new Uint8Array(await blob.arrayBuffer());
+      const flags = raw[10], gct = (flags & 0x80) ? [raw[13], raw[14], raw[15]] : null;
+      const corner = [d[0], d[1], d[2]];
+      const near0 = !!gct && Math.abs(gct[0]-corner[0]) <= 12 && Math.abs(gct[1]-corner[1]) <= 12
+                    && Math.abs(gct[2]-corner[2]) <= 12;
+      let p2 = 13 + ((flags & 0x80) ? (2 << (flags & 7)) * 3 : 0), dispose = -1;
+      while (p2 < raw.length){
+        if (raw[p2] === 0x21 && raw[p2+1] === 0xF9){ dispose = (raw[p2+3] >> 2) & 7; break; }
+        if (raw[p2] === 0x21){ p2 += 2; while (raw[p2]){ p2 += raw[p2] + 1; } p2++; continue; }
+        if (raw[p2] === 0x2C) break;
+        p2++;
+      }
+      return { w: c.width, flat: best, step: step, scanned: edgeTo, bytes: blob.size, near0: near0, dispose: dispose,
+               gct0: gct ? gct.join(",") : "none", corner: corner.join(",") };
     })()`);
-    ok(slab.flat <= 20,
-       theme + ": no slab of one colour across the field — undithered it was 234 px (dark) and "
-       + "351 px (light) of a 1240 px row",
-       slab.flat + " px across " + slab.w + ", " + (slab.bytes / 1048576).toFixed(2) + " MB");
+    ok(slab.near0 === true,
+       theme + ": the colour table's FIRST entry is the field's own colour — Søren saw \"a green "
+       + "blinking of the background\", which is index 0: gifenc hard-codes it as the background "
+       + "colour and a decoder paints it before every loop, and the quantiser had sorted the light "
+       + "theme's accent teal into that slot",
+       slab.gct0 + " vs the field's " + slab.corner);
+    ok(slab.dispose === 1,
+       theme + ": ...and every frame says \"leave it there\" rather than letting the decoder "
+       + "choose, because \"restore to background\" is one of the choices",
+       "dispose " + slab.dispose);
+    ok(slab.step <= 2,
+       theme + ": no step bigger than a level anywhere across the field — undithered the gradient "
+       + "arrived as slabs 234 px (dark) and 351 px (light) wide with eight-level joins between "
+       + "them, which is what a 5-6-5 quantiser does to an eighteen-level ramp",
+       "largest step " + slab.step + " levels; longest flat run " + slab.flat + " px across "
+       + slab.scanned + " px of field, " + (slab.bytes / 1048576).toFixed(2) + " MB");
   }
   await p.evaluate(`document.documentElement.removeAttribute("data-theme")`);
 

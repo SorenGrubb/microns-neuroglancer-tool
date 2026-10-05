@@ -3907,17 +3907,30 @@ function draftCurrentId(){
    by one -- which is the thing this is for. */
 function draftTitleNow(){
   const val = function(id){ const e = document.getElementById(id); return e ? String(e.value || "") : ""; };
-  let what = "";
+  /* ── EVERY STRUCTURE'S OWN KIND, COUNTED ─────────────────────────────────────  2026-10-05
+     Søren, with a nucleus and a whole cell on one pad: "it says 2x whole cell mesh". It did, because
+     this read the shared #tracingWhat select — which with "name each one separately" ticked shows
+     the SELECTED structure's type and nothing about the others — and multiplied it by how many
+     structures had contours.
+
+     tracingKindFor(inst) has returned each structure's own kind since separate naming existed, and
+     tracingCurrentAll() has used it to file them as separate tracings all along. This was the one
+     place still asking the box. With separate naming OFF every structure shares one kind, so the
+     old "2 \u00d7 Mitochondrion" comes out of the same arithmetic. */
+  const seen = {}, order = [];
   try {
-    const sel = document.getElementById("tracingWhat");
-    if (sel && sel.selectedIndex >= 0) what = sel.options[sel.selectedIndex].textContent || "";
-  } catch (_e){}
-  if (val("tracingWhat") === "__other" && val("tracingName")) what = val("tracingName");
-  let n = 0;
-  try { n = UJ.tracepad.instances(PAD).filter(function(i){ return i.contours; }).length; } catch (_e2){}
+    UJ.tracepad.instances(PAD).filter(function(i){ return i.contours; }).forEach(function(i){
+      const w = tracingKindFor(i.inst) || {};
+      const nm = String(w.name || "").trim() || "structure";
+      if (seen[nm] === undefined){ seen[nm] = 0; order.push(nm); }
+      seen[nm]++;
+    });
+  } catch (_e2){}
+  const what = order.map(function(nm){
+    return (seen[nm] > 1 ? seen[nm] + " \u00d7 " : "") + nm;
+  }).join(" + ");
   const bits = [];
-  if (n > 1) bits.push(n + " \u00d7 " + (what || "structure"));
-  else if (what) bits.push(what);
+  if (what) bits.push(what);
   const cell = [val("tracingType"), val("tracingNucId")].filter(function(s){ return s; }).join(" ");
   if (cell) bits.push(cell);
   return bits.join(" \u00b7 ") || "Unfinished tracing";

@@ -208,6 +208,64 @@ const MAKE = `(function(what, nuc, nRings, z0){
        "...and it says so, with what to do about it", JSON.stringify((got.msg||got.__absent||'').slice(0, 80)));
   }
 
+  /* ── AND IT IS NAMED FOR WHAT IS ON THE PAD ─────────────────────────────────────────────
+     Søren, with a nucleus and a whole cell on one pad: *"it says 2x whole cell mesh"*. It did. The
+     title read the shared #tracingWhat select — which with "name each one separately" ticked shows
+     only the SELECTED structure's type — and multiplied it by how many structures had contours, so
+     whichever one happened to be selected got counted twice and the other was never named.
+
+     His pad exactly: two structures, nucleus first, whole cell second, separate naming on. */
+  {
+    const t = await p.evaluate(() => {
+      document.getElementById("tracingPanel").open = true;
+      PAD = UJ.tracepad.create();
+      const ring = (z, inst, d) => ({ z: z, inst: inst,
+        points: [[9000-d, 9000-d], [9000+d, 9000-d], [9000+d, 9000+d], [9000-d, 9000+d]] });
+      PAD.rings = [ring(1941, 0, 200), ring(1943, 0, 220), ring(1941, 1, 900), ring(1943, 1, 950)];
+      PAD.inst = 1;
+      const each = document.getElementById("tracingEachOwn");
+      each.checked = true;
+      PAD_INST_KIND = { "0": { kind: "nucleus", name: "Nucleus" },
+                        "1": { kind: "cell", name: "Whole cell \u2014 the cell\u2019s own mesh" } };
+      document.getElementById("tracingWhat").value = "__cell";   // the box shows #2, as his did
+      document.getElementById("tracingType").value = "Endothelial cell";
+      document.getElementById("tracingNucId").value = "61360735";
+      const two = draftTitleNow();
+
+      /* And three organelles of two kinds, to show the counting still counts. */
+      PAD.rings = [ring(10, 0, 10), ring(11, 0, 12), ring(10, 1, 20), ring(10, 2, 30)];
+      PAD_INST_KIND = { "0": { kind: "mitochondrion", name: "Mitochondrion" },
+                        "1": { kind: "mitochondrion", name: "Mitochondrion" },
+                        "2": { kind: "lysosome", name: "Lysosome" } };
+      const three = draftTitleNow();
+
+      /* With separate naming OFF they share the box's kind, which is the old behaviour. */
+      each.checked = false;
+      PAD.rings = [ring(10, 0, 10), ring(10, 1, 20)];
+      document.getElementById("tracingWhat").value = "__cell";
+      const same = draftTitleNow();
+
+      /* AND "something else", which the old line had its own branch for: it read #tracingName
+         directly. Nothing reads the box now, so the typed name has to arrive the way every other
+         kind does — through tracingWhat(), which asks the same field. */
+      document.getElementById("tracingWhat").value = "__other";
+      document.getElementById("tracingName").value = "Spine apparatus";
+      PAD.rings = [ring(10, 0, 10)];
+      const typed = draftTitleNow();
+      return { two: two, three: three, same: same, typed: typed };
+    });
+    ok(/Nucleus/.test(t.two) && /Whole cell/.test(t.two) && !/2 \u00d7/.test(t.two),
+       "a pad holding a nucleus and a whole cell is named for BOTH — it used to say \"2 \u00d7 Whole "
+       + "cell\" and never mention the nucleus", t.two);
+    ok(/2 \u00d7 Mitochondrion/.test(t.three) && /Lysosome/.test(t.three),
+       "...and three structures of two kinds count each kind, in the order they were drawn", t.three);
+    ok(/^2 \u00d7 Whole cell/.test(t.same),
+       "...while with separate naming off they share one kind, exactly as before", t.same);
+    ok(/^Spine apparatus/.test(t.typed),
+       "...and a name you typed yourself still arrives, which the old line had a branch of its own "
+       + "for", t.typed);
+  }
+
   ok(errors.length === 0, "the page still loads with no new errors",
      errors.length ? errors[0] : "none");
 
