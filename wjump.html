@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-10-05 19:58</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-10-05 20:42</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -16360,6 +16360,29 @@ function tracingNextIndex(kind, label, nuc, root, skip){
 }
 
 function tracingCurrentAll(){
+  /* ── WHAT IS ON THE PAD, NOT WHAT WAS ON IT WHEN IT OPENED ─────────────  2026-10-05
+     Søren: *"as soon as I added it to the dataset, the whole cell mesh disappeared."* It never
+     left the browser. TRACING_PENDING is written by a pasted link, a resumed draft, either "Open in
+     the pad" and "Use these contours" — and by nothing that draws. padRings() refreshes the
+     preview, the volume, the strip, the 3D view and the draft, and left this alone, so a tracing
+     opened for editing and drawn on submitted the contours it was opened with, under the id it was
+     opened with. Nothing refused it, because the 4 October geometry guard compares a submission
+     against OTHER structures and this one matched only itself.
+
+     THE PAD IS THE TRUTH WHEN THERE IS A PAD. This file already says so where the link reader
+     declines to clear the per-structure colours and types — "those numbers are the PAD'S". A
+     tracing read from a link carries `groups`, which a pad never does, and keeps its own rings. An
+     empty TRACING_PENDING still meets the gate below, because that gate is about having decided,
+     not about where the contours are. */
+  if (PAD && (PAD.rings || []).length && TRACING_PENDING && !TRACING_PENDING.groups){
+    try { TRACING_PENDING.rings = UJ.tracepad.toRings(PAD); } catch (_e0){}
+  }
+  /* ── AND TWO STRUCTURES ARE TWO KINDS ──────────────────────────  2026-10-05
+     With the tick off, tracingKindFor() answers for every structure out of the one box, so a pad
+     holding a nucleus and a whole cell filed both as whatever it said. tracingEachAuto() turns the
+     rows on the moment a second structure appears, so in ordinary use this never fires; it is here
+     because the thing it prevents costs an evening. */
+  if (tracingEachAuto(true)) return [];
   /* IT SAYS SO NOW, 2026-09-19. Returning [] in silence is what made "Add it to the dataset" and
      "Look at it in Neuroglancer" both do nothing at all on a card that was still showing three
      volumes. The other empty case below -- something with no type yet -- has always explained
@@ -20301,7 +20324,16 @@ async function tracingOpenShared(sid, btn){
        and the stale draft id would have saved the edit over that session's draft. Same fault as
        the compound ids, one level up. */
     TRACING_BASE_ID = ""; TRACING_DRAFT_ID = "";
-    PAD_EDIT_ID = st.structureId; PAD_EDIT_IDS = {};
+    /* ── AND NUMBER ONE IS THE ONE THAT WAS OPENED ────────────────  2026-10-05
+       PAD_EDIT_IDS was emptied here while PAD_EDIT_ID was set, which editOf() reads and idOf() does
+       not need — inst 0 takes TRACING_PENDING.id, which is the same string. So it was harmless
+       and it was also the only record of WHICH number on the pad came from the dataset, which
+       tracingEachAuto() now asks for. Its kind too: a published nucleus stays a nucleus when
+       something else is drawn beside it, whatever the box at the top has moved on to saying. */
+    PAD_EDIT_ID = st.structureId; PAD_EDIT_IDS = { "0": st.structureId };
+    PAD_INST_KIND = {};
+    if (st.kind || st.name)
+      PAD_INST_KIND["0"] = { value: st.kind || "", kind: st.kind || "", name: st.name || "" };
     /* ── WHAT NUMBER IT IS ALREADY PUBLISHED UNDER ──────────────────────────────  2026-09-19
        Søren: *"I would like that editing it does not increase its number."* It did: the submission
        builder asked for "one more than the highest this cell has" for every structure, including a
@@ -20453,6 +20485,60 @@ function tracingEachInsts(){
    somebody has been through the rows and named them individually, and that is work the tick must
    not quietly undo. All the same (or none) means nothing has been individually decided yet, and the
    box is the newer instruction. */
+/* ── A SECOND STRUCTURE TURNS THE ROWS ON ───────────────────────  2026-10-05
+   Søren, two days running: *"it says 2x whole cell mesh"*, and then *"the whole cell mesh
+   disappeared and the nucleus... became the same as the other cell's nucleus"*.
+
+   ONE BOX FOR THE WHOLE PAD. With "name each one separately" off, tracingKindFor(inst) falls back to
+   the single #tracingWhat select for every structure, so a pad holding a nucleus and a whole cell
+   files both as whatever that box happens to say — both "Whole cell" on the 4th, both "Nucleus"
+   on the 5th. Nothing warned, because one box is a perfectly good answer for a pad holding one
+   structure and nothing asked how many it held.
+
+   So the rows turn themselves on. Seeded through tracingSeedKinds(), which is what the tick does by
+   hand, so every structure starts as what they all already were and the person changes the ones that
+   are something else — on screen, before anything is sent, which is the whole point of the rows.
+
+   `gate` is the submission asking rather than the pad telling: it returns true when it had to turn
+   them on at that moment, and the press is refused once so the rows are read before they are used. */
+function tracingEachAuto(gate){
+  const each = document.getElementById("tracingEachOwn");
+  if (!each || each.checked) return false;
+  let insts = [];
+  try {
+    insts = UJ.tracepad.instances(PAD).filter(function(i){ return i.contours; })
+                                      .map(function(i){ return i.inst || 0; });
+  } catch (_e){ return false; }
+  if (insts.length < 2) return false;
+  /* ── ONLY WHERE A KIND IS ALREADY DECIDED ────────────────────────────────────────────────
+     Two lysosomes drawn on a fresh pad are two structures of one kind, and the single box is the
+     right answer for both -- turning the rows on there changes nothing and renumbers them, which
+     tracingpanelcheck.js said in four assertions the first time this fired on every pad.
+
+     The case that costs an evening is narrower and has a mark on it: a tracing OPENED from the
+     dataset already has a published kind, and anything drawn beside it is something else, because
+     a cell has one nucleus and one whole cell. PAD_EDIT_IDS names the opened ones. */
+  const opened = insts.filter(function(k){
+    return (typeof PAD_EDIT_IDS !== "undefined") && PAD_EDIT_IDS[String(k)];
+  });
+  if (!opened.length || opened.length === insts.length) return false;
+  each.checked = true;
+  /* SEEDED WITHOUT DISTURBING WHAT IS ALREADY DECIDED -- tracingSeedKinds() lets the box win, which
+     is right for the tick pressed by hand and wrong here: the box describes the structure being
+     drawn NOW, and the opened one's kind came off the sheet. */
+  const w = tracingWhat(), what = document.getElementById("tracingWhat");
+  insts.forEach(function(k){
+    if (PAD_INST_KIND[String(k)]) return;
+    PAD_INST_KIND[String(k)] = { value: what ? what.value : "", kind: w.kind, name: w.name };
+  });
+  try { tracingEachRender(true); } catch (_e2){}
+  const msg = "There are " + insts.length + " structures on the pad and one of them came from the "
+    + "dataset, so each now has its own row — type, colour and name. Check what the new one "
+    + "says before"
+    + (gate ? " pressing again." : " you add them.");
+  try { gate ? tracingSay(msg, true) : padSay(msg, true); } catch (_e3){}
+  return true;
+}
 function tracingSeedKinds(){
   const what = document.getElementById("tracingWhat");
   const w = tracingWhat();
@@ -21053,6 +21139,7 @@ function padRings(){
   pad3DSoon();
   draftSoon();
   padVolume();
+  tracingEachAuto(false);   // a second structure gets the rows, before anything can be filed as one
   padInstances();
   tracingEachRender();      // a new structure gets a row; a deleted one loses it
   const box = document.getElementById("tracePadRings");
