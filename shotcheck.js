@@ -214,31 +214,56 @@ const SETUP = `(() => {
      "the camera is put back where it was — a turn is an export, not a navigation",
      gif.yawBack ? "same yaw" : "the model was left turned");
 
-  /* ── WHAT IS IN THE PICTURE, SAID ON THE PICTURE ─────────────────────────────────────────
-     Søren: *"we also need to have a tool logo in the lower right corner and the cell name and
-     organelle names in the top left corner. Make sure it does not overcrowd the image."*
+  /* ── WHAT THE PICTURE IS OF, SAID ON THE PICTURE ─────────────────────────────────────────
+     Søren, on the exported figure: *"Instead of the cell and nucleus IDs, I want the verdict on the
+     cell type and the coordinates of the center of the nucleus. If there are organelles included, I
+     want the type(s) of organelles not their numbers."*
 
-     The panel knows what it is drawing — every surface carries a `what` and now a `label` — so the
-     caption and the corner block are the same list, read once. The cap is what keeps the promise
-     about overcrowding: four lines and then a count, never more. */
-  console.log("\nthe picture says what is in it");
+     THREE FACTS AND NOT A LIST OF SURFACES. The verdict belongs to the cell, the coordinate to the
+     nucleus, and the organelles collapse to their kinds — so this asserts that two mitochondria
+     produce the word once, that the cell and the nucleus are not themselves listed as kinds, and
+     that the ids do not appear anywhere on the picture or in the caption. The caption reads the
+     same three lines, so the post and the figure cannot disagree.
+
+     The overcrowding cap moved with it: three lines, and the third holds at most three kinds
+     before it counts. 2026-10-04. */
+  console.log("\nthe picture says what it is of");
   const legend = await p.evaluate(`(() => {
     const M = UJ.mesh3d, ball = ${BALL}, h = document.getElementById("h"); h.innerHTML = "";
     const cell = ball(50,0,0,0), nuc = ball(8,12,6,0);
     const gc = M.prepare(cell.positions, cell.indices, { unitNm: 1000 });
-    const gn = M.prepare(nuc.positions, nuc.indices,
-                         { unitNm: 1000, frame: { mid: gc.mid, span: gc.span } });
+    const fr = { unitNm: 1000, frame: { mid: gc.mid, span: gc.span } };
+    const gn = M.prepare(nuc.positions, nuc.indices, fr);
+    /* Two mitochondria and one lysosome, so "kinds not numbers" has something to collapse. */
+    const m1 = ball(4, -20, 10, 5), m2 = ball(4, 22, -12, -6), ly = ball(3, 0, -25, 10);
+    const g1 = M.prepare(m1.positions, m1.indices, fr);
+    const g2 = M.prepare(m2.positions, m2.indices, fr);
+    const gl2 = M.prepare(ly.positions, ly.indices, fr);
     window.__v = {};
-    M.show(h, gc, { what: "cell", label: "Cell 864691135194795306", alpha: 0.3, view: window.__v,
-                    ghosts: [{ geo: gn, what: "nucleus", label: "Nucleus 485387",
-                               tint: M.NUC_TINT, alpha: 1 }] });
-    return { legend: M.legend().map(q => q.label), caption: UJ.mesh3dshot.captionFor() };
+    M.show(h, gc, { what: "cell", alpha: 0.3, view: window.__v,
+                    about: { verdict: "Pyramidal cell", atVox: [216448, 164096, 21360] },
+                    ghosts: [{ geo: gn, what: "nucleus", tint: M.NUC_TINT, alpha: 1 },
+                             { geo: g1, label: "Mitochondrion", alpha: 1 },
+                             { geo: g2, label: "mitochondrion", alpha: 1 },
+                             { geo: gl2, label: "Lysosome", alpha: 1 }] });
+    return { L: M.legend(), caption: UJ.mesh3dshot.captionFor() };
   })()`);
-  ok(legend.legend.length === 2 && /864691135194795306/.test(legend.legend[0]),
-     "the panel hands back what it is drawing, in the words the caller gave it",
-     legend.legend.join(" / "));
-  ok(/864691135194795306/.test(legend.caption) && /485387/.test(legend.caption),
-     "...and the caption names the cell and what is in it", legend.caption.slice(0, 110));
+  ok(legend.L.verdict === "Pyramidal cell",
+     "the panel hands back the VERDICT, not the root id", legend.L.verdict);
+  ok(String(legend.L.atVox) === "216448,164096,21360",
+     "...and the nucleus's own centre, in voxels", String(legend.L.atVox));
+  ok(legend.L.kinds.length === 2 && /^Mitochondrion$/.test(legend.L.kinds[0])
+     && /^Lysosome$/.test(legend.L.kinds[1]),
+     "...and the organelles as KINDS — two mitochondria are one word, and neither the cell nor the "
+     + "nucleus is a kind",
+     legend.L.kinds.join(", ") + " (from 5 surfaces)");
+  ok(/Pyramidal cell/.test(legend.caption) && /216448, 164096, 21360/.test(legend.caption)
+     && /Mitochondrion/.test(legend.caption),
+     "...and the caption says the same three things, read off the same call",
+     legend.caption.slice(0, 120));
+  ok(!/8646911|485387/.test(legend.caption),
+     "...and no database key appears on anything somebody is about to post",
+     legend.caption.slice(0, 60));
 
   const marks = await p.evaluate(`(async () => {
     const blob = await UJ.mesh3dshot.imageBlob();
@@ -276,7 +301,7 @@ const SETUP = `(() => {
      (marks.bottomRight * 100).toFixed(2) + "%");
   ok(marks.topLeft < 0.12 && marks.bottomRight < 0.12,
      "...and neither of them is a wall of text. Søren: \"Make sure it does not overcrowd the "
-     + "image.\" Four lines and then a count, never more.",
+     + "image.\" Three lines, and the third holds three kinds before it counts.",
      "top-left " + (marks.topLeft * 100).toFixed(1) + "%, bottom-right "
        + (marks.bottomRight * 100).toFixed(1) + "%");
 

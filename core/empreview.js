@@ -198,7 +198,22 @@ function m3d(){
 
 /* Both surfaces share ONE frame, or the nucleus is drawn centred on itself and appears to be the
    size of the cell — a picture, and a lie about scale. The same rule the tracing pad follows. */
-function drawMeshes(host, parts){
+/* ── WHAT THE DISCUSSION'S PREVIEW IS OF ──────────────────────────────────────────────────
+   The verdict from the page's own long name, and the NUCLEUS'S CENTROID rather than the clicked
+   point — in a Discussion post those are different things, since the preview opens where somebody
+   wrote a coordinate and the nucleus it finds may be up to 4 µm away. The centroid is the one a
+   reader can act on. Falls back to the point itself when there is no nucleus to centre on, and to
+   nothing at all on a page with no nucleus table. 2026-10-04. */
+function aboutAt(at, cfg, pos){
+  var v = null, t = "";
+  try { if (cfg && typeof cfg.nucleusAt === "function" && at && at.nuc) v = cfg.nucleusAt(at.nuc); }
+  catch (_e){}
+  try { if (cfg && typeof cfg.typeOf === "function" && at && at.nuc) t = cfg.typeOf(at.nuc) || ""; }
+  catch (_e){}
+  return { verdict: t, atVox: v || pos || null };
+}
+
+function drawMeshes(host, parts, about){
   var M = m3d();
   if (!M || !parts.length) return;
   var raw = parts.map(function(p){
@@ -264,7 +279,7 @@ function drawMeshes(host, parts){
   if (!host.__empView) host.__empView = { yaw: 0.6, pitch: 0.3, dist: 1.9 };
   M.show(host, geos[leadAt], { ghosts: ghosts, view: host.__empView,
                                what: parts[leadAt].what,
-                               label: parts[leadAt].label || "",
+                               about: about || null,
                                saveName: parts[leadAt].saveName || "cell",
                                tint: (leadAt === nucAt) ? NUC : CELL,
                                emptyMessage: "That cell has no mesh to draw." });
@@ -364,9 +379,8 @@ async function open(hostEl, pos, opts){
          than no comment: it is confidently wrong and it sits where somebody would look to check.
          Saying so at each call is what keeps the two in one frame -- see core/mesh3d.js on
          unitNm. */
-      parts.unshift({ what: "cell", mesh: m, unitNm: 1000,
-                      label: "Cell " + at.root, saveName: "cell_" + at.root });
-      drawMeshes(host3d, parts);
+      parts.unshift({ what: "cell", mesh: m, unitNm: 1000, saveName: "cell_" + at.root });
+      drawMeshes(host3d, parts, aboutAt(at, cfg, pos));
       note("cell " + at.root + (at.nuc ? ", nucleus " + at.nuc : ""));
     } catch (e){ note("the cell’s mesh could not be read: " + String(e && e.message || e), true); }
     cellBtn.disabled = false;
@@ -392,8 +406,10 @@ async function open(hostEl, pos, opts){
          the joint frame stretched from the origin to the cell to cover the gap. The panel said so
          the whole time: "0.0 x 0.0 x 0.0 um - 21,208 triangles". 2026-10-03, from Søren's
          screenshots. core/tracingcard.js has always passed 1000 here. */
-      parts.push({ what: "nucleus", mesh: n, unitNm: 1000, label: "Nucleus " + at.nuc });
-      drawMeshes(host3d, parts);
+      /* saveName too, which it has never had: a nucleus-led preview fell through to the
+         literal "cell" and every file it saved was called that. 2026-10-04. */
+      parts.push({ what: "nucleus", mesh: n, unitNm: 1000, saveName: "nucleus_" + at.nuc });
+      drawMeshes(host3d, parts, aboutAt(at, cfg, pos));
       note("cell " + at.root + ", nucleus " + at.nuc
            + (at.nucFrom ? " (" + at.nucFrom + ")" : ""));
     } catch (e){ note("the nucleus mesh could not be read: " + String(e && e.message || e), true); }

@@ -629,7 +629,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-04 15:25</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-04 21:49</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -13060,6 +13060,19 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
           const i=rootIdToIndex(rid);
           return i<0?null:[NX[i],NY[i],NZ[i]];
         }catch(_e){ return null; }
+      },
+      /* THE LONG NAME, not the code. jumpLinkHost().nucleus() already hands back typeInfo().name --
+         "23P", "oligo" -- which is the right thing in a link's tooltip and the wrong thing in the
+         corner of a picture somebody is about to post. longName() is this page's own table and is
+         what the headline uses. Søren, on the exported figure: "I want the verdict on the cell
+         type". 2026-10-04. */
+      typeOf:function(nid){
+        try{
+          const i=nidToIndex(nid);
+          if(i<0)return "";
+          const t=typeInfo(i);
+          return (t&&t.name&&t.name!=="Unclassified")?longName(t.name):"";
+        }catch(_e){ return ""; }
       },
       viewerUrl:function(pos){
         try{

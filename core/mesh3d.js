@@ -486,6 +486,12 @@ UJ.mesh3d = (function(){
        sits BESIDE `what`, which stays the contract this file's own buttons read. 2026-10-04. */
     var ALL = [{ d: MAIN, tint: o.tint || null, what: o.what || "", label: o.label || "",
                  alpha: (o.alpha === undefined ? 1 : o.alpha) }].concat(GHOSTS);
+    /* WHAT THE SPECIMEN IS, as opposed to what each surface is. Søren: "I want the verdict on
+       the cell type and the coordinates of the center of the nucleus." Neither of those belongs to
+       a surface — the verdict is about the cell whether or not the cell is the one being drawn,
+       and the coordinate is the nucleus's centroid even when the nucleus is hidden. So it rides
+       beside the surfaces rather than on one of them. 2026-10-04. */
+    var ABOUT = o.about || null;
     gl.enable(gl.DEPTH_TEST);
     function drawOne(d, tint, alpha){
       if (!d) return;
@@ -952,16 +958,34 @@ UJ.mesh3d = (function(){
              spin: spin, nucleus: lookAtNucleus, iso: isoNext, isoCan: isoCan,
              isoNow: function(){ return ISO; },
              framedNow: function(){ return framedNuc; },
-             /* ── WHAT IS ON SCREEN, IN ORDER ───────────────────────────────────────  2026-10-04
-                Only what is actually drawn: the isolate button hides a surface, and a corner block
-                naming something the reader cannot see is worse than no block. Unnamed surfaces are
-                left out rather than listed as blanks. */
+             /* ── WHAT THE PICTURE IS OF ────────────────────────────────────────────  2026-10-04
+                Three facts, not a list of surfaces. Søren: "Instead of the cell and nucleus IDs, I
+                want the verdict on the cell type and the coordinates of the center of the nucleus.
+                If there are organelles included, I want the type(s) of organelles not their
+                numbers."
+
+                KINDS, NOT INSTANCES. A cell with twenty mitochondria drawn in it says
+                "Mitochondrion" once. The rule is the `what` contract this file already keeps:
+                anything that is not the cell and not the nucleus is a structure, and its label is
+                what it is rather than which one it is. Case-insensitive, because one caller
+                capitalises a layer name and another may not.
+
+                ISOLATION STILL APPLIES to the kinds — hide every mitochondrion and the word goes —
+                but NOT to the verdict or the place. Isolating the nucleus does not make the cell a
+                different cell, and a figure of a nucleus alone still wants to say whose it is. */
              legend: function(){
-               return ALL.filter(function(it){ return it.label && isoShows(it); })
-                         .map(function(it){
-                           return { what: it.what, label: it.label,
-                                    tint: it.tint ? it.tint.slice() : null };
-                         });
+               var kinds = [], seen = {};
+               ALL.forEach(function(it){
+                 if (!it.label || !isoShows(it)) return;
+                 if (it.what === "cell" || it.what === "nucleus") return;
+                 var k = String(it.label).toLowerCase();
+                 if (seen[k]) return;
+                 seen[k] = 1; kinds.push(it.label);
+               });
+               return { verdict: (ABOUT && ABOUT.verdict) ? String(ABOUT.verdict) : "",
+                        atVox: (ABOUT && ABOUT.atVox && ABOUT.atVox.length === 3)
+                               ? ABOUT.atVox.slice() : null,
+                        kinds: kinds };
              },
              /* ── WHAT A PIXEL IS WORTH ─────────────────────────────────────────  2026-10-03
                 In NANOMETRES. 2·dist·tan(FOV/2) is the visible height at the model's own centre
@@ -1519,6 +1543,49 @@ UJ.mesh3d = (function(){
     };
     injectStyle();
 
+    /* ── THE VERDICT, FROM THE BUTTON NEXT DOOR ──────────────────────────────────────────
+       µJump renders three buttons in one row — "3D model", "PowerPoint", "Compute volume" — and
+       the last two already carry data-celltype, because the PowerPoint slide has always been
+       labelled with the cell type. The 3D panel sits in the same row and had never asked.
+
+       data-follow-live IS NOT DECORATION. ujump.html's own two click handlers prefer the live
+       window.CUR_CELLTYPE_DISPLAY over the attribute when that flag is set, and the comment on
+       meshDlButtonHtml() says why: the attribute is baked at render time and goes stale the moment
+       a community report resolves, so "downloads kept saying Unclassified even after the on-screen
+       headline had already moved on". The same precedence, read at draw time, which is as live as
+       a click. A page with no such sibling — δJump, βJump — gets "" and the line is left out.
+       2026-10-04. */
+    function verdictNear(dl){
+      try {
+        var row = dl.parentNode;
+        var el = row && row.querySelector("[data-celltype]");
+        if (!el) return "";
+        if (el.getAttribute("data-follow-live") === "1" && window.CUR_CELLTYPE_DISPLAY)
+          return String(window.CUR_CELLTYPE_DISPLAY);
+        return String(el.getAttribute("data-celltype") || "");
+      } catch (_e){ return ""; }
+    }
+
+    /* And the nucleus's own centroid. The sibling's data-coords FIRST, because that is the string
+       the PowerPoint export prints and two labels for one cell that disagree would be worse than
+       either; the nucleus table only when there is no such sibling to ask. Voxels in both. */
+    function nucVoxNear(dl, nucId){
+      var v = null, s, cfg;
+      try {
+        var el = dl.parentNode && dl.parentNode.querySelector("[data-coords]");
+        s = el ? String(el.getAttribute("data-coords") || "") : "";
+        if (s){
+          v = s.split(",").map(function(t){ return parseInt(t, 10); });
+          if (v.length === 3 && v.every(function(n){ return isFinite(n); })) return v;
+        }
+      } catch (_e){}
+      try {
+        cfg = (typeof window.emPreviewHost === "function") ? window.emPreviewHost() : null;
+        if (cfg && typeof cfg.nucleusAt === "function" && nucId) return cfg.nucleusAt(nucId) || null;
+      } catch (_e){}
+      return null;
+    }
+
     function decorate(dl){
       if (!dl || dl.getAttribute("data-m3d")) return;
       var root = dl.getAttribute("data-root");
@@ -1607,10 +1674,18 @@ UJ.mesh3d = (function(){
              picture rather than where it is in the cell, which looks right and is a lie. */
           var nucId = dl.getAttribute("data-nucid") || "";
           return nucleusMeshFor(nucId).then(function(nm){
+            /* The file keeps the root id, because a folder of pictures wants a key you can
+               sort and search. The PICTURE gets the verdict and the place, which is what Søren
+               asked for: "instead of the cell and nucleus IDs".
+
+               AND THE ID COMES BACK WHEN THERE IS NOTHING ELSE. μJump always has a verdict, even
+               if it is "Unclassified cell"; ωJump and χJump browse volumes with no cell-type
+               predictions and no nucleus table at all, so without this their pictures would carry
+               a scale bar, a wordmark and nothing to say which cell it is. An unlabelled figure is
+               worse than one labelled with a key. 2026-10-04. */
+            var vd = verdictNear(dl), vx = nucVoxNear(dl, nucId);
             var opts2 = { what: "cell", lead: lead,
-                          /* For the exported picture's corner and for the file's name. Both ids
-                             are in hand here and neither was being passed on. 2026-10-04. */
-                          label: "Cell " + root,
+                          about: { verdict: vd || (vx ? "" : "Cell " + root), atVox: vx },
                           saveName: "cell_" + root,
                           emptyMessage: "This cell has no mesh geometry to draw." };
             if (nm && nm.positions && nm.positions.length){
@@ -1622,8 +1697,7 @@ UJ.mesh3d = (function(){
                    four, and did so silently, because a missing field reads as "there is no
                    nucleus here", which is a perfectly reasonable thing for it to mean.
                    2026-10-03, from Søren: "I only see two buttons". */
-                opts2.ghosts = [{ geo: ng, what: "nucleus", label: "Nucleus " + nucId,
-                                  tint: NUC_TINT, alpha: 1 }];
+                opts2.ghosts = [{ geo: ng, what: "nucleus", tint: NUC_TINT, alpha: 1 }];
                 /* The cell goes see-through ONLY now that there is something inside it to see --
                    the notebook's rule, and for its reason: transparency with nothing behind it
                    costs contrast and shows nothing. */

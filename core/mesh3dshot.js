@@ -191,14 +191,32 @@ UJ.mesh3dshot = (function(){
      THE LIST IS THE PANEL'S, not this file's idea of what is on screen. core/mesh3d.js's legend()
      skips whatever the isolate button has hidden, so a picture taken with only the nucleus showing
      does not claim a cell is in it. */
-  var MAX_LINES = 4;
+  /* Three lines at most, so the cap is now on how many KINDS share the third one rather than on
+     how many lines there are. 2026-10-04. */
+  var MAX_KINDS = 3;
+  /* ── WHAT IT IS, WHERE IT IS, WHAT ELSE IS IN IT ──────────────────────────────────────────
+     Søren: "I want the verdict on the cell type and the coordinates of the center of the nucleus.
+     If there are organelles included, I want the type(s) of organelles not their numbers."
+
+     Each line is left out when there is nothing to put in it, so a panel that knows nothing gets a
+     clean picture rather than three blanks — and the caption below, which reads this same list,
+     cannot then disagree with the corner about what is in the frame.
+
+     `vox` ON THE COORDINATE, which the tool's own on-screen labels do not bother with because they
+     are surrounded by a sentence that says it. A posted picture has no sentence around it. Voxels
+     rather than micrometres for ujump.html's reason: they paste straight back into Neuroglancer's
+     position box and micrometres do not. 2026-10-04. */
   function legendLines(){
-    var L = [];
-    try { L = m3d().legend() || []; } catch (_e){ return []; }
-    var names = L.map(function(q){ return q.label; }).filter(Boolean);
-    if (names.length <= MAX_LINES) return names;
-    return names.slice(0, MAX_LINES - 1)
-                .concat(["+ " + (names.length - (MAX_LINES - 1)) + " more"]);
+    var L = null;
+    try { L = m3d().legend(); } catch (_e){ return []; }
+    if (!L) return [];
+    var out = [], k = L.kinds || [];
+    if (L.verdict) out.push(L.verdict);
+    if (L.atVox) out.push(L.atVox[0] + ", " + L.atVox[1] + ", " + L.atVox[2] + " vox");
+    if (k.length) out.push(k.length <= MAX_KINDS ? k.join(", ")
+                           : k.slice(0, MAX_KINDS - 1).join(", ")
+                             + " + " + (k.length - (MAX_KINDS - 1)) + " more");
+    return out;
   }
   function drawTitle(ctx, w, h, lines){
     if (!lines.length) return;

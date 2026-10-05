@@ -255,22 +255,11 @@ function tracingScope(){
   catch (_e){ return ""; }
 }
 /* THE ONE STORE, 2026-09-21. localStorage, unless the host says keepLocal: false -- then an object
-   in memory for the life of the page. See src/the_card_can_keep_nothing_in_the_browser.py. */
-var TRACING_MEM = {};
-var TRACING_MEM_STORE = {
-  getItem: function(k){ return Object.prototype.hasOwnProperty.call(TRACING_MEM, k) ? TRACING_MEM[k] : null; },
-  setItem: function(k, v){ TRACING_MEM[k] = String(v); },
-  removeItem: function(k){ delete TRACING_MEM[k]; }
-};
-function tracingKeepsLocal(){
-  try { var v = tracingCfg().keepLocal; return v === undefined ? true : !!v; } catch (_e){ return true; }
-}
-function tracingStore(){
-  if (!tracingKeepsLocal()) return TRACING_MEM_STORE;
-  try { return window.localStorage || TRACING_MEM_STORE; } catch (_e){ return TRACING_MEM_STORE; }
-}
-/* THE ONE STORE, 2026-09-21. localStorage, unless the host says keepLocal: false -- then an object
-   in memory for the life of the page. See src/the_card_can_keep_nothing_in_the_browser.py. */
+   in memory for the life of the page. See src/the_card_can_keep_nothing_in_the_browser.py.
+
+   AND IT EXISTED TWICE, verbatim, fifteen lines apart, under a comment calling itself THE ONE
+   STORE. Harmless by luck -- the declarations hoist and the two copies were identical -- and
+   exactly the shape of fault this file keeps paying for. 2026-10-04. */
 var TRACING_MEM = {};
 var TRACING_MEM_STORE = {
   getItem: function(k){ return Object.prototype.hasOwnProperty.call(TRACING_MEM, k) ? TRACING_MEM[k] : null; },
@@ -2963,8 +2952,34 @@ async function pad3DDraw(){
         + ghosts.map(function(d){ return d.what; }).join(" and ") + ".</span>";
     if (PAD3D_NOTE && wantGhosts)
       lead += "<br><span class='hint'>" + escHtml(PAD3D_NOTE) + ".</span>";
+    /* ── THE SUBJECT HAS A NAME, AND THE PAD KNOWS THE CELL ──────────────────────────────
+       The siblings and the ghosts were labelled from the day the corner block was written and the
+       SUBJECT was not — the traced structure, the one thing the picture is of, was the one surface
+       that never reached the legend. padLoftName() is sixty lines above.
+
+       And the verdict and the place come off the card's own two fields. #tracingType's title says
+       it is "suggested from the nucleus or root ID below, by the same precedence the rest of the
+       tool uses: verified, then community-reported, then the MICrONS prediction" — so reading it
+       here is reading that precedence rather than inventing a second one. 2026-10-04. */
+    var padType = "", padVox = null;
+    try {
+      var te = document.getElementById("tracingType");
+      padType = te && te.value && te.value !== "traced" ? String(te.value) : "";
+      var ce = document.getElementById("tracingCellAt");
+      var cv = ce && ce.value ? String(ce.value).split(",").map(function(t){
+                 return parseInt(t, 10); }) : null;
+      if (cv && cv.length === 3 && cv.every(function(n){ return isFinite(n); })) padVox = cv;
+      else if (typeof window.tracingNucCentroid === "function"){
+        var nc = window.tracingNucCentroid(pad3DIds().nuc);
+        if (nc) padVox = [nc.xVox, nc.yVox, nc.zVox];
+      }
+    } catch (_e){}
     tracingM3D().show(host, geo, { lead: lead, ghosts: drawn, view: PAD3D_VIEW,
                                 tint: pad3DTint(lofts[subject].inst),
+                                label: padLoftName(lofts[subject]),
+                                saveName: (padLoftName(lofts[subject]) || "tracing")
+                                            .toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+                                about: { verdict: padType, atVox: padVox },
                                 emptyMessage: "Nothing to draw yet." });
   } catch (e){
     pad3DNote("Could not build the preview: " + String(e && e.message || e));
@@ -3418,15 +3433,196 @@ const TRACING_PEN_KEY = tracingCfg().penKey || "ujump_tracing_pen_v1";
 const TRACING_DRAFTS_MAX = 50;
 var TRACING_DRAFT_SOON = null, TRACING_DRAFT_ID = "";
 
+/* ── THE DESTINATION THAT CANNOT BE FULL ───────────────────────────────────────  2026-10-04
+   Søren: *"I just lost 2 hours of work."*
+
+   Every place this card keeps a draft can say no. localStorage has a quota and said so. The account
+   needs somebody to be signed in and a network to reach. A FILE ON HIS OWN DISK needs neither, has
+   no quota this code can exhaust, and is the only one of the three that is still there after the
+   tab is closed, the browser updated, the site data cleared.
+
+   SO IT IS WRITTEN WITHOUT BEING ASKED, the moment anything else refuses, and the banner goes up as
+   well rather than instead — a programmatic download is a thing a browser may decline silently, so
+   the button has to be there whether or not the automatic one landed.
+
+   AND AGAIN AS THE WORK GROWS. The first version wrote one file per draft per page, which would
+   have handed him a file from the minute it first failed and lost the hour he drew afterwards.
+   Another twenty-five contours or another five minutes and it writes a fresh one. That is a handful
+   of files in a long session, which is the right trade against a handful of hours. */
+var DRAFT_ALARM_FOR = "", DRAFT_RESCUED = {};
+function draftFileName(d){
+  return tracingSafeName((d && d.title) || "tracing") + "_draft_"
+       + String((d && d.at) || new Date().toISOString()).replace(/[:.]/g, "-") + ".json";
+}
+function draftToFile(d){
+  try {
+    tracingSaveBlob(new Blob([JSON.stringify(d)], { type: "application/json" }), draftFileName(d));
+    return true;
+  } catch (_e){ return false; }
+}
+function draftRescue(d, why){
+  if (!d || !d.id) return;
+  var now = Date.now(), n = (d.rings || []).length, was = DRAFT_RESCUED[d.id];
+  if (!was || n - was.n >= 25 || now - was.at >= 300000){
+    DRAFT_RESCUED[d.id] = { n: n, at: now };
+    draftToFile(d);
+  }
+  draftAlarmShow(d, why);
+}
+/* IT STAYS UP UNTIL A SAVE WORKS. padSay's line is one sentence in a status row that the next
+   thing to happen overwrites — which is what he saw: it "complained some times", and then the pad
+   went on looking normal. This does not go away on its own. */
+function draftAlarmShow(d, why){
+  var el = document.getElementById("tracingDraftAlarm");
+  DRAFT_ALARM_FOR = d.id;
+  if (!el) return;
+  var n = (d.rings || []).length;
+  el.style.display = "";
+  el.innerHTML =
+    "<b>This tracing is not saved.</b> " + escHtml(String(why || "the browser refused it")) + ", so "
+    + "the " + n + " contour" + (n === 1 ? "" : "s") + " on the pad "
+    + (draftSignedIn() ? "went to your account, but there is no copy in this browser."
+                       : "are only on this pad — and you are not signed in, so there is no "
+                         + "copy on your account either.")
+    + " <b>A file has been downloaded to this machine.</b> Take another whenever you like; the pad "
+    + "reopens from it with <i>Open a draft file</i> below."
+    + " <button type=\"button\" id=\"tracingDraftFile\" style=\"margin-left:6px\">"
+    + "Save this tracing to a file</button>";
+  var b = document.getElementById("tracingDraftFile");
+  if (b) b.addEventListener("click", function(){
+    var now = draftNow() || d;
+    DRAFT_RESCUED[d.id] = { n: (now.rings || []).length, at: Date.now() };
+    var okFile = draftToFile(now);
+    padSay(okFile ? "Written to your downloads folder."
+                  : "The browser would not write the file \u2014 use its own Save page as, or sign in.",
+           !okFile);
+  });
+}
+function draftAlarmClear(id){
+  if (id && DRAFT_ALARM_FOR && String(id) !== String(DRAFT_ALARM_FOR)) return;
+  DRAFT_ALARM_FOR = "";
+  var el = document.getElementById("tracingDraftAlarm");
+  if (el){ el.style.display = "none"; el.innerHTML = ""; }
+}
+/* ── AND THE TAB DOES NOT CLOSE QUIETLY ────────────────────────────────────────  2026-10-04
+   Only while the alarm is up, so this never nags somebody whose work is kept. Browsers show their
+   own wording; what matters is that there is a stop between two hours of contours and a reflex
+   Ctrl-W. */
+try {
+  window.addEventListener("beforeunload", function(e){
+    if (!DRAFT_ALARM_FOR) return;
+    if (!(typeof PAD !== "undefined" && PAD && PAD.rings && PAD.rings.length)) return;
+    e.preventDefault(); e.returnValue = ""; return "";
+  });
+} catch (_e){}
+
+/* ── A DRAFT IS NEVER ONLY IN A PLACE THAT CAN REFUSE ──────────────────────────  2026-10-04
+   Søren, after two hours of a whole-cell tracing went: *"It had complained some times that it did
+   not have enough space in the browser to save my draft. I just lost 2 hours of work."*
+
+   THE ACCOUNT COPY WAS GATED BEHIND THE BROWSER COPY. The line was `if (wrote) draftPush(d, false)`
+   under a comment that said "the browser first, always: it is the copy that cannot fail". It can
+   fail; it told him so, repeatedly; and because it failed, the one copy that would have survived
+   the tab closing was never even attempted. A fallback that only runs when the primary succeeded is
+   not a fallback.
+
+   THREE THINGS CHANGED, and every one of them is about the moment the browser says no.
+
+     the account      pushed on every save and FORCED when the local write failed, instead of
+                      being skipped. The two-minute throttle exists so drawing does not become a
+                      Drive write per second; a failed local save is not drawing.
+     a file           a .json straight to the disk. Not storage this code manages, not a quota,
+                      not an account — the one destination that cannot be full and does not need
+                      anyone to be signed in. Offered the instant the browser refuses, and left on
+                      screen until it is taken.
+     one key each     the whole list used to be re-serialised into a single key on every autosave,
+                      so one tracing too big for the quota took the other forty-nine down with it
+                      and nothing could be saved at all until something was deleted. Each draft now
+                      has its own key and the index is small: a draft that cannot fit fails alone.
+
+   SPLITTING THE OLD BLOB FREES SPACE RATHER THAN USING MORE. The v2 key held every draft; the
+   migration writes each one to its own key and then replaces that key with the small index, so a
+   browser that was full before is less full afterwards. The index is written LAST and only when
+   every draft got somewhere, because an index naming a draft that is not there is worse than an
+   old blob. */
+function draftKeyFor(id){ return tracingScopedKey(TRACING_DRAFTS_KEY) + "#" + String(id); }
+
+/* How much this origin is holding, in bytes, counting UTF-16 as the browsers do. null when the
+   store is the in-memory one, which has no quota to report. */
+function draftRoom(){
+  var s, i, k, n = 0;
+  try {
+    s = tracingStore();
+    if (typeof s.length !== "number" || typeof s.key !== "function") return null;
+    for (i = 0; i < s.length; i++){ k = s.key(i); n += (String(k).length + String(s.getItem(k) || "").length) * 2; }
+  } catch (_e){ return null; }
+  return n;
+}
+function draftMB(n){ return (n / 1048576).toFixed(1) + " MB"; }
+
 var draftStore = (function(){
-  function readAll(){
-    var out = [];
+  function keyOf(id){ return draftKeyFor(id); }
+  function putOne(d){
+    try { tracingStore().setItem(keyOf(d.id), JSON.stringify(d)); return true; }
+    catch (_e){ return false; }
+  }
+  function getOne(id){
     try {
-      var raw = JSON.parse(tracingStore().getItem(tracingScopedKey(TRACING_DRAFTS_KEY)) || "null");
-      if (raw && Array.isArray(raw.drafts)) out = raw.drafts.filter(function(d){
-        return d && Array.isArray(d.rings);
+      var d = JSON.parse(tracingStore().getItem(keyOf(id)) || "null");
+      return (d && Array.isArray(d.rings)) ? d : null;
+    } catch (_e){ return null; }
+  }
+  function dropOne(id){ try { tracingStore().removeItem(keyOf(id)); } catch (_e){} }
+  /* The index carries only what the list on screen shows, so it stays small enough to write even
+     when the store is nearly full -- which is exactly when it has to be written. */
+  function brief(d){
+    return { id: d.id, title: d.title || "", at: d.at || "", n: (d.rings || []).length,
+             nucId: d.nucId || "", rootId: d.rootId || "" };
+  }
+  function writeIndex(list){
+    try { tracingStore().setItem(tracingScopedKey(TRACING_DRAFTS_KEY),
+                                 JSON.stringify({ v: 3, index: list.map(brief) })); return true; }
+    catch (_e){ return false; }
+  }
+  /* ONE WAY, AND IT FREES SPACE. Returns the list it split out, or null when there was no old
+     blob to split.
+
+     ONCE PER PAGE, WHATEVER HAPPENS. On a browser that is ALREADY full -- which is the one this
+     was written for -- the per-draft writes fail, the index is not written, and the old blob stays
+     exactly where it was. That is the right outcome: readAll still returns the drafts it parsed,
+     so nothing is lost. What would be wrong is trying again on every render, several times a
+     second, each time serialising every draft afresh. It is attempted once; if it could not be
+     done it is left alone until the next load, by which time deleting a draft may have made room. */
+  var SPLIT_TRIED = false;
+  function splitOldBlob(){
+    var raw = null, old = [], wrote = 0;
+    try { raw = JSON.parse(tracingStore().getItem(tracingScopedKey(TRACING_DRAFTS_KEY)) || "null"); }
+    catch (_e){ return null; }
+    if (!raw || !Array.isArray(raw.drafts)) return null;
+    old = raw.drafts.filter(function(d){ return d && d.id && Array.isArray(d.rings); });
+    if (SPLIT_TRIED) return old;
+    SPLIT_TRIED = true;
+    old.forEach(function(d){ if (putOne(d)) wrote++; });
+    /* Only when every one of them landed. A half-split index would hide the half that did not. */
+    if (wrote === old.length) writeIndex(old);
+    return old;
+  }
+  function readAll(){
+    var out = [], idx = null, raw;
+    try { raw = JSON.parse(tracingStore().getItem(tracingScopedKey(TRACING_DRAFTS_KEY)) || "null"); }
+    catch (_e){ raw = null; }
+    if (raw && Array.isArray(raw.drafts)){
+      out = splitOldBlob() || [];
+    } else if (raw && Array.isArray(raw.index)){
+      idx = raw.index;
+      idx.forEach(function(b){
+        var d = getOne(b.id);
+        /* A draft named by the index but not on disk is listed from the index alone rather than
+           dropped, so somebody can see that it was there and that something ate it. */
+        out.push(d || { id: b.id, title: b.title, at: b.at, missing: true,
+                        rings: new Array(Math.max(0, b.n | 0)), pending: [] });
       });
-    } catch (_e){ out = []; }
+    }
     if (!out.length){
       /* MIGRATION, ONE WAY. The single-slot draft becomes the first entry in the list; the old key
          keeps its copy, because nothing good has ever come of a migration that also deletes. */
@@ -3442,43 +3638,47 @@ var draftStore = (function(){
     out.sort(function(a, b){ return String(b.at || "").localeCompare(String(a.at || "")); });
     return out;
   }
-  function writeAll(list){
-    try { tracingStore().setItem(tracingScopedKey(TRACING_DRAFTS_KEY), JSON.stringify({ v: 2, drafts: list })); return true; }
-    catch (_e){
-      padSay("This browser refused to keep the draft \u2014 it is out of storage. Your contours "
-        + "are still on the pad.", true);
-      return false;
-    }
-  }
   return {
     list: readAll,
     get: function(id){
-      var m = readAll().filter(function(d){ return d.id === id; });
+      var d = getOne(id);
+      if (d) return d;
+      var m = readAll().filter(function(x){ return x.id === id && !x.missing; });
       return m.length ? m[0] : null;
     },
     put: function(d){
       var list = readAll(), at = -1, i;
       for (i = 0; i < list.length; i++) if (list[i].id === d.id){ at = i; break; }
-      /* NOTHING IS DROPPED TO MAKE ROOM. One tracing was lost today to a silent overwrite; the
-         answer to a full list is not another one. A NEW draft is refused and said so; the ones
-         already in the list go on saving. */
+      /* NOTHING IS DROPPED TO MAKE ROOM. One tracing was lost to a silent overwrite; the answer to
+         a full list is not another one. A NEW draft is refused and said so; the ones already in the
+         list go on saving. */
       if (at < 0 && list.length >= TRACING_DRAFTS_MAX){
         padSay("There are already " + TRACING_DRAFTS_MAX + " unfinished tracings kept here, so this "
           + "one was not added. Add or discard one below and it will keep itself from then on.",
           true);
+        draftRescue(d, "there is no room in the list for another unfinished tracing");
         return false;
       }
       if (at >= 0) list.splice(at, 1, d); else list.unshift(d);
-      var wrote = writeAll(list);
-      /* The browser first, always: it is the copy that cannot fail and the one the pad reads back.
-         The server is a mirror of it, throttled, and its failure costs nothing here. */
-      if (wrote) draftPush(d, false);
+      var wrote = putOne(d);
+      if (wrote) writeIndex(list);
+      /* ── THE ACCOUNT IS TRIED WHETHER OR NOT THE BROWSER TOOK IT ──────────────────────────
+         This is the line that cost two hours. It used to read `if (wrote) draftPush(d, false)`,
+         so the copy that survives a closed tab was attempted only when the copy that cannot
+         survive one had already worked. Forced when the local write failed, because a throttle
+         meant for "somebody is drawing" has no business delaying the one remaining copy. */
+      draftPush(d, !wrote);
+      if (!wrote) draftRescue(d, "this browser is out of storage"
+                              + (draftRoom() ? " (it is holding " + draftMB(draftRoom()) + ")" : ""));
+      else draftAlarmClear(d.id);
       return wrote;
     },
     drop: function(id){
       var list = readAll().filter(function(d){ return d.id !== id; });
       draftPushDelete(id);
-      return writeAll(list);
+      dropOne(id);
+      draftAlarmClear(id);
+      return writeIndex(list);
     },
     /* EVERY DRAFT THIS ACCOUNT HAS, from both copies. One kept in both is shown once, preferring
        whichever was updated later — so a draft carried on from the laptop resumes the laptop's
@@ -3503,7 +3703,6 @@ var draftStore = (function(){
     }
   };
 })();
-
 /* ── THE SERVER COPY ───────────────────────────────────────────────────────────  2026-09-19
    Søren chose drafts kept in the dataset, so they follow the account between machines.
 
@@ -3737,7 +3936,38 @@ function draftWhen(iso){
 
    The row for the draft the pad is CURRENTLY writing to says so instead of offering to resume
    itself, which would be a button that appears to do something and does nothing. */
+/* -- A RESCUE FILE THAT CANNOT BE REOPENED IS A SOUVENIR -----------------------  2026-10-04
+   draftResumeFrom() has always taken a draft OBJECT rather than an id -- the path that fetches one
+   from the account needed that -- so a file is a dozen lines on top of it. The draft keeps its own
+   id, so carrying on writes back to the same draft rather than growing a second copy of it. */
+function draftOpenFile(f){
+  var r = new FileReader();
+  r.onload = function(){
+    var d = null;
+    try { d = JSON.parse(String(r.result)); } catch (_e){}
+    if (!d || !Array.isArray(d.rings)){
+      padSay("That file is not a tracing draft — it should be the .json this card wrote.", true);
+      return;
+    }
+    if (!d.id) d.id = draftCurrentId();
+    draftResumeFrom(d);
+    padSay(d.rings.length + " contour" + (d.rings.length === 1 ? "" : "s")
+      + " back on the pad, from the file.");
+  };
+  r.onerror = function(){ padSay("That file could not be read.", true); };
+  r.readAsText(f);
+}
 function draftRender(){
+  /* Wired here rather than where the card is built, because this runs on load whether or not there
+     is a draft to list -- and the one moment somebody needs to open a rescue file is when there is
+     nothing in the list to show them. Before the early return, for the same reason. */
+  var fin = document.getElementById("tracingDraftFileIn");
+  if (fin && !fin.getAttribute("data-wired")){
+    fin.setAttribute("data-wired", "1");
+    fin.addEventListener("change", function(){
+      if (fin.files && fin.files[0]) draftOpenFile(fin.files[0]);
+    });
+  }
   const bar = document.getElementById("tracingDraftBar");
   if (!bar) return;
   const list = draftStore.all();
@@ -6369,7 +6599,12 @@ function tracingCardHtml(){
     "     under a pointer that is in the middle of drawing on it. Caught by tracingpanelcheck.js, whose",
     "     click coordinates went stale the moment the bar arrived -- which is the same thing happening to",
     "     a person, one click at a time. -->",
+    "<div id=\"tracingDraftAlarm\" style=\"display:none;margin-top:8px;padding:8px;font-size:12px;border:1px solid var(--bad);border-radius:6px\"></div>",
     "<div id=\"tracingDraftBar\" style=\"display:none;margin-top:8px;font-size:12px\"></div>",
+    "<!-- The way back in from a rescue file. It sits beside the list rather than inside it because",
+    "     the moment somebody needs it is the moment the list has nothing in it. -->",
+    "<div style=\"margin-top:6px;font-size:12px\"><label for=\"tracingDraftFileIn\" style=\"display:inline;margin:0 6px 0 0\">Open a draft file</label>",
+    "<input type=\"file\" id=\"tracingDraftFileIn\" accept=\".json,application/json\" style=\"font-size:11px\"></div>",
     "<p class=\"hint\" style=\"margin-top:6px\"><b>Spelunker has a polyline tool, and it is the best route here.</b> Pick <i>Annotate polyline</i>, click round the cell, click the first vertex to close it, then copy the link &mdash; the whole contour arrives as one shape. (This card said the opposite until 2026-09-18: the polyline was measured as never reaching the link, which was wrong. A polyline only enters the link once it is <i>finished</i>, which is the likeliest way that measurement came back empty.) The MICrONS viewer still offers only point, bounding box, line and ellipsoid, so there a ring of <b>points</b> &mdash; one click per vertex, read back in the order you clicked them &mdash; or a ring of <b>line</b> annotations at two clicks a segment is the way. All three are read.</p>",
     "<label style=\"margin-top:10px\">Neuroglancer link</label>",
     "<textarea id=\"tracingLink\" placeholder=\"Paste the whole address bar, with your contours on it.\"></textarea>",

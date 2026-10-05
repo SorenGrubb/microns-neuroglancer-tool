@@ -164,6 +164,72 @@ const BOX = `(cx, cy, cz, r) => {
      "a nucleus the volume has no mesh for draws the cell solid, and says nothing about it",
      missing.blue + " blue pixels");
 
+  /* ── THE VERDICT AND THE PLACE COME OFF THE ROW THE BUTTON IS IN ─────────────────────────
+     Søren, on the exported figure: *"Instead of the cell and nucleus IDs, I want the verdict on the
+     cell type and the coordinates of the center of the nucleus."*
+
+     µJump renders three buttons in one row and the last two already carry data-celltype and
+     data-coords, because the PowerPoint slide has always been labelled with them. The 3D panel sits
+     in the same row and had never asked. This builds that row and reads the panel's own legend back.
+
+     AND THE FOLLOW-LIVE PRECEDENCE, which is the part that is easy to get wrong and expensive to
+     notice. The attribute is baked at render time and goes stale the moment a community report
+     resolves; ujump.html's own click handlers therefore prefer window.CUR_CELLTYPE_DISPLAY when the
+     button carries data-follow-live. The second row here has the flag and a global that disagrees
+     with its attribute, so a panel reading only the attribute passes the first assertion and fails
+     this one. Without it the picture would go on saying "Unclassified" after the headline had moved
+     on — which is the bug ujump.html records for 2026-07-28. 2026-10-04. */
+  const said = await p.evaluate(async ({ boxSrc }) => {
+    const box = eval(boxSrc);
+    UJ.nucmesh.fetchNucleus = async () => box(0, 0, 0, 1);
+    document.body.insertAdjacentHTML("beforeend",
+      '<div class="idrow" id="verdict">'
+      + '<button class="idbtn meshdl" data-root="444" data-nucid="1">Download</button>'
+      + '<button class="idbtn pptxdl" data-root="444" data-celltype="Oligodendrocyte" '
+      + 'data-coords="216448, 164096, 21360">PowerPoint</button></div>'
+      + '<div class="idrow" id="stale">'
+      + '<button class="idbtn meshdl" data-root="555" data-nucid="1">Download</button>'
+      + '<button class="idbtn pptxdl" data-root="555" data-celltype="Unclassified cell" '
+      + 'data-follow-live="1" data-coords="1, 2, 3">PowerPoint</button></div>');
+    await new Promise(r => setTimeout(r, 120));
+    document.querySelector("#verdict .m3d-btn").click();
+    await new Promise(r => setTimeout(r, 600));
+    const a = UJ.mesh3d.legend();
+    /* The headline has since moved on; the attribute has not. */
+    window.CUR_CELLTYPE_DISPLAY = "Astrocyte";
+    document.querySelector("#stale .m3d-btn").click();
+    await new Promise(r => setTimeout(r, 600));
+    const b2 = UJ.mesh3d.legend();
+    /* A page with no such sibling at all — ωJump and χJump browse volumes with no cell-type
+       predictions and no nucleus table, so there is nothing to say but which cell it is. */
+    document.body.insertAdjacentHTML("beforeend",
+      '<div class="idrow" id="bare">'
+      + '<button class="idbtn meshdl" data-root="666">Download</button></div>');
+    await new Promise(r => setTimeout(r, 120));
+    document.querySelector("#bare .m3d-btn").click();
+    await new Promise(r => setTimeout(r, 600));
+    const c2 = UJ.mesh3d.legend();
+    return { verdict: a.verdict, at: String(a.atVox), kinds: a.kinds.length, live: b2.verdict,
+             bare: c2.verdict };
+  }, { boxSrc: BOX });
+  ok(said.verdict === "Oligodendrocyte",
+     "the panel reads the cell type off the button next door, not the root id",
+     said.verdict || "(nothing)");
+  ok(said.at === "216448,164096,21360",
+     "...and the nucleus's centre from the same row, in voxels", said.at);
+  ok(said.kinds === 0,
+     "...and neither the cell nor the nucleus counts as an organelle kind",
+     said.kinds + " kinds");
+  ok(said.live === "Astrocyte",
+     "...and a data-follow-live button follows the live headline rather than its own stale "
+     + "attribute, which still says \"Unclassified cell\"",
+     said.live || "(nothing)");
+
+  ok(said.bare === "Cell 666",
+     "...and a page with no cell type and no nucleus table falls back to the id, because an "
+     + "unlabelled figure is worse than one labelled with a key",
+     said.bare || "(nothing)");
+
   ok(errors.length === 0, "no page errors", errors.join(" | ") || "none");
   await b.close();
   console.log(fails ? "\n" + fails + " FAILED" : "\nall good");
