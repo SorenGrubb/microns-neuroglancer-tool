@@ -53,7 +53,7 @@ function link(annotations){
   await p.route("**cdnjs.cloudflare.com/**", r => r.abort());
   await p.addInitScript(() => {
     window.__alerts = []; window.alert = (m) => window.__alerts.push(String(m));
-    try { localStorage.removeItem("ujump_tracings_v1"); } catch (e) {}
+    try { tracingStore().removeItem("ujump_tracings_v1"); } catch (e) {}
   });
   await p.goto("file://" + page_("ujump.html"));
   await p.waitForTimeout(5000);
@@ -860,9 +860,9 @@ function link(annotations){
         if (typeof TRACING_DRAFT_SOON !== "undefined" && TRACING_DRAFT_SOON){
           clearTimeout(TRACING_DRAFT_SOON); TRACING_DRAFT_SOON = null;
         }
-        try { localStorage.removeItem("ujump_tracing_drafts_v2");
-              localStorage.removeItem("ujump_tracing_drafts_v2");
-      localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e){}
+        try { tracingStore().removeItem("ujump_tracing_drafts_v2");
+              tracingStore().removeItem("ujump_tracing_drafts_v2");
+      tracingStore().removeItem("ujump_tracing_draft_v1"); } catch (e){}
         draftRender();
       });
     }
@@ -1101,7 +1101,7 @@ function link(annotations){
     sel.value = [...sel.options].map(o => o.value).find(v => /astrocyte/i.test(v)) || "traced";
     document.getElementById("tracingKeep").click();
     return { kept: TRACINGS_KEPT.length, alerts: window.__alerts.length,
-             stored: JSON.parse(localStorage.getItem("ujump_tracings_v1") || "[]").length,
+             stored: JSON.parse(tracingStore().getItem("ujump_tracings_v1") || "[]").length,
              status: document.getElementById("tracingStatus").innerText,
              list: document.getElementById("tracingList").innerText.replace(/\s+/g, " ").trim(),
              cleared: document.getElementById("tracingLink").value === "" };
@@ -1110,7 +1110,7 @@ function link(annotations){
   ok(kept.kept === 1, "the tracing is kept", kept.kept);
   ok(kept.alerts === 0, "SIGNED OUT, and nothing asked him to sign in — the export does not "
      + "wait for the backend", kept.alerts + " alerts");
-  ok(kept.stored === 1, "...and it survives a reload", kept.stored + " in localStorage");
+  ok(kept.stored === 1, "...and it survives a reload", kept.stored + " in the card's store");
   ok(/2 contours on 2 sections/.test(kept.list),
      "...and the list says what it holds", kept.list.slice(0, 80));
   ok(kept.cleared, "...and the box is cleared, ready for the next one");
@@ -1303,7 +1303,7 @@ function link(annotations){
       document.getElementById("tracingKeep").click();
       return { before: before, after: TRACINGS_KEPT.length,
                ids: TRACINGS_KEPT.map(t => t.id),
-               stored: JSON.parse(localStorage.getItem("ujump_tracings_v1") || "[]").length };
+               stored: JSON.parse(tracingStore().getItem("ujump_tracings_v1") || "[]").length };
     }, { url: link(polygon(1000, 2000, 500, 44, 12, "r1")
           .concat(polygon(1005, 2005, 505, 42, 12, "r2"),
                   polygon(1010, 2010, 510, 40, 12, "r3"))) });
@@ -1325,7 +1325,7 @@ function link(annotations){
       document.getElementById("tracingKeep").click();
       return { before: before, after: TRACINGS_KEPT.length,
                ids: TRACINGS_KEPT.map(t => t.id),
-               stored: JSON.parse(localStorage.getItem("ujump_tracings_v1") || "[]").length };
+               stored: JSON.parse(tracingStore().getItem("ujump_tracings_v1") || "[]").length };
     }, { url: link(polygon(1000, 2000, 500, 44, 12, "r1")
           .concat(polygon(1005, 2005, 505, 42, 12, "r2"),
                   polygon(1010, 2010, 510, 40, 12, "r3"))) });
@@ -1639,9 +1639,9 @@ function link(annotations){
      the reason another one fails, which is a failure that teaches nobody anything. */
   await p.evaluate(() => {
     if (window.TRACING_DRAFT_SOON){ clearTimeout(TRACING_DRAFT_SOON); TRACING_DRAFT_SOON = null; }
-    try { localStorage.removeItem("ujump_tracing_drafts_v2");
-          localStorage.removeItem("ujump_tracing_drafts_v2");
-      localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e) {}
+    try { tracingStore().removeItem("ujump_tracing_drafts_v2");
+          tracingStore().removeItem("ujump_tracing_drafts_v2");
+      tracingStore().removeItem("ujump_tracing_draft_v1"); } catch (e) {}
     if (window.__padSnap){ PAD.rings = window.__padSnap.rings; UJ.tracepad.setInstance(PAD, window.__padSnap.inst); }
     PAD3D_KEY = null;
   });
@@ -1652,7 +1652,7 @@ function link(annotations){
     const n = TRACINGS_KEPT.length;
     document.querySelector(".tracingdrop").click();
     return { before: n, after: TRACINGS_KEPT.length,
-             stored: JSON.parse(localStorage.getItem("ujump_tracings_v1") || "[]").length };
+             stored: JSON.parse(tracingStore().getItem("ujump_tracings_v1") || "[]").length };
   });
   ok(gone.after === gone.before - 1 && gone.stored === gone.after,
      "Remove takes it out of the export and out of storage",
@@ -2194,9 +2194,9 @@ function link(annotations){
     };
     const drew = await p.evaluate(async ({ src }) => {
       eval("(" + src + ")()");
-      try { localStorage.removeItem("ujump_tracing_drafts_v2");
-          localStorage.removeItem("ujump_tracing_drafts_v2");
-      localStorage.removeItem("ujump_tracing_draft_v1"); } catch (e) {}
+      try { tracingStore().removeItem("ujump_tracing_drafts_v2");
+          tracingStore().removeItem("ujump_tracing_drafts_v2");
+      tracingStore().removeItem("ujump_tracing_draft_v1"); } catch (e) {}
       document.getElementById("tracingPanel").open = true;
       ["tracingX", "tracingY", "tracingZ"].forEach((id, i) => {
         document.getElementById(id).value = [240640, 207872, 33000][i];

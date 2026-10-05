@@ -420,7 +420,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-04 21:49</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-05 05:59</span></p>
 <div class="tabbar" id="mainTabs" role="tablist">
 <button type="button" class="tabbtn active" data-tab="jump" role="tab" aria-selected="true">🔍 Jump</button>
 <button type="button" class="tabbtn" data-tab="filter" role="tab" aria-selected="false">📥 Filter and show</button>
@@ -1324,6 +1324,9 @@ document.addEventListener("DOMContentLoaded", function(){
 <!-- The tracing card, shared with µJump since 2026-09-20. Same slot as there: after the modules
      it is built on, before this page's own script, which supplies the host contract its header
      lists (buildState, escHtml, postReport, UJ.cfg.tracing). -->
+<!-- The card's store. BEFORE the card, because the card asks for it on load and a store
+     that is not there yet means a first read answered from localStorage. 2026-10-05. -->
+<script src="core/kvstore.js"></script>
 <script src="core/tracingcard.js"></script>
 <!-- "Open all matches in Neuroglancer (3D)" and its traced-outline layer, 2026-09-21. -->
 <script src="core/tracedoutlines.js"></script>

@@ -64,7 +64,10 @@ const MAKE = `(function(what, nuc, nRings, z0){
   console.log("three unfinished tracings are three, not the last one");
   {
     const got = await ask(p, ([make]) => {
-      localStorage.removeItem("ujump_tracing_drafts_v2");
+      /* Through the card's own store: since core/kvstore.js it reads a mirror, and a raw
+         localStorage write is one it never sees. 2026-10-05. */
+      (function(){ const S = tracingStore();
+        for (let i = S.length - 1; i >= 0; i--){ const k = S.key(i); if (/draft/.test(k)) S.removeItem(k); } })();
       localStorage.removeItem("ujump_tracing_draft_v1");
       // eslint-disable-next-line no-eval
       const make_ = eval(make);
@@ -157,17 +160,20 @@ const MAKE = `(function(what, nuc, nRings, z0){
   console.log("\na draft saved before today is adopted, and its old copy is left alone");
   {
     const got = await ask(p, () => {
-      localStorage.removeItem("ujump_tracing_drafts_v2");
+      /* Through the card's own store: since core/kvstore.js it reads a mirror, and a raw
+         localStorage write is one it never sees. 2026-10-05. */
+      (function(){ const S = tracingStore();
+        for (let i = S.length - 1; i >= 0; i--){ const k = S.key(i); if (/draft/.test(k)) S.removeItem(k); } })();
       const old = { v: 1, at: new Date().toISOString(),
                     rings: [{ z: 1, inst: 0, points: [[0, 0], [10, 0], [10, 10]] },
                             { z: 2, inst: 0, points: [[0, 0], [10, 0], [10, 10]] }],
                     pending: [], z: 1, centre: [0, 0, 1], used: true };
-      localStorage.setItem("ujump_tracing_draft_v1", JSON.stringify(old));
+      tracingStore().setItem("ujump_tracing_draft_v1", JSON.stringify(old));
       const list = draftStore.list();
       return { n: list.length, rings: list[0] && list[0].rings.length, id: list[0] && list[0].id,
                /* BELT AND BRACES, on the day a tracing was destroyed by a save that thought it
                   knew better: the migration reads and never deletes. */
-               oldStillThere: !!localStorage.getItem("ujump_tracing_draft_v1") };
+               oldStillThere: !!tracingStore().getItem("ujump_tracing_draft_v1") };
     });
     ok(!got.__absent && got.n === 1 && got.rings === 2,
        "the single-slot draft becomes the first entry in the list", got.n + " / " + got.rings);
@@ -182,7 +188,7 @@ const MAKE = `(function(what, nuc, nRings, z0){
       for (let i = 0; i < 50; i++)
         many.push({ v: 2, id: "x" + i, title: "filler " + i, at: new Date(2020, 0, 1 + i).toISOString(),
                     rings: [{ z: i, inst: 0, points: [[0, 0], [10, 0], [10, 10]] }], pending: [] });
-      localStorage.setItem("ujump_tracing_drafts_v2", JSON.stringify({ v: 2, drafts: many }));
+      tracingStore().setItem("ujump_tracing_drafts_v2", JSON.stringify({ v: 2, drafts: many }));
       const said = document.getElementById("tracePadSay");
       said.textContent = "";
       TRACING_DRAFT_ID = "";

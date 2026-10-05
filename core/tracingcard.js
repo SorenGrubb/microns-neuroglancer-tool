@@ -271,6 +271,17 @@ function tracingKeepsLocal(){
 }
 function tracingStore(){
   if (!tracingKeepsLocal()) return TRACING_MEM_STORE;
+  /* ── INDEXEDDB, THROUGH A SYNCHRONOUS MIRROR ─────────────────────────────────  2026-10-05
+     core/kvstore.js. The ceiling that cost Søren two hours was localStorage's few megabytes,
+     shared by every tool on the origin; IndexedDB is granted against free disk. It answers
+     getItem/setItem/removeItem exactly as localStorage does, so the sixteen call sites below did
+     not change -- and it REFUSES to write until it has hydrated, because an empty mirror written
+     back over real work would be a worse bug than the one this fixes.
+
+     Until it has hydrated, this still answers localStorage: a page that reads in that window gets
+     the old copy rather than nothing, and tracingInit() waits on ready() before its first read so
+     that window is normally empty. */
+  if (window.UJ && UJ.kv && UJ.kv.hydrated()) return UJ.kv;
   try { return window.localStorage || TRACING_MEM_STORE; } catch (_e){ return TRACING_MEM_STORE; }
 }
 function tracingScopedKey(k){ var s = tracingScope(); return s ? k + ":" + s : k; }
@@ -3516,6 +3527,89 @@ try {
   });
 } catch (_e){}
 
+/* ── A SAVE MUST CONTINUE WHAT IT IS WRITING OVER ──────────────────────────────  2026-10-05
+   Søren, on two tracings that ended up holding one set of contours: *"There is some problem with
+   the nuclei segmentations here."*
+
+   WHAT THE RECOVERED DATA SHOWS. Draft dmuub74uqjeq1kw belongs to nucleus 61360735 and said so
+   correctly, all the way through. Its sheet row records 39 contours and 2041 vertices. At
+   21:05:22 on 4 October it was written with 47 contours and 1927 vertices — byte-identical to the
+   OTHER nucleus's tracing, which the pad was still carrying. The label was right and the rings
+   were somebody else's, and every layer below accepted it: the draft, the Drive file, the row.
+
+   SO THE RULE CANNOT BE ABOUT IDENTITY. A guard comparing nucleus ids would have waved this
+   straight through, because the id was never wrong. The thing that was wrong is that a save
+   REPLACED work instead of continuing it, and that is a question about the contours themselves.
+
+   CONTINUITY, MEASURED. Drawing adds contours and edits them one at a time; between two autosaves
+   1.2 s apart, almost every ring is still the ring it was. Swapping 39 for a disjoint 47 is not
+   something a hand does. So each ring gets a cheap signature -- its section, its structure, how
+   many points it has and where it starts -- and a save that keeps fewer than half of the stored
+   draft's rings is not a continuation of it.
+
+   HALF IS DELIBERATELY GENEROUS. Deleting a structure, or thinning a tracing in z, can legitimately
+   drop a lot at once; the cost of a false fork is one extra draft in the list, and the cost of a
+   false pass is what this is being written about. It triggers on a replacement, not on an edit.
+
+   AND IT FORKS RATHER THAN REFUSING. Søren, asked: *"Fork to a new draft and tell you."* A refusal
+   mid-tracing is its own way to lose work -- it stops the drawing and waits to be noticed. A fork
+   never blocks and never overwrites: the new contours are kept under a new id, the old draft is
+   left exactly as it was, and the list below shows both. Reconciling two drafts is a cheap problem.
+   2026-10-05. */
+/* ── WHERE A CONTOUR IS, NOT HOW MANY POINTS IT HAS ──────────────────────────────  2026-10-05
+   The first version signed a ring by section, structure, POINT COUNT and first point, and
+   tracingpanelcheck.js caught it within the hour: "drop the redundant points" rewrites every ring
+   on the pad at once, so every signature changed, the overlap fell to nothing and a perfectly
+   ordinary simplification forked the draft. A guard that fires on correct work is a guard somebody
+   learns to ignore.
+
+   SO A RING IS WHERE IT IS. Its section, its structure, and the centre of its points. Simplifying
+   a contour barely moves its centre; dragging a vertex moves it a little; and the thing this is
+   built to catch -- another cell's tracing arriving under this draft's id -- is somewhere else
+   entirely. Søren's two nuclei sat 26,000 voxels apart in x, which is a hundred micrometres.
+
+   FOUR MICROMETRES OF TOLERANCE, in the voxel units the pad draws in. Wide enough that no edit of
+   one contour is mistaken for a replacement, narrow enough that two different cells never look
+   like the same one. */
+var RING_NEAR = 1000;
+function ringAt(r){
+  var p = (r && r.points) || [], i, x = 0, y = 0;
+  if (!p.length) return null;
+  for (i = 0; i < p.length; i++){ x += p[i][0]; y += p[i][1]; }
+  return { k: (r.z) + "/" + (r.inst || 0), x: x / p.length, y: y / p.length };
+}
+function draftKeeps(stored, d){
+  var had = [], have = {}, n = 0, kept = 0, i, a, list, j, near;
+  ((stored && stored.rings) || []).forEach(function(r){ var q = ringAt(r); if (q){ had.push(q); n++; } });
+  if (!n) return { n: 0, kept: 0, ok: true };
+  ((d && d.rings) || []).forEach(function(r){
+    var q = ringAt(r); if (!q) return;
+    (have[q.k] = have[q.k] || []).push(q);
+  });
+  for (i = 0; i < had.length; i++){
+    a = had[i]; list = have[a.k] || []; near = false;
+    for (j = 0; j < list.length; j++){
+      if (Math.abs(list[j].x - a.x) <= RING_NEAR && Math.abs(list[j].y - a.y) <= RING_NEAR){
+        near = true; break;
+      }
+    }
+    if (near) kept++;
+  }
+  return { n: n, kept: kept, ok: kept * 2 >= n };
+}
+function draftFork(d, keeps){
+  var was = d.id;
+  TRACING_DRAFT_ID = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  d.id = TRACING_DRAFT_ID;
+  padSay("These contours are not a continuation of the tracing this draft held — "
+    + keeps.kept + " of its " + keeps.n + " contour" + (keeps.n === 1 ? "" : "s")
+    + " are still here — so they have been kept as a NEW unfinished tracing instead of written "
+    + "over it. Nothing was lost: both are in the list below.", true);
+  try { console.warn("[tracing] forked " + was + " -> " + d.id
+                    + " (kept " + keeps.kept + "/" + keeps.n + ")"); } catch (_e){}
+  return d;
+}
+
 /* ── A DRAFT IS NEVER ONLY IN A PLACE THAT CAN REFUSE ──────────────────────────  2026-10-04
    Søren, after two hours of a whole-cell tracing went: *"It had complained some times that it did
    not have enough space in the browser to save my draft. I just lost 2 hours of work."*
@@ -3659,7 +3753,15 @@ var draftStore = (function(){
         draftRescue(d, "there is no room in the list for another unfinished tracing");
         return false;
       }
-      if (at >= 0) list.splice(at, 1, d); else list.unshift(d);
+      /* A SAVE MUST CONTINUE WHAT IT WRITES OVER. See the block above draftKeeps(): the pad can
+         be carrying another tracing's rings while naming this draft correctly, and that is what
+         cost the second nucleus its 39 contours. Forked, never refused. 2026-10-05. */
+      if (at >= 0){
+        var keeps = draftKeeps(list[at], d);
+        if (!keeps.ok){ draftFork(d, keeps); at = -1; }
+        else list.splice(at, 1, d);
+      }
+      if (at < 0) list.unshift(d);
       var wrote = putOne(d);
       if (wrote) writeIndex(list);
       /* ── THE ACCOUNT IS TRIED WHETHER OR NOT THE BROWSER TOOK IT ──────────────────────────
@@ -6333,8 +6435,19 @@ function wireTracing(){
        +"what they already were, and they are still added in one press."
       :"Back to one type for all of them.");
   });
-  TRACINGS_KEPT=tracingRead();
-  tracingRenderList();
+  /* ── READ NOTHING BEFORE THE STORE IS READY ──────────────────────────────────  2026-10-05
+     This is the line that would destroy the work if the store answered an empty mirror: the list
+     is read into memory here and written back from memory later, so reading [] here means writing
+     [] over every kept tracing at the next save. The store refuses to be written before it
+     hydrates, which stops the damage; waiting here is what stops the wrong answer. */
+  function tracingLoadKept(){
+    TRACINGS_KEPT=tracingRead();
+    tracingRenderList();
+    try { draftRender(); } catch (_e){}
+  }
+  if (window.UJ && UJ.kv && !UJ.kv.hydrated())
+    UJ.kv.ready().then(tracingLoadKept, tracingLoadKept);
+  else tracingLoadKept();
   document.getElementById("tracingRead").addEventListener("click",function(){
     try{tracingReadLink();}catch(e){tracingSay(String(e&&e.message||e),true);}
   });

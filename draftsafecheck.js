@@ -29,6 +29,15 @@ const ok = (c, what, d) => {
   const errors = [];
   p.on("pageerror", e => { if (!/atob/.test(e.message)) errors.push(e.message); });
   await p.route("**/*", r => /^file:/.test(r.request().url()) ? r.continue() : r.abort());
+  /* ── THIS CHECK IS ABOUT THE DAY THE STORE SAYS NO, AND THAT IS NOW THE FALLBACK ─────────
+     core/kvstore.js moved the card's keys to IndexedDB, which has no ceiling worth filling — so
+     filling localStorage no longer makes anything refuse. The refusal is still reachable and still
+     has to behave: a private window, a blocked database, an old browser all land on localStorage
+     with its few megabytes. So IndexedDB is turned off here and the store falls back exactly as it
+     would there, and the quota below is filled for real rather than stubbed. 2026-10-05. */
+  await p.addInitScript(() => {
+    try { Object.defineProperty(window, "indexedDB", { get(){ return undefined; } }); } catch (_e){}
+  });
   await p.goto("file://" + page_(PAGE));
   await p.waitForTimeout(3500);
 
@@ -121,27 +130,35 @@ const ok = (c, what, d) => {
        is the one he will actually meet on the morning he reloads, with a v2 blob holding every
        draft in one value. Splitting it writes each to its own key and then replaces the blob with
        the small index, so the browser has MORE room afterwards, not less. */
-    localStorage.clear();
+    /* THROUGH THE CARD'S OWN STORE, not through localStorage behind its back. Since core/kvstore.js
+       the card reads a mirror, and a raw localStorage write is a write it never sees -- which would
+       make this section test nothing at all. The v2-to-v3 split being asserted is draftStore's and
+       is the same whichever backend holds the bytes. 2026-10-05. */
+    const S = tracingStore();
+    const keysOf = function(){
+      const a = []; for (let i = 0; i < S.length; i++) a.push(S.key(i)); return a;
+    };
+    const wipe = function(){ keysOf().forEach(function(k){ try { S.removeItem(k); } catch (_e){} }); };
+    wipe();
     const two = [draft("old_a", 4), draft("old_b", 5)];
-    const k = Object.keys(localStorage), scoped = (function(){
+    const scoped = (function(){
       /* Whatever key this page's scope puts it under -- the card builds it, not this check. */
       draftStore.put(draft("probe", 1));
-      const kk = Object.keys(localStorage).filter(function(x){ return x.indexOf("#") < 0
-                   && x.indexOf("draft") >= 0; });
-      localStorage.clear();
+      const kk = keysOf().filter(function(x){ return x.indexOf("#") < 0 && x.indexOf("draft") >= 0; });
+      wipe();
       return kk[0] || "";
     })();
     out.scoped = scoped;
     const before = JSON.stringify({ v: 2, drafts: two });
-    localStorage.setItem(scoped, before);
+    S.setItem(scoped, before);
     out.beforeBytes = before.length;
     const listed = draftStore.list();
     out.migrated = listed.length;
     out.migratedBack = listed.map(function(d){ return d.id + ":" + d.rings.length; }).join(" ");
-    out.nowIndex = (function(){ try { return !!JSON.parse(localStorage.getItem(scoped)).index; }
+    out.nowIndex = (function(){ try { return !!JSON.parse(S.getItem(scoped)).index; }
                                 catch (_e){ return false; } })();
-    out.afterBytes = (localStorage.getItem(scoped) || "").length;
-    out.perKey = Object.keys(localStorage).filter(function(x){ return x.indexOf("#") > 0; }).length;
+    out.afterBytes = (S.getItem(scoped) || "").length;
+    out.perKey = keysOf().filter(function(x){ return x.indexOf("#") > 0; }).length;
 
     draftPush = window.__realPush;
     return out;
