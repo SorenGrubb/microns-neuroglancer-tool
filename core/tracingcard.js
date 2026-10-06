@@ -897,6 +897,59 @@ function tracingNextIndex(kind, label, nuc, root, skip){
   return (tracingKindNumbered(wantK) ? Math.max(top, have) : top) + 1;
 }
 
+/* ── A ROW MAY NOT DISAGREE WITH ITSELF ABOUT WHICH CELL IT IS ──────  2026-10-06
+   Søren, four structures filed under a cell 125 µm from where they were drawn: *"now it mixed
+   two different tracings completely."*
+
+   THE COORDINATE WAS RIGHT. 427087, 220193, 1940 is where those contours are. The nucleus id was
+   394673650, whose own centre is 402334, 232283, 479. So "are the contours near the cell
+   coordinate?" would have passed all four; what is wrong is that the row names two different places
+   at once.
+
+   LOCATION FIRST, NUCLEUS SECOND, ROOT NEVER. Søren: *"we can't always trust the root ID...
+   many different cells share the same root ID... more important is the cell location, which is put
+   as close to the nucleus center as possible."* A cell coordinate is PUT at the nucleus centre, so
+   25 µm is generous slack for one typed by hand and nowhere near a hundred.
+
+   IT RETURNS NOTHING WHEN THE PAGE CANNOT ANSWER -- ωJump has no nucleus table, and a cell
+   nobody has named has no centre to be far from. A guard that guesses is worse than one that is
+   quiet, and this one has to be right every time or it will be switched off. */
+var TRACING_CELL_FAR_UM = 25;
+function tracingCellDisagrees(){
+  try {
+    var nid = (document.getElementById("tracingNucId") || {}).value;
+    nid = String(nid || "").trim();
+    var at = tracingCellAtVal();
+    if (!nid || !at) return null;
+    if (typeof window.tracingNucCentroid !== "function") return null;
+    var nc = window.tracingNucCentroid(nid);
+    if (!nc || !isFinite(nc.xVox)) return null;
+    var c = at.split(",").map(Number);
+    if (c.length !== 3 || !c.every(isFinite)) return null;
+    var res = (UJ.cfg && UJ.cfg.res) || [4, 4, 40];
+    var dx = (c[0] - nc.xVox) * res[0], dy = (c[1] - nc.yVox) * res[1],
+        dz = (c[2] - nc.zVox) * res[2];
+    var um = Math.sqrt(dx * dx + dy * dy + dz * dz) / 1000;
+    if (!(um > TRACING_CELL_FAR_UM)) return null;
+    /* WHICH CELL IT REALLY IS, when the page can say. The same reader the coordinate box is filled
+       from, so the answer offered here is the answer that box would have given. */
+    var near = null;
+    try { near = tracingNearestCell(c); } catch (_e){ near = null; }
+    return { um: um, nid: nid, at: at,
+             nearId: (near && near.nucleusId) ? String(near.nucleusId) : "",
+             nearUm: near ? (near.distNm / 1000) : 0 };
+  } catch (_e){ return null; }
+}
+function tracingCellDisagreeSay(d){
+  return "These contours are filed at " + tracingCoordShow(d.at) + ", and nucleus " + d.nid
+    + " is " + d.um.toFixed(1) + " \u00b5m from there \u2014 they are two different cells, so "
+    + "nothing has been added."
+    + (d.nearId
+        ? " The cell at that coordinate is nucleus " + d.nearId + ", "
+          + d.nearUm.toFixed(1) + " \u00b5m away. Put that in the nucleus box, or clear the box and "
+          + "the coordinate and read them again."
+        : " Clear the nucleus and cell-centre boxes and read them again from the coordinate.");
+}
 function tracingCurrentAll(){
   /* ── WHAT IS ON THE PAD, NOT WHAT WAS ON IT WHEN IT OPENED ─────────────  2026-10-05
      Søren: *"as soon as I added it to the dataset, the whole cell mesh disappeared."* It never
@@ -962,6 +1015,13 @@ function tracingCurrentAll(){
   const nid=(document.getElementById("tracingNucId").value||"").trim();
   const rid=(document.getElementById("tracingRootId").value||"").trim();
   const type=document.getElementById("tracingType").value||"traced";
+  /* ── BEFORE ANYTHING IS BUILT ─────────────────────────────  2026-10-06
+     Here rather than at the button, because the Neuroglancer link goes through this function too and
+     a link naming the wrong cell is a quieter version of the same mistake. */
+  {
+    const dis = tracingCellDisagrees();
+    if (dis){ tracingSay(tracingCellDisagreeSay(dis), true); return []; }
+  }
 
   /* A SERIES IS A KIND, NOT A PAD. Two mitochondria and a lysosome are Mitochondrion 1,
      Mitochondrion 2 and Lysosome 1 -- so the numbering is per series, each starting from what the
@@ -1017,9 +1077,19 @@ function tracingCurrentAll(){
          The root and the coordinate keep their old meaning for everything else, because a cell
          traced from a point inside a process has a root id and nothing else, and that is the case
          the root test was added for. The root id is not wrong here; it is WEAKER. */
+      /* ── AND THE ROOT ID IS THE LAST THING ASKED ───────────  2026-10-06
+         Søren: *"we can't always trust the root ID, because they are really bad often and
+         especially for the vasculature. So, in this case many different cells share the same root
+         ID... more important is the cell location."*
+
+         So the order is the order he gave: the nucleus settles it both ways when both have one (the
+         2 October rule, unchanged); failing that the LOCATION, which is put at the nucleus centre
+         and so is the cell's own place; and only with neither is a shared root id evidence of
+         anything. It was root-or-location, which let a root id shared by a hundred vessels outrank
+         two coordinates that disagreed. */
       if(here.nuc&&c.nuc) return c.nuc===here.nuc;
-      return !!((here.root&&c.root&&c.root===here.root)
-              ||(here.at&&c.at&&c.at===here.at));
+      if(here.at&&c.at) return c.at===here.at;
+      return !!(here.root&&c.root&&c.root===here.root);
     };
     /* ── AND ONLY FOR SOMETHING A CELL HAS ONE OF ──────────────────────────────────  2026-09-27
        Hesham: "if I'm logging multiple lysosomes I still have to change the color of the annotation
@@ -4935,10 +5005,24 @@ async function tracingOpenShared(sid, btn){
       if (what.value === "__other") document.getElementById("tracingName").value = st.name || "";
     }
     if (st.color) document.getElementById("tracingColor").value = st.color;
-    if (st.nucleusId) document.getElementById("tracingNucId").value = st.nucleusId;
-    if (st.rootId) document.getElementById("tracingRootId").value = st.rootId;
-    { const ca = document.getElementById("tracingCellAt"), cc = st.cellCoord || t.cellCoord;
-      if (ca && cc) ca.value = tracingCoordShow(cc); }
+    /* ── ONE DECISION, NOT THREE ─────────────────────────  2026-10-06
+       This was three independent `if`s — nucleus id, root id, coordinate, three sources with
+       nothing requiring them to agree. A tracing carrying a coordinate and no nucleus id moved the
+       coordinate to ITS cell and left the two ids naming the last one, which is a row that
+       disagrees with itself before a single contour is drawn.
+
+       The three fields are one fact: which cell this is. They arrive together or the ones that did
+       not arrive are CLEARED, because an empty box is a question and a stale box is a wrong
+       answer. */
+    {
+      const nucBox = document.getElementById("tracingNucId");
+      const rootBox = document.getElementById("tracingRootId");
+      const ca = document.getElementById("tracingCellAt");
+      const cc = st.cellCoord || t.cellCoord;
+      if (nucBox) nucBox.value = st.nucleusId || "";
+      if (rootBox) rootBox.value = st.rootId || "";
+      if (ca) ca.value = cc ? tracingCoordShow(cc) : "";
+    }
     /* FILED AGAINST NO CELL: opened, it looks for one -- the nearest nucleus to where it was drawn --
        so adding it again files the next version under the cell. How Søren's λJump lysosome, traced
        before the card could read λJump's nuclei, gets its cell (2026-09-21). */
@@ -6752,6 +6836,42 @@ function wireTracing(){
     const el=document.getElementById(id);
     if(el)el.addEventListener("focus",function(){try{el.select();}catch(_e){}});
   });
+  /* ── MOVE THE COORDINATE AND THE IDS FOLLOW ───────────────────  2026-10-06
+     Søren, asked what the boxes should do when the cell changes: *"Clear them when the cell
+     changes."* They used to keep whatever was in them -- "never over something typed", which is
+     right for a typo and wrong for a different cell, and is how four structures came to be filed
+     under a cell 125 µm from where they were drawn.
+
+     ONLY WHEN THE CELL REALLY CHANGED: the nearest nucleus to the new coordinate has to BE a
+     different one. Nudging a coordinate a micrometre within the same cell leaves everything alone,
+     and a page with no nucleus table says nothing and changes nothing. */
+  (function(){
+    const at = document.getElementById("tracingCellAt");
+    if (!at) return;
+    at.addEventListener("change", function(){
+      const v = tracingCellAtVal();
+      if (!v) return;
+      let c = null;
+      try { c = tracingNearestCell(v.split(",").map(Number)); } catch (_e){ return; }
+      if (!c || !c.nucleusId) return;
+      const nucEl = document.getElementById("tracingNucId");
+      const rootEl = document.getElementById("tracingRootId");
+      const had = nucEl ? String(nucEl.value || "").trim() : "";
+      if (had === String(c.nucleusId)) return;
+      if (nucEl) nucEl.value = String(c.nucleusId);
+      /* THE ROOT ID IS NOT CARRIED OVER. S\u00f8ren: *"we can't always trust the root ID... many
+         different cells share the same root ID."* One belonging to the cell you have left is worse
+         than none, and an empty box is read again from the coordinate. */
+      if (rootEl) rootEl.value = "";
+      try { tracingSuggestType(); } catch (_e){}
+      tracingSay(had
+        ? "That coordinate is in a different cell \u2014 nucleus " + c.nucleusId + ", "
+          + (c.distNm / 1000).toFixed(1) + " \u00b5m away. The nucleus box now says so and the "
+          + "fragment box is cleared; read it again if you need it."
+        : "Nucleus " + c.nucleusId + " is " + (c.distNm / 1000).toFixed(1)
+          + " \u00b5m from that coordinate, and is filled in below.");
+    });
+  })();
   /* Typing an id in by hand suggests the type too -- the ids are not only ever filled by the
      coordinate read, and somebody who knows the cell should not have to open the pad to get it. */
   ["tracingNucId","tracingRootId"].forEach(function(id){
