@@ -1,23 +1,25 @@
-/* A row may not disagree with itself about which cell it is.                          2026-10-06
+/* The coordinate is the cell.                                                         2026-10-06
 
-   Søren, four structures filed under a cell 125 µm from where they were drawn: *"now it mixed two
-   different tracings completely.... WE NEED TO FIX THIS! WHAT IS GOING ON???"*
+   Søren: *"For these cells I told you the nucleus and rootID are useless, because the vasculature
+   segmentation is crap. Therefor I am tracing those myself and reporting what cell is there. I want
+   you to fix that when whole cell meshes and nucleus meshes are traced for a cell that has been
+   newly reported with a coordinate for the cell center, that is what defines the cell and not the
+   faulty rootID or nucleus ID."*
 
-   nucleus_1791311494766_j6b2 and three others carry nucleusId 394673650 and rootId 6475165144,
-   whose own centre is 402334, 232283, 479 — while their cellCoord, and their contours, are at
-   427087, 220193, 1940. Cell 394673650's panel then showed two whole cells, two nuclei, two
-   centrioles and two cilia.
+   HIS ROWS WERE NEVER WRONG. The panel read them wrongly, and it was one line:
 
-   THE COORDINATE WAS RIGHT THE WHOLE TIME, which is why the obvious test is the wrong one: "are the
-   contours near the cell coordinate?" passes all four. The row disagrees with ITSELF — its
-   coordinate names one place and its nucleus id names a cell a hundred micrometres from there.
+       return nuc ? "n:" + nuc : (root ? "r:" + root : (coord ? "c:" + coord : ""));
 
-   AND NOT THROUGH THE ROOT ID. Søren: *"in h01 we can't always trust the root ID... many different
-   cells share the same root ID... more important is the cell location, which is put as close to the
-   nucleus center as possible."*
+   Nucleus first, root second, coordinate LAST. Four structures reported at 427087, 220193, 1940
+   therefore appeared inside cell 394673650's panel, which is 125 µm away, on the strength of a
+   nucleus id the segmentation had got wrong.
 
-   THE NUMBERS BELOW ARE HIS. Nothing here is a toy: the two cells, their centres and the distance
-   between them are the ones out of his sheet.
+   AND IT WAS FIVE LINES, NOT ONE: the same `nuc || root` test, with no coordinate in it at all,
+   written out again in tracingBareOf, twice in tracingNextIndex, and once in tracingCurrentAll.
+   That is why the second cell's FIRST centriole came back named "Centriole / centrosome 2".
+
+   EVERY NUMBER HERE IS HIS. The two cells, their centres, the kinds and the counts are the ones out
+   of his sheet on the evening of 6 October.
 
    Run: node cellidentitycheck.js [page.html]      (default ujump.html) */
 const { chromium } = require("playwright");
@@ -29,11 +31,44 @@ const ok = (c, what, d) => {
   if (!c) fails++;
 };
 
-/* His two cells, as the sheet records them. */
-const CELLS = `window.__CELLS = {
-  "394673650": { xVox: 402334, yVox: 232283, zVox:  479, from: "nucleus" },
-  "38762771":  { xVox: 426863, yVox: 220507, zVox: 2024, from: "nucleus" }
-};`;
+/* His ten rows. The four at the end carry the same junk nucleus id as the first four and sit
+   125 µm away, at their own reported centre. */
+const A = { nuc: "394673650", root: "6475165144", at: "402334,232283,479" };
+const B = { nuc: "394673650", root: "6475165144", at: "427087,220193,1940" };
+const C = { nuc: "38762771",  root: "6198781614", at: "426863,220507,2024" };
+const SHARED = [
+  { structureId: "primary-cilium-base-tip_1790279760231_w92v", name: "Primary cilium (base + tip)",
+    kind: "cilium", instanceOf: "cilium", instanceIndex: 1, timestamp: "2026-10-06T19:42:11Z",
+    cellType: "Endothelial cell", nucleusId: A.nuc, rootId: A.root, cellCoord: A.at },
+  { structureId: "whole-cell_1790370589006_pb15", name: "Whole cell", kind: "cell",
+    timestamp: "2026-10-06T19:42:11Z", cellType: "Endothelial cell",
+    nucleusId: A.nuc, rootId: A.root, cellCoord: A.at },
+  { structureId: "nucleus_1790453685825_dkdr", name: "Nucleus", kind: "nucleus",
+    timestamp: "2026-10-06T19:42:12Z", cellType: "Endothelial cell",
+    nucleusId: A.nuc, rootId: A.root, cellCoord: A.at },
+  { structureId: "centriole-centrosome_1790454525224_u8as", name: "Centriole / centrosome",
+    kind: "centriole", instanceOf: "centriole", instanceIndex: 1, timestamp: "2026-10-06T19:17:02Z",
+    cellType: "Endothelial cell", nucleusId: A.nuc, rootId: A.root, cellCoord: A.at },
+  { structureId: "nucleus_1790886647285_qf2b", name: "Nucleus", kind: "nucleus",
+    timestamp: "2026-10-06T19:59:08Z", cellType: "Endothelial cell",
+    nucleusId: C.nuc, rootId: C.root, cellCoord: C.at },
+  { structureId: "centriole-centrosome_1791311483003_rqtp__i1", name: "Centriole / centrosome",
+    kind: "centriole", instanceOf: "centriole", instanceIndex: 1, timestamp: "2026-10-06T19:58:13Z",
+    cellType: "Endothelial cell", nucleusId: C.nuc, rootId: C.root, cellCoord: C.at },
+  /* ── THE CELL HE REPORTED HIMSELF ──────────────────────────────────────────────────────── */
+  { structureId: "nucleus_1791311494766_j6b2", name: "Nucleus", kind: "nucleus",
+    timestamp: "2026-10-06T20:35:53Z", cellType: "Endothelial cell",
+    nucleusId: B.nuc, rootId: B.root, cellCoord: B.at },
+  { structureId: "centriole-centrosome_1791315243496_dxqr__i1", name: "Centriole / centrosome 2",
+    kind: "centriole", instanceOf: "centriole", instanceIndex: 2, timestamp: "2026-10-06T20:34:03Z",
+    cellType: "Endothelial cell", nucleusId: B.nuc, rootId: B.root, cellCoord: B.at },
+  { structureId: "centriole-centrosome_1791315495090_khqx__i2", name: "Primary cilium (base + tip)",
+    kind: "cilium", instanceOf: "cilium", instanceIndex: 1, timestamp: "2026-10-06T20:38:15Z",
+    cellType: "Endothelial cell", nucleusId: B.nuc, rootId: B.root, cellCoord: B.at },
+  { structureId: "centriole-centrosome_1791318953251_jltv9__i3", name: "Whole cell", kind: "cell",
+    timestamp: "2026-10-06T20:35:53Z", cellType: "Endothelial cell",
+    nucleusId: B.nuc, rootId: B.root, cellCoord: B.at }
+];
 
 (async () => {
   const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
@@ -43,125 +78,138 @@ const CELLS = `window.__CELLS = {
   await p.route("**/*", r => /^file:/.test(r.request().url()) ? r.continue() : r.abort());
   await p.goto("file://" + page_(PAGE));
   await p.waitForTimeout(3500);
+  await p.evaluate(rows => { window.TRACING_SHARED = TRACING_SHARED = rows; }, SHARED);
 
-  /* The page's own nucleus table needs the network, so the two hooks the guard reads are stood in
-     for with his two cells. They are the SAME hooks µJump defines — window.tracingNucCentroid for
-     "where is this nucleus" and tracingNearestCell for "which cell is at this coordinate" — so what
-     is under test is the guard, not the table. */
-  await p.evaluate(CELLS + `
-    window.tracingNucCentroid = function(nid){ return window.__CELLS[String(nid)] || null; };
-    window.tracingNearestCell = tracingNearestCell = function(pos){
-      var best = null, bd = 1e18;
-      Object.keys(window.__CELLS).forEach(function(k){
-        var c = window.__CELLS[k];
-        var dx = (pos[0]-c.xVox)*4, dy = (pos[1]-c.yVox)*4, dz = (pos[2]-c.zVox)*40;
-        var d = Math.sqrt(dx*dx+dy*dy+dz*dz);
-        if (d < bd){ bd = d; best = { nucleusId: k, coord: [c.xVox,c.yVox,c.zVox], distNm: d, label: "" }; }
-      });
-      return (best && best.distNm <= 10000) ? best : null;
-    };
-  `);
-
-  const setUp = (nuc, root, at) => `(function(){
-    document.getElementById("tracingPanel").open = true;
-    PAD = UJ.tracepad.create();
-    PAD.rings = [{ z: 1941, inst: 0, points: [[427000,220100],[427200,220100],[427200,220300],[427000,220300]] },
-                 { z: 1943, inst: 0, points: [[427000,220100],[427200,220100],[427200,220300],[427000,220300]] }];
-    PAD.z = 1941; PAD.inst = 0;
-    TRACING_BASE_ID = ""; PAD_EDIT_ID = ""; PAD_EDIT_IDS = {}; PAD_INST_KIND = {};
-    TRACING_PENDING = { rings: UJ.tracepad.toRings(PAD) };
-    TRACINGS_KEPT = [];
-    document.getElementById("tracingEachOwn").checked = false;
-    document.getElementById("tracingWhat").value = "__nucleus";
-    document.getElementById("tracingType").value = "Endothelial cell";
-    document.getElementById("tracingNucId").value = ${JSON.stringify(nuc)};
-    document.getElementById("tracingRootId").value = ${JSON.stringify(root)};
-    document.getElementById("tracingCellAt").value = ${JSON.stringify(at)};
-    document.getElementById("tracingFound").style.display = "";
-    var all = tracingCurrentAll() || [];
-    return { n: all.length, said: (document.getElementById("tracingStatus")||{}).textContent || "" };
-  })()`;
-
-  console.log("the submission that started this");
-  {
-    /* His exact state: the coordinate of one cell, the ids of another. */
-    const r = await p.evaluate(setUp("394673650", "6475165144", "427087, 220193, 1940"));
-    ok(r.n === 0,
-       "NOTHING IS FILED when the coordinate and the nucleus id name two different cells — four "
-       + "structures went into cell 394673650 this way, whose own centre is 125 µm from where they "
-       + "were drawn", r.n + " structures");
-    /* 124.7 µm, not the ~99 a glance at the x column gives: dy is 48 µm and dz, at 40 nm a
-       section, is another 58. Measured by the guard rather than estimated by me. */
-    ok(/124\.7 µm/.test(r.said),
-       "...and it says how far apart they are, in three dimensions and measured rather than "
-       + "asserted", r.said.slice(0, 95));
-    ok(/38762771/.test(r.said),
-       "...and names the cell the coordinate is actually at, so the repair is one paste",
-       /38762771/.test(r.said) ? "offers nucleus 38762771" : "offers nothing");
-  }
-
-  console.log("\nand the submissions that must still go through");
-  {
-    const r = await p.evaluate(setUp("38762771", "6198781614", "427087, 220193, 1940"));
-    ok(r.n === 1, "the same contours under the RIGHT nucleus are filed", r.n + " structure");
-  }
-  {
-    /* 1.6 µm out, which is a coordinate placed by hand at a nucleus centre. */
-    const r = await p.evaluate(setUp("38762771", "", "426863, 220507, 2024"));
-    ok(r.n === 1,
-       "...and a coordinate a micrometre or two off its nucleus is the ordinary case, not a "
-       + "disagreement — a guard that refuses correct work is a guard somebody switches off",
-       r.n + " structure");
-  }
-  {
-    const r = await p.evaluate(setUp("", "6475165144", "427087, 220193, 1940"));
-    ok(r.n === 1,
-       "...and with no nucleus id there is nothing to disagree with, so it goes", r.n + " structure");
-  }
-  {
-    const r = await p.evaluate(`(function(){
-      var keep = window.tracingNucCentroid;
-      window.tracingNucCentroid = undefined;
-      var out = ${setUp("394673650", "6475165144", "427087, 220193, 1940")};
-      window.tracingNucCentroid = keep;
-      return out;
-    })()`);
-    ok(r.n === 1,
-       "...and a page with no nucleus table says nothing and files it — ωJump has none, and a guard "
-       + "that guesses is worse than one that is quiet", r.n + " structure");
-  }
-
-  console.log("\nand moving the coordinate moves the ids");
+  console.log("the panel that showed one cell's structures inside another's");
   {
     const r = await p.evaluate(() => {
-      const out = {};
-      const nuc = document.getElementById("tracingNucId");
-      const root = document.getElementById("tracingRootId");
-      const at = document.getElementById("tracingCellAt");
-      nuc.value = "394673650"; root.value = "6475165144";
-      at.value = "427087, 220193, 1940";
-      at.dispatchEvent(new Event("change"));
-      out.nuc = nuc.value; out.root = root.value;
-      out.said = (document.getElementById("tracingStatus") || {}).textContent || "";
-      /* AND A NUDGE WITHIN ONE CELL CHANGES NOTHING. */
-      root.value = "6198781614";
-      at.value = "427090, 220196, 1941";
-      at.dispatchEvent(new Event("change"));
-      out.nucAfter = nuc.value; out.rootAfter = root.value;
-      return out;
+      const gs = tracingGroupByCell(TRACING_SHARED, t => t.nucleusId, t => t.rootId, t => t.cellCoord);
+      return gs.map(g => ({ key: g.key, coord: g.coord, nuc: g.nuc,
+                            n: g.items.length,
+                            what: g.items.map(x => x.t.name).join(", ") }));
     });
-    ok(r.nuc === "38762771",
-       "a coordinate in another cell refills the nucleus box with that cell", r.nuc);
-    ok(r.root === "",
-       "...and CLEARS the fragment box rather than carrying over one belonging to the cell you "
-       + "left — Søren: \"many different cells share the same root ID\"",
-       JSON.stringify(r.root));
-    ok(/different cell/i.test(r.said) && /38762771/.test(r.said),
-       "...out loud, because a box that changes itself in silence is its own hazard",
-       r.said.slice(0, 90));
-    ok(r.nucAfter === "38762771" && r.rootAfter === "6198781614",
-       "...while a nudge of a few voxels inside one cell leaves both alone",
-       r.nucAfter + " / " + r.rootAfter);
+    ok(r.length === 3,
+       "THREE CELLS, not two — two reported centres 125 µm apart are two cells however much their "
+       + "nucleus ids agree, and the panel showed cell 394673650 holding eight tracings when four "
+       + "of them were somewhere else entirely",
+       r.length + " groups: " + r.map(g => g.n).join(" + "));
+    ok(r.every(g => /^c:/.test(g.key)),
+       "...keyed on the coordinate, which is the thing Søren reports and the only identity a "
+       + "vascular cell has that he trusts", r.map(g => g.key).join("  "));
+    const atB = r.filter(g => g.coord === "427087,220193,1940")[0];
+    ok(!!atB && atB.n === 4,
+       "...so the four he reported at 427087, 220193, 1940 are their own cell",
+       atB ? atB.n + " tracings: " + atB.what : "no group there");
+    const atA = r.filter(g => g.coord === "402334,232283,479")[0];
+    ok(!!atA && atA.n === 4,
+       "...and cell 394673650 is back to its own four", atA ? atA.n + " tracings" : "no group there");
+  }
+
+  console.log("\nand the heading says where, before it says what the segmentation claims");
+  {
+    const r = await p.evaluate(() =>
+      tracingCellHead("394673650", "6475165144", "Endothelial cell", 4, "427087,220193,1940")
+        .replace(/<[^>]+>/g, ""));
+    ok(/Endothelial cell.{0,12}cell at 427087, 220193, 1940.{0,12}nucleus 394673650/.test(r),
+       "the place comes first and the ids follow as a claim", r.slice(0, 95));
+  }
+
+  console.log("\nand the numbering counts siblings of THIS cell");
+  {
+    const r = await p.evaluate(() => ({
+      /* The second cell already has ONE centriole of its own (the __i1 row). Its next is 2 —
+         but ONLY because of that one, not because cell A also has one. */
+      bAgain: tracingNextIndex("centriole", "Centriole / centrosome", "394673650", "6475165144",
+                               [], "427087,220193,1940"),
+      /* Cell C has one centriole, so its next is 2 as well, and the eight rows on A and B are
+         nothing to do with it. */
+      cNext: tracingNextIndex("centriole", "Centriole / centrosome", "38762771", "6198781614",
+                              [], "426863,220507,2024"),
+      /* A cell nobody has traced starts at 1, however many centrioles the junk nucleus id has. */
+      fresh: tracingNextIndex("centriole", "Centriole / centrosome", "394673650", "6475165144",
+                              [], "500000,500000,900")
+    }));
+    ok(r.fresh === 1,
+       "A NEWLY REPORTED CELL STARTS AT 1 — this is the line that made the second cell's FIRST "
+       + "centriole come back as \"Centriole / centrosome 2\": the numbering counted the other "
+       + "cell's centriole as its sibling because they share a junk nucleus id",
+       "next centriole on an untraced coordinate: " + r.fresh);
+    /* 3, not 2: that cell's one centriole carries instanceIndex 2 — the artefact of the very bug
+       this change fixes, written into the sheet before it was fixed. The allocator answers "one
+       more than the highest this CELL carries", and the highest it carries is 2. Renumbering
+       somebody's published structures is not this change's job. */
+    ok(r.bAgain === 3,
+       "...a cell whose one centriole is published as number 2 answers 3, because the allocator "
+       + "never reuses a number a published structure already has", String(r.bAgain));
+    ok(r.cNext === 2, "...and so does the third cell, from its own one", String(r.cNext));
+  }
+
+  console.log("\nand nothing is refused");
+  {
+    const r = await p.evaluate(() => {
+      document.getElementById("tracingPanel").open = true;
+      PAD = UJ.tracepad.create();
+      PAD.rings = [{ z: 1941, inst: 0, points: [[427000,220100],[427200,220100],[427200,220300]] },
+                   { z: 1943, inst: 0, points: [[427000,220100],[427200,220100],[427200,220300]] }];
+      PAD.z = 1941; PAD.inst = 0;
+      TRACING_BASE_ID = ""; PAD_EDIT_ID = ""; PAD_EDIT_IDS = {}; PAD_INST_KIND = {};
+      TRACING_PENDING = { rings: UJ.tracepad.toRings(PAD) };
+      TRACINGS_KEPT = [];
+      document.getElementById("tracingEachOwn").checked = false;
+      document.getElementById("tracingWhat").value = "__nucleus";
+      document.getElementById("tracingType").value = "Endothelial cell";
+      /* His state exactly: a coordinate he reported, and a nucleus id the segmentation got wrong. */
+      document.getElementById("tracingNucId").value = "394673650";
+      document.getElementById("tracingRootId").value = "6475165144";
+      document.getElementById("tracingCellAt").value = "427087, 220193, 1940";
+      document.getElementById("tracingFound").style.display = "";
+      window.tracingNucCentroid = function(nid){
+        return nid === "394673650" ? { xVox: 402334, yVox: 232283, zVox: 479, from: "nucleus" } : null;
+      };
+      const all = tracingCurrentAll() || [];
+      return { n: all.length, coord: (all[0] || {}).cell_coord,
+               status: (document.getElementById("tracingStatus") || {}).textContent || "",
+               note: (document.getElementById("tracingAtSay") || {}).textContent || "" };
+    });
+    ok(r.n === 1,
+       "A VASCULAR TRACING IS FILED, nucleus id 125 µm away and all — for an hour on 6 October this "
+       + "refused, which would have blocked every tracing Søren is doing, because the ids being "
+       + "wrong is WHY he is tracing these by hand",
+       r.n + " structure");
+    ok(!/two different cells|nothing has been added/i.test(r.status),
+       "...and the status line does not say it was refused",
+       JSON.stringify(r.status.slice(0, 70)));
+    ok(/124\.7 µm/.test(r.note) && /the coordinate is what files this tracing/i.test(r.note),
+       "...but the disagreement is said once, beside the coordinate box it is about",
+       r.note.slice(0, 110));
+  }
+
+  console.log("\nand the one definition is one definition");
+  {
+    const r = await p.evaluate(() => ({
+      coordBeatsNucleus: tracingSameCell({ at: "1,2,3", nuc: "x" }, { at: "1,2,3", nuc: "y" }),
+      coordSplitsOneNucleus: tracingSameCell({ at: "1,2,3", nuc: "x" }, { at: "9,9,9", nuc: "x" }),
+      spacingIsNotIdentity: tracingSameCell({ at: "1, 2, 3" }, { at: "1,2,3" }),
+      nucleusWhenNoCoord: tracingSameCell({ nuc: "x", root: "r" }, { nuc: "x", root: "q" }),
+      nucleusSplitsOneRoot: tracingSameCell({ nuc: "x", root: "r" }, { nuc: "y", root: "r" }),
+      rootOnlyLast: tracingSameCell({ root: "r" }, { root: "r" }),
+      nothingIsNotAMatch: tracingSameCell({}, {}),
+      scopeIsNotACell: tracingCellOf({ nucleusId: "janelia:" }).nuc
+    }));
+    ok(r.coordBeatsNucleus === true && r.coordSplitsOneNucleus === false,
+       "the coordinate decides when both have one, in both directions",
+       r.coordBeatsNucleus + " / " + r.coordSplitsOneNucleus);
+    ok(r.spacingIsNotIdentity === true,
+       "...and spacing is formatting, not identity — the box shows \"1, 2, 3\" and the sheet stores "
+       + "\"1,2,3\"", String(r.spacingIsNotIdentity));
+    ok(r.nucleusWhenNoCoord === true && r.nucleusSplitsOneRoot === false,
+       "...the nucleus decides next, and splits a shared root id",
+       r.nucleusWhenNoCoord + " / " + r.nucleusSplitsOneRoot);
+    ok(r.rootOnlyLast === true, "...and a root id is evidence only when there is nothing else");
+    ok(r.nothingIsNotAMatch === false,
+       "...while two tracings filed against nothing are not thereby the same cell");
+    ok(r.scopeIsNotACell === "",
+       "...and ωJump's \"<volume>:\" is a scope, not a nucleus", JSON.stringify(r.scopeIsNotACell));
   }
 
   ok(errors.length === 0, "the page still loads with no new errors",

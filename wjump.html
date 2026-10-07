@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-10-06 20:52</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-10-06 21:20</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -15782,17 +15782,66 @@ let TRACING_PENDING=null;
    would like is that they are organized as sub-elements of the cell they were traced in". A series
    is per cell, so two cells each having a Lysosome 1 is right; the flat list hid the cell. See
    src/the_tracings_group_by_cell.py. */
+/* ── ONE DEFINITION OF "THE SAME CELL" ────────────────────────  2026-10-06
+   Søren: *"the nucleus and rootID are useless, because the vasculature segmentation is crap.
+   Therefor I am tracing those myself and reporting what cell is there... a coordinate for the cell
+   center, that is what defines the cell and not the faulty rootID or nucleus ID."*
+
+   THE ORDER IS HIS: coordinate, then nucleus, then root. A reported centre is a person saying "this
+   is a cell and it is here"; a nucleus id is the segmentation's claim; a root id in vasculature can
+   cover a hundred cells at once.
+
+   EXACT, on his instruction. Two reported centres 3.7 µm apart are two cells, not one re-reported
+   slightly differently — asked directly, he chose "group on the exact coordinate". So the only
+   normalising here is whitespace and rounding, which is formatting rather than tolerance: the box
+   shows "427087, 220193, 1940" and the sheet stores "427087,220193,1940", and those are one place.
+
+   THERE WAS ONE OF THESE FOR EVERY CALLER. The same `nuc || root` test, with no coordinate in it at
+   all, was written out in tracingBareOf, twice in tracingNextIndex and once in tracingCurrentAll —
+   which is why a second cell's first centriole came back named "Centriole / centrosome 2". Five
+   copies of one decision is how a rule gets fixed in one place and stays broken in four. */
+function tracingCoordKey(v){
+  var n = String(v || "").split(/[\s,;]+/).filter(Boolean).map(Number);
+  return (n.length === 3 && n.every(isFinite)) ? n.map(Math.round).join(",") : "";
+}
+/* A row from any of the three shapes this card holds cells in: the sheet's camelCase, the kept
+   list's snake_case, and the card's own boxes. */
+function tracingCellOf(x){
+  /* ωJump files a tracing with no nucleus as "<volume>:" — a scope, not a cell (2026-09-21). */
+  var bare = function(v){ var s = String(v || ""); var i = s.indexOf(":"); return i < 0 ? s : s.slice(i + 1); };
+  return { nuc:  bare(x && (x.nucleus_id || x.nucleusId)),
+           root: bare(x && (x.root_id || x.rootId)),
+           at:   tracingCoordKey(x && (x.cell_coord || x.cellCoord)) };
+}
+function tracingSameCell(a, b){
+  if (!a || !b) return false;
+  /* NORMALISED HERE AND NOT ONLY IN tracingCellOf. A caller handing this a raw box value —
+     "427087, 220193, 1940" against the sheet's "427087,220193,1940" — is precisely the drift
+     this function exists to end, and it would have reported two cells. Found by the check, which
+     asks it directly rather than only through its callers. 2026-10-06. */
+  var aa = tracingCoordKey(a.at), bb = tracingCoordKey(b.at);
+  if (aa && bb) return aa === bb;
+  if (a.nuc && b.nuc) return String(a.nuc) === String(b.nuc);
+  return !!(a.root && b.root && String(a.root) === String(b.root));
+}
+/* ── AND THE KEY EVERY "BY CELL" LIST GROUPS ON ───────────────  2026-10-06
+   This read nucleus, then root, then coordinate — so Søren's four structures, reported at
+   427087, 220193, 1940, were filed into cell 394673650's panel on the strength of a nucleus id the
+   segmentation had got wrong, and the coordinate he had reported on purpose was never reached. */
 function tracingCellKeyOf(nuc, root, coord){
-  nuc = String(nuc || ""); root = String(root || ""); coord = String(coord || "");
-  return nuc ? "n:" + nuc : (root ? "r:" + root : (coord ? "c:" + coord : ""));
+  nuc = String(nuc || ""); root = String(root || "");
+  var at = tracingCoordKey(coord);
+  return at ? "c:" + at : (nuc ? "n:" + nuc : (root ? "r:" + root : ""));
 }
 /* The cell's own line: its type, its nucleus, its root, how many. */
 function tracingCellHead(nuc, root, type, n, coord){
+  /* THE PLACE FIRST, since 2026-10-06: it is what the group is keyed on, so it is what tells two
+     cells apart in a list. The ids follow as what the segmentation claims. */
   const bits = [];
   if (type && type !== "traced") bits.push("<b>" + escHtml(type) + "</b>");
+  if (coord) bits.push("cell at " + escHtml(tracingCoordShow(coord)));
   if (nuc) bits.push("nucleus " + escHtml(nuc));
   if (root) bits.push("root " + escHtml(root));
-  if (coord) bits.push((nuc || root ? "centre " : "cell at ") + escHtml(tracingCoordShow(coord)));
   if (!nuc && !root && !coord) bits.push("<b>Not filed against a cell</b>");
   return '<span class="tracingcellhead" style="flex:1 1 200px;min-width:0">' + bits.join(" &middot; ")
     + ' <span style="opacity:.6">&middot; ' + n + " tracing" + (n === 1 ? "" : "s") + "</span></span>";
@@ -16275,16 +16324,16 @@ function tracingKindNumbered(kind){
    Asked by BOTH consumers: the card, for a bare structure that happens to be open on the pad, and
    tracingNumberBare, for the ones that are not. Two allocators would hand the same number to two
    structures, which is the mistake the last four days were made of. */
-function tracingBareOf(kind, label, nuc, root){
+function tracingBareOf(kind, label, nuc, root, at){
   var wantK = String(kind || ""), wantL = tracingSeriesLabel(label);
   if (!tracingKindNumbered(wantK)) return [];
+  var here = tracingCellOf({ nucleusId: nuc, rootId: root, cellCoord: at });
   var bare = [], taken = {};
   (TRACING_SHARED || []).forEach(function(t){
     if (!t) return;
     var k = String(t.instanceOf || t.kind || "");
     var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
-    var sameCell = (nuc && String(t.nucleusId || "") === String(nuc))
-                || (root && String(t.rootId || "") === String(root));
+    var sameCell = tracingSameCell(tracingCellOf(t), here);
     if (!same || !sameCell) return;
     var n = Math.round(Number(t.instanceIndex) || 0);
     if (n > 0) taken[n] = 1; else bare.push(t);
@@ -16301,8 +16350,8 @@ function tracingBareOf(kind, label, nuc, root){
   return out;
 }
 /* The number a bare published structure is owed, or 0 if it is not one. */
-function tracingBareNumberFor(id, kind, label, nuc, root){
-  var list = tracingBareOf(kind, label, nuc, root), want = String(id || "");
+function tracingBareNumberFor(id, kind, label, nuc, root, at){
+  var list = tracingBareOf(kind, label, nuc, root, at), want = String(id || "");
   for (var i = 0; i < list.length; i++)
     if (String(list[i].row.structureId || "") === want) return list[i].index;
   return 0;
@@ -16310,8 +16359,9 @@ function tracingBareNumberFor(id, kind, label, nuc, root){
 /* `skip` is the ids on the pad. A structure is not its own sibling: a re-add is in TRACINGS_KEPT
    already, so without this it counted itself and a lone hand-named structure came back "second
    tracing 2". Found by tracingpanelcheck.js; see src/numbering_does_not_count_itself.py. */
-function tracingNextIndex(kind, label, nuc, root, skip){
+function tracingNextIndex(kind, label, nuc, root, skip, at){
   var wantK = String(kind || ""), wantL = tracingSeriesLabel(label);
+  var here = tracingCellOf({ nucleusId: nuc, rootId: root, cellCoord: at });
   var top = 0, have = 0, seen = {};
   (skip || []).forEach(function(id){ if (id) seen[String(id)] = 1; });
   (TRACING_SHARED || []).forEach(function(t){
@@ -16322,8 +16372,7 @@ function tracingNextIndex(kind, label, nuc, root, skip){
        each other if the kind alone decided it -- a hand-named "Dense body" would come back as
        "Myelin figure 2". Under `other`, the NAME is the series. */
     var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
-    var sameCell = (nuc && String(t.nucleusId || "") === String(nuc))
-                || (root && String(t.rootId || "") === String(root));
+    var sameCell = tracingSameCell(tracingCellOf(t), here);
     if (same && sameCell){
       if (seen[String(t.structureId || "")]) return;      // on the pad: counted by the caller
       have++;
@@ -16346,8 +16395,7 @@ function tracingNextIndex(kind, label, nuc, root, skip){
     if (!t || !t.id || seen[String(t.id)]) return;        // already counted, or on the pad
     var k = String(t.instance_of || t.kind || "");
     var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
-    var sameCell = (nuc && String(t.nucleus_id || "") === String(nuc))
-                || (root && String(t.root_id || "") === String(root));
+    var sameCell = tracingSameCell(tracingCellOf(t), here);
     if (!same || !sameCell) return;
     have++;
     if (Number(t.instance_index) > top) top = Number(t.instance_index);
@@ -16401,6 +16449,18 @@ function tracingCellDisagrees(){
              nearId: (near && near.nucleusId) ? String(near.nucleusId) : "",
              nearUm: near ? (near.distNm / 1000) : 0 };
   } catch (_e){ return null; }
+}
+/* Beside the coordinate box, which is the thing it is about, and never in the way. */
+function tracingCellNoteShow(){
+  var el = document.getElementById("tracingAtSay");
+  if (!el) return;
+  var d = null;
+  try { d = tracingCellDisagrees(); } catch (_e){ d = null; }
+  if (!d) return;
+  el.textContent = "Nucleus " + d.nid + " is " + d.um.toFixed(1) + " \u00b5m from this coordinate"
+    + (d.nearId ? " (the nucleus there is " + d.nearId + ")" : "")
+    + " \u2014 the coordinate is what files this tracing, so this is only worth a look if you "
+    + "expected the segmentation to be right here.";
 }
 function tracingCellDisagreeSay(d){
   return "These contours are filed at " + tracingCoordShow(d.at) + ", and nucleus " + d.nid
@@ -16480,10 +16540,16 @@ function tracingCurrentAll(){
   /* ── BEFORE ANYTHING IS BUILT ─────────────────────────────  2026-10-06
      Here rather than at the button, because the Neuroglancer link goes through this function too and
      a link naming the wrong cell is a quieter version of the same mistake. */
-  {
-    const dis = tracingCellDisagrees();
-    if (dis){ tracingSay(tracingCellDisagreeSay(dis), true); return []; }
-  }
+  /* ── AND IT DOES NOT REFUSE ───────────────────────────  2026-10-06
+     This refused a submission whose nucleus id and coordinate named different places, for about an
+     hour. For a vascular cell — where Søren is tracing precisely BECAUSE the segmentation's
+     ids are wrong — that is always true, so it would have refused every tracing he is doing.
+     "A guard that refuses correct work is a guard somebody switches off", written on 4 October and
+     walked into on the 6th.
+
+     The coordinate decides the cell now, so a stale id is noise rather than a hazard: it is said
+     once, beside the box it is about, and nothing is blocked. */
+  try { tracingCellNoteShow(); } catch (_eCell){}
 
   /* A SERIES IS A KIND, NOT A PAD. Two mitochondria and a lysosome are Mitochondrion 1,
      Mitochondrion 2 and Lysosome 1 -- so the numbering is per series, each starting from what the
@@ -16539,19 +16605,10 @@ function tracingCurrentAll(){
          The root and the coordinate keep their old meaning for everything else, because a cell
          traced from a point inside a process has a root id and nothing else, and that is the case
          the root test was added for. The root id is not wrong here; it is WEAKER. */
-      /* ── AND THE ROOT ID IS THE LAST THING ASKED ───────────  2026-10-06
-         Søren: *"we can't always trust the root ID, because they are really bad often and
-         especially for the vasculature. So, in this case many different cells share the same root
-         ID... more important is the cell location."*
-
-         So the order is the order he gave: the nucleus settles it both ways when both have one (the
-         2 October rule, unchanged); failing that the LOCATION, which is put at the nucleus centre
-         and so is the cell's own place; and only with neither is a shared root id evidence of
-         anything. It was root-or-location, which let a root id shared by a hundred vessels outrank
-         two coordinates that disagreed. */
-      if(here.nuc&&c.nuc) return c.nuc===here.nuc;
-      if(here.at&&c.at) return c.at===here.at;
-      return !!(here.root&&c.root&&c.root===here.root);
+      /* THROUGH THE ONE DEFINITION, since 2026-10-06. This was a fourth copy of it, and on the
+         6th it was the only one of the four that had been corrected — which is exactly how a rule
+         gets fixed in one place and stays broken everywhere else. */
+      return tracingSameCell(c, here);
     };
     /* ── AND ONLY FOR SOMETHING A CELL HAS ONE OF ──────────────────────────────────  2026-09-27
        Hesham: "if I'm logging multiple lysosomes I still have to change the color of the annotation
@@ -16633,7 +16690,8 @@ function tracingCurrentAll(){
        other way: the siblings OPENED beside a new structure are real siblings and must be counted,
        and only the structure asking must not count itself. Both halves were caught by a check —
        tracingpanelcheck for the self-count, reopenedtracingcheck for the over-skip. */
-    if(first[k]===undefined)first[k]=tracingNextIndex(g.w.kind,g.w.name,nid,rid,[idOf(g)]);
+    if(first[k]===undefined)first[k]=tracingNextIndex(g.w.kind,g.w.name,nid,rid,[idOf(g)],
+                                                      tracingCellAtVal());
   });
 
   return groups.map(function(g){
@@ -16646,7 +16704,7 @@ function tracingCurrentAll(){
          the siblings that are NOT on the pad go through, so its position in the cell's order is its
          own and no number is handed out twice. */
       if(!index&&tracingKindNumbered(g.w.kind))
-        index=tracingBareNumberFor(idOf(g),g.w.kind,g.w.name,nid,rid);
+        index=tracingBareNumberFor(idOf(g),g.w.kind,g.w.name,nid,rid,tracingCellAtVal());
       /* IT IS NAMED THE WAY IT WAS PUBLISHED, whatever else is on the pad (2026-09-27). With a
          number it keeps that number — dropping it would rename "Lysosome 3" to "Lysosome" and make
          the same object look like a different one. With none, it is given the one it is owed
