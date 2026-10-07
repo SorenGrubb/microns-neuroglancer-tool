@@ -672,10 +672,18 @@ function loadTracedStructures(nid, root){
          on one panel in two vocabularies, which is what that section exists to end. The cell and
          its nucleus stay, because they are the cell rather than something inside it. */
       if (typeof organIsOrganelle === "function" && organIsOrganelle(t)) return false;
-      return (nid && String(t.nucleusId || "") === String(nid))
-          || (root && String(t.rootId || "") === String(root));
+      return panelSameCell(t, nid, root);
     });
-    if (!mine.length){ host.innerHTML = ""; return; }
+    /* ── AND WHAT IS NOT SHOWN IS COUNTED ───────────  2026-10-07
+       A tracing left out only because its coordinate names another cell is a tracing that used to
+       be ON this card. Dropping it in silence would swap one invisible mistake for another, which
+       is how this week started. */
+    var away = (list || []).filter(function(t){
+      if (!t) return false;
+      if (typeof organIsOrganelle === "function" && organIsOrganelle(t)) return false;
+      return panelElsewhere(t);
+    }).length;
+    if (!mine.length && !away){ host.innerHTML = ""; return; }
     /* By kind, then by number: the point of a number is that 1, 2 and 3 of a kind read as a set. */
     mine.sort(function(a, b){
       var ka = String(a.instanceOf || a.kind || ""), kb = String(b.instanceOf || b.kind || "");
@@ -708,7 +716,14 @@ function loadTracedStructures(nid, root){
             + '</div>';
         }).join("")
       + '<p class="hint" style="margin-top:4px">Hand-traced, not from the segmentation. Open one in '
-      + '\u00b5Jump\u2019s tracing card to add to it or correct it.</p>';
+      + '\u00b5Jump\u2019s tracing card to add to it or correct it.'
+      /* ── THE REMAINDER ─────────────────  2026-10-07
+         Until this morning these WERE on this card, wrongly. A filter that removes them without
+         saying so swaps a visible mistake for an invisible one, and the invisible kind is what cost
+         Søren two evenings. */
+      + (away ? ' ' + away + ' tracing' + (away === 1 ? '' : 's')
+                + ' filed at a different cell centre \u2014 not shown here.' : '')
+      + '</p>';
   };
   if (PANEL_TRACINGS && Date.now() - PANEL_TRACINGS_AT < 60000){
     render(PANEL_TRACINGS);
@@ -893,6 +908,37 @@ function organVol(v){
 }
 /* A tracing of a CELL or a NUCLEUS is not an organelle and does not belong in this section -- it is
    the cell itself, and it is listed with the cell. */
+/* ── WHICH CELL A TRACING IS ON, ASKED OF THE SHARED MODULE ────────  2026-10-07
+   Søren, on cell 61360735's panel: *"it appears to have all the organelles and whole cell
+   trace associated with the other cells I have traced."* It did. This file tested
+   `nucleusId === nid || rootId === root`, in two places, with no coordinate anywhere — and his
+   vascular cells share root 6198781614, which is the whole reason he traces them by hand. So every
+   structure traced on any of them was listed on all of their cards.
+
+   The same test was in core/tracingcard.js five times and core/blenderexport.js once. It is now in
+   core/tracing.js once, and this asks it. window.CUR_POS is the cell this panel is showing —
+   the VOXEL pill in its own header — and is what the coordinate is compared against. */
+function panelCellHere(nid, root){
+  var at = "";
+  try { at = (window.CUR_POS && window.CUR_POS.length === 3) ? window.CUR_POS.join(",") : ""; }
+  catch (_e){ at = ""; }
+  return { nuc: String(nid || ""), root: String(root || ""), at: at };
+}
+function panelSameCell(t, nid, root){
+  try { return UJ.tracing.sameCell(UJ.tracing.cellOf(t), panelCellHere(nid, root)); }
+  catch (_e){
+    /* A page whose core/tracing.js has not loaded keeps the old behaviour rather than showing
+       nothing: wrong is better than blank only when the alternative is blank. */
+    return (nid && String(t.nucleusId || "") === String(nid))
+        || (root && String(t.rootId || "") === String(root));
+  }
+}
+function panelElsewhere(t){
+  try {
+    return UJ.tracing.elsewhereByCoord(UJ.tracing.cellOf(t),
+      panelCellHere(PANEL_CUR_NID, (typeof CUR_ROOT !== "undefined" && CUR_ROOT) || ""));
+  } catch (_e){ return false; }
+}
 function organIsOrganelle(t){
   var k = String((t && (t.instanceOf || t.kind)) || "").toLowerCase();
   return !!k && k !== "cell" && k !== "nucleus";
@@ -904,8 +950,7 @@ function renderOrganelleSection(nid, root){
   var anns = (PANEL_ORGAN_ANNS && PANEL_ORGAN_NID === String(nid)) ? PANEL_ORGAN_ANNS : [];
   var trs = (PANEL_TRACINGS || []).filter(function(t){
     if (!t || !organIsOrganelle(t)) return false;
-    return (nid && String(t.nucleusId || "") === String(nid))
-        || (root && String(t.rootId || "") === String(root));
+    return panelSameCell(t, nid, root);
   });
   if (!anns.length && !trs.length){ host.innerHTML = ""; return; }
 

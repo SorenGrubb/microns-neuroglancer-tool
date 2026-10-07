@@ -901,7 +901,50 @@ UJ.tracing = (function(){
     return out;
   }
 
-  return { ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
+  /* ── WHICH CELL A TRACING IS ON ───────────────────────────  2026-10-07
+     Søren: *"the nucleus and rootID are useless, because the vasculature segmentation is crap.
+     Therefor I am tracing those myself and reporting what cell is there... a coordinate for the cell
+     center, that is what defines the cell and not the faulty rootID or nucleus ID."*
+
+     THE ORDER IS HIS: coordinate, then nucleus, then root. A reported centre is a person saying
+     "this is a cell and it is here"; a nucleus id is the segmentation's claim; a root id in
+     vasculature can cover a hundred cells at once — his share 6198781614.
+
+     IT LIVES HERE BECAUSE IT HAD EIGHT HOMES. core/tracingcard.js carried five copies of this test
+     and core/panel.js two and core/blenderexport.js one, none of which looked at the coordinate. On
+     6 October I fixed the five I was reading and left the three I was not, and the next morning the
+     cell panel was still showing three cells' tracings on one card. A decision written out once per
+     caller is a decision that gets half-fixed; this module is loaded by all of them. */
+  function coordKey(v){
+    var n = String(v || "").split(/[\s,;]+/).filter(Boolean).map(Number);
+    return (n.length === 3 && n.every(isFinite)) ? n.map(Math.round).join(",") : "";
+  }
+  /* A row in any of the shapes this project holds cells in: the sheet's camelCase, the kept list's
+     snake_case, the export's, and the card's own boxes. */
+  function cellOf(x){
+    /* ωJump files a tracing with no nucleus as "<volume>:" — a scope, not a cell. */
+    var bare = function(v){ var s = String(v || ""); var i = s.indexOf(":"); return i < 0 ? s : s.slice(i + 1); };
+    return { nuc:  bare(x && (x.nucleus_id || x.nucleusId)),
+             root: bare(x && (x.root_id || x.rootId)),
+             at:   coordKey(x && (x.cell_coord || x.cellCoord || x.at)) };
+  }
+  function sameCell(a, b){
+    if (!a || !b) return false;
+    var aa = coordKey(a.at), bb = coordKey(b.at);
+    if (aa && bb) return aa === bb;
+    if (a.nuc && b.nuc) return String(a.nuc) === String(b.nuc);
+    return !!(a.root && b.root && String(a.root) === String(b.root));
+  }
+  /* True only when the coordinate is the reason — so a caller can say what it is not showing
+     rather than dropping it in silence. */
+  function elsewhereByCoord(a, b){
+    if (!a || !b) return false;
+    var aa = coordKey(a.at), bb = coordKey(b.at);
+    return !!(aa && bb && aa !== bb);
+  }
+  return { coordKey: coordKey, cellOf: cellOf, sameCell: sameCell,
+           elsewhereByCoord: elsewhereByCoord,
+           ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
            ringAnnotations: ringAnnotations, simplifyRings: simplifyRings,
            simplifyTolVox: simplifyTolVox, simplifyDefaultNm: function(){ return SIMPLIFY_NM; },
            viewerTakesPolylines: viewerTakesPolylines,

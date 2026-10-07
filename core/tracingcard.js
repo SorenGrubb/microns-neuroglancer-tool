@@ -338,30 +338,16 @@ let TRACING_PENDING=null;
    all, was written out in tracingBareOf, twice in tracingNextIndex and once in tracingCurrentAll —
    which is why a second cell's first centriole came back named "Centriole / centrosome 2". Five
    copies of one decision is how a rule gets fixed in one place and stays broken in four. */
-function tracingCoordKey(v){
-  var n = String(v || "").split(/[\s,;]+/).filter(Boolean).map(Number);
-  return (n.length === 3 && n.every(isFinite)) ? n.map(Math.round).join(",") : "";
-}
+/* ── DELEGATES, SINCE 2026-10-07 ────────────────────────────
+   These three were written here on the 6th, and core/panel.js and core/blenderexport.js went on
+   carrying their own `nuc || root` tests because this file is not where they look. The definition
+   moved to core/tracing.js, which all three load; these keep their names so every call site in this
+   file reads as it did. */
+function tracingCoordKey(v){ return UJ.tracing.coordKey(v); }
 /* A row from any of the three shapes this card holds cells in: the sheet's camelCase, the kept
    list's snake_case, and the card's own boxes. */
-function tracingCellOf(x){
-  /* ωJump files a tracing with no nucleus as "<volume>:" — a scope, not a cell (2026-09-21). */
-  var bare = function(v){ var s = String(v || ""); var i = s.indexOf(":"); return i < 0 ? s : s.slice(i + 1); };
-  return { nuc:  bare(x && (x.nucleus_id || x.nucleusId)),
-           root: bare(x && (x.root_id || x.rootId)),
-           at:   tracingCoordKey(x && (x.cell_coord || x.cellCoord)) };
-}
-function tracingSameCell(a, b){
-  if (!a || !b) return false;
-  /* NORMALISED HERE AND NOT ONLY IN tracingCellOf. A caller handing this a raw box value —
-     "427087, 220193, 1940" against the sheet's "427087,220193,1940" — is precisely the drift
-     this function exists to end, and it would have reported two cells. Found by the check, which
-     asks it directly rather than only through its callers. 2026-10-06. */
-  var aa = tracingCoordKey(a.at), bb = tracingCoordKey(b.at);
-  if (aa && bb) return aa === bb;
-  if (a.nuc && b.nuc) return String(a.nuc) === String(b.nuc);
-  return !!(a.root && b.root && String(a.root) === String(b.root));
-}
+function tracingCellOf(x){ return UJ.tracing.cellOf(x); }
+function tracingSameCell(a, b){ return UJ.tracing.sameCell(a, b); }
 /* ── AND THE KEY EVERY "BY CELL" LIST GROUPS ON ───────────────  2026-10-06
    This read nucleus, then root, then coordinate — so Søren's four structures, reported at
    427087, 220193, 1940, were filed into cell 394673650's panel on the strength of a nucleus id the

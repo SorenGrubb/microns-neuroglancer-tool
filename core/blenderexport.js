@@ -301,9 +301,13 @@ UJ.blender = (function(){
       if (t && t.for_export) return true;
       var nuc = String((t && t.nucleus_id) || "").replace(/^.*:/, "");
       var root = String((t && t.root_id) || "");
-      var mine = cells.some(function(c){
-        return (nuc && String(c.nucleus_id || "") === nuc) || (root && String(c.root_id || "") === root);
-      });
+      /* ── THROUGH THE ONE DEFINITION ──────────────  2026-10-07
+         This was `nuc || root`, with no coordinate — and Søren's vascular cells share one
+         root id, so an export of any one of them would have carried every tracing made on all of
+         them. core/tracing.js answers it now, coordinate first, for this file and the card and the
+         panel alike. */
+      var here = UJ.tracing.cellOf(t);
+      var mine = cells.some(function(c){ return UJ.tracing.sameCell(here, UJ.tracing.cellOf(c)); });
       if (mine) return true;
       /* A tracing filed against a DIFFERENT cell is not this export's, wherever it is: that is the
          one Søren found, 430 µm outside the box. One filed against no cell at all is judged by
