@@ -131,6 +131,26 @@ const TRACINGS = [
      this fixture does not build, so an assertion on its HTML passed just as happily with the old
      `nuc || root` test restored \u2014 a check that cannot fail. What changed is the filter, so the
      filter is what is asked. 2026-10-07. */
+  /* \u2500\u2500 AND IT COUNTS WHAT USED TO BE HERE, NOT THE WHOLE DATASET \u2500\u2500\u2500\u2500\u2500\u2500\u2500
+     The first version counted every tracing whose coordinate differed from this cell's. S\u00f8ren
+     opened an \u03b7Jump card and got "7 tracings filed at a different cell centre" on a card that
+     had never listed one of them \u2014 a running total of the dataset dressed up as a warning.
+     2026-10-07. */
+  {
+    const n = await p.evaluate(() => {
+      const other = { structureId: "unrelated", name: "Nucleus", kind: "nucleus",
+                      nucleusId: "999999", rootId: "888888", cellCoord: "1,2,3" };
+      PANEL_TRACINGS = PANEL_TRACINGS.concat([other]);
+      loadTracedStructures("61360735", "6198781614");
+      const h = document.getElementById("tracedOnCell");
+      return (h.textContent.match(/(\d+) tracings? filed at a different cell centre/) || [])[1];
+    });
+    ok(n === "3",
+       "a tracing on an unrelated cell \u2014 another nucleus, another fragment, another place "
+       + "\u2014 is not counted, because it was never on this card to begin with",
+       "still " + n + " after adding one");
+  }
+
   console.log("\nand the organelles below it, through the line that changed");
   {
     const s2 = await p.evaluate(tr => ({

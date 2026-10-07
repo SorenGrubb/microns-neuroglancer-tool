@@ -681,7 +681,7 @@ function loadTracedStructures(nid, root){
     var away = (list || []).filter(function(t){
       if (!t) return false;
       if (typeof organIsOrganelle === "function" && organIsOrganelle(t)) return false;
-      return panelElsewhere(t);
+      return panelElsewhere(t, nid, root);
     }).length;
     if (!mine.length && !away){ host.innerHTML = ""; return; }
     /* By kind, then by number: the point of a number is that 1, 2 and 3 of a kind read as a set. */
@@ -933,10 +933,22 @@ function panelSameCell(t, nid, root){
         || (root && String(t.rootId || "") === String(root));
   }
 }
-function panelElsewhere(t){
+/* ── WHAT USED TO BE ON THIS CARD, NOT WHAT EXISTS ELSEWHERE ───────  2026-10-07
+   The first version of this counted every tracing in the dataset whose coordinate differs from this
+   cell's — which, for any cell, is nearly all of them. Søren opened an ηJump card and
+   got "7 tracings filed at a different cell centre", a running total of the dataset dressed up as a
+   warning, on a card that had never shown any of them.
+
+   The set worth naming is the one the OLD rule would have listed here: a tracing that matches this
+   cell by nucleus or root id and whose coordinate says another cell. Those are the ones that were on
+   this card yesterday and are not today; everything else was never here. */
+function panelElsewhere(t, nid, root){
   try {
-    return UJ.tracing.elsewhereByCoord(UJ.tracing.cellOf(t),
-      panelCellHere(PANEL_CUR_NID, (typeof CUR_ROOT !== "undefined" && CUR_ROOT) || ""));
+    var here = panelCellHere(nid, root);
+    var mine = UJ.tracing.cellOf(t);
+    var wouldHave = (nid && String(t.nucleusId || "") === String(nid))
+                 || (root && String(t.rootId || "") === String(root));
+    return !!wouldHave && UJ.tracing.elsewhereByCoord(mine, here);
   } catch (_e){ return false; }
 }
 function organIsOrganelle(t){
