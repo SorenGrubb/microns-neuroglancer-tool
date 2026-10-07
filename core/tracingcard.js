@@ -1925,6 +1925,7 @@ function organShowAllInViewer(trs, nid, root, missing){
   const structs = (trs || []).filter(function(t){ return t && (t.rings || []).length; })
     .map(function(t){
       return { name: t.name || (t.instanceOf || t.kind || "organelle"),
+               kind: String((t.instanceOf || t.kind) || "").toLowerCase(),
                color: t.color || "#40e28c", rings: t.rings };
     });
   if (!structs.length){
@@ -1932,7 +1933,16 @@ function organShowAllInViewer(trs, nid, root, missing){
       + "Organelles list, give it a moment, and try again.", true);
     return;
   }
-  const what = structs.length + " organelle" + (structs.length === 1 ? "" : "s");
+  /* ── TWO KINDS, COUNTED APART \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-10-07
+     Since the cell and its nucleus now travel with the organelles (see core/panel.js), "with 4
+     organelles on it" would be a miscount of a link with two of them. */
+  const isBody = function(s){ return s.kind === "cell" || s.kind === "nucleus"; };
+  const nBody = structs.filter(isBody).length, nOrg = structs.length - nBody;
+  const what = (nOrg ? nOrg + " organelle" + (nOrg === 1 ? "" : "s") : "")
+    + ((nOrg && nBody) ? " and " : "")
+    + (nBody ? structs.filter(isBody).map(function(s){
+         return s.kind === "cell" ? "the whole cell" : "the nucleus"; }).join(" and ")
+         + " you traced" : "");
   tracingViewerOpen(structs,
     "Opened this cell with " + what + " on it — one annotation layer each, in the colours they "
     + "were drawn in."

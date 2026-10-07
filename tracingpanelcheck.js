@@ -2475,9 +2475,16 @@ function link(annotations){
        "closed, it costs no Drive read — the index alone draws the list",
        sect.before.asked.length + " call(s), none for contours");
     ok(/Organelles/.test(sect.before.html), "...and the section is there, collapsed");
-    ok(sect.asked === 1,
-       "opening it reads the contours of this cell's organelles, and only the organelles",
-       sect.asked + " (the whole-cell tracing is not one)");
+    /* WAS "and only the organelles", asked === 1, until 2026-10-07. Søren: *"When there exist a
+       nucleus and a whole cell mesh, then they should be shown also in the neuroglancer and not
+       just the organelles."* The button under this list now hands his own outline of the cell to
+       the viewer alongside them — on a vascular cell the published mesh covers a hundred cells and
+       his tracing is the only true one — so its contours have to be in hand when it is pressed.
+       The cell is still not IN the list: the three assertions below say so. */
+    ok(sect.asked === 2,
+       "opening it reads the contours of this cell's organelles and of the cell he traced, because "
+       + "the viewer button now opens with both",
+       sect.asked + " (one organelle, one whole cell)");
     ok(!/Mitochondrion 1/.test(sect.before.traced),
        "an organelle is no longer listed twice — it has left the “Traced on this cell” block",
        JSON.stringify(sect.before.traced.slice(0, 40)));

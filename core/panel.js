@@ -955,6 +955,18 @@ function organIsOrganelle(t){
   var k = String((t && (t.instanceOf || t.kind)) || "").toLowerCase();
   return !!k && k !== "cell" && k !== "nucleus";
 }
+/* The other half of the same sentence. A whole cell and a nucleus are not organelles -- that is why
+   they are listed with the cell and not in the Organelles list -- but they ARE the cell, and a
+   picture of this cell with its organelles in it is not a picture of this cell without it
+   (2026-10-07). Cell first, then nucleus: the order they are drawn in and the order they are read
+   in. */
+function organIsCellBody(t){
+  var k = String((t && (t.instanceOf || t.kind)) || "").toLowerCase();
+  return k === "cell" || k === "nucleus";
+}
+function organBodyRank(t){
+  return String((t && (t.instanceOf || t.kind)) || "").toLowerCase() === "cell" ? 0 : 1;
+}
 function renderOrganelleSection(nid, root){
   var host = organelleSectionBox();
   if (!host) return;
@@ -964,6 +976,12 @@ function renderOrganelleSection(nid, root){
     if (!t || !organIsOrganelle(t)) return false;
     return panelSameCell(t, nid, root);
   });
+  /* THE CELL ITSELF, for the viewer button only -- it is not put in the list below, which is the
+     Organelles list and has never held it (2026-10-07). */
+  var body = (PANEL_TRACINGS || []).filter(function(t){
+    if (!t || !organIsCellBody(t)) return false;
+    return panelSameCell(t, nid, root);
+  }).sort(function(a, b){ return organBodyRank(a) - organBodyRank(b); });
   if (!anns.length && !trs.length){ host.innerHTML = ""; return; }
 
   /* The index (?tracings=1) carries no contours -- it is one sheet scan and opens no Drive files,
@@ -978,12 +996,16 @@ function renderOrganelleSection(nid, root){
     if (ka !== kb) return ka < kb ? -1 : 1;
     return (Number(a.instanceIndex) || 0) - (Number(b.instanceIndex) || 0);
   });
-  trs.forEach(function(t){
+  var fromCache = function(t){
     if (!t.rings && t.structureId && PANEL_ORGAN_RINGS[t.structureId])
       t.rings = PANEL_ORGAN_RINGS[t.structureId];
-  });
+  };
+  trs.forEach(fromCache);
+  body.forEach(fromCache);
   var withRings = trs.filter(function(t){ return t.rings && t.rings.length; });
   var noRings = trs.filter(function(t){ return !(t.rings && t.rings.length); });
+  var bodyWith = body.filter(function(t){ return t.rings && t.rings.length; });
+  var bodyNo = body.filter(function(t){ return !(t.rings && t.rings.length); });
   var r = UJ.organellelink.pair(anns, withRings);
 
   var rows = [];
@@ -1065,14 +1087,31 @@ function renderOrganelleSection(nid, root){
 
      Only when there is something to draw, and only on a page that can draw it -- this panel serves
      six tools and the viewer opener belongs to the ones with a tracing card. */
+  /* \u2500\u2500 AND THE CELL HE DREW GOES WITH THEM \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-10-07
+     S\u00f8ren: *"When there exist a nucleus and a whole cell mesh, then they should be shown also
+     in the neuroglancer and not just the organelles."*
+
+     The 3D pane shows the PUBLISHED mesh for ids.root, which on his vascular cells is root
+     6198781614 and covers a hundred cells -- the reason he traced this one by hand. His own outline
+     is the only true one, and it was the one thing the button left behind. Named on the face of the
+     button so the picture is known before the click. */
+  var bodySay = bodyWith.map(function(t){
+    return String((t.instanceOf || t.kind) || "").toLowerCase() === "cell" ? "whole cell" : "nucleus";
+  });
+  var andSay = bodySay.length
+    ? " \u2014 and the " + (bodySay.length === 1 ? bodySay[0] : bodySay.join(" and ")) + " you traced"
+    : "";
   var allBtn = "";
-  if (withRings.length && typeof organShowAllInViewer === "function")
+  if ((withRings.length || bodyWith.length) && typeof organShowAllInViewer === "function")
     allBtn = '<div style="margin-top:8px"><button type="button" class="idbtn organshowall" '
       + 'style="width:auto;padding:4px 10px;font-size:12px" '
       + 'title="Opens the viewer with this cell and every outline on it \u2014 one annotation layer '
-      + 'each, in the colours they were drawn in, with the cell see-through in the 3D pane.">'
+      + 'each, in the colours they were drawn in, with the cell see-through in the 3D pane.'
+      + (bodySay.length ? " Your own outline of the cell goes on it too, which is the only one "
+          + "there is where the published segmentation cannot be trusted." : "") + '"'
+      + '>'
       + 'Show the cell with all ' + withRings.length + ' organelle'
-      + (withRings.length === 1 ? "" : "s") + ' \u2197</button></div>';
+      + (withRings.length === 1 ? "" : "s") + andSay + ' \u2197</button></div>';
   var nSeg = trs.length, nAnn = anns.length;
   host.innerHTML = '<details id="cellOrganDetails"' + (window.__organOpen ? " open" : "") + '>'
     + '<summary style="cursor:pointer;font-size:12px;text-transform:uppercase;letter-spacing:.06em;'
@@ -1090,11 +1129,11 @@ function renderOrganelleSection(nid, root){
   var det = host.querySelector("#cellOrganDetails");
   if (det) det.addEventListener("toggle", function(){
     window.__organOpen = det.open;
-    if (det.open) organFetchRings(nid, root, trs);
+    if (det.open) organFetchRings(nid, root, trs.concat(body));
   });
   /* Already open -- a second cell looked at with the section left open should pair without being
      opened again. */
-  if (det && det.open) organFetchRings(nid, root, trs);
+  if (det && det.open) organFetchRings(nid, root, trs.concat(body));
   /* The same jump the rest of the panel uses, wired here because this block is rebuilt on its own. */
   [].slice.call(host.querySelectorAll(".jumpview")).forEach(function(b){
     b.addEventListener("click", function(){
@@ -1112,7 +1151,7 @@ function renderOrganelleSection(nid, root){
   [].slice.call(host.querySelectorAll(".organshowall")).forEach(function(b){
     b.addEventListener("click", function(){
       if (typeof organShowAllInViewer === "function")
-        organShowAllInViewer(withRings, nid, root, noRings.length);
+        organShowAllInViewer(bodyWith.concat(withRings), nid, root, noRings.length + bodyNo.length);
     });
   });
   [].slice.call(host.querySelectorAll(".organtrace")).forEach(function(b){

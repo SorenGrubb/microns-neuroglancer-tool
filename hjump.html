@@ -451,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-07 20:27</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-07 20:51</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -689,7 +689,7 @@ number are on the <a class="ref" href="#" id="aboutToRefs">References tab</a>.</
 <p class="hint" style="margin-top:6px">Applied to the <span id="filterTotal"></span> cells embedded in this page, mostly entirely in your browser. Leave a section untouched to ignore it. The one exception is current community identity, below, which reads the community's own reports the first time you open this tab.</p>
 
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px">Cell type</div>
-<div style="max-height:230px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterTypes"></div>
+<div style="max-height:min(46vh,320px);overflow-y:auto;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-top:8px" id="filterTypes" title="Scrolls \u2014 there are more cell types below than fit here."></div>
 
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink);font-weight:600;margin:14px 0 2px" title="From H01's own cortical-layer volume where it covers the soma, otherwise from the published #L1..#WM tag.">Cortical layer</div>
 <div class="toggles" style="margin-top:4px" id="filterLayers"></div>
@@ -3052,9 +3052,17 @@ function poolLabel(t){
   return s.indexOf(ADDED_POOL)===0 ? s.slice(ADDED_POOL.length) : longName(s);
 }
 /* TYPE_GROUPS is H01's own vocabulary and cannot name a type nobody has proposed yet. */
+/* \u2500\u2500 AND IT GOES FIRST \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-10-07
+   S\u00f8ren: "give me the option to filter for them also again, I don't understand why you removed
+   it." It had not been removed. It was last in a list 470 px long inside a box 228 px tall, 436 px
+   down, with no scrollbar drawn until the pointer is inside the box -- so for him it did not exist.
+
+   H01's five groups have been the same five for a year and are findable by habit. This group
+   changes every time somebody names a cell H01 never listed, which is the only reason anyone opens
+   this box looking for something new. It gets the top. */
 function typeGroups(){
   if(!ADDED_POOLS.length) return TYPE_GROUPS;
-  return TYPE_GROUPS.concat([{ label:"Not in H01 \u2014 named here", types:ADDED_POOLS.slice() }]);
+  return [{ label:"Not in H01 \u2014 named here", types:ADDED_POOLS.slice() }].concat(TYPE_GROUPS);
 }
 /* The only two community identities that move a cell between H01 cell-type pools. Keyed by the
    exact canonical string a guided-ID submission stores (see canonSubmitName in core/ontology.js).
