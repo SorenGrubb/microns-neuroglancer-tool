@@ -120,7 +120,7 @@ try{var _t=localStorage.getItem("ujump_theme");
     <p class="sub">Find the cells &middot; Janelia OpenOrganelle FIB-SEM &middot;
     <span id="dslabel"></span> &middot; <span class="build" title="When this file was built. If it
     does not match the file you think you are looking at, your browser is showing you a cached copy
-    &mdash; reload with ctrl-shift-R.">build 2026-10-07 21:16</span></p>
+    &mdash; reload with ctrl-shift-R.">build 2026-10-08 16:26</span></p>
   </div>
   <div style="text-align:right">
     <button type="button" id="themeToggleBtn" title="Switch between dark and light mode"
@@ -14281,8 +14281,126 @@ UJ.tracing = (function(){
     var aa = coordKey(a.at), bb = coordKey(b.at);
     return !!(aa && bb && aa !== bb);
   }
+  /* ── IS THIS ONE OBJECT? ─────────────────────────────  2026-10-08
+     Søren, reading his own Blender notebook: *"is there some mistake also here with the
+     different tracings belonging to the right cell?"* One of his Nucleus outlines carries contours
+     around x 400300 AND around x 401000, on the same sections, 3 um apart. 52 contours on 34
+     sections is 18 sections with a second contour in them.
+
+     NO THRESHOLD IS CHOSEN HERE. Each contour gets its own equivalent radius, sqrt(area/pi), so
+     "touching" means centre-to-centre distance under the sum of two radii. A minimum spanning tree
+     over the contours, with every distance divided by that sum, has a largest edge, and that edge
+     is the answer: under 1 the outline is a chain of contours that all touch; over 1 it is two
+     pieces further apart than their own reach, and the number says by how much. It scales itself,
+     so a 10 um cell and a 0.2 um vesicle are each judged against their own size. Removing that one
+     edge from a tree leaves exactly two components, which is why both halves can be named.
+
+     A contour drawn inside another has the same centre, so a hole is distance zero and never
+     splits anything. A cell whose outline drifts across sections stays one piece as long as
+     consecutive contours overlap, which is what a cell followed section by section does.
+
+     REPORTS. It does not change a tracing, and nothing in this project calls it in a way that
+     could. See src/one_tracing_that_is_really_two.py. */
+  function ringGeom(r, RX, RY, RZ){
+    var p = (r && r.points) || [], n = p.length;
+    if (n < 3) return null;
+    var a2 = 0, gx = 0, gy = 0;
+    for (var i = 0; i < n; i++){
+      var q = p[i], w = p[(i + 1) % n];
+      var cr = Number(q[0]) * Number(w[1]) - Number(w[0]) * Number(q[1]);
+      a2 += cr; gx += (Number(q[0]) + Number(w[0])) * cr; gy += (Number(q[1]) + Number(w[1])) * cr;
+    }
+    var cx, cy;
+    if (a2 !== 0){ cx = gx / (3 * a2); cy = gy / (3 * a2); }
+    else {
+      cx = 0; cy = 0;
+      for (var k = 0; k < n; k++){ cx += Number(p[k][0]); cy += Number(p[k][1]); }
+      cx /= n; cy /= n;
+    }
+    /* The radius of a circle of the same area, in nanometres. x and y are the same size in every
+       volume this family reads; the average is written out so a dataset where they differ gets a
+       sensible number rather than silently using one of them. */
+    return { vx: cx, vy: cy, vz: Number(r.z),
+             x: cx * RX, y: cy * RY, z: Number(r.z) * RZ,
+             rad: Math.sqrt(Math.abs(a2) / 2 / Math.PI) * ((RX + RY) / 2) };
+  }
+  function splitOf(rings, resNm){
+    var RX = 1, RY = 1, RZ = 1;
+    if (Array.isArray(resNm) && resNm.length === 3){
+      RX = Number(resNm[0]) || 1; RY = Number(resNm[1]) || 1; RZ = Number(resNm[2]) || 1;
+    }
+    var g = [];
+    (rings || []).forEach(function(r){ var x = ringGeom(r, RX, RY, RZ); if (x) g.push(x); });
+    var n = g.length;
+    if (n < 2) return { split: false, ratio: 0, gapNm: 0, clusters: [], contours: n };
+    var pair = function(a, b){
+      var dx = g[a].x - g[b].x, dy = g[a].y - g[b].y, dz = g[a].z - g[b].z;
+      var d = Math.sqrt(dx * dx + dy * dy + dz * dz), reach = g[a].rad + g[b].rad;
+      return { ratio: reach > 0 ? d / reach : (d > 0 ? Infinity : 0), gap: d - reach };
+    };
+    /* Prim, because n is a few hundred at most and an O(n²) tree needs no heap. */
+    var inT = [], best = [], from = [], i, j;
+    for (i = 0; i < n; i++){ inT.push(false); best.push(Infinity); from.push(-1); }
+    best[0] = 0;
+    var edges = [];
+    for (var it = 0; it < n; it++){
+      var pick = -1, pb = Infinity;
+      for (var k = 0; k < n; k++) if (!inT[k] && best[k] < pb){ pb = best[k]; pick = k; }
+      if (pick < 0) break;
+      inT[pick] = true;
+      if (from[pick] >= 0) edges.push({ a: from[pick], b: pick, ratio: best[pick] });
+      for (j = 0; j < n; j++){
+        if (inT[j]) continue;
+        var v = pair(pick, j).ratio;
+        if (v < best[j]){ best[j] = v; from[j] = pick; }
+      }
+    }
+    var worst = null;
+    edges.forEach(function(e){ if (!worst || e.ratio > worst.ratio) worst = e; });
+    if (!worst) return { split: false, ratio: 0, gapNm: 0, clusters: [], contours: n };
+    var gapNm = pair(worst.a, worst.b).gap;
+    /* A tree minus one edge is exactly two components. */
+    var adj = [];
+    for (i = 0; i < n; i++) adj.push([]);
+    edges.forEach(function(e){
+      if (e === worst) return;
+      adj[e.a].push(e.b); adj[e.b].push(e.a);
+    });
+    var mark = [];
+    for (i = 0; i < n; i++) mark.push(-1);
+    var label = 0;
+    for (i = 0; i < n; i++){
+      if (mark[i] >= 0) continue;
+      var stack = [i]; mark[i] = label;
+      while (stack.length){
+        var c = stack.pop();
+        adj[c].forEach(function(q){ if (mark[q] < 0){ mark[q] = label; stack.push(q); } });
+      }
+      label++;
+    }
+    var parts = [];
+    for (var L = 0; L < label; L++){
+      var idx = [];
+      for (i = 0; i < n; i++) if (mark[i] === L) idx.push(i);
+      if (!idx.length) continue;
+      var sx = 0, sy = 0, zs = {}, zmin = Infinity, zmax = -Infinity, rmax = 0;
+      idx.forEach(function(q){
+        sx += g[q].vx; sy += g[q].vy; zs[g[q].vz] = 1;
+        if (g[q].vz < zmin) zmin = g[q].vz;
+        if (g[q].vz > zmax) zmax = g[q].vz;
+        if (g[q].rad > rmax) rmax = g[q].rad;
+      });
+      parts.push({ contours: idx.length, sections: Object.keys(zs).length,
+                   centre: [Math.round(sx / idx.length), Math.round(sy / idx.length),
+                            Math.round((zmin + zmax) / 2)],
+                   zFrom: zmin, zTo: zmax, radiusNm: Math.round(rmax) });
+    }
+    parts.sort(function(a, b){ return b.contours - a.contours; });
+    return { split: worst.ratio > 1, ratio: worst.ratio, gapNm: gapNm,
+             clusters: parts, contours: n };
+  }
   return { coordKey: coordKey, cellOf: cellOf, sameCell: sameCell,
-           sameCellWhy: sameCellWhy,
+           sameCellWhy: sameCellWhy, splitOf: splitOf,
            elsewhereByCoord: elsewhereByCoord,
            ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
            ringAnnotations: ringAnnotations, simplifyRings: simplifyRings,
@@ -15141,6 +15259,62 @@ async function tracedMeasureAll(say){
   return { measured: measured, updated: updated, missing: missing, cells: keys.length,
            capped: capped };
 }
+
+/* ── EVERY OUTLINE, ASKED THE SAME QUESTION ─────────────────  2026-10-08
+   Søren: *"is there some mistake also here with the different tracings belonging to the right
+   cell?"* — after finding a Nucleus whose contours sit in two places 3 um apart. One is worth
+   knowing about; the set is worth knowing about more, because he cannot look at 70 of them by eye.
+
+   The index (?tracings=1) is one sheet scan and carries no contours, so the geometry comes through
+   UJ.tracing.fetchMany — 20 to a request, the same path the cell panel and the viewer already
+   use, and cached by structureId|groupId for the session. Nothing is written. See
+   src/one_tracing_that_is_really_two.py. */
+async function tracedSplitScan(say, opts){
+  opts = opts || {};
+  if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT)
+    return { error: "this page has no backend configured" };
+  let index = [];
+  try {
+    say && say("Listing the dataset\u2019s outlines\u2026");
+    const r = await fetch(REPORT_ENDPOINT + "?tracings=1" + tracedOutlinesDsQS());
+    const d = await r.json();
+    if (!d || !Array.isArray(d.tracings))
+      return { error: "the backend did not answer with a list of outlines" };
+    index = d.tracings;
+  } catch (e){
+    return { error: "could not list the outlines (" + String(e && e.message || e) + ")" };
+  }
+  const who = String(opts.only || "").trim().toLowerCase();
+  const want = index.filter(function(t){
+    if (!t || !t.structureId) return false;
+    if (!who) return true;
+    return [].concat(t.contributors || [], [t.tracedBy || ""]).join(" ").toLowerCase()
+             .indexOf(who) >= 0;
+  });
+  if (!want.length) return { looked: 0, rows: [], unread: [] };
+  const res = (window.UJ && UJ.cfg && UJ.cfg.res) || null;
+  let got;
+  try {
+    got = await UJ.tracing.fetchMany(REPORT_ENDPOINT, want, tracedOutlinesDsQS(),
+      function(done, total){ say && say("Reading contours \u2014 " + done + " of " + total + "\u2026"); });
+  } catch (e){
+    return { error: "could not read the contours (" + String(e && e.message || e) + ")" };
+  }
+  const rows = [], unread = [];
+  want.forEach(function(t){
+    const x = got[t.structureId];
+    if (!x || !x.st || !(x.st.rings || []).length){ unread.push(t.structureId); return; }
+    let s;
+    try { s = UJ.tracing.splitOf(x.st.rings, res); } catch (_e){ unread.push(t.structureId); return; }
+    if (s.split) rows.push({ t: t, st: x.st, split: s });
+  });
+  /* Worst first: the ratio IS how far apart the two halves are in units of their own size, so the
+     top of this list is the one least likely to be a real shape. */
+  rows.sort(function(a, b){ return b.split.ratio - a.split.ratio; });
+  return { looked: want.length, rows: rows, unread: unread };
+}
+window.tracedSplitScan = tracedSplitScan;
+
 window.tracedMeasureAndSave = tracedMeasureAndSave;
 window.tracedMeasureCells = tracedMeasureCells;
 window.tracedMeasureAll = tracedMeasureAll;
@@ -20110,6 +20284,25 @@ async function tracingMeasureRun(btn, go, sayEl){
   if (sayEl) sayEl.textContent = msg;
   if (typeof tracingSay === "function") tracingSay(msg);
 }
+/* ── WHAT ONE SPLIT OUTLINE READS AS ───────────────────────  2026-10-08
+   One sentence, in one place, so the row in the dataset list, the warning on the cell panel and
+   anything later all say the same thing about the same number. "" when the outline is one piece.
+   See src/one_tracing_that_is_really_two.py. */
+function tracingSplitSay(st, resNm){
+  var s;
+  try {
+    s = UJ.tracing.splitOf((st && (st.rings || st)) || [],
+                           resNm || (window.UJ && UJ.cfg && UJ.cfg.res) || null);
+  } catch (_e){ return ""; }
+  if (!s || !s.split) return "";
+  var um = function(nm){ return (Math.round(Number(nm) / 100) / 10) + " \u00b5m"; };
+  return "In " + s.clusters.length + " pieces that do not touch: "
+    + s.clusters.map(function(c){
+        return c.contours + " contour" + (c.contours === 1 ? "" : "s") + " at " + c.centre.join(", ");
+      }).join(" and ")
+    + " \u2014 " + um(s.gapNm) + " apart, " + (Math.round(s.ratio * 10) / 10)
+    + "\u00d7 their own reach.";
+}
 function tracingRenderShared(){
   const host = document.getElementById("tracingShared");
   if (!host) return;
@@ -20146,7 +20339,23 @@ function tracingRenderShared(){
      What remains is per cell, because that is the thing that recurs: a cell's relational numbers
      go stale when another organelle in it is outlined. tracingRemeasureCell() now does that by
      itself after every share, and this button is the manual repair for when it did not. */
-  host.innerHTML = '<label>In the dataset, by cell — open one to add to it or correct it</label>'
+  /* ── AND THE ONE QUESTION THE LIST CANNOT ANSWER BY ITSELF ─────  2026-10-08
+     The index carries names, counts and cells, not contours, so "is this outline one object" needs
+     the geometry — a read per structure. A button, not an automatic scan: it is dozens of Drive
+     reads, and a page that spends them without being asked is a page that is slow for everyone who
+     did not want this. REPORTS ONLY; nothing is changed by pressing it. */
+  const splitBox = '<div style="border:1px solid var(--line);border-radius:7px;padding:8px 10px;'
+    + 'margin:6px 0 10px 0">'
+    + '<button class="idbtn" id="tracingSplitGo" ' + TRACING_BTN + ' title="Reads every outline\u2019s '
+    + 'contours and reports any whose contours sit in two places that do not touch \u2014 one tracing '
+    + 'holding two objects. Nothing is changed: this is a list of what to look at.">'
+    + 'Check outlines for split structures</button>'
+    + ' <label style="font-size:11px;color:var(--mut)"><input type="checkbox" id="tracingSplitMine" '
+    + 'checked style="width:auto;vertical-align:-1px"> only ones I have drawn on</label>'
+    + '<div class="hint" id="tracingSplitSayEl" style="margin-top:5px"></div>'
+    + '<div id="tracingSplitOut"></div></div>';
+  host.innerHTML = splitBox
+    + '<label>In the dataset, by cell — open one to add to it or correct it</label>'
     + groups.map(function(g, gi){
         const type = (g.items.filter(function(x){ return x.t.cellType; })[0] || { t: {} }).t.cellType || "";
         return '<div ' + TRACING_CELL_BOX + ' data-g="' + gi + '">'
@@ -20210,6 +20419,10 @@ function tracingRenderShared(){
   [].slice.call(host.querySelectorAll(".tracingcellzip")).forEach(function(b){
     b.addEventListener("click", function(){ tracingCellZip(groups[Number(b.dataset.g)], b); });
   });
+  {
+    const go = host.querySelector("#tracingSplitGo");
+    if (go) go.addEventListener("click", function(){ tracingSplitRun(go); });
+  }
   [].slice.call(host.querySelectorAll(".tracedmeasurecell")).forEach(function(b){
     b.addEventListener("click", function(){
       const g = groups[Number(b.dataset.g)];
@@ -20220,6 +20433,166 @@ function tracingRenderShared(){
     });
   });
 }
+
+/* The button's half: ask, then write what came back. Each row names the outline, the cell it is
+   filed against, and both halves with a coordinate to jump to — because "this one is wrong" is
+   only useful if you can get to it. 2026-10-08. */
+async function tracingSplitRun(btn){
+  const sayEl = document.getElementById("tracingSplitSayEl");
+  const out = document.getElementById("tracingSplitOut");
+  const say = function(m){ if (sayEl) sayEl.textContent = m; };
+  if (typeof window.tracedSplitScan !== "function"){
+    say("This page does not have core/tracedoutlines.js loaded, so there is nothing to read.");
+    return;
+  }
+  const mine = document.getElementById("tracingSplitMine");
+  /* REPORTER_NAME is what every share writes into the sheet's reporterName, so it is the string
+     the index can actually be matched on. Signed out it is empty, and the tick then does nothing
+     rather than silently matching everything or nothing \u2014 the label says so. */
+  const who = (typeof REPORTER_NAME !== "undefined" && REPORTER_NAME) ? String(REPORTER_NAME) : "";
+  const only = (mine && mine.checked && who) ? who : "";
+  if (mine) mine.disabled = !who;
+  const was = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Reading\u2026"; }
+  if (out) out.innerHTML = "";
+  let r;
+  try { r = await window.tracedSplitScan(say, { only: only }); }
+  catch (e){ r = { error: String(e && e.message || e) }; }
+  if (btn){ btn.disabled = false; btn.textContent = was; }
+  if (!r || r.error){ say("Nothing was read \u2014 " + ((r && r.error) || "unknown error") + "."); return; }
+  const n = (r.rows || []).length;
+  say(n
+    ? n + " of " + r.looked + " outline" + (r.looked === 1 ? "" : "s") + " are in more than one "
+      + "piece. Worst first. Nothing has been changed \u2014 open one in the pad to correct it."
+      + (r.unread.length ? " " + r.unread.length + " could not be read." : "")
+    : "All " + r.looked + " outline" + (r.looked === 1 ? " is" : "s are") + " one piece."
+      + (r.unread.length ? " " + r.unread.length + " could not be read." : ""));
+  if (!out || !n) return;
+  out.innerHTML = r.rows.map(function(x, i){
+    const t = x.t, s = x.split;
+    const where = s.clusters.map(function(c){
+      return '<button class="idbtn tracingsplitjump" data-at="' + c.centre.join(",") + '" '
+        + 'style="padding:1px 7px;font-size:11px" title="Put this piece\u2019s centre in the '
+        + 'coordinate boxes.">' + c.contours + ' at ' + c.centre.join(", ") + '</button>';
+    }).join(" ");
+    return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;'
+      + 'border-top:1px solid var(--line);padding:5px 0">'
+      + '<span style="width:11px;height:11px;border-radius:2px;flex:0 0 auto;background:'
+        + escHtml(t.color || "#3a6b5a") + '"></span>'
+      + '<b style="flex:0 0 auto">' + escHtml(t.name || t.structureId) + '</b>'
+      + '<span style="opacity:.7;flex:0 0 auto">' + escHtml(tracingCellHeadPlain(t)) + '</span>'
+      + '<span style="flex:0 0 auto">' + (Math.round(s.ratio * 10) / 10) + '\u00d7 apart</span>'
+      + where
+      + '<button class="idbtn tracingsplitopen" data-sid="' + escHtml(t.structureId) + '" '
+        + 'style="padding:1px 7px;font-size:11px" title="Open this outline in the pad, as it is, '
+        + 'so you can correct it and share the corrected version.">Open in the pad</button>'
+      + '</div>';
+  }).join("");
+  [].slice.call(out.querySelectorAll(".tracingsplitjump")).forEach(function(b){
+    b.addEventListener("click", function(){
+      const p = String(b.dataset.at || "").split(",");
+      ["tracingX", "tracingY", "tracingZ"].forEach(function(id, k){
+        const el = document.getElementById(id);
+        if (el && p[k] !== undefined) el.value = String(p[k]).trim();
+      });
+      tracingSay("Coordinate set to " + p.join(", ") + " \u2014 this piece of that outline.");
+    });
+  });
+  [].slice.call(out.querySelectorAll(".tracingsplitopen")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingOpenShared(b.dataset.sid, b); });
+  });
+}
+/* The cell a row is filed against, in one short phrase. tracingCellHead builds the rich version
+   for the per-cell headings; this is the same facts without the markup. */
+function tracingCellHeadPlain(t){
+  const at = (t && (t.cellCoord || t.cell_coord)) || "";
+  if (at) return "cell at " + at;
+  const nuc = String((t && (t.nucleusId || t.nucleus_id)) || "");
+  if (nuc) return "nucleus " + nuc;
+  const root = String((t && (t.rootId || t.root_id)) || "");
+  return root ? "segment " + root : "no cell";
+}
+
+
+/* The button's half: ask, then write what came back. Each row names the outline, the cell it is
+   filed against, and both halves with a coordinate to jump to — because "this one is wrong" is
+   only useful if you can get to it. 2026-10-08. */
+async function tracingSplitRun(btn){
+  const sayEl = document.getElementById("tracingSplitSayEl");
+  const out = document.getElementById("tracingSplitOut");
+  const say = function(m){ if (sayEl) sayEl.textContent = m; };
+  if (typeof window.tracedSplitScan !== "function"){
+    say("This page does not have core/tracedoutlines.js loaded, so there is nothing to read.");
+    return;
+  }
+  const mine = document.getElementById("tracingSplitMine");
+  /* REPORTER_NAME is what every share writes into the sheet's reporterName, so it is the string
+     the index can actually be matched on. Signed out it is empty, and the tick then does nothing
+     rather than silently matching everything or nothing — the label says so. */
+  const who = (typeof REPORTER_NAME !== "undefined" && REPORTER_NAME) ? String(REPORTER_NAME) : "";
+  const only = (mine && mine.checked && who) ? who : "";
+  if (mine) mine.disabled = !who;
+  const was = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Reading\u2026"; }
+  if (out) out.innerHTML = "";
+  let r;
+  try { r = await window.tracedSplitScan(say, { only: only }); }
+  catch (e){ r = { error: String(e && e.message || e) }; }
+  if (btn){ btn.disabled = false; btn.textContent = was; }
+  if (!r || r.error){ say("Nothing was read \u2014 " + ((r && r.error) || "unknown error") + "."); return; }
+  const n = (r.rows || []).length;
+  say(n
+    ? n + " of " + r.looked + " outline" + (r.looked === 1 ? "" : "s") + " are in more than one "
+      + "piece. Worst first. Nothing has been changed \u2014 open one in the pad to correct it."
+      + (r.unread.length ? " " + r.unread.length + " could not be read." : "")
+    : "All " + r.looked + " outline" + (r.looked === 1 ? " is" : "s are") + " one piece."
+      + (r.unread.length ? " " + r.unread.length + " could not be read." : ""));
+  if (!out || !n) return;
+  out.innerHTML = r.rows.map(function(x, i){
+    const t = x.t, s = x.split;
+    const where = s.clusters.map(function(c){
+      return '<button class="idbtn tracingsplitjump" data-at="' + c.centre.join(",") + '" '
+        + 'style="padding:1px 7px;font-size:11px" title="Put this piece\u2019s centre in the '
+        + 'coordinate boxes.">' + c.contours + ' at ' + c.centre.join(", ") + '</button>';
+    }).join(" ");
+    return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;'
+      + 'border-top:1px solid var(--line);padding:5px 0">'
+      + '<span style="width:11px;height:11px;border-radius:2px;flex:0 0 auto;background:'
+        + escHtml(t.color || "#3a6b5a") + '"></span>'
+      + '<b style="flex:0 0 auto">' + escHtml(t.name || t.structureId) + '</b>'
+      + '<span style="opacity:.7;flex:0 0 auto">' + escHtml(tracingCellHeadPlain(t)) + '</span>'
+      + '<span style="flex:0 0 auto">' + (Math.round(s.ratio * 10) / 10) + '\u00d7 apart</span>'
+      + where
+      + '<button class="idbtn tracingsplitopen" data-sid="' + escHtml(t.structureId) + '" '
+        + 'style="padding:1px 7px;font-size:11px" title="Open this outline in the pad, as it is, '
+        + 'so you can correct it and share the corrected version.">Open in the pad</button>'
+      + '</div>';
+  }).join("");
+  [].slice.call(out.querySelectorAll(".tracingsplitjump")).forEach(function(b){
+    b.addEventListener("click", function(){
+      const p = String(b.dataset.at || "").split(",");
+      ["tracingX", "tracingY", "tracingZ"].forEach(function(id, k){
+        const el = document.getElementById(id);
+        if (el && p[k] !== undefined) el.value = String(p[k]).trim();
+      });
+      tracingSay("Coordinate set to " + p.join(", ") + " \u2014 this piece of that outline.");
+    });
+  });
+  [].slice.call(out.querySelectorAll(".tracingsplitopen")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingOpenShared(b.dataset.sid, b); });
+  });
+}
+/* The cell a row is filed against, in one short phrase. tracingCellHead builds the rich version
+   for the per-cell headings; this is the same facts without the markup. */
+function tracingCellHeadPlain(t){
+  const at = (t && (t.cellCoord || t.cell_coord)) || "";
+  if (at) return "cell at " + at;
+  const nuc = String((t && (t.nucleusId || t.nucleus_id)) || "");
+  if (nuc) return "nucleus " + nuc;
+  const root = String((t && (t.rootId || t.root_id)) || "");
+  return root ? "segment " + root : "no cell";
+}
+
 /* window.tracedMeasureAll() has no button on purpose -- see "ONE BUTTON, NOT TWO" above. */
 var TRACING_SHARED_GROUPS = [];
 

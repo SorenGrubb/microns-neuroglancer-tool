@@ -707,6 +707,7 @@ function loadTracedStructures(nid, root){
               + panelEsc(t.color || "#3a6b5a") + '"></span>'
             + '<span style="flex:1 1 140px;min-width:0"><b>' + panelEsc(t.name || t.structureId)
               + '</b>' + panelEsc(vol(t.volumeUm3)) + '</span>'
+            + organSplitNote(t)
             + '<span style="opacity:.7;flex:0 0 auto">' + (t.contours || 0) + " contour"
               + ((t.contours === 1) ? "" : "s") + " on " + (t.sections || 0) + " section"
               + ((t.sections === 1) ? "" : "s") + '</span>'
@@ -827,6 +828,10 @@ function organFetchRings(nid, root, trs){
     if (--left > 0) return;
     PANEL_ORGAN_BUSY = false;
     try { renderOrganelleSection(nid, root); } catch (_e){}
+    /* The whole cell and the nucleus are fetched with the organelles since this morning, so the
+       list above can carry the same warning as the rows below. Its own 60-second cache makes this
+       a re-render, not a second read (2026-10-08). */
+    try { loadTracedStructures(nid, root); } catch (_e2){}
   };
   /* TOGETHER where core/tracing.js can (2026-09-22, src/the_outlines_come_in_one_request.py). */
   if (window.UJ && UJ.tracing && UJ.tracing.fetchMany){
@@ -967,6 +972,25 @@ function organIsCellBody(t){
 function organBodyRank(t){
   return String((t && (t.instanceOf || t.kind)) || "").toLowerCase() === "cell" ? 0 : 1;
 }
+/* ── AND A ROW SAYS SO WHERE THE CONTOURS ARE IN HAND ────────  2026-10-08
+   The scan in the tracing card reads the whole dataset on a button; this costs nothing, because
+   the Organelles section has already fetched these contours to pair them. Warning only — the
+   number is the same one tracingSplitSay prints, from the same function. */
+function organSplitNote(t){
+  if (!t || !(t.rings || []).length) return "";
+  if (!(window.UJ && UJ.tracing && typeof UJ.tracing.splitOf === "function")) return "";
+  var s;
+  try { s = UJ.tracing.splitOf(t.rings, (UJ.cfg && UJ.cfg.res) || null); } catch (_e){ return ""; }
+  if (!s || !s.split) return "";
+  var um = (Math.round(Number(s.gapNm) / 100) / 10);
+  return '<span style="flex:0 0 auto;color:var(--warn)" title="Its contours sit in '
+    + s.clusters.length + ' groups that do not touch — '
+    + s.clusters.map(function(c){ return c.contours + ' at ' + c.centre.join(", "); }).join(" and ")
+    + ', ' + um + ' µm apart, ' + (Math.round(s.ratio * 10) / 10) + '× their own reach. '
+    + 'That is usually two objects saved as one outline. Nothing has been changed; open it in '
+    + 'µJump’s tracing card to correct it.">⚠ in ' + s.clusters.length
+    + ' pieces, ' + um + ' µm apart</span>';
+}
 function renderOrganelleSection(nid, root){
   var host = organelleSectionBox();
   if (!host) return;
@@ -1023,6 +1047,7 @@ function renderOrganelleSection(nid, root){
       + '<b style="flex:0 0 auto">' + panelEsc(t.name || organKindLabel(t.instanceOf || t.kind)) + '</b>'
       + (organVol(t.volumeUm3) ? '<span style="flex:0 0 auto">' + organVol(t.volumeUm3)
           + ' µm³</span>' : "")
+      + organSplitNote(t)
       + '<span style="opacity:.7;flex:0 0 auto">' + (t.contours || 0) + " contour"
         + ((t.contours === 1) ? "" : "s") + " on " + (t.sections || 0) + " section"
         + ((t.sections === 1) ? "" : "s") + '</span>'
@@ -1074,6 +1099,7 @@ function renderOrganelleSection(nid, root){
       + (organVol(t.volumeUm3) ? '<span style="flex:0 0 auto">' + organVol(t.volumeUm3)
           + ' µm³</span>' : "")
       + '<span style="opacity:.7;flex:0 0 auto">outlined, not logged</span>'
+      + organSplitNote(t)
       + (best ? '<span style="flex:0 0 auto">centre (' + best.join(", ") + ')' + organJump(best, t) + '</span>' : "")
       + (t.fileUrl ? '<a href="' + panelEsc(t.fileUrl) + '" target="_blank" rel="noopener" '
           + 'style="opacity:.7;flex:0 0 auto">file</a>' : "")

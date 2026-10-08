@@ -4592,6 +4592,25 @@ async function tracingMeasureRun(btn, go, sayEl){
   if (sayEl) sayEl.textContent = msg;
   if (typeof tracingSay === "function") tracingSay(msg);
 }
+/* ── WHAT ONE SPLIT OUTLINE READS AS ───────────────────────  2026-10-08
+   One sentence, in one place, so the row in the dataset list, the warning on the cell panel and
+   anything later all say the same thing about the same number. "" when the outline is one piece.
+   See src/one_tracing_that_is_really_two.py. */
+function tracingSplitSay(st, resNm){
+  var s;
+  try {
+    s = UJ.tracing.splitOf((st && (st.rings || st)) || [],
+                           resNm || (window.UJ && UJ.cfg && UJ.cfg.res) || null);
+  } catch (_e){ return ""; }
+  if (!s || !s.split) return "";
+  var um = function(nm){ return (Math.round(Number(nm) / 100) / 10) + " \u00b5m"; };
+  return "In " + s.clusters.length + " pieces that do not touch: "
+    + s.clusters.map(function(c){
+        return c.contours + " contour" + (c.contours === 1 ? "" : "s") + " at " + c.centre.join(", ");
+      }).join(" and ")
+    + " \u2014 " + um(s.gapNm) + " apart, " + (Math.round(s.ratio * 10) / 10)
+    + "\u00d7 their own reach.";
+}
 function tracingRenderShared(){
   const host = document.getElementById("tracingShared");
   if (!host) return;
@@ -4628,7 +4647,23 @@ function tracingRenderShared(){
      What remains is per cell, because that is the thing that recurs: a cell's relational numbers
      go stale when another organelle in it is outlined. tracingRemeasureCell() now does that by
      itself after every share, and this button is the manual repair for when it did not. */
-  host.innerHTML = '<label>In the dataset, by cell — open one to add to it or correct it</label>'
+  /* ── AND THE ONE QUESTION THE LIST CANNOT ANSWER BY ITSELF ─────  2026-10-08
+     The index carries names, counts and cells, not contours, so "is this outline one object" needs
+     the geometry — a read per structure. A button, not an automatic scan: it is dozens of Drive
+     reads, and a page that spends them without being asked is a page that is slow for everyone who
+     did not want this. REPORTS ONLY; nothing is changed by pressing it. */
+  const splitBox = '<div style="border:1px solid var(--line);border-radius:7px;padding:8px 10px;'
+    + 'margin:6px 0 10px 0">'
+    + '<button class="idbtn" id="tracingSplitGo" ' + TRACING_BTN + ' title="Reads every outline\u2019s '
+    + 'contours and reports any whose contours sit in two places that do not touch \u2014 one tracing '
+    + 'holding two objects. Nothing is changed: this is a list of what to look at.">'
+    + 'Check outlines for split structures</button>'
+    + ' <label style="font-size:11px;color:var(--mut)"><input type="checkbox" id="tracingSplitMine" '
+    + 'checked style="width:auto;vertical-align:-1px"> only ones I have drawn on</label>'
+    + '<div class="hint" id="tracingSplitSayEl" style="margin-top:5px"></div>'
+    + '<div id="tracingSplitOut"></div></div>';
+  host.innerHTML = splitBox
+    + '<label>In the dataset, by cell — open one to add to it or correct it</label>'
     + groups.map(function(g, gi){
         const type = (g.items.filter(function(x){ return x.t.cellType; })[0] || { t: {} }).t.cellType || "";
         return '<div ' + TRACING_CELL_BOX + ' data-g="' + gi + '">'
@@ -4692,6 +4727,10 @@ function tracingRenderShared(){
   [].slice.call(host.querySelectorAll(".tracingcellzip")).forEach(function(b){
     b.addEventListener("click", function(){ tracingCellZip(groups[Number(b.dataset.g)], b); });
   });
+  {
+    const go = host.querySelector("#tracingSplitGo");
+    if (go) go.addEventListener("click", function(){ tracingSplitRun(go); });
+  }
   [].slice.call(host.querySelectorAll(".tracedmeasurecell")).forEach(function(b){
     b.addEventListener("click", function(){
       const g = groups[Number(b.dataset.g)];
@@ -4702,6 +4741,166 @@ function tracingRenderShared(){
     });
   });
 }
+
+/* The button's half: ask, then write what came back. Each row names the outline, the cell it is
+   filed against, and both halves with a coordinate to jump to — because "this one is wrong" is
+   only useful if you can get to it. 2026-10-08. */
+async function tracingSplitRun(btn){
+  const sayEl = document.getElementById("tracingSplitSayEl");
+  const out = document.getElementById("tracingSplitOut");
+  const say = function(m){ if (sayEl) sayEl.textContent = m; };
+  if (typeof window.tracedSplitScan !== "function"){
+    say("This page does not have core/tracedoutlines.js loaded, so there is nothing to read.");
+    return;
+  }
+  const mine = document.getElementById("tracingSplitMine");
+  /* REPORTER_NAME is what every share writes into the sheet's reporterName, so it is the string
+     the index can actually be matched on. Signed out it is empty, and the tick then does nothing
+     rather than silently matching everything or nothing \u2014 the label says so. */
+  const who = (typeof REPORTER_NAME !== "undefined" && REPORTER_NAME) ? String(REPORTER_NAME) : "";
+  const only = (mine && mine.checked && who) ? who : "";
+  if (mine) mine.disabled = !who;
+  const was = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Reading\u2026"; }
+  if (out) out.innerHTML = "";
+  let r;
+  try { r = await window.tracedSplitScan(say, { only: only }); }
+  catch (e){ r = { error: String(e && e.message || e) }; }
+  if (btn){ btn.disabled = false; btn.textContent = was; }
+  if (!r || r.error){ say("Nothing was read \u2014 " + ((r && r.error) || "unknown error") + "."); return; }
+  const n = (r.rows || []).length;
+  say(n
+    ? n + " of " + r.looked + " outline" + (r.looked === 1 ? "" : "s") + " are in more than one "
+      + "piece. Worst first. Nothing has been changed \u2014 open one in the pad to correct it."
+      + (r.unread.length ? " " + r.unread.length + " could not be read." : "")
+    : "All " + r.looked + " outline" + (r.looked === 1 ? " is" : "s are") + " one piece."
+      + (r.unread.length ? " " + r.unread.length + " could not be read." : ""));
+  if (!out || !n) return;
+  out.innerHTML = r.rows.map(function(x, i){
+    const t = x.t, s = x.split;
+    const where = s.clusters.map(function(c){
+      return '<button class="idbtn tracingsplitjump" data-at="' + c.centre.join(",") + '" '
+        + 'style="padding:1px 7px;font-size:11px" title="Put this piece\u2019s centre in the '
+        + 'coordinate boxes.">' + c.contours + ' at ' + c.centre.join(", ") + '</button>';
+    }).join(" ");
+    return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;'
+      + 'border-top:1px solid var(--line);padding:5px 0">'
+      + '<span style="width:11px;height:11px;border-radius:2px;flex:0 0 auto;background:'
+        + escHtml(t.color || "#3a6b5a") + '"></span>'
+      + '<b style="flex:0 0 auto">' + escHtml(t.name || t.structureId) + '</b>'
+      + '<span style="opacity:.7;flex:0 0 auto">' + escHtml(tracingCellHeadPlain(t)) + '</span>'
+      + '<span style="flex:0 0 auto">' + (Math.round(s.ratio * 10) / 10) + '\u00d7 apart</span>'
+      + where
+      + '<button class="idbtn tracingsplitopen" data-sid="' + escHtml(t.structureId) + '" '
+        + 'style="padding:1px 7px;font-size:11px" title="Open this outline in the pad, as it is, '
+        + 'so you can correct it and share the corrected version.">Open in the pad</button>'
+      + '</div>';
+  }).join("");
+  [].slice.call(out.querySelectorAll(".tracingsplitjump")).forEach(function(b){
+    b.addEventListener("click", function(){
+      const p = String(b.dataset.at || "").split(",");
+      ["tracingX", "tracingY", "tracingZ"].forEach(function(id, k){
+        const el = document.getElementById(id);
+        if (el && p[k] !== undefined) el.value = String(p[k]).trim();
+      });
+      tracingSay("Coordinate set to " + p.join(", ") + " \u2014 this piece of that outline.");
+    });
+  });
+  [].slice.call(out.querySelectorAll(".tracingsplitopen")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingOpenShared(b.dataset.sid, b); });
+  });
+}
+/* The cell a row is filed against, in one short phrase. tracingCellHead builds the rich version
+   for the per-cell headings; this is the same facts without the markup. */
+function tracingCellHeadPlain(t){
+  const at = (t && (t.cellCoord || t.cell_coord)) || "";
+  if (at) return "cell at " + at;
+  const nuc = String((t && (t.nucleusId || t.nucleus_id)) || "");
+  if (nuc) return "nucleus " + nuc;
+  const root = String((t && (t.rootId || t.root_id)) || "");
+  return root ? "segment " + root : "no cell";
+}
+
+
+/* The button's half: ask, then write what came back. Each row names the outline, the cell it is
+   filed against, and both halves with a coordinate to jump to — because "this one is wrong" is
+   only useful if you can get to it. 2026-10-08. */
+async function tracingSplitRun(btn){
+  const sayEl = document.getElementById("tracingSplitSayEl");
+  const out = document.getElementById("tracingSplitOut");
+  const say = function(m){ if (sayEl) sayEl.textContent = m; };
+  if (typeof window.tracedSplitScan !== "function"){
+    say("This page does not have core/tracedoutlines.js loaded, so there is nothing to read.");
+    return;
+  }
+  const mine = document.getElementById("tracingSplitMine");
+  /* REPORTER_NAME is what every share writes into the sheet's reporterName, so it is the string
+     the index can actually be matched on. Signed out it is empty, and the tick then does nothing
+     rather than silently matching everything or nothing — the label says so. */
+  const who = (typeof REPORTER_NAME !== "undefined" && REPORTER_NAME) ? String(REPORTER_NAME) : "";
+  const only = (mine && mine.checked && who) ? who : "";
+  if (mine) mine.disabled = !who;
+  const was = btn ? btn.textContent : "";
+  if (btn){ btn.disabled = true; btn.textContent = "Reading\u2026"; }
+  if (out) out.innerHTML = "";
+  let r;
+  try { r = await window.tracedSplitScan(say, { only: only }); }
+  catch (e){ r = { error: String(e && e.message || e) }; }
+  if (btn){ btn.disabled = false; btn.textContent = was; }
+  if (!r || r.error){ say("Nothing was read \u2014 " + ((r && r.error) || "unknown error") + "."); return; }
+  const n = (r.rows || []).length;
+  say(n
+    ? n + " of " + r.looked + " outline" + (r.looked === 1 ? "" : "s") + " are in more than one "
+      + "piece. Worst first. Nothing has been changed \u2014 open one in the pad to correct it."
+      + (r.unread.length ? " " + r.unread.length + " could not be read." : "")
+    : "All " + r.looked + " outline" + (r.looked === 1 ? " is" : "s are") + " one piece."
+      + (r.unread.length ? " " + r.unread.length + " could not be read." : ""));
+  if (!out || !n) return;
+  out.innerHTML = r.rows.map(function(x, i){
+    const t = x.t, s = x.split;
+    const where = s.clusters.map(function(c){
+      return '<button class="idbtn tracingsplitjump" data-at="' + c.centre.join(",") + '" '
+        + 'style="padding:1px 7px;font-size:11px" title="Put this piece\u2019s centre in the '
+        + 'coordinate boxes.">' + c.contours + ' at ' + c.centre.join(", ") + '</button>';
+    }).join(" ");
+    return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;'
+      + 'border-top:1px solid var(--line);padding:5px 0">'
+      + '<span style="width:11px;height:11px;border-radius:2px;flex:0 0 auto;background:'
+        + escHtml(t.color || "#3a6b5a") + '"></span>'
+      + '<b style="flex:0 0 auto">' + escHtml(t.name || t.structureId) + '</b>'
+      + '<span style="opacity:.7;flex:0 0 auto">' + escHtml(tracingCellHeadPlain(t)) + '</span>'
+      + '<span style="flex:0 0 auto">' + (Math.round(s.ratio * 10) / 10) + '\u00d7 apart</span>'
+      + where
+      + '<button class="idbtn tracingsplitopen" data-sid="' + escHtml(t.structureId) + '" '
+        + 'style="padding:1px 7px;font-size:11px" title="Open this outline in the pad, as it is, '
+        + 'so you can correct it and share the corrected version.">Open in the pad</button>'
+      + '</div>';
+  }).join("");
+  [].slice.call(out.querySelectorAll(".tracingsplitjump")).forEach(function(b){
+    b.addEventListener("click", function(){
+      const p = String(b.dataset.at || "").split(",");
+      ["tracingX", "tracingY", "tracingZ"].forEach(function(id, k){
+        const el = document.getElementById(id);
+        if (el && p[k] !== undefined) el.value = String(p[k]).trim();
+      });
+      tracingSay("Coordinate set to " + p.join(", ") + " \u2014 this piece of that outline.");
+    });
+  });
+  [].slice.call(out.querySelectorAll(".tracingsplitopen")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingOpenShared(b.dataset.sid, b); });
+  });
+}
+/* The cell a row is filed against, in one short phrase. tracingCellHead builds the rich version
+   for the per-cell headings; this is the same facts without the markup. */
+function tracingCellHeadPlain(t){
+  const at = (t && (t.cellCoord || t.cell_coord)) || "";
+  if (at) return "cell at " + at;
+  const nuc = String((t && (t.nucleusId || t.nucleus_id)) || "");
+  if (nuc) return "nucleus " + nuc;
+  const root = String((t && (t.rootId || t.root_id)) || "");
+  return root ? "segment " + root : "no cell";
+}
+
 /* window.tracedMeasureAll() has no button on purpose -- see "ONE BUTTON, NOT TWO" above. */
 var TRACING_SHARED_GROUPS = [];
 

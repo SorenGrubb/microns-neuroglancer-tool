@@ -954,8 +954,126 @@ UJ.tracing = (function(){
     var aa = coordKey(a.at), bb = coordKey(b.at);
     return !!(aa && bb && aa !== bb);
   }
+  /* ── IS THIS ONE OBJECT? ─────────────────────────────  2026-10-08
+     Søren, reading his own Blender notebook: *"is there some mistake also here with the
+     different tracings belonging to the right cell?"* One of his Nucleus outlines carries contours
+     around x 400300 AND around x 401000, on the same sections, 3 um apart. 52 contours on 34
+     sections is 18 sections with a second contour in them.
+
+     NO THRESHOLD IS CHOSEN HERE. Each contour gets its own equivalent radius, sqrt(area/pi), so
+     "touching" means centre-to-centre distance under the sum of two radii. A minimum spanning tree
+     over the contours, with every distance divided by that sum, has a largest edge, and that edge
+     is the answer: under 1 the outline is a chain of contours that all touch; over 1 it is two
+     pieces further apart than their own reach, and the number says by how much. It scales itself,
+     so a 10 um cell and a 0.2 um vesicle are each judged against their own size. Removing that one
+     edge from a tree leaves exactly two components, which is why both halves can be named.
+
+     A contour drawn inside another has the same centre, so a hole is distance zero and never
+     splits anything. A cell whose outline drifts across sections stays one piece as long as
+     consecutive contours overlap, which is what a cell followed section by section does.
+
+     REPORTS. It does not change a tracing, and nothing in this project calls it in a way that
+     could. See src/one_tracing_that_is_really_two.py. */
+  function ringGeom(r, RX, RY, RZ){
+    var p = (r && r.points) || [], n = p.length;
+    if (n < 3) return null;
+    var a2 = 0, gx = 0, gy = 0;
+    for (var i = 0; i < n; i++){
+      var q = p[i], w = p[(i + 1) % n];
+      var cr = Number(q[0]) * Number(w[1]) - Number(w[0]) * Number(q[1]);
+      a2 += cr; gx += (Number(q[0]) + Number(w[0])) * cr; gy += (Number(q[1]) + Number(w[1])) * cr;
+    }
+    var cx, cy;
+    if (a2 !== 0){ cx = gx / (3 * a2); cy = gy / (3 * a2); }
+    else {
+      cx = 0; cy = 0;
+      for (var k = 0; k < n; k++){ cx += Number(p[k][0]); cy += Number(p[k][1]); }
+      cx /= n; cy /= n;
+    }
+    /* The radius of a circle of the same area, in nanometres. x and y are the same size in every
+       volume this family reads; the average is written out so a dataset where they differ gets a
+       sensible number rather than silently using one of them. */
+    return { vx: cx, vy: cy, vz: Number(r.z),
+             x: cx * RX, y: cy * RY, z: Number(r.z) * RZ,
+             rad: Math.sqrt(Math.abs(a2) / 2 / Math.PI) * ((RX + RY) / 2) };
+  }
+  function splitOf(rings, resNm){
+    var RX = 1, RY = 1, RZ = 1;
+    if (Array.isArray(resNm) && resNm.length === 3){
+      RX = Number(resNm[0]) || 1; RY = Number(resNm[1]) || 1; RZ = Number(resNm[2]) || 1;
+    }
+    var g = [];
+    (rings || []).forEach(function(r){ var x = ringGeom(r, RX, RY, RZ); if (x) g.push(x); });
+    var n = g.length;
+    if (n < 2) return { split: false, ratio: 0, gapNm: 0, clusters: [], contours: n };
+    var pair = function(a, b){
+      var dx = g[a].x - g[b].x, dy = g[a].y - g[b].y, dz = g[a].z - g[b].z;
+      var d = Math.sqrt(dx * dx + dy * dy + dz * dz), reach = g[a].rad + g[b].rad;
+      return { ratio: reach > 0 ? d / reach : (d > 0 ? Infinity : 0), gap: d - reach };
+    };
+    /* Prim, because n is a few hundred at most and an O(n²) tree needs no heap. */
+    var inT = [], best = [], from = [], i, j;
+    for (i = 0; i < n; i++){ inT.push(false); best.push(Infinity); from.push(-1); }
+    best[0] = 0;
+    var edges = [];
+    for (var it = 0; it < n; it++){
+      var pick = -1, pb = Infinity;
+      for (var k = 0; k < n; k++) if (!inT[k] && best[k] < pb){ pb = best[k]; pick = k; }
+      if (pick < 0) break;
+      inT[pick] = true;
+      if (from[pick] >= 0) edges.push({ a: from[pick], b: pick, ratio: best[pick] });
+      for (j = 0; j < n; j++){
+        if (inT[j]) continue;
+        var v = pair(pick, j).ratio;
+        if (v < best[j]){ best[j] = v; from[j] = pick; }
+      }
+    }
+    var worst = null;
+    edges.forEach(function(e){ if (!worst || e.ratio > worst.ratio) worst = e; });
+    if (!worst) return { split: false, ratio: 0, gapNm: 0, clusters: [], contours: n };
+    var gapNm = pair(worst.a, worst.b).gap;
+    /* A tree minus one edge is exactly two components. */
+    var adj = [];
+    for (i = 0; i < n; i++) adj.push([]);
+    edges.forEach(function(e){
+      if (e === worst) return;
+      adj[e.a].push(e.b); adj[e.b].push(e.a);
+    });
+    var mark = [];
+    for (i = 0; i < n; i++) mark.push(-1);
+    var label = 0;
+    for (i = 0; i < n; i++){
+      if (mark[i] >= 0) continue;
+      var stack = [i]; mark[i] = label;
+      while (stack.length){
+        var c = stack.pop();
+        adj[c].forEach(function(q){ if (mark[q] < 0){ mark[q] = label; stack.push(q); } });
+      }
+      label++;
+    }
+    var parts = [];
+    for (var L = 0; L < label; L++){
+      var idx = [];
+      for (i = 0; i < n; i++) if (mark[i] === L) idx.push(i);
+      if (!idx.length) continue;
+      var sx = 0, sy = 0, zs = {}, zmin = Infinity, zmax = -Infinity, rmax = 0;
+      idx.forEach(function(q){
+        sx += g[q].vx; sy += g[q].vy; zs[g[q].vz] = 1;
+        if (g[q].vz < zmin) zmin = g[q].vz;
+        if (g[q].vz > zmax) zmax = g[q].vz;
+        if (g[q].rad > rmax) rmax = g[q].rad;
+      });
+      parts.push({ contours: idx.length, sections: Object.keys(zs).length,
+                   centre: [Math.round(sx / idx.length), Math.round(sy / idx.length),
+                            Math.round((zmin + zmax) / 2)],
+                   zFrom: zmin, zTo: zmax, radiusNm: Math.round(rmax) });
+    }
+    parts.sort(function(a, b){ return b.contours - a.contours; });
+    return { split: worst.ratio > 1, ratio: worst.ratio, gapNm: gapNm,
+             clusters: parts, contours: n };
+  }
   return { coordKey: coordKey, cellOf: cellOf, sameCell: sameCell,
-           sameCellWhy: sameCellWhy,
+           sameCellWhy: sameCellWhy, splitOf: splitOf,
            elsewhereByCoord: elsewhereByCoord,
            ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
            ringAnnotations: ringAnnotations, simplifyRings: simplifyRings,

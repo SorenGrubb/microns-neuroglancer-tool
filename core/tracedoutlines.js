@@ -842,6 +842,62 @@ async function tracedMeasureAll(say){
   return { measured: measured, updated: updated, missing: missing, cells: keys.length,
            capped: capped };
 }
+
+/* ── EVERY OUTLINE, ASKED THE SAME QUESTION ─────────────────  2026-10-08
+   Søren: *"is there some mistake also here with the different tracings belonging to the right
+   cell?"* — after finding a Nucleus whose contours sit in two places 3 um apart. One is worth
+   knowing about; the set is worth knowing about more, because he cannot look at 70 of them by eye.
+
+   The index (?tracings=1) is one sheet scan and carries no contours, so the geometry comes through
+   UJ.tracing.fetchMany — 20 to a request, the same path the cell panel and the viewer already
+   use, and cached by structureId|groupId for the session. Nothing is written. See
+   src/one_tracing_that_is_really_two.py. */
+async function tracedSplitScan(say, opts){
+  opts = opts || {};
+  if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT)
+    return { error: "this page has no backend configured" };
+  let index = [];
+  try {
+    say && say("Listing the dataset\u2019s outlines\u2026");
+    const r = await fetch(REPORT_ENDPOINT + "?tracings=1" + tracedOutlinesDsQS());
+    const d = await r.json();
+    if (!d || !Array.isArray(d.tracings))
+      return { error: "the backend did not answer with a list of outlines" };
+    index = d.tracings;
+  } catch (e){
+    return { error: "could not list the outlines (" + String(e && e.message || e) + ")" };
+  }
+  const who = String(opts.only || "").trim().toLowerCase();
+  const want = index.filter(function(t){
+    if (!t || !t.structureId) return false;
+    if (!who) return true;
+    return [].concat(t.contributors || [], [t.tracedBy || ""]).join(" ").toLowerCase()
+             .indexOf(who) >= 0;
+  });
+  if (!want.length) return { looked: 0, rows: [], unread: [] };
+  const res = (window.UJ && UJ.cfg && UJ.cfg.res) || null;
+  let got;
+  try {
+    got = await UJ.tracing.fetchMany(REPORT_ENDPOINT, want, tracedOutlinesDsQS(),
+      function(done, total){ say && say("Reading contours \u2014 " + done + " of " + total + "\u2026"); });
+  } catch (e){
+    return { error: "could not read the contours (" + String(e && e.message || e) + ")" };
+  }
+  const rows = [], unread = [];
+  want.forEach(function(t){
+    const x = got[t.structureId];
+    if (!x || !x.st || !(x.st.rings || []).length){ unread.push(t.structureId); return; }
+    let s;
+    try { s = UJ.tracing.splitOf(x.st.rings, res); } catch (_e){ unread.push(t.structureId); return; }
+    if (s.split) rows.push({ t: t, st: x.st, split: s });
+  });
+  /* Worst first: the ratio IS how far apart the two halves are in units of their own size, so the
+     top of this list is the one least likely to be a real shape. */
+  rows.sort(function(a, b){ return b.split.ratio - a.split.ratio; });
+  return { looked: want.length, rows: rows, unread: unread };
+}
+window.tracedSplitScan = tracedSplitScan;
+
 window.tracedMeasureAndSave = tracedMeasureAndSave;
 window.tracedMeasureCells = tracedMeasureCells;
 window.tracedMeasureAll = tracedMeasureAll;
