@@ -1072,8 +1072,36 @@ UJ.tracing = (function(){
     return { split: worst.ratio > 1, ratio: worst.ratio, gapNm: gapNm,
              clusters: parts, contours: n };
   }
+  /* ── THE VESSELS ───────────────────────────────────  2026-10-08
+     Søren: *"a new topic called Vasculature with all the possible vascular segments Artery,
+     arteriole, capillary, venule, vein, and one called Lymphatic vessel."*
+
+     IN FLOW ORDER, not alphabetical: artery → arteriole → capillary → venule → vein is how the
+     blood goes and how anyone reading the list expects to find them; the lymphatic is its own
+     vessel and sits last. The colours are the convention a physiologist already has in their eye
+     — arterial red warming to the capillary bed, venous blue, lymph green — and they are here
+     rather than chosen per tool because a capillary has to be the same colour in the pad, the
+     viewer and the Blender scene or the picture lies.
+
+     A vessel is NOT a cell and NOT an organelle. Everything that asks "which cell is this on"
+     answers "none" for one, which is the point: see src/a_vessel_is_not_part_of_a_cell.py. */
+  var VESSELS = [
+    { value: "__artery",    kind: "artery",    label: "Artery",           color: "#e5484d" },
+    { value: "__arteriole", kind: "arteriole", label: "Arteriole",        color: "#f76808" },
+    { value: "__capillary", kind: "capillary", label: "Capillary",        color: "#c44bc4" },
+    { value: "__venule",    kind: "venule",    label: "Venule",           color: "#5b8def" },
+    { value: "__vein",      kind: "vein",      label: "Vein",             color: "#3451b2" },
+    { value: "__lymphatic", kind: "lymphatic", label: "Lymphatic vessel", color: "#46a758" }
+  ];
+  var VESSEL_BY = {};
+  VESSELS.forEach(function(v){ VESSEL_BY[v.kind] = v; VESSEL_BY[v.value] = v; });
+  /* Either spelling, any casing: the pad hands the "__capillary" option value, the sheet hands
+     back the stored "capillary", and a row written by hand can be "Capillary". */
+  function vesselOf(k){ return VESSEL_BY[String(k || "").trim().toLowerCase()] || null; }
+  function isVessel(k){ return !!vesselOf(k); }
   return { coordKey: coordKey, cellOf: cellOf, sameCell: sameCell,
            sameCellWhy: sameCellWhy, splitOf: splitOf,
+           VESSELS: VESSELS, vesselOf: vesselOf, isVessel: isVessel,
            elsewhereByCoord: elsewhereByCoord,
            ringsFromLink: ringsFromLink, _readLayer: readLayer, fetchMany: fetchMany,
            ringAnnotations: ringAnnotations, simplifyRings: simplifyRings,

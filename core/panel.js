@@ -958,6 +958,12 @@ function panelElsewhere(t, nid, root){
 }
 function organIsOrganelle(t){
   var k = String((t && (t.instanceOf || t.kind)) || "").toLowerCase();
+  /* A VESSEL IS NOT ONE EITHER (2026-10-08). This was "anything that is not the cell or its
+     nucleus", which made an artery an organelle by default — and the Organelles section is a
+     list of what is INSIDE a cell. A vessel is filed against no cell at all, so it would only
+     ever arrive here by accident, and when it did it would read as part of one. */
+  try { if (window.UJ && UJ.tracing && UJ.tracing.isVessel && UJ.tracing.isVessel(k)) return false; }
+  catch (_e){}
   return !!k && k !== "cell" && k !== "nucleus";
 }
 /* The other half of the same sentence. A whole cell and a nucleus are not organelles -- that is why

@@ -699,13 +699,61 @@ function tracingReadLink(){
 /* Split out from tracingWhat() (2026-09-17) so the single box and each row of the per-structure
    list read a dropdown value the SAME way. Two copies of this mapping is how a lysosome traced in
    one place stops being the same thing as a lysosome traced in the other. */
+/* The vessel name box, which only a vascular kind asks for. "" when empty or absent. */
+function tracingVesselName(){
+  var el = document.getElementById("tracingVessel");
+  return el ? String(el.value || "").trim() : "";
+}
 function tracingWhatOf(v,typed){
   if(v==="__cell")return {kind:"cell",name:"Whole cell"};
   if(v==="__nucleus")return {kind:"nucleus",name:"Nucleus"};
   if(v==="__other")return {kind:"other",name:String(typed||"").trim()};
+  /* ── A VESSEL IS NAMED, NOT NUMBERED INTO A CELL ────────  2026-10-08
+     The name he types is what joins segments traced on different days into one vessel; with none
+     typed it is just its kind, and the numbering tells the segments apart either way. */
+  var ves = (window.UJ && UJ.tracing && UJ.tracing.vesselOf) ? UJ.tracing.vesselOf(v) : null;
+  if (ves) return { kind: ves.kind, name: String(typed || "").trim() || ves.label };
   /* The label from whichever vocabulary this page carries -- see tracingWhat()'s own note. */
   const k=(typeof ORGANELLE_KIND_BY_VALUE!=="undefined")?ORGANELLE_KIND_BY_VALUE[v]:null;
   return {kind:v,name:(k&&k.label)||UJ.organelles.labelOf(v)};
+}
+
+/* ── THE VESSEL BOX ────────────────────────────────────  2026-10-08
+   Shown only for a vascular kind, and offering the names already in the dataset so reusing one is
+   a click rather than a retyping — a vessel joins its segments BY THAT STRING, and "Capillary A"
+   and "capillary a" would be two vessels. The datalist is built from the index the card already
+   holds; nothing is fetched for it. See src/a_vessel_is_not_part_of_a_cell.py. */
+function tracingVesselNames(kind){
+  var want = String(kind || "").toLowerCase(), seen = {}, out = [];
+  var take = function(t){
+    if (!t) return;
+    var k = String(t.instanceOf || t.kind || "").toLowerCase();
+    if (want && k !== want) return;
+    if (!(window.UJ && UJ.tracing && UJ.tracing.isVessel && UJ.tracing.isVessel(k))) return;
+    var nm = tracingSeriesLabel(t.name || "");
+    if (nm && !seen[nm]){ seen[nm] = 1; out.push(nm); }
+  };
+  (TRACING_SHARED || []).forEach(take);
+  (TRACINGS_KEPT || []).forEach(function(t){ take({ kind: t.kind, name: t.name }); });
+  out.sort(function(a, b){ return a.localeCompare(b, undefined, { numeric: true }); });
+  return out;
+}
+function tracingVesselSync(){
+  var what = document.getElementById("tracingWhat");
+  var row = document.getElementById("tracingVesselRow");
+  var box = document.getElementById("tracingVessel");
+  var list = document.getElementById("tracingVesselNames");
+  if (!what || !row) return;
+  var ves = (window.UJ && UJ.tracing && UJ.tracing.vesselOf)
+          ? UJ.tracing.vesselOf(what.value) : null;
+  row.style.display = ves ? "" : "none";
+  if (!ves) return;
+  if (box) box.placeholder = ves.label + " \u2014 name it to join its segments (optional)";
+  if (list) list.innerHTML = tracingVesselNames(ves.kind).map(function(n){
+    return '<option value="' + escHtml(n) + '"></option>'; }).join("");
+  /* Its own colour, unless the person has already chosen one for this structure. */
+  var col = document.getElementById("tracingColor");
+  if (col && !col.dataset.chosen) col.value = ves.color;
 }
 function tracingWhat(){
   const sel=document.getElementById("tracingWhat");
@@ -715,6 +763,10 @@ function tracingWhat(){
   if(v==="__other"){
     const typed=(document.getElementById("tracingName").value||"").trim();
     return {kind:"other",name:typed};
+  }
+  {
+    const ves=(window.UJ&&UJ.tracing&&UJ.tracing.vesselOf)?UJ.tracing.vesselOf(v):null;
+    if(ves)return {kind:ves.kind,name:tracingVesselName()||ves.label};
   }
   /* The label from whichever vocabulary this page carries. µJump defines its own
      ORGANELLE_KIND_BY_VALUE in core/ontology.js and leaves UJ.organelleData unset, so
@@ -837,6 +889,27 @@ function tracingPublishedIndex(structureId){
    typed the name and it is the identifier they chose. Every ontology organelle kind can occur many
    times on one cell, and the number is how they are told apart — so it is always given, from the
    first one. See src/a_cells_organelles_of_a_kind_are_numbered.py. */
+/* ── WHAT MAKES A SERIES ───────────────────────────────  2026-10-08
+   Two questions the numbering asks, each answered once rather than in both allocators.
+
+   IS THE NAME PART OF IT? For a kind, no: two lysosomes on a cell are Lysosome 1 and 2 whatever
+   else is around. For "other" the user typed the name, so the name IS the kind. For a vessel the
+   name is the vessel — "Capillary A" and "Capillary B" are two capillaries and number apart.
+
+   IS THE CELL PART OF IT? For everything a cell contains, yes. For a vessel, no: it has no cell,
+   so its segments number within the vessel across every cell and every session, which is what
+   makes "Capillary A 1" and "Capillary A 2" one vessel traced twice. */
+function tracingSeriesIsNamed(kind){
+  var k = String(kind || "");
+  if (k === "other") return true;
+  try { return !!(window.UJ && UJ.tracing && UJ.tracing.isVessel && UJ.tracing.isVessel(k)); }
+  catch (_e){ return false; }
+}
+function tracingSeriesIgnoresCell(kind){
+  try { return !!(window.UJ && UJ.tracing && UJ.tracing.isVessel
+                  && UJ.tracing.isVessel(String(kind || ""))); }
+  catch (_e){ return false; }
+}
 function tracingKindNumbered(kind){
   var k = String(kind || "");
   return !!k && k !== "cell" && k !== "nucleus" && k !== "other";
@@ -856,8 +929,10 @@ function tracingBareOf(kind, label, nuc, root, at){
   (TRACING_SHARED || []).forEach(function(t){
     if (!t) return;
     var k = String(t.instanceOf || t.kind || "");
-    var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
-    var sameCell = tracingSameCell(tracingCellOf(t), here);
+    var same = (k === wantK) && (!tracingSeriesIsNamed(wantK)
+                                 || tracingSeriesLabel(t.name) === wantL);
+    var sameCell = tracingSeriesIgnoresCell(wantK)
+                 || tracingSameCell(tracingCellOf(t), here);
     if (!same || !sameCell) return;
     var n = Math.round(Number(t.instanceIndex) || 0);
     if (n > 0) taken[n] = 1; else bare.push(t);
@@ -895,8 +970,10 @@ function tracingNextIndex(kind, label, nuc, root, skip, at){
        everything under "other", so two unrelated hand-named structures on one cell would number
        each other if the kind alone decided it -- a hand-named "Dense body" would come back as
        "Myelin figure 2". Under `other`, the NAME is the series. */
-    var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
-    var sameCell = tracingSameCell(tracingCellOf(t), here);
+    var same = (k === wantK) && (!tracingSeriesIsNamed(wantK)
+                                 || tracingSeriesLabel(t.name) === wantL);
+    var sameCell = tracingSeriesIgnoresCell(wantK)
+                 || tracingSameCell(tracingCellOf(t), here);
     if (same && sameCell){
       if (seen[String(t.structureId || "")]) return;      // on the pad: counted by the caller
       have++;
@@ -918,8 +995,10 @@ function tracingNextIndex(kind, label, nuc, root, skip, at){
   (TRACINGS_KEPT || []).forEach(function(t){
     if (!t || !t.id || seen[String(t.id)]) return;        // already counted, or on the pad
     var k = String(t.instance_of || t.kind || "");
-    var same = (k === wantK) && (wantK !== "other" || tracingSeriesLabel(t.name) === wantL);
-    var sameCell = tracingSameCell(tracingCellOf(t), here);
+    var same = (k === wantK) && (!tracingSeriesIsNamed(wantK)
+                                 || tracingSeriesLabel(t.name) === wantL);
+    var sameCell = tracingSeriesIgnoresCell(wantK)
+                 || tracingSameCell(tracingCellOf(t), here);
     if (!same || !sameCell) return;
     have++;
     if (Number(t.instance_index) > top) top = Number(t.instance_index);
@@ -1264,10 +1343,18 @@ function tracingCurrentAll(){
       t.area_um2=vol.areaUm2;
       t.areas=vol.perSection.map(function(q){return {z:q.z,areaUm2:q.areaUm2};});
     }
-    if(nid)t.nucleus_id=nid;
-    const cat=tracingCellAtVal();
-    if(cat)t.cell_coord=cat;
-    if(rid)t.root_id=rid;
+    /* ── A VESSEL TAKES NO CELL'S IDS ────────────────────  2026-10-08
+       Søren: *"We should be able to segment them without belonging to a certain cell."* The
+       card almost always has a cell on it — he traces vessels while looking at the endothelial
+       cells on them — so without this line every capillary would be filed as part of whichever
+       cell happened to be open, which is the opposite of what was asked for. */
+    const isVes=!!(window.UJ&&UJ.tracing&&UJ.tracing.isVessel&&UJ.tracing.isVessel(g.w.kind));
+    if(!isVes){
+      if(nid)t.nucleus_id=nid;
+      const cat=tracingCellAtVal();
+      if(cat)t.cell_coord=cat;
+      if(rid)t.root_id=rid;
+    }
     /* The pad's own index, not the published number: see the header. The first structure keeps the
        bare id, so editing a shared tracing and adding it back is still a version of THAT tracing;
        every other one hangs off the pad's base rather than off that tracing's id (2026-09-19). */
@@ -6985,9 +7072,19 @@ function wireTracing(){
      text box, because a kind that has to be typed is one the ontology is missing. */
   const what=document.getElementById("tracingWhat");
   if(what){
+    /* VASCULATURE SITS WITH THE CELL ITSELF, above the organelles: like the whole cell and the
+       nucleus it is a whole object you outline because the segmentation has not given you one,
+       and unlike every kind below it, it is part of no cell at all (2026-10-08). */
+    const vesselOpts=(window.UJ&&UJ.tracing&&UJ.tracing.VESSELS)
+      ? ('<optgroup label="Vasculature">'
+         + UJ.tracing.VESSELS.map(function(v){
+             return '<option value="'+escHtml(v.value)+'">'+escHtml(v.label)+'</option>'; }).join("")
+         + '</optgroup>')
+      : "";
     what.innerHTML='<optgroup label="The cell itself">'
       +'<option value="__cell">Whole cell \u2014 the cell\u2019s own mesh</option>'
       +'<option value="__nucleus">Nucleus</option></optgroup>'
+      +vesselOpts
       +((typeof ORGANELLE_KIND_OPTIONS_HTML!=="undefined")
           ? ORGANELLE_KIND_OPTIONS_HTML : UJ.organelles.optionsHtml())
       +'<optgroup label="Not on the list"><option value="__other">Something else \u2014 type the name</option></optgroup>';
@@ -6995,6 +7092,10 @@ function wireTracing(){
     what.addEventListener("change",function(){
       document.getElementById("tracingNameRow").style.display=(what.value==="__other")?"":"none";
       if(what.value==="__other")document.getElementById("tracingName").focus();
+      /* The vessel box, and the colour that goes with the kind. Picking "Capillary" and getting
+         the previous structure's green would make six vessels in one scene unreadable, which is
+         the whole reason the colours are declared beside the kinds (2026-10-08). */
+      try { tracingVesselSync(); } catch (_ev){}
       /* This box is the SHARED one, and with the list on it is not even on screen -- see
          tracingEachRender(). The strip still has to redraw, because with the list off every chip
          shows this type. */
@@ -7373,6 +7474,13 @@ function tracingCardHtml(){
     "     give me an option to name each one, so that there would be one naming for each drawing",
     "     number.\" See tracingEachRender(). -->",
     "<div id=\"tracingEachList\" style=\"display:none;margin-top:4px\"></div>",
+    "<!-- THE VESSEL IT IS PART OF.  2026-10-08. S\u00f8ren: a Vasculature topic whose segments are",
+    "     traced without belonging to a cell. The name is what joins segments of one vessel; the",
+    "     datalist offers the ones already in the dataset. Hidden for every other kind. -->",
+    "<div class=\"row\" id=\"tracingVesselRow\" style=\"gap:8px;margin-top:8px;display:none\">",
+    "<div class=\"coord\" style=\"flex:1 1 auto\"><input type=\"text\" id=\"tracingVessel\" list=\"tracingVesselNames\" placeholder=\"Name it to join its segments (optional)\" title=\"Segments of one vessel share this name, so a capillary traced across three sessions is one capillary. Leave it empty and the segment is filed under its kind alone. A vessel is filed against NO cell \u2014 not even the one open on this card.\"></div>",
+    "<datalist id=\"tracingVesselNames\"></datalist>",
+    "</div>",
     "<div class=\"row\" id=\"tracingNameRow\" style=\"gap:8px;margin-top:8px;display:none\">",
     "<div class=\"coord\" style=\"flex:1 1 auto\"><input type=\"text\" id=\"tracingName\" placeholder=\"Name it &mdash; and tell me, so it can go on the list\"></div>",
     "</div>",

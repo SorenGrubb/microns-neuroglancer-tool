@@ -898,6 +898,76 @@ async function tracedSplitScan(say, opts){
 }
 window.tracedSplitScan = tracedSplitScan;
 
+
+/* ── THE VESSELS IN THE DATASET, AS VESSELS ────────────────────────────────────  2026-10-08
+   Søren: a Vasculature topic whose ticks pick WHICH VESSELS are listed, shown and exported —
+   "they do not filter the cell table at all", because "does this cell have an artery" is not a
+   question anyone asks.
+
+   Grouped by kind AND by the name he reused, through tracingSeriesLabel, which strips a trailing
+   number: "Capillary A 1" and "Capillary A 2" are two segments of the vessel "Capillary A". The
+   index alone answers all of it — no contours are read, so this costs the one sheet scan the
+   page already makes. See src/a_vessel_is_not_part_of_a_cell.py. */
+var TRACED_VESSELS = null, TRACED_VESSELS_WAIT = null, TRACED_VESSELS_DS = null;
+function tracedVesselIndex(force){
+  var ds = tracedOutlinesDsQS();
+  if (ds !== TRACED_VESSELS_DS){ TRACED_VESSELS = null; TRACED_VESSELS_WAIT = null; TRACED_VESSELS_DS = ds; }
+  if (TRACED_VESSELS && !force) return Promise.resolve(TRACED_VESSELS);
+  if (TRACED_VESSELS_WAIT && !force) return TRACED_VESSELS_WAIT;
+  if (typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT)
+    return Promise.resolve({ vessels: [], counts: {} });
+  TRACED_VESSELS_WAIT = fetch(REPORT_ENDPOINT + "?tracings=1" + ds)
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      TRACED_VESSELS = tracedVesselsFrom((d && d.tracings) || []);
+      TRACED_VESSELS_WAIT = null;
+      return TRACED_VESSELS;
+    }, function(e){
+      TRACED_VESSELS_WAIT = null;
+      console.warn("[vessels] index unavailable", e);
+      return { vessels: [], counts: {} };
+    });
+  return TRACED_VESSELS_WAIT;
+}
+/* Split out so a check can hand it rows without a backend. */
+function tracedVesselsFrom(rows){
+  var by = {}, out = [], counts = {};
+  /* THE KEY IS THE COMPARISON, THE NAME IS WHAT HE TYPED. tracingSeriesLabel lowercases on
+     purpose -- it exists to compare -- so grouping on it and then PRINTING it turned "Capillary A"
+     into "capillary a" on screen. Caught by vesselcheck.js. The key groups; the first spelling
+     seen is what is shown, which is the one he wrote. */
+  var series = (typeof tracingSeriesLabel === "function")
+    ? tracingSeriesLabel
+    : function(n){ return String(n || "").replace(/\s+\d+$/, "").trim().toLowerCase(); };
+  var shown = function(n){ return String(n || "").replace(/\s+\d+$/, "").trim(); };
+  (rows || []).forEach(function(t){
+    if (!t || !t.structureId) return;
+    var kind = String(t.instanceOf || t.kind || "").toLowerCase();
+    if (!(window.UJ && UJ.tracing && UJ.tracing.isVessel && UJ.tracing.isVessel(kind))) return;
+    var fallback = (UJ.tracing.vesselOf(kind) || {}).label || kind;
+    var name = shown(t.name || "") || fallback;
+    var key = kind + "|" + (series(t.name || "") || fallback.toLowerCase());
+    var v = by[key];
+    if (!v){
+      v = by[key] = { kind: kind, name: name, label: (UJ.tracing.vesselOf(kind) || {}).label || kind,
+                      color: (UJ.tracing.vesselOf(kind) || {}).color || "#888",
+                      segments: [], contours: 0, sections: 0 };
+      out.push(v);
+      counts[kind] = (counts[kind] || 0) + 1;
+    }
+    v.segments.push(t);
+    v.contours += Number(t.contours || 0);
+    v.sections += Number(t.sections || 0);
+  });
+  out.sort(function(a, b){
+    if (a.kind !== b.kind) return a.kind < b.kind ? -1 : 1;
+    return String(a.name).localeCompare(String(b.name), undefined, { numeric: true });
+  });
+  return { vessels: out, counts: counts };
+}
+window.tracedVesselIndex = tracedVesselIndex;
+window.tracedVesselsFrom = tracedVesselsFrom;
+
 window.tracedMeasureAndSave = tracedMeasureAndSave;
 window.tracedMeasureCells = tracedMeasureCells;
 window.tracedMeasureAll = tracedMeasureAll;

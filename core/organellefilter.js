@@ -168,7 +168,15 @@ UJ.organelleFilter = (function(){
                    + '&ldquo;has&rdquo; filter will return nothing.')
         + '</p>';
     }
+    /* ── AND THE VESSELS, WHICH ARE NOT A QUESTION ABOUT CELLS ──────────────────  2026-10-08
+       Søren wanted the vascular kinds in the filter, and when asked what ticking one should do:
+       *"the ticks pick which traced vessels are listed, shown in the viewer and put in a Blender
+       box — they do not filter the cell table at all."* So it is in the same box, under its own
+       heading, with its OWN class: checked() returns .forganelle and never these, so a ticked
+       capillary cannot change which cells match. Its own list says what it found. */
+    h += vesselSectionHtml();
     host.innerHTML = h;
+    try { wireVessels(host); } catch (_ev){}
 
     var m = host.querySelector("#" + modeId);
     if (m && wasMode) m.value = wasMode;
@@ -183,6 +191,101 @@ UJ.organelleFilter = (function(){
       });
     });
     if (m && opts.onChange) m.addEventListener("change", opts.onChange);
+  }
+
+  /* The six, from core/tracing.js, never a second list. "" when this page has not loaded it. */
+  function vesselSectionHtml(){
+    var V = (window.UJ && UJ.tracing && UJ.tracing.VESSELS) || null;
+    if (!V || !V.length) return "";
+    return '<div class="fvessel-box" style="margin-top:12px;border-top:1px solid var(--line);'
+      + 'padding-top:9px">'
+      + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);'
+      + 'margin-bottom:3px">Vasculature</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:4px 14px">'
+      + V.map(function(v){
+          return '<label style="font-size:12px;display:flex;align-items:center;gap:6px">'
+            + '<input type="checkbox" class="fvessel" value="' + esc(v.kind) + '" style="width:auto">'
+            + '<span style="width:10px;height:10px;border-radius:2px;flex:0 0 auto;background:'
+            + esc(v.color) + '"></span>' + esc(v.label)
+            + ' <span class="nsub fvessel-n" data-k="' + esc(v.kind) + '" style="color:var(--mut)">'
+            + '\u2026</span></label>';
+        }).join("")
+      + '</div>'
+      + '<p class="hint" style="margin:5px 0 0">These are traced vessels, not cells. A vessel is '
+      + 'filed against no cell, so ticking one lists the vessels below \u2014 it does not change '
+      + 'which cells the filter returns. The number is how many vessels of that kind have been '
+      + 'traced, counting all the segments of one vessel as one.</p>'
+      + '<div class="fvessel-list" style="margin-top:4px"></div></div>';
+  }
+  function vesselsChecked(host){
+    if (!host) return [];
+    return Array.prototype.map.call(host.querySelectorAll(".fvessel:checked"),
+      function(cb){ return cb.value; });
+  }
+  /* Filled from the index when the page has one; silent when it does not, because a tool without
+     core/tracedoutlines.js has no vessels to list and an error message about it would be noise. */
+  function wireVessels(host){
+    var box = host.querySelector(".fvessel-box");
+    if (!box) return;
+    var draw = function(idx){
+      var want = vesselsChecked(host);
+      box.querySelectorAll(".fvessel-n").forEach(function(el){
+        el.textContent = String((idx.counts || {})[el.dataset.k] || 0);
+      });
+      var list = box.querySelector(".fvessel-list");
+      if (!list) return;
+      if (!want.length){
+        list.innerHTML = '<p class="hint" style="margin:4px 0 0">Tick a kind to list the vessels '
+          + 'traced in this dataset.</p>';
+        return;
+      }
+      var hit = (idx.vessels || []).filter(function(v){ return want.indexOf(v.kind) >= 0; });
+      if (!hit.length){
+        list.innerHTML = '<p class="hint" style="margin:4px 0 0">Nothing of '
+          + (want.length === 1 ? 'that kind' : 'those kinds') + ' has been traced yet.</p>';
+        return;
+      }
+      list.innerHTML = hit.map(function(v, i){
+        var seg = v.segments.length;
+        return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;'
+          + 'border-top:1px solid var(--line);padding:4px 0">'
+          + '<span style="width:10px;height:10px;border-radius:2px;flex:0 0 auto;background:'
+          + esc(v.color) + '"></span>'
+          + '<b style="flex:0 0 auto">' + esc(v.name) + '</b>'
+          + '<span style="opacity:.7;flex:1 1 90px;min-width:0">' + esc(v.label) + ' \u00b7 '
+          + seg + ' segment' + (seg === 1 ? '' : 's') + ' \u00b7 ' + v.contours + ' contours</span>'
+          + '<button type="button" class="idbtn fvessel-ngl" data-i="' + i + '" '
+          + 'style="padding:1px 7px;font-size:11px" title="Open every segment of this vessel in '
+          + 'the viewer, each in its own layer.">Neuroglancer</button>'
+          + '<button type="button" class="idbtn fvessel-pad" data-i="' + i + '" '
+          + 'style="padding:1px 7px;font-size:11px" title="Open every segment of this vessel on '
+          + 'the tracing pad, to add to it or correct it.">Open in the pad</button>'
+          + '</div>';
+      }).join("");
+      var sidsOf = function(b){
+        var v = hit[Number(b.dataset.i)];
+        return v ? v.segments.map(function(t){ return t.structureId; }) : [];
+      };
+      list.querySelectorAll(".fvessel-ngl").forEach(function(b){
+        b.addEventListener("click", function(){
+          if (typeof tracingCellSharedInViewer === "function") tracingCellSharedInViewer(sidsOf(b), b);
+          else alert("The tracing card is not on this page, so there is no viewer to open.");
+        });
+      });
+      list.querySelectorAll(".fvessel-pad").forEach(function(b){
+        b.addEventListener("click", function(){
+          if (typeof tracingOpenCellShared === "function") tracingOpenCellShared(sidsOf(b), b);
+          else alert("The tracing card is not on this page.");
+        });
+      });
+    };
+    var idx = { vessels: [], counts: {} };
+    draw(idx);
+    host.querySelectorAll(".fvessel").forEach(function(cb){
+      cb.addEventListener("change", function(){ draw(idx); });
+    });
+    if (typeof tracedVesselIndex === "function")
+      tracedVesselIndex().then(function(r){ idx = r || idx; draw(idx); }, function(){});
   }
 
   function checked(host, cls){
@@ -228,5 +331,6 @@ UJ.organelleFilter = (function(){
   }
 
   return { render:render, checked:checked, mode:mode, matches:matches,
+           vesselsChecked:vesselsChecked,
            countsFrom:countsFrom, _groupsOf:groupsOf };
 })();
