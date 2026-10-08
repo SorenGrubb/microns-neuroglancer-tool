@@ -294,40 +294,69 @@ UJ.blender = (function(){
        bounding box and disturbed the rotation part of the video." Every tracing the page had kept
        was sent. One travels now when it is filed against a cell in this export, or when its own
        centre is inside the box. See src/the_blender_export_colours_by_kind.py. */
-    tracings = tracings.filter(function(t){
-      /* Read from the dataset for the cells in this export, so the question is already settled
-         (2026-09-26). Without this, a tracing filed against a cell body id on a page whose cells
-         carry no nucleus id matched nothing, was not judged by position either, and vanished. */
-      if (t && t.for_export) return true;
-      var nuc = String((t && t.nucleus_id) || "").replace(/^.*:/, "");
-      var root = String((t && t.root_id) || "");
-      /* ── THROUGH THE ONE DEFINITION ──────────────  2026-10-07
-         This was `nuc || root`, with no coordinate — and Søren's vascular cells share one
-         root id, so an export of any one of them would have carried every tracing made on all of
-         them. core/tracing.js answers it now, coordinate first, for this file and the card and the
-         panel alike. */
-      var here = UJ.tracing.cellOf(t);
-      var mine = cells.some(function(c){ return UJ.tracing.sameCell(here, UJ.tracing.cellOf(c)); });
-      if (mine) return true;
-      /* A tracing filed against a DIFFERENT cell is not this export's, wherever it is: that is the
-         one Søren found, 430 µm outside the box. One filed against no cell at all is judged by
-         where it is, and kept when there is no voxel size to judge it with -- a page cached from
-         before this change sends none, and dropping every outline in silence would be worse than
-         the extra one this filter exists to remove. */
-      if (nuc || root) return false;
-      /* Its centre, in nanometres, against the box. */
+    /* ── THE CELLS, WITH EVERY ID THEY ACTUALLY CARRY ────────  2026-10-07
+       `cells` above is the mapped, notebook-shaped copy: type, root_id, nucleus_id, and nothing
+       else. The question "is this outline one of these cells'" needs the two fields that copy
+       drops -- the coordinate, and trace_nucleus_id, which is the id ηJump's outlines are
+       filed under because H01 publishes no nucleus volume. Asked of opts.cells, not of the copy. */
+    /* A page without core/tracing.js has no shared definition to ask, and nbexportcheck.js
+       evaluates this file on its own. There the box is the only authority there is, which for a
+       per-box notebook is the right one to fall back to. */
+    var UT = (window.UJ && UJ.tracing && UJ.tracing.sameCellWhy) ? UJ.tracing : null;
+    var cellKeys = !UT ? [] : (opts.cells || []).map(function(c){
+      return UT.cellOf({
+        nucleus_id: (c && (c.trace_nucleus_id || c.nucleus_id)) || "",
+        root_id: (c && c.root_id) || "",
+        cell_coord: (c && (c.cell_coord || c.cellCoord)) || ""
+      });
+    });
+    /* Its own centre, in nanometres, against the box: true, false, or null for "nothing to judge
+       it with" -- no box, no voxel size, or no contours. */
+    var centreInBox = function(t){
       var R = opts.resNm;
-      if (!Array.isArray(R) || R.length !== 3 || b.xmin == null) return true;
+      if (!Array.isArray(R) || R.length !== 3 || b.xmin == null) return null;
       var n = 0, sx = 0, sy = 0, sz = 0;
       ((t && t.rings) || []).forEach(function(r){
         (r.points || []).forEach(function(p){
           sx += Number(p[0]); sy += Number(p[1]); sz += Number(r.z); n++;
         });
       });
-      if (!n) return false;
+      if (!n) return null;
       var x = sx / n * R[0], y = sy / n * R[1], z = sz / n * R[2];
-      return x >= b.xmin && x <= b.xmax && y >= b.ymin && y <= b.ymax && z >= b.zmin && z <= b.zmax;
+      return x >= b.xmin && x <= b.xmax && y >= b.ymin && y <= b.ymax
+          && z >= b.zmin && z <= b.zmax;
+    };
+    var leftOut = 0;
+    tracings = tracings.filter(function(t){
+      /* ── WHAT CARRIED THE MATCH, NOT ONLY WHETHER THERE WAS ONE ──  2026-10-07
+         Søren: *"they seem to contain more than their own data, but also data from the other
+         boxes."* A coordinate or a nucleus id names ONE cell, so an outline that matches on either
+         is this export's wherever its centre happens to fall -- a box drawn tight round a soma is
+         not a claim about where the cell ends. A ROOT id in vasculature names a hundred cells at
+         once, and `for_export` -- set by the fetch that asked the dataset for these cells' ids --
+         is only as strong as the ids it asked with, so it is the same weak evidence wearing a
+         flag. Both go to the box. */
+      var here = UT ? UT.cellOf(t) : null;
+      var why = "";
+      if (here) cellKeys.forEach(function(k){
+        var w = UT.sameCellWhy(here, k);
+        if (w === "at" || (w === "nuc" && why !== "at")) why = w;
+        else if (w && !why) why = w;
+      });
+      if (why === "at" || why === "nuc") return true;
+      var inBox = centreInBox(t);
+      /* Nothing to judge it by: a page cached from before resNm was sent gives no voxel size, and
+         an outline whose geometry has not been read has no centre. Kept, because dropping every
+         outline in silence would be worse than the extra one this filter exists to remove. */
+      if (inBox === null) return true;
+      if (!inBox) leftOut++;
+      return inBox;
     });
+    /* AND IT SAYS SO. A filter without a remainder is an invisible change — the lesson of
+       2026-10-07, applied in the file that is written rather than only on screen. */
+    if (leftOut)
+      lines.push("# " + leftOut + " hand-traced outline(s) left out of this box: filed against "
+                 + "another cell, or their own centre is outside it.");
     lines.push("# Cells the segmentation does not have, outlined section by section by a person.");
     lines.push("# Section 4b meshes each of these and appends it to CELLS as an ordinary cell.");
     if (!tracings.length){

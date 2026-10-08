@@ -451,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-07 20:51</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-07 21:16</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -4083,8 +4083,14 @@ function addRegionBox(){
              page's tracings are filed under, which is the cell_bodies object (see
              UJ.panel.cellIds above). The export reads outlines by it; the notebook never does.
              2026-09-26, src/the_export_knows_which_id_the_tracer_had.py. */
+          /* AND WHERE IT IS. 2026-10-07: the Blender export asks "is this outline one of
+             these cells'", and on this page a root id answers "it is one of a hundred" — these
+             are the vascular cells sharing 6198781614. The coordinate is the only id that names
+             one cell, it is three array reads away, and without it the export had nothing to
+             judge with. Same frame as the tracings': voxels. */
           if(rid)boxCells.push({type:String(typeName(i)||"unclassified"),
                                 root_id:String(rid),nucleus_id:null,
+                                cell_coord:HX[i]+","+HY[i]+","+HZ[i],
                                 trace_nucleus_id:String(HSB[i])});
         }
       }
