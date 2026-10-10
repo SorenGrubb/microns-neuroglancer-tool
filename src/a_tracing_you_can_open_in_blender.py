@@ -510,7 +510,7 @@ for _fn in [u"async function tracingCellGlb", u"async function tracingOneGlb",
             u"function tracingGlbSave", u"async function tracingSegParts",
             u"function tracingProposedNucsFor"]:
     assert _c.count(_fn) == 1, "core/tracingcard.js has %d copies of %s" % (_c.count(_fn), _fn)
-assert u"tracingSegParts(g, missed)" in _c.split(u"async function tracingCellGlb")[1][:1400], \
+assert u"tracingSegParts(g, missed" in _c.split(u"async function tracingCellGlb")[1][:1600], \
     "tracingCellGlb does not fetch the segmentation"
 print("done 4")
 

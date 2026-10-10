@@ -72,6 +72,12 @@ const CONTRACT = [
         missing: CON.filter(id => !document.getElementById(id)),
         kinds: (document.querySelectorAll("#tracingWhat option") || []).length,
         groups: [...document.querySelectorAll("#tracingWhat optgroup")].map(g => g.label),
+        /* The values, not the labels: a vessel's value is "__artery", and the value is what the
+           pad files, the filter ticks and the export colours read. */
+        vessels: [...document.querySelectorAll("#tracingWhat optgroup")]
+          .filter(g => g.label === "Vasculature")
+          .reduce((a, g) => a.concat([...g.querySelectorAll("option")]
+            .map(o => String(o.value).replace(/^__/, ""))), []),
         mips: (document.querySelectorAll("#tracePadMip option") || []).length,
         mounted: !!(window.UJ && UJ.tracingcard && UJ.tracingcard._wired)
       };
@@ -92,13 +98,28 @@ const CONTRACT = [
        61 kinds (60 across twelve topic groups, plus "Not on the list"); this dropdown adds three
        of its own — two under "The cell itself", because a tracing is often a whole cell rather
        than a structure inside one, and one "Not sure what this is?". Asserted as 61 first, which
-       failed: the number was an assumption about the card rather than a reading of it. */
-    ok(got.kinds === 64, "the what-did-you-outline list is whole", got.kinds
-       + " = 61 from the ontology + 3 this card adds");
-    ok(got.groups.length === 15 && got.groups[0] === "The cell itself"
+       failed: the number was an assumption about the card rather than a reading of it.
+
+       SEVENTY NOW, AND SIXTEEN GROUPS.  2026-10-10. Søren asked for a Vasculature topic — artery,
+       arteriole, capillary, venule, vein, lymphatic vessel — and these two numbers went on
+       asserting the card from before it, so this check was red for a day while every other check
+       was green. SUPERSEDED, NOT LOOSENED: the six are named below, so a seventh vessel appearing
+       by accident still fails, and the groups are still read end to end. The lesson is the one
+       this project keeps paying: a count written as a bare number is a fact in a second place,
+       and the second place is the one nobody updates. UT.VESSELS is the first place. */
+    ok(got.kinds === 70, "the what-did-you-outline list is whole", got.kinds
+       + " = 61 from the ontology + 3 this card adds + 6 vascular segments");
+    ok(got.groups.length === 16 && got.groups[0] === "The cell itself"
+       && got.groups[1] === "Vasculature"
        && got.groups[got.groups.length - 1] === "Not on the list",
-       "...with its topic groups in order, from the cell itself to “not on the list”",
-       got.groups.length + " groups");
+       "...with its topic groups in order, from the cell itself through the vasculature to “not "
+       + "on the list”", got.groups.length + " groups: " + got.groups.slice(0, 3).join(", ")
+       + " … " + got.groups[got.groups.length - 1]);
+    ok((got.vessels || []).join(",")
+       === "artery,arteriole,capillary,venule,vein,lymphatic",
+       "...and the Vasculature group is the six segments core/tracing.js defines, in that order — "
+       + "one vocabulary for the pad, the filter, the viewer and the export",
+       (got.vessels || []).join(", ") || "none");
     ok(got.mips === 6, "...and the pad offers all six zoom levels", got.mips
        + "  <- a markup array cut short still parses and still looks like a card");
     ok(got.mounted, "...and the wiring ran over it", got.mounted);

@@ -5316,9 +5316,16 @@ function tracingProposedNucsFor(nuc){
    volume, a page without core/mesh.js — all ordinary, and none of them is a reason to withhold
    the tracings he actually drew. What could not be fetched is named in the line afterwards rather
    than thrown, because a file silently missing its cell looks like a file that never had one. */
-async function tracingSegParts(g, missed){
+async function tracingSegParts(g, missed, have){
   var out = [];
   var root = String((g && g.root) || ""), nuc = String((g && g.nuc) || "");
+  /* HIS OWN TRACING WINS. Søren: *"If there is a whole cell trace then we don't need to add the
+     root ID to the download and the same with Nucleus id"*. A hand-traced Whole cell and the
+     published root-ID mesh are the same body twice; the one he drew is the one he checked. Note
+     it is not fetched and discarded — a whole-cell mesh is megabytes, and the cheapest request
+     is the one nobody makes. */
+  if (have && have.cell) root = "";
+  if (have && have.nucleus) nuc = "";
   if (root && window.UJ && UJ.mesh && typeof UJ.mesh.fetchCombinedMesh === "function"){
     try {
       var extra = [];
@@ -5353,6 +5360,17 @@ async function tracingSegParts(g, missed){
                  scaleToNm: 1, positions: new Float32Array(pos), indices: new Uint32Array(idx) });
   }
   return out;
+}
+/* SAID OUT LOUD. A download quietly missing the cell looks exactly like a download that never
+   had one — this project has made that mistake before, so the line names what was left out and
+   why, in the same breath as what was saved. */
+function tracingSegSkipSay(g, have){
+  var out = [];
+  if (have && have.cell && g && g.root) out.push("root ID");
+  if (have && have.nucleus && g && g.nuc) out.push("nucleus ID");
+  if (!out.length) return "";
+  return " The published " + out.join(" and ") + " mesh" + (out.length > 1 ? "es are" : " is")
+    + " left out: you traced " + (out.length > 1 ? "those" : "that") + " yourself.";
 }
 /* One tracing, on its own. Solid: there is nothing inside it to look through it at. */
 async function tracingOneGlb(sid, btn, fmt){
@@ -5389,8 +5407,10 @@ async function tracingCellGlb(g, btn, fmt){
     /* THE SEGMENTATION FIRST, so the see-through cell is the outermost thing in the file and the
        list reads from the outside in. */
     var missed = [];
+    var have = {};
+    parts.forEach(function(q){ have[String(q.kind || "").toLowerCase()] = 1; });
     if (btn) btn.textContent = "fetching the cell\u2026";
-    var segs = await tracingSegParts(g, missed);
+    var segs = await tracingSegParts(g, missed, have);
     parts = segs.concat(parts);
     if (btn) btn.textContent = "meshing\u2026";
     var cell = tracingSafeName(g.coord ? "cell_at_" + g.coord.split(",").join("_")
@@ -5408,6 +5428,7 @@ async function tracingCellGlb(g, btn, fmt){
              + " see-through so what is inside shows." : ".")
       + " Micrometres, centred on itself."
       + ((fmt === "py") ? "" : " " + TRACING_GLTF_HELP)
+      + tracingSegSkipSay(g, have)
       + (missed.length ? " Could not fetch " + missed.join(", ") + "." : "")
       + tracingFailedSay(got));
   } catch (e){

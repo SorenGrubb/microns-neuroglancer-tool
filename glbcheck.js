@@ -320,6 +320,108 @@ const ok = (c, what, d) => {
        (seg.lone || []).map(q => q.name).join(" | "));
   }
 
+  /* \u2500\u2500 AND HIS OWN TRACING BEATS THE PUBLISHED MESH \u2500\u2500\u2500\u2500\u2500\u2500  2026-10-10
+     S\u00f8ren: *"If there is a whole cell trace then we don\u2019t need to add the root ID to the
+     download and the same with Nucleus id"*
+
+     Right, and for a reason worth writing down: the published root-ID mesh and a hand-traced
+     Whole cell are the same body twice. Downloaded together they z-fight, and the volume you
+     measure is neither his nor the consortium\u2019s. The one he drew is the one he checked.
+
+     WHAT IS ASSERTED:
+       - a cell with a traced Whole cell and a traced Nucleus gets NEITHER published mesh
+       - ...and does not even ASK for them, because a whole-cell mesh is megabytes
+       - a cell with only a traced Whole cell still gets the published nucleus
+       - a cell with neither still gets both \u2014 the feature from yesterday is intact
+       - and the line says which one was left out, so a missing cell cannot be mistaken for a
+         cell that never existed */
+  console.log("\nand his own tracing beats the published mesh");
+  const own = await p.evaluate(async () => {
+    if (typeof tracingCellGlb !== "function") return { noCard: true };
+    const sq = (z, cx, cy, h) => ({ z: z,
+      points: [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]] });
+    const rings = [sq(400, 401000, 230000, 60), sq(401, 401010, 230010, 60)];
+    const asked = [];
+    window.UJ.mesh = window.UJ.mesh || {};
+    UJ.mesh.fetchCombinedMesh = async function(){
+      asked.push("root");
+      return { positions: new Float32Array([0,0,0, 1,0,0, 0,1,0, 0,0,1]),
+               indices: new Uint32Array([0,1,2, 0,1,3, 0,2,3, 1,2,3]) };
+    };
+    window.UJ.nucmesh = window.UJ.nucmesh || {};
+    UJ.nucmesh.configured = function(){ return true; };
+    UJ.nucmesh.fetchNucleus = async function(){
+      asked.push("nucleus");
+      return { positions: new Float32Array([0,0,0, 100,0,0, 0,100,0, 0,0,100]),
+               indices: new Uint32Array([0,1,2, 0,1,3, 0,2,3, 1,2,3]) };
+    };
+    window.tracingExtraRootsFor = tracingExtraRootsFor = async function(){ return []; };
+    window.tracingProposedNucsFor = tracingProposedNucsFor = async function(){ return []; };
+    /* The kinds are the ones tracingGlbParts() stamps: "cell" for a Whole cell, "nucleus" for a
+       Nucleus. The same two words tracingGlbAlpha() reads \u2014 one vocabulary, not a sixth copy. */
+    const KIND = { c1: ["Whole cell", "cell"], n1: ["Nucleus", "nucleus"],
+                   o1: ["Lysosome 1", "lysosome"] };
+    window.tracingFetchCell = tracingFetchCell = async function(sids){
+      return sids.map(function(sid){
+        const k = KIND[sid] || ["Thing", "lysosome"];
+        return { sid: sid, t: { color: "#9c27b0", kind: k[1] },
+                 st: { name: k[0], kind: k[1], rings: rings } };
+      });
+    };
+    let got = null, said = "";
+    const realGlb = UJ.traceloft.glb, realSay = window.tracingSay;
+    UJ.traceloft.glb = function(parts, res){
+      got = parts.map(q => q.name); return realGlb(parts, res);
+    };
+    window.tracingSaveBlob = tracingSaveBlob = function(){};
+    window.tracingSay = tracingSay = function(t){ said = String(t || ""); };
+    const run = async (sids) => {
+      got = null; said = ""; asked.length = 0;
+      await tracingCellGlb({ nuc: "405191", root: "864691136051278323",
+                             coord: "234624,228032,17512",
+                             items: sids.map(s => ({ t: { structureId: s } })) }, null);
+      return { names: got || [], said: said, asked: asked.slice() };
+    };
+    const both = await run(["c1", "n1", "o1"]);
+    const cellOnly = await run(["c1", "o1"]);
+    const neither = await run(["o1"]);
+    UJ.traceloft.glb = realGlb;
+    window.tracingSay = tracingSay = realSay;
+    return { both: both, cellOnly: cellOnly, neither: neither };
+  });
+  if (own.noCard) console.log("  (no tracing card on this page)");
+  else {
+    const n = (c) => (c.names || []).join(" | ");
+    ok((own.both.names || []).join(",").indexOf("(segmentation)") < 0,
+       "a cell he traced whole, nucleus and all, gets no published mesh at all \u2014 the body he "
+       + "drew and the body the consortium published are the same body, and two surfaces a "
+       + "fraction of a micrometre apart z-fight", n(own.both));
+    ok((own.both.names || []).indexOf("Whole cell") >= 0
+       && (own.both.names || []).indexOf("Nucleus") >= 0,
+       "...and keeps his own two, which are the ones he checked", n(own.both));
+    ok((own.both.asked || []).length === 0,
+       "...and never asked for them: a whole-cell mesh is megabytes, so fetching one in order to "
+       + "throw it away is the waste that is invisible until the network is bad",
+       (own.both.asked || []).join(", ") || "nothing fetched");
+    ok(/root ID and nucleus ID/.test(own.both.said) && /traced those yourself/.test(own.both.said),
+       "...and the line says which ones and why \u2014 a download quietly missing the cell looks "
+       + "exactly like a download that never had one", own.both.said.slice(-140));
+    ok((own.cellOnly.names || []).indexOf("Cell (segmentation)") < 0
+       && (own.cellOnly.names || []).indexOf("Nucleus (segmentation)") >= 0,
+       "a cell he traced but whose nucleus he did not still gets the published nucleus \u2014 the "
+       + "two halves are decided separately, because he asked for them separately",
+       n(own.cellOnly));
+    ok(/published root ID mesh is left out/.test(own.cellOnly.said)
+       && own.cellOnly.said.indexOf("nucleus ID") < 0,
+       "...and the line names only the one that was left out, not both", own.cellOnly.said.slice(-140));
+    ok((own.neither.names || []).indexOf("Cell (segmentation)") >= 0
+       && (own.neither.names || []).indexOf("Nucleus (segmentation)") >= 0,
+       "and a cell with only an organelle traced still gets both, so yesterday\u2019s feature is "
+       + "intact and this is a narrowing, not a replacement", n(own.neither));
+    ok(own.neither.said.indexOf("left out") < 0,
+       "...with nothing claimed to be left out, because nothing was", own.neither.said.slice(-90));
+  }
+
   /* \u2500\u2500 AND A FORM THAT NEEDS NO IMPORTER AT ALL \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-10-10
      S\u00f8ren: *"I see now that .glb does not open naturally in Blender"* \u2014 and, asked which of
      the three it was: *"dragging did not work and no option in the import"*. That is his glTF
