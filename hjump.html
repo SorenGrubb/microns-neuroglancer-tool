@@ -451,7 +451,7 @@ code{font-family:var(--mono);color:var(--accent)}a.ref{color:var(--accent);font-
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-08 18:13</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-09 20:24</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -4002,6 +4002,10 @@ function regionRowHtml(k){
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" class="colab-meshes" checked>Cell 3D model</label>'
       /* No Nuclei tick and no Vasculature tick: minnie65 is the only volume in this family with a
          separate nucleus segmentation, and Wan & Wei's vessels are minnie65's. */
+      /* TRACED VASCULATURE (2026-10-09). Markup from core/blenderexport.js, because five
+         region-box panels with five copies of one control is how the last four corrections
+         reached some pages and not others. */
+      +((window.UJ&&UJ.blender&&UJ.blender.vesselTickHtml)?UJ.blender.vesselTickHtml():"")
       +'<span style="flex:1"></span>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The three ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
     +'</div>'
@@ -4047,7 +4051,11 @@ function addRegionBox(){
   (function(){
     const bl=row.querySelector(".colab-blender"), help=row.querySelector(".rbox-blender-help");
     if(bl&&help){
-      const sync=function(){ help.style.display=bl.checked?"":"none"; };
+      const sync=function(){
+        /* TRACED VASCULATURE, 2026-10-09: Blender-only, like every 3D tick on this row. */
+        if(window.UJ&&UJ.blender&&UJ.blender.vesselTickSync)UJ.blender.vesselTickSync(row,bl.checked);
+        help.style.display=bl.checked?"":"none";
+      };
       bl.addEventListener("change",sync); sync();
     }
   })();
@@ -4099,7 +4107,12 @@ function addRegionBox(){
     const boxLabel="Box "+(boxIdx>=0?boxIdx+1:1);
     if(wantBlender){
       const logoEl=document.querySelector("h1.logo");
+      /* TRACED VASCULATURE (2026-10-09). Read before anything is built, like every other
+         refusal in this handler, and said rather than silently written as an empty list. */
+      var _ves=(window.UJ&&UJ.blender&&UJ.blender.vesselWantFrom)?UJ.blender.vesselWantFrom(row):null;
+      if(_ves&&_ves.error){ alert(_ves.error); return; }
       UJ.blender.downloadNotebook({
+        vessels:_ves,
         datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
         emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,
         nucSource:"",          /* H01 publishes no nucleus segmentation */

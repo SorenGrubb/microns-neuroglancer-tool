@@ -721,7 +721,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-08 18:13</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-09 20:24</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -12961,6 +12961,10 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
          the EM sections. The second works even if that volume publishes no meshes -- painting
          needs voxels -- and the run reports which it got. 2026-09-09. */
       +'<label class="colab-nuc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Include the nucleus: its 3D mesh inside the cell, and the nucleus painted on the EM sections in blue. V1DD publishes its nuclei as a separate, public volume — no CAVE token needed for this part. Blender file only."><input type="checkbox" class="colab-nuclei" checked>Nuclei</label>'
+      /* TRACED VASCULATURE (2026-10-09). Markup from core/blenderexport.js, because five
+         region-box panels with five copies of one control is how the last four corrections
+         reached some pages and not others. */
+      +((window.UJ&&UJ.blender&&UJ.blender.vesselTickHtml)?UJ.blender.vesselTickHtml():"")
       +'<span style="flex:1"></span>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
       +'</div>'
@@ -13002,6 +13006,9 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
          Blender tick, and re-arming the box each time would undo an untick a second later. Once
          he has moved it himself, this leaves it alone for the life of the row. */
       const sync=()=>{
+        /* TRACED VASCULATURE, 2026-10-09: Blender-only, for the same reason the rest of this
+           closure's ticks are. The one line each panel adds. */
+        if(window.UJ&&UJ.blender&&UJ.blender.vesselTickSync)UJ.blender.vesselTickSync(row,bl.checked);
         help.style.display=bl.checked?"":"none";
         const show=!!(UJ.cfg.em&&UJ.cfg.em.segCaveAuth&&haveToken());
         if(cavLab)cavLab.style.display=show?"flex":"none";
@@ -13062,7 +13069,12 @@ window.VD11_FIX={"OV_FINE_IDX":"","OV_FINE_VAL":"","ST_FINE_IDX":"","ST_FINE_VAL
       const boxLabel="Box "+(boxIdx>=0?boxIdx+1:1);
       if(wantBlender){
         const logoEl=document.querySelector("h1.logo");
+        /* TRACED VASCULATURE (2026-10-09). Read before anything is built, like every other
+           refusal in this handler, and said rather than silently written as an empty list. */
+        var _ves=(window.UJ&&UJ.blender&&UJ.blender.vesselWantFrom)?UJ.blender.vesselWantFrom(row):null;
+        if(_ves&&_ves.error){ alert(_ves.error); return; }
         UJ.blender.downloadNotebook({
+          vessels:_ves,
           datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
           emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,
           /* THE ONE DATASET IN THE FAMILY THAT NEEDS THIS. V1DD's segmentation is a live CAVE

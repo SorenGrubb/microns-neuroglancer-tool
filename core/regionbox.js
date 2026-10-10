@@ -310,6 +310,9 @@ UJ.regionbox = (function(){
              + '<label class="colab-vasc-extent-lab" style="display:none;font-size:11px;color:var(--mut);align-items:center;gap:4px;margin-left:2px">'
              + '<select class="colab-vasc-extent" style="font-size:11px;padding:1px 2px;width:auto;background:var(--inset);color:var(--ink);border:1px solid var(--line);border-radius:4px" title="IN THIS BOX cuts the vessel labels to the bounding box and builds the surface locally. WHOLE DATASET downloads the published mesh for the whole vessel segment instead: one download, but it is the vessel tree of the entire volume and the scene ends up framed on all of it.">'
              + '<option value="box">in this box</option><option value="whole">whole dataset</option></select></label>' : "")
+        /* TRACED VASCULATURE (2026-10-09) -- see the same insertion in the four hand-written
+           panels. The markup is core/blenderexport.js's, so there is one control. */
+        + ((window.UJ && UJ.blender && UJ.blender.vesselTickHtml) ? UJ.blender.vesselTickHtml() : "")
         + (can.blender ? '<span style="flex:1"></span>'
              + optTick("colab-blender", "Blender file", false,
                  "Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The ticks to the left still say what goes in.") : "")
@@ -356,6 +359,8 @@ UJ.regionbox = (function(){
         if (!bl) return;
         function sync(){
           var on = bl.checked;
+          /* TRACED VASCULATURE, 2026-10-09: Blender-only, like the two ticks below. */
+          if (UJ.blender && UJ.blender.vesselTickSync) UJ.blender.vesselTickSync(row, on);
           if (help) help.style.display = on ? "" : "none";
           [["colab-nuclei", nu], ["colab-vasc", va]].forEach(function(pair){
             var el = pair[1]; if (!el) return;
@@ -455,7 +460,14 @@ UJ.regionbox = (function(){
         });
         /* the logo lookup moved into brandFromPage() -- 2026-09-08 */
         var vxEl = row.querySelector(".colab-vasc-extent");
+        /* TRACED VASCULATURE (2026-10-09) -- the same two lines as the four hand-written panels,
+           for the same reason: a notebook that says it has the vasculature and has none is the
+           outcome this change exists to prevent. */
+        var _ves = (window.UJ && UJ.blender && UJ.blender.vesselWantFrom)
+                 ? UJ.blender.vesselWantFrom(row) : null;
+        if (_ves && _ves.error){ alert(_ves.error); return; }
         UJ.blender.downloadNotebook({
+          vessels: _ves,
           datasetId: UJ.cfg.id, datasetLabel: UJ.cfg.label,
           emSource: UJ.cfg.em.emSource, segSource: UJ.cfg.em.segSource,
           nucSource: UJ.cfg.em.nucSource || "",

@@ -662,7 +662,7 @@ document.addEventListener("DOMContentLoaded", function(){
 <div id="gameChipSlot"></div>
 </div>
 </div>
-<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-08 18:13</span></p>
+<p class="buildline"><span class="build" title="When this file was built. If it does not match the file you think you are looking at, your browser is showing you a cached copy — reload with ctrl-shift-R.">build 2026-10-09 20:24</span></p>
 <script>document.getElementById("logoHome").href=location.pathname;</script>
 <script>
 /* ---------------------------------------------------------------------------------------------
@@ -12785,6 +12785,10 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
          separate, public nucleus segmentation WITH meshes (see UJ.cfg.em.nucSource), so this tick
          does the same two things it does on µJump and δJump. */
       +'<label class="colab-nuc-lab" style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Include the nucleus: its 3D mesh inside the cell, and the nucleus painted on the EM sections. With nuclei in, the cells are drawn translucent so a nucleus stays visible through its own cell, the way it does in Neuroglancer. pinky100 publishes its nuclei as a separate, public volume. Blender file only."><input type="checkbox" class="colab-nuclei" checked>Nuclei</label>'
+      /* TRACED VASCULATURE (2026-10-09). Markup from core/blenderexport.js, because five
+         region-box panels with five copies of one control is how the last four corrections
+         reached some pages and not others. */
+      +((window.UJ&&UJ.blender&&UJ.blender.vesselTickHtml)?UJ.blender.vesselTickHtml():"")
       +'<span style="flex:1"></span>'
       +'<label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:3px;cursor:pointer" title="Write the Blender-scene notebook instead of the EM/segmentation one: a .blend and a .glb, with the cells as 3D models and the EM sections sweeping through them. The ticks to the left still say what goes in."><input type="checkbox" class="colab-blender">Blender file</label>'
       +'</div>'
@@ -12806,6 +12810,9 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const nu=row.querySelector(".colab-nuclei"), lab=row.querySelector(".colab-nuc-lab");
       if(!bl)return;
       const sync=()=>{
+        /* TRACED VASCULATURE, 2026-10-09: Blender-only, for the same reason the rest of this
+           closure's ticks are. The one line each panel adds. */
+        if(window.UJ&&UJ.blender&&UJ.blender.vesselTickSync)UJ.blender.vesselTickSync(row,bl.checked);
         if(help)help.style.display=bl.checked?"":"none";
         if(nu)nu.disabled=!bl.checked;
         if(lab){
@@ -12871,7 +12878,12 @@ window.VD11_FIX={"OV_FINE_IDX":"OAAAADwAAABIAAAAUAAAAFcAAABgAAAAeQAAAIwAAACNAAAA
       const boxLabel="Box "+(boxIdx>=0?boxIdx+1:1);
       if(wantBlender){
         const logoEl=document.querySelector("h1.logo");
+        /* TRACED VASCULATURE (2026-10-09). Read before anything is built, like every other
+           refusal in this handler, and said rather than silently written as an empty list. */
+        var _ves=(window.UJ&&UJ.blender&&UJ.blender.vesselWantFrom)?UJ.blender.vesselWantFrom(row):null;
+        if(_ves&&_ves.error){ alert(_ves.error); return; }
         UJ.blender.downloadNotebook({
+          vessels:_ves,
           datasetId:UJ.cfg.id,datasetLabel:UJ.cfg.label,
           emSource:UJ.cfg.em.emSource,segSource:UJ.cfg.em.segSource,
           /* IT DOES PUBLISH ONE -- see UJ.cfg.em.nucSource. This line read `nucSource:""` with

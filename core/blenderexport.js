@@ -327,7 +327,23 @@ UJ.blender = (function(){
           && z >= b.zmin && z <= b.zmax;
     };
     var leftOut = 0;
+    /* ── A VESSEL IS CHOSEN, NEVER CAUGHT ──────────────────  2026-10-09
+       Søren: *"the bounding box is smaller than the vasculature."* It is, and it always will
+       be: a box is drawn round a cell and a capillary runs out of the picture, which is why you
+       want it in the scene. The box test asks where a tracing's CENTRE is, and for a vessel that
+       is a question about nothing.
+
+       `is_vessel` is set by vesselTracingsFor() on exactly the vessels the tick asked for, so a
+       flagged one travels whole and an unflagged one is refused — including one sitting inside
+       the box, which would otherwise be a second way in, and two ways in is how a rule stops
+       being a rule. See src/a_vessel_is_chosen_not_caught.py. */
+    var isVesselKind = function(t){
+      try { return !!(UT && UT.isVessel && UT.isVessel(String((t && (t.instanceOf || t.kind)) || ""))); }
+      catch (_e){ return false; }
+    };
     tracings = tracings.filter(function(t){
+      if (t && t.is_vessel) return true;
+      if (isVesselKind(t)) return false;
       /* ── WHAT CARRIED THE MATCH, NOT ONLY WHETHER THERE WAS ONE ──  2026-10-07
          Søren: *"they seem to contain more than their own data, but also data from the other
          boxes."* A coordinate or a nucleus id names ONE cell, so an outline that matches on either
@@ -364,9 +380,19 @@ UJ.blender = (function(){
     } else {
       lines.push("TRACINGS = [");
       tracings.forEach(function(t){
-        lines.push("    {'name': " + pyStr(t.name || "traced")
+        /* A VESSEL CARRIES ITS COLOUR (2026-10-09). The note below is right about organelles and
+         stays: colour_policy owns the scene's palette. There is no policy for a capillary, and
+         its colour is declared beside its kind in core/tracing.js precisely so it is the same
+         magenta in the pad, the viewer and the scene. */
+      var vcol = "";
+      try {
+        if (t && t.is_vessel && UT && UT.vesselOf)
+          vcol = String(t.color || (UT.vesselOf(t.kind) || {}).color || "");
+      } catch (_ec){ vcol = ""; }
+      lines.push("    {'name': " + pyStr(t.name || "traced")
                    + ", 'kind': " + pyStr(t.kind || "")
                    + ", 'type': " + pyStr(t.type || "traced")
+                   + (vcol ? ", 'color': " + pyStr(vcol) : "")
                    + ", 'traced_by': " + pyStr(t.traced_by || "")
                    /* NO COLOUR, 2026-09-22. It used to send the pad's per-structure colour,
                       which beat colour_policy's rule -- so nine lysosomes came out nine colours
@@ -528,8 +554,47 @@ UJ.blender = (function(){
       return opts.tracings || [];
     }
   }
+  /* ── THE VESSELS THE TICK ASKED FOR, WHOLE ──────────────  2026-10-09
+     datasetTracingsFor() asks the dataset for the outlines filed against the export's CELLS, and
+     a vessel is filed against no cell, so it could never come back from that fetch. This is its
+     own read: the vessel index (one sheet scan, cached) names the segments, and fetchMany brings
+     their contours 20 to a request. Every segment of the chosen vessels, with no box anywhere in
+     it. See src/a_vessel_is_chosen_not_caught.py. */
+  async function vesselTracingsFor(opts){
+    var ask = opts && opts.vessels;
+    if (!ask || ask.error || !ask.want) return [];
+    if (typeof tracedVesselIndex !== "function"
+        || !(window.UJ && UJ.tracing && UJ.tracing.fetchMany)) return [];
+    var idx;
+    try { idx = await tracedVesselIndex(); } catch (_e){ return []; }
+    var kinds = (ask.want === "all") ? null : [].concat(ask.want);
+    var segs = [];
+    ((idx && idx.vessels) || []).forEach(function(v){
+      if (kinds && kinds.indexOf(v.kind) < 0) return;
+      (v.segments || []).forEach(function(s){ segs.push(s); });
+    });
+    if (!segs.length) return [];
+    var qs = (typeof tracedOutlinesDsQS === "function") ? tracedOutlinesDsQS() : "";
+    var got;
+    try { got = await UJ.tracing.fetchMany(REPORT_ENDPOINT, segs, qs); }
+    catch (_e2){ return []; }
+    var out = [];
+    segs.forEach(function(s){
+      var x = got[s.structureId];
+      if (!x || !x.st || !(x.st.rings || []).length) return;
+      var t = x.st;
+      /* The flag the filter reads, and the two names the notebook writes from. */
+      t.is_vessel = 1;
+      t.type = t.cellType || "vessel";
+      t.traced_by = (t.contributors && t.contributors.length) ? t.contributors.join(", ")
+                                                              : (t.tracedBy || "");
+      out.push(t);
+    });
+    return out;
+  }
   async function downloadNotebook(opts){
-    opts = Object.assign({}, opts, { tracings: await datasetTracingsFor(opts) });
+    var vessels = await vesselTracingsFor(opts);
+    opts = Object.assign({}, opts, { tracings: (await datasetTracingsFor(opts)).concat(vessels) });
     const nb = buildNotebook(opts);
     const filename = filenameFor(opts);
     const blob = new Blob([JSON.stringify(nb, null, 1)], {type: "application/x-ipynb+json"});
@@ -541,5 +606,118 @@ UJ.blender = (function(){
     return filename;
   }
 
-  return {buildNotebook, downloadNotebook, filenameFor, brandFromPage};
+
+  /* ── THE TRACED VASCULATURE TICK ─────────────────────────────────────────────  2026-10-09
+     Søren: *"the bounding box is smaller than the vasculature... maybe it could be added in some
+     other way? Like for the cells? Then I could choose whether to include it or not."*
+
+     The markup and the reading live here, not in the five region-box panels, because there ARE
+     five -- ujump, djump, pjump and hjump each carry their own copy of that control and
+     core/regionbox.js carries the fifth. Every correction to it so far has reached some of them.
+     Each one now inserts one expression and passes one option.
+
+     Returns null when unticked; {want:"all"} or {want:[kinds]}; {error} when he asked for the
+     ticked kinds and ticked none, because an empty TRACINGS that looks like it worked is the
+     outcome core/regionbox.js already refuses for meshes. */
+  function vesselTickHtml(){
+    var V = (window.UJ && UJ.tracing && UJ.tracing.VESSELS) || null;
+    if (!V || !V.length) return "";
+    return '<label class="colab-vessels-lab" style="font-size:11px;color:var(--mut);display:flex;'
+      + 'align-items:center;gap:3px;cursor:pointer" title="Hand-traced vessels go into the scene '
+      + 'WHOLE, every segment, however far they run outside this box \u2014 a capillary is longer '
+      + 'than any box you would draw round a cell on it. Nothing is cut. Blender file only.">'
+      + '<input type="checkbox" class="colab-vessels">Traced vasculature</label>'
+      + '<select class="colab-vessels-which" style="font-size:11px;padding:1px 2px;width:auto;'
+      + 'background:var(--inset);color:var(--ink);border:1px solid var(--line);border-radius:4px" '
+      + 'title="ALL brings in every vessel anybody has traced in this dataset. TICKED brings in '
+      + 'only the kinds ticked in the Vasculature list in Filter and show \u2014 the same control, '
+      + 'used the way Cell 3D model uses the filter result.">'
+      + '<option value="all">all traced vessels</option>'
+      + '<option value="ticked">only the kinds ticked in Filter and show</option></select>';
+  }
+  /* Blender-only, for the same reason the Nuclei tick is: the EM/segmentation notebook writes
+     PNG sections and has nowhere to put a 3D model. Each of the five panels already has a closure
+     that follows its own Blender tick; this is the one line they add to it. */
+  function vesselTickSync(row, on){
+    var tick = row && row.querySelector(".colab-vessels");
+    var lab = row && row.querySelector(".colab-vessels-lab");
+    var which = row && row.querySelector(".colab-vessels-which");
+    if (!tick) return;
+    tick.disabled = !on;
+    if (which) which.disabled = !on;
+    if (lab){
+      lab.style.opacity = on ? "" : "0.45";
+      if (!on) lab.title = "Traced vessels are part of the Blender scene only \u2014 the "
+        + "EM/segmentation notebook has no 3D step. Tick \u201cBlender file\u201d to enable this.";
+    }
+  }
+  function vesselWantFrom(row){
+    var tick = row && row.querySelector(".colab-vessels");
+    if (!tick || !tick.checked || tick.disabled) return null;
+    var which = row.querySelector(".colab-vessels-which");
+    if (!which || which.value === "all") return { want: "all" };
+    /* The Vasculature ticks in Filter and show, wherever that panel is on this page. Read from
+       the document rather than handed in, because all five region boxes would otherwise each
+       need to know where their page keeps it. */
+    var kinds = [];
+    try {
+      kinds = Array.prototype.map.call(document.querySelectorAll(".fvessel:checked"),
+        function(cb){ return cb.value; });
+    } catch (_e){ kinds = []; }
+    if (!kinds.length)
+      return { error: "No vessel kind is ticked in the Vasculature list in Filter and show, so "
+             + "\u201conly the kinds ticked\u201d would put nothing in the notebook. Tick one "
+             + "there, or choose \u201call traced vessels\u201d." };
+    return { want: kinds };
+  }
+
+  /* ── THE TRACED VASCULATURE TICK ─────────────────────────────────────────────  2026-10-09
+     Søren: *"the bounding box is smaller than the vasculature... maybe it could be added in some
+     other way? Like for the cells? Then I could choose whether to include it or not."*
+
+     The markup and the reading live here, not in the five region-box panels, because there ARE
+     five -- ujump, djump, pjump and hjump each carry their own copy of that control and
+     core/regionbox.js carries the fifth. Every correction to it so far has reached some of them.
+     Each one now inserts one expression and passes one option.
+
+     Returns null when unticked; {want:"all"} or {want:[kinds]}; {error} when he asked for the
+     ticked kinds and ticked none, because an empty TRACINGS that looks like it worked is the
+     outcome core/regionbox.js already refuses for meshes. */
+  function vesselTickHtml(){
+    var V = (window.UJ && UJ.tracing && UJ.tracing.VESSELS) || null;
+    if (!V || !V.length) return "";
+    return '<label class="colab-vessels-lab" style="font-size:11px;color:var(--mut);display:flex;'
+      + 'align-items:center;gap:3px;cursor:pointer" title="Hand-traced vessels go into the scene '
+      + 'WHOLE, every segment, however far they run outside this box \u2014 a capillary is longer '
+      + 'than any box you would draw round a cell on it. Nothing is cut. Blender file only.">'
+      + '<input type="checkbox" class="colab-vessels">Traced vasculature</label>'
+      + '<select class="colab-vessels-which" style="font-size:11px;padding:1px 2px;width:auto;'
+      + 'background:var(--inset);color:var(--ink);border:1px solid var(--line);border-radius:4px" '
+      + 'title="ALL brings in every vessel anybody has traced in this dataset. TICKED brings in '
+      + 'only the kinds ticked in the Vasculature list in Filter and show \u2014 the same control, '
+      + 'used the way Cell 3D model uses the filter result.">'
+      + '<option value="all">all traced vessels</option>'
+      + '<option value="ticked">only the kinds ticked in Filter and show</option></select>';
+  }
+  function vesselWantFrom(row){
+    var tick = row && row.querySelector(".colab-vessels");
+    if (!tick || !tick.checked || tick.disabled) return null;
+    var which = row.querySelector(".colab-vessels-which");
+    if (!which || which.value === "all") return { want: "all" };
+    /* The Vasculature ticks in Filter and show, wherever that panel is on this page. Read from
+       the document rather than handed in, because all five region boxes would otherwise each
+       need to know where their page keeps it. */
+    var kinds = [];
+    try {
+      kinds = Array.prototype.map.call(document.querySelectorAll(".fvessel:checked"),
+        function(cb){ return cb.value; });
+    } catch (_e){ kinds = []; }
+    if (!kinds.length)
+      return { error: "No vessel kind is ticked in the Vasculature list in Filter and show, so "
+             + "\u201conly the kinds ticked\u201d would put nothing in the notebook. Tick one "
+             + "there, or choose \u201call traced vessels\u201d." };
+    return { want: kinds };
+  }
+  return {buildNotebook, downloadNotebook, filenameFor, brandFromPage,
+          vesselTickHtml, vesselWantFrom, vesselTickSync};
 })();
