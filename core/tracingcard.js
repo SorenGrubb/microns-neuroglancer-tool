@@ -4760,6 +4760,11 @@ function tracingRenderShared(){
             + 'is the next version of each.">Open all in the pad</button>'
           + '<button class="idbtn tracingcellngl" data-g="' + gi + '" ' + TRACING_BTN + ' title="Every '
             + 'tracing of this cell in the viewer, each in its own colour, with the cell.">Neuroglancer</button>'
+          + '<button class="idbtn tracingcellglb" data-g="' + gi + '" ' + TRACING_BTN + ' title="Every '
+            + 'tracing of this cell as ONE 3D model (GLB) \u2014 the cell and its nucleus see-through so '
+            + 'the organelles inside them show, each in the colour it was drawn in. Micrometres, centred '
+            + 'on itself, so it opens inside the viewport in Blender, PowerPoint or any glTF viewer.">'
+            + '3D model</button>'
           + '<button class="idbtn tracingcellzip" data-g="' + gi + '" ' + TRACING_BTN + ' title="A zip '
             + 'of this cell: each tracing&rsquo;s contours (JSON), a mesh of each (OBJ, nm), and an '
             + 'index.">Download zip</button>'
@@ -4791,6 +4796,9 @@ function tracingRenderShared(){
                 + '<button class="idbtn tracingngl" data-sid="' + escHtml(t.structureId) + '" '
                   + TRACING_BTN + ' title="Open this tracing in the viewer, as an annotation layer in '
                   + 'its own colour — without taking it onto your pad.">Neuroglancer</button>'
+                + '<button class="idbtn tracingglb" data-sid="' + escHtml(t.structureId) + '" '
+                  + TRACING_BTN + ' title="This one tracing as a 3D model (GLB), solid, in its own '
+                  + 'colour. Micrometres, centred on itself.">3D model</button>'
                 + (t.fileUrl ? ' <a href="' + escHtml(t.fileUrl) + '" target="_blank" rel="noopener" '
                     + 'style="font-size:12px;opacity:.7" title="The tracing’s own file in Drive">file</a>' : "")
                 + '</div>';
@@ -4803,6 +4811,9 @@ function tracingRenderShared(){
   [].slice.call(host.querySelectorAll(".tracingngl")).forEach(function(b){
     b.addEventListener("click", function(){ tracingSharedInViewer(b.dataset.sid, b); });
   });
+  [].slice.call(host.querySelectorAll(".tracingglb")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingOneGlb(b.dataset.sid, b); });
+  });
   const sidsOf = function(b){ const g = groups[Number(b.dataset.g)];
     return g ? g.items.map(function(x){ return x.t.structureId; }) : []; };
   [].slice.call(host.querySelectorAll(".tracingcellpad")).forEach(function(b){
@@ -4810,6 +4821,9 @@ function tracingRenderShared(){
   });
   [].slice.call(host.querySelectorAll(".tracingcellngl")).forEach(function(b){
     b.addEventListener("click", function(){ tracingCellSharedInViewer(sidsOf(b), b); });
+  });
+  [].slice.call(host.querySelectorAll(".tracingcellglb")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingCellGlb(groups[Number(b.dataset.g)], b); });
   });
   [].slice.call(host.querySelectorAll(".tracingcellzip")).forEach(function(b){
     b.addEventListener("click", function(){ tracingCellZip(groups[Number(b.dataset.g)], b); });
@@ -5189,6 +5203,94 @@ function tracingObjOf(name, rings, res){
   for (let i = 0; i < g.indices.length; i += 3)
     out.push("f " + (g.indices[i] + 1) + " " + (g.indices[i + 1] + 1) + " " + (g.indices[i + 2] + 1));
   return out.join("\n") + "\n";
+}
+/* ── WHICH THINGS YOU CAN SEE THROUGH ───────────────────  2026-10-10
+   Søren: *"If combined, the cell should be transparent to show the organelles inside it."*
+
+   Only the structures that ENCLOSE something are see-through, and only when there is something
+   inside them to see: a whole cell exported on its own is solid, because a transparent object
+   alone in a scene is just a faint one. The same two kinds the rest of this file treats as "the
+   cell rather than something in it", asked once.
+
+   The numbers are the Blender scene's: the cell well back so three organelles read through it,
+   the nucleus less so because it is a thing you also want to see the shape of. */
+function tracingGlbAlpha(kind, alone){
+  var k = String(kind || "").toLowerCase();
+  if (alone) return 1;
+  if (k === "cell") return 0.22;
+  if (k === "nucleus") return 0.4;
+  return 1;
+}
+/* The parts list a GLB is written from, in the order they should be read: the cell, then its
+   nucleus, then everything else as it is listed. One place, so the lone and the combined export
+   cannot disagree about colour, name or alpha. */
+function tracingGlbParts(got, alone){
+  var rank = function(k){
+    k = String(k || "").toLowerCase();
+    return k === "cell" ? 0 : (k === "nucleus" ? 1 : 2);
+  };
+  var parts = [];
+  (got || []).forEach(function(x){
+    if (!x || x.error || !x.st || !(x.st.rings || []).length) return;
+    var t = x.t || {}, st = x.st;
+    var kind = st.kind || t.kind || t.instanceOf || "";
+    parts.push({ name: st.name || t.name || x.sid, kind: kind,
+                 color: t.color || st.color || "#3a6b5a",
+                 alpha: tracingGlbAlpha(kind, alone), rings: st.rings });
+  });
+  parts.sort(function(a, b){ return rank(a.kind) - rank(b.kind); });
+  return parts;
+}
+function tracingGlbSave(parts, filename){
+  var res = (window.UJ && UJ.cfg && UJ.cfg.res) || [4, 4, 40];
+  var bytes = UJ.traceloft.glb(parts, res);
+  if (!bytes) return 0;
+  tracingSaveBlob(new Blob([bytes], { type: "model/gltf-binary" }), filename);
+  return parts.length;
+}
+/* One tracing, on its own. Solid: there is nothing inside it to look through it at. */
+async function tracingOneGlb(sid, btn){
+  var label = btn ? btn.textContent : "";
+  try {
+    if (btn){ btn.disabled = true; btn.textContent = "meshing\u2026"; }
+    var x = Object.assign({ sid: sid }, await tracingFetchShared(sid));
+    var parts = tracingGlbParts([x], true);
+    if (!parts.length) throw new Error("that tracing has no contours to mesh");
+    var n = tracingGlbSave(parts, tracingSafeName(parts[0].name) + "__"
+                                 + tracingSafeName(sid) + "_um.glb");
+    tracingSay(n ? "Saved " + parts[0].name + " as a 3D model (GLB, micrometres, centred on "
+                   + "itself). It opens in Blender, PowerPoint or any glTF viewer."
+                 : "Nothing could be meshed from that tracing.", !n);
+  } catch (e){
+    tracingSay("Could not make the 3D model: " + String(e && e.message || e), true);
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = label; }
+  }
+}
+/* Every tracing of one cell in one file, the cell see-through. */
+async function tracingCellGlb(g, btn){
+  if (!g || !g.items.length) return;
+  var label = btn ? btn.textContent : "";
+  try {
+    var got = await tracingFetchCell(g.items.map(function(x){ return x.t.structureId; }), btn);
+    if (btn){ btn.disabled = true; btn.textContent = "meshing\u2026"; }
+    var parts = tracingGlbParts(got, false);
+    if (!parts.length) throw new Error("none of this cell\u2019s tracings could be read");
+    var cell = tracingSafeName(g.coord ? "cell_at_" + g.coord.split(",").join("_")
+                 : (g.nuc ? "nucleus_" + g.nuc : (g.root ? "root_" + g.root : "no_cell")));
+    var n = tracingGlbSave(parts, cell + "_um.glb");
+    var see = parts.filter(function(q){ return q.alpha < 1; }).length;
+    tracingSay("Saved " + cell + "_um.glb \u2014 " + n + " structure" + (n === 1 ? "" : "s")
+      + " in one file"
+      + (see ? ", with the " + parts.filter(function(q){ return q.alpha < 1; })
+                 .map(function(q){ return q.name.toLowerCase(); }).join(" and ")
+             + " see-through so what is inside shows." : ".")
+      + " Micrometres, centred on itself." + tracingFailedSay(got));
+  } catch (e){
+    tracingSay("Could not make the 3D model: " + String(e && e.message || e), true);
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = label; }
+  }
 }
 async function tracingCellZip(g, btn){
   if (!g || !g.items.length) return;

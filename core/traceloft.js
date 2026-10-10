@@ -1224,7 +1224,152 @@ UJ.traceloft = (function(){
              centroidNm: [cx, cy, cz] };
   }
 
-  return { loft: loft, volume: volume, shape: shape, shape3d: shape3d,
+  /* ── CONTOURS TO A GLB, SEVERAL AT ONCE ─────────────────  2026-10-10
+     Søren: *"an option to download the tracing as a 3D model. Either as a lone 3D model or as a
+     combined 3D model of all in that cell. If combined, the cell should be transparent to show
+     the organelles inside it."*
+
+     Here rather than in the card because the input is this file's own output: loft() turns a
+     contour stack into positions and indices, and this is the next step. One call writes one
+     tracing or a whole cell's worth.
+
+     parts: [{name, rings, color, alpha}] -- or {name, positions, indices, ...} for geometry
+     already in hand. resNm scales voxels to nanometres. Returns a Uint8Array.
+
+     MICROMETRES, CENTRED. Nanometres would put a 15 µm cell 15,000 units across and 1.6 million
+     units from the origin -- past Blender's default clip plane, so the file opens on an empty
+     grid and looks broken. One offset for the whole file, so a combined export stays assembled,
+     and the voxel it was moved from is written into asset.extras.
+
+     Y IS FLIPPED, winding with it. Neuroglancer's y increases downward and glTF is Y-up; a model
+     fed straight through opens upside down, which core/mesh.js found out the hard way in August.
+
+     THERE ARE NOW THREE GLB WRITERS in this project -- core/mesh.js and core/synmesh.js have one
+     each. Theirs are single-mesh and material-less and take Draco-decoded arrays with their own
+     flip already applied, so neither could write this; folding them into this one is a real job
+     with its own checks and is not done. Said out loud rather than left to be rediscovered.
+     See src/a_tracing_you_can_open_in_blender.py. */
+  function hexRgb(c){
+    var s = String(c || "").trim().replace(/^#/, "");
+    if (s.length === 3) s = s[0] + s[0] + s[1] + s[1] + s[2] + s[2];
+    if (!/^[0-9a-f]{6}$/i.test(s)) return [0.6, 0.6, 0.6];
+    /* sRGB to linear, because glTF baseColorFactor is linear and a hex pasted straight in comes
+       out washed out next to anything rendered properly. */
+    return [0, 2, 4].map(function(i){
+      var v = parseInt(s.substr(i, 2), 16) / 255;
+      return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+  }
+  function glb(parts, resNm){
+    var res = (Array.isArray(resNm) && resNm.length === 3) ? resNm : [1, 1, 1];
+    var built = [];
+    (parts || []).forEach(function(q){
+      if (!q) return;
+      var g = (q.positions && q.indices) ? q : null;
+      if (!g){
+        try { g = loft(q.rings || [], res); } catch (_e){ g = null; }
+      }
+      if (!g || !g.positions || !g.positions.length || !g.indices || !g.indices.length) return;
+      built.push({ name: String(q.name || "structure"), color: q.color,
+                   alpha: (q.alpha === undefined || q.alpha === null) ? 1 : Number(q.alpha),
+                   positions: g.positions, indices: g.indices });
+    });
+    if (!built.length) return null;
+    /* ONE CENTRE FOR THE WHOLE FILE, in nanometres, so the parts stay assembled. */
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    built.forEach(function(q){
+      for (var i = 0; i < q.positions.length; i += 3)
+        for (var k = 0; k < 3; k++){
+          var v = q.positions[i + k];
+          if (v < lo[k]) lo[k] = v;
+          if (v > hi[k]) hi[k] = v;
+        }
+    });
+    var mid = [0, 1, 2].map(function(k){ return (lo[k] + hi[k]) / 2; });
+    var NM_PER_UM = 1000;
+    var chunks = [], accessors = [], bufferViews = [], meshes = [], nodes = [], materials = [];
+    var off = 0;
+    var push = function(bytes, target){
+      var pad = (4 - (off % 4)) % 4;
+      if (pad){ chunks.push(new Uint8Array(pad)); off += pad; }
+      var view = { buffer: 0, byteOffset: off, byteLength: bytes.byteLength };
+      if (target) view.target = target;
+      bufferViews.push(view);
+      chunks.push(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+      off += bytes.byteLength;
+      return bufferViews.length - 1;
+    };
+    built.forEach(function(q, qi){
+      var n = q.positions.length / 3;
+      var pos = new Float32Array(q.positions.length);
+      var mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+      for (var i = 0; i < q.positions.length; i += 3){
+        var x = (q.positions[i] - mid[0]) / NM_PER_UM;
+        /* THE FLIP. */
+        var y = -(q.positions[i + 1] - mid[1]) / NM_PER_UM;
+        var z = (q.positions[i + 2] - mid[2]) / NM_PER_UM;
+        pos[i] = x; pos[i + 1] = y; pos[i + 2] = z;
+        if (x < mn[0]) mn[0] = x; if (x > mx[0]) mx[0] = x;
+        if (y < mn[1]) mn[1] = y; if (y > mx[1]) mx[1] = y;
+        if (z < mn[2]) mn[2] = z; if (z > mx[2]) mx[2] = z;
+      }
+      /* ...and the winding back, or every face is lit from inside. */
+      var idx = new Uint32Array(q.indices.length);
+      for (var t = 0; t + 2 < q.indices.length; t += 3){
+        idx[t] = q.indices[t]; idx[t + 1] = q.indices[t + 2]; idx[t + 2] = q.indices[t + 1];
+      }
+      var ivRef = push(idx, 34963), pvRef = push(pos, 34962);
+      accessors.push({ bufferView: ivRef, componentType: 5125, count: idx.length, type: "SCALAR" });
+      accessors.push({ bufferView: pvRef, componentType: 5126, count: n, type: "VEC3",
+                       min: mn, max: mx });
+      var rgb = hexRgb(q.color), a = Math.max(0, Math.min(1, q.alpha));
+      materials.push({ name: q.name,
+        doubleSided: true,
+        alphaMode: a < 1 ? "BLEND" : "OPAQUE",
+        pbrMetallicRoughness: { baseColorFactor: [rgb[0], rgb[1], rgb[2], a],
+                                metallicFactor: 0, roughnessFactor: 0.75 } });
+      meshes.push({ name: q.name, primitives: [{ attributes: { POSITION: qi * 2 + 1 },
+                                                 indices: qi * 2, material: qi, mode: 4 }] });
+      nodes.push({ mesh: qi, name: q.name });
+    });
+    var binLength = off;
+    var json = {
+      asset: { version: "2.0", generator: "grubblab tracing card",
+               extras: { units: "micrometres", yFlipped: true,
+                         centreVoxel: [Math.round(mid[0] / res[0]), Math.round(mid[1] / res[1]),
+                                       Math.round(mid[2] / res[2])],
+                         centreNm: mid.map(function(v){ return Math.round(v); }),
+                         note: "Moved to the origin and scaled to micrometres so it opens inside "
+                             + "a default viewport; y is negated for glTF's Y-up. centreVoxel is "
+                             + "where it came from, in this tool's voxels." } },
+      scene: 0, scenes: [{ nodes: nodes.map(function(_, i){ return i; }) }],
+      nodes: nodes, meshes: meshes, materials: materials,
+      accessors: accessors, bufferViews: bufferViews,
+      buffers: [{ byteLength: binLength }]
+    };
+    var jsonBytes = new TextEncoder().encode(JSON.stringify(json));
+    var jPad = (4 - (jsonBytes.length % 4)) % 4;
+    if (jPad){
+      var padded = new Uint8Array(jsonBytes.length + jPad);
+      padded.set(jsonBytes); padded.fill(0x20, jsonBytes.length);
+      jsonBytes = padded;
+    }
+    var binPad = (4 - (binLength % 4)) % 4;
+    var total = 12 + 8 + jsonBytes.length + 8 + binLength + binPad;
+    var out = new Uint8Array(total), dv = new DataView(out.buffer);
+    var o = 0;
+    dv.setUint32(o, 0x46546C67, true); o += 4;     // "glTF"
+    dv.setUint32(o, 2, true); o += 4;
+    dv.setUint32(o, total, true); o += 4;
+    dv.setUint32(o, jsonBytes.length, true); o += 4;
+    dv.setUint32(o, 0x4E4F534A, true); o += 4;     // "JSON"
+    out.set(jsonBytes, o); o += jsonBytes.length;
+    dv.setUint32(o, binLength + binPad, true); o += 4;
+    dv.setUint32(o, 0x004E4942, true); o += 4;     // "BIN"
+    chunks.forEach(function(c){ out.set(c, o); o += c.byteLength; });
+    return out;
+  }
+  return { loft: loft, volume: volume, shape: shape, shape3d: shape3d, glb: glb,
            surfacePoints: surfacePoints, minSurfaceDistNm: minSurfaceDistNm,
            interpolate: interpolate, thinSections: thinSections,
            _orient: orient, _resample: resample, _bestOffset: bestOffset,
