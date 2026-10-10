@@ -4763,8 +4763,14 @@ function tracingRenderShared(){
           + '<button class="idbtn tracingcellglb" data-g="' + gi + '" ' + TRACING_BTN + ' title="Every '
             + 'tracing of this cell as ONE 3D model (GLB) \u2014 the cell and its nucleus see-through so '
             + 'the organelles inside them show, each in the colour it was drawn in. Micrometres, centred '
-            + 'on itself, so it opens inside the viewport in Blender, PowerPoint or any glTF viewer.">'
+            + 'on itself, so it opens inside the viewport in Blender, PowerPoint or any glTF viewer. '
+            + escHtml(TRACING_GLTF_HELP) + '">'
             + '3D model</button>'
+          + '<button class="idbtn tracingcellpy" data-g="' + gi + '" ' + TRACING_BTN + ' title="The '
+            + 'same scene as a Blender Python script \u2014 Scripting tab, Open, Run. No add-on and no '
+            + 'File \u203a Import, so it works even where the glTF importer is switched off, and it '
+            + 'carries a collection per kind and viewport transparency, which a .glb cannot.">'
+            + 'Blender script</button>'
           + '<button class="idbtn tracingcellzip" data-g="' + gi + '" ' + TRACING_BTN + ' title="A zip '
             + 'of this cell: each tracing&rsquo;s contours (JSON), a mesh of each (OBJ, nm), and an '
             + 'index.">Download zip</button>'
@@ -4798,7 +4804,11 @@ function tracingRenderShared(){
                   + 'its own colour — without taking it onto your pad.">Neuroglancer</button>'
                 + '<button class="idbtn tracingglb" data-sid="' + escHtml(t.structureId) + '" '
                   + TRACING_BTN + ' title="This one tracing as a 3D model (GLB), solid, in its own '
-                  + 'colour. Micrometres, centred on itself.">3D model</button>'
+                  + 'colour. Micrometres, centred on itself. ' + escHtml(TRACING_GLTF_HELP)
+                  + '">3D model</button>'
+                + '<button class="idbtn tracingpy" data-sid="' + escHtml(t.structureId) + '" '
+                  + TRACING_BTN + ' title="The same one tracing as a Blender Python script \u2014 '
+                  + 'Scripting tab, Open, Run. No importer involved.">Blender script</button>'
                 + (t.fileUrl ? ' <a href="' + escHtml(t.fileUrl) + '" target="_blank" rel="noopener" '
                     + 'style="font-size:12px;opacity:.7" title="The tracing’s own file in Drive">file</a>' : "")
                 + '</div>';
@@ -4814,6 +4824,9 @@ function tracingRenderShared(){
   [].slice.call(host.querySelectorAll(".tracingglb")).forEach(function(b){
     b.addEventListener("click", function(){ tracingOneGlb(b.dataset.sid, b); });
   });
+  [].slice.call(host.querySelectorAll(".tracingpy")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingOneGlb(b.dataset.sid, b, "py"); });
+  });
   const sidsOf = function(b){ const g = groups[Number(b.dataset.g)];
     return g ? g.items.map(function(x){ return x.t.structureId; }) : []; };
   [].slice.call(host.querySelectorAll(".tracingcellpad")).forEach(function(b){
@@ -4824,6 +4837,9 @@ function tracingRenderShared(){
   });
   [].slice.call(host.querySelectorAll(".tracingcellglb")).forEach(function(b){
     b.addEventListener("click", function(){ tracingCellGlb(groups[Number(b.dataset.g)], b); });
+  });
+  [].slice.call(host.querySelectorAll(".tracingcellpy")).forEach(function(b){
+    b.addEventListener("click", function(){ tracingCellGlb(groups[Number(b.dataset.g)], b, "py"); });
   });
   [].slice.call(host.querySelectorAll(".tracingcellzip")).forEach(function(b){
     b.addEventListener("click", function(){ tracingCellZip(groups[Number(b.dataset.g)], b); });
@@ -5214,6 +5230,13 @@ function tracingObjOf(name, rings, res){
 
    The numbers are the Blender scene's: the cell well back so three organelles read through it,
    the nucleus less so because it is a thing you also want to see the shape of. */
+/* THE ONE SENTENCE ABOUT A MISSING IMPORTER.  2026-10-10. Søren, after finding his own
+   Blender had no glTF entry: *"if my blender is missing it, then other people are also
+   missing it. it should be plug and play."* It cannot be plug and play — nothing but a
+   .blend opens Blender by double-click — but it can stop being a puzzle. The remedy is one
+   tick, so the page says it rather than leaving each person to work it out: on the button
+   before the click, and in the line after it. ONE string, so the two cannot drift. */
+var TRACING_GLTF_HELP = "If Blender has no glTF 2.0 under File \u203a Import, tick Import-Export: glTF 2.0 format in Edit \u203a Preferences \u203a Add-ons \u2014 or use Blender script, which needs no add-on.";
 function tracingGlbAlpha(kind, alone){
   var k = String(kind || "").toLowerCase();
   if (alone) return 1;
@@ -5241,6 +5264,13 @@ function tracingGlbParts(got, alone){
   parts.sort(function(a, b){ return rank(a.kind) - rank(b.kind); });
   return parts;
 }
+function tracingPySave(parts, filename, title){
+  var res = (window.UJ && UJ.cfg && UJ.cfg.res) || [4, 4, 40];
+  var txt = UJ.traceloft.blenderPy(parts, res, { title: title || "", file: filename });
+  if (!txt) return 0;
+  tracingSaveBlob(new Blob([txt], { type: "text/x-python" }), filename);
+  return parts.length;
+}
 function tracingGlbSave(parts, filename){
   var res = (window.UJ && UJ.cfg && UJ.cfg.res) || [4, 4, 40];
   var bytes = UJ.traceloft.glb(parts, res);
@@ -5248,18 +5278,98 @@ function tracingGlbSave(parts, filename){
   tracingSaveBlob(new Blob([bytes], { type: "model/gltf-binary" }), filename);
   return parts.length;
 }
+/* ── THE COMMUNITY'S NUCLEUS IDS, THE OTHER HALF OF THE SAME PANEL ──  2026-10-10
+   The propose/vote panel takes four segTypes — img65, img35, nucleus65, nucleus35 — off one
+   `?rootIds=<nucleus>` read. tracingExtraRootsFor() above asks the page for the ROOT half, which
+   each page filters to its own segmentation's name; nothing asked for the nucleus half, because
+   until now nothing combined nucleus meshes. Anything whose segType begins "nucleus" is one,
+   which is dataset-agnostic in the way a hardcoded "nucleus65" would not be.
+   See src/a_tracing_you_can_open_in_blender.py. */
+var TRACING_PROPOSED_NUCS = {};
+function tracingProposedNucsFor(nuc){
+  nuc = String(nuc || "");
+  if (!nuc || typeof REPORT_ENDPOINT === "undefined" || !REPORT_ENDPOINT)
+    return Promise.resolve([]);
+  if (!TRACING_PROPOSED_NUCS[nuc]){
+    TRACING_PROPOSED_NUCS[nuc] = fetch(REPORT_ENDPOINT + "?rootIds=" + encodeURIComponent(nuc)
+                                       + tracingDsQS())
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var seen = {}; seen[nuc] = 1;
+        var out = [];
+        ((d && d.rootIds) || []).forEach(function(x){
+          var id = String((x && x.rootId) || ""), st = String((x && x.segType) || "");
+          if (!id || seen[id] || st.indexOf("nucleus") !== 0) return;
+          seen[id] = 1; out.push(id);
+        });
+        return out;
+      }, function(){ delete TRACING_PROPOSED_NUCS[nuc]; return []; });
+  }
+  return TRACING_PROPOSED_NUCS[nuc];
+}
+/* ── THE PUBLISHED MESHES, FOR THE COMBINED EXPORT ONLY ─────────  2026-10-10
+   Søren: *"it would be nice if it opens the 3D model together with the RootID and Nucleus ID
+   also, and that root ID is transparent to show the nucleus and organelles... That is only for
+   the 3D model for all, not for the individual organelle ones."*
+
+   Best-effort, every one of them: a cell with no mesh in the snapshot, a dataset with no nucleus
+   volume, a page without core/mesh.js — all ordinary, and none of them is a reason to withhold
+   the tracings he actually drew. What could not be fetched is named in the line afterwards rather
+   than thrown, because a file silently missing its cell looks like a file that never had one. */
+async function tracingSegParts(g, missed){
+  var out = [];
+  var root = String((g && g.root) || ""), nuc = String((g && g.nuc) || "");
+  if (root && window.UJ && UJ.mesh && typeof UJ.mesh.fetchCombinedMesh === "function"){
+    try {
+      var extra = [];
+      try { extra = (await tracingExtraRootsFor(nuc, root)) || []; } catch (_ex){ extra = []; }
+      var m = await UJ.mesh.fetchCombinedMesh(root, null, false, extra);
+      if (m && m.positions && m.positions.length)
+        /* MICROMETRES — core/mesh.js's own frame, stated at its nm -> µm line. */
+        out.push({ name: "Cell (segmentation)", kind: "cell", color: "#ff3b3b", alpha: 0.15,
+                   scaleToNm: 1000, positions: m.positions, indices: m.indices });
+    } catch (e){ missed.push("the cell mesh (" + String(e && e.message || e) + ")"); }
+  }
+  if (nuc && window.UJ && UJ.nucmesh && typeof UJ.nucmesh.fetchNucleus === "function"
+      && (typeof UJ.nucmesh.configured !== "function" || UJ.nucmesh.configured())){
+    var ids = [nuc];
+    try { ((await tracingProposedNucsFor(nuc)) || []).forEach(function(x){ ids.push(x); }); }
+    catch (_en){}
+    var pos = [], idx = [], base = 0;
+    for (var i = 0; i < ids.length; i++){
+      try {
+        var nm = await UJ.nucmesh.fetchNucleus(ids[i]);
+        if (!nm || !nm.positions || !nm.positions.length) continue;
+        for (var a = 0; a < nm.positions.length; a++) pos.push(nm.positions[a]);
+        for (var b2 = 0; b2 < nm.indices.length; b2++) idx.push(nm.indices[b2] + base);
+        base += nm.positions.length / 3;
+      } catch (e2){ missed.push("nucleus " + ids[i]); }
+    }
+    /* ONE STRUCTURE, as he asked: a proposed nucleus id is another piece of THIS nucleus, not a
+       second object. Exactly what fetchCombinedMesh already does for proposed root ids. */
+    if (pos.length)
+      /* NANOMETRES — core/nucmesh.js returns the legacy fragment vertices unscaled. */
+      out.push({ name: "Nucleus (segmentation)", kind: "nucleus", color: "#3a72d8", alpha: 0.35,
+                 scaleToNm: 1, positions: new Float32Array(pos), indices: new Uint32Array(idx) });
+  }
+  return out;
+}
 /* One tracing, on its own. Solid: there is nothing inside it to look through it at. */
-async function tracingOneGlb(sid, btn){
+async function tracingOneGlb(sid, btn, fmt){
   var label = btn ? btn.textContent : "";
   try {
     if (btn){ btn.disabled = true; btn.textContent = "meshing\u2026"; }
     var x = Object.assign({ sid: sid }, await tracingFetchShared(sid));
     var parts = tracingGlbParts([x], true);
     if (!parts.length) throw new Error("that tracing has no contours to mesh");
-    var n = tracingGlbSave(parts, tracingSafeName(parts[0].name) + "__"
-                                 + tracingSafeName(sid) + "_um.glb");
-    tracingSay(n ? "Saved " + parts[0].name + " as a 3D model (GLB, micrometres, centred on "
-                   + "itself). It opens in Blender, PowerPoint or any glTF viewer."
+    var base = tracingSafeName(parts[0].name) + "__" + tracingSafeName(sid) + "_um";
+    var n = (fmt === "py") ? tracingPySave(parts, base + "_blender.py", parts[0].name)
+                           : tracingGlbSave(parts, base + ".glb");
+    tracingSay(n ? ((fmt === "py")
+                    ? "Saved " + parts[0].name + " as a Blender script \u2014 open it in "
+                      + "Blender\u2019s Scripting tab and press Run. Micrometres."
+                    : "Saved " + parts[0].name + " as a 3D model (GLB, micrometres, centred on "
+                      + "itself). Blender: File \u203a Import \u203a glTF 2.0. " + TRACING_GLTF_HELP)
                  : "Nothing could be meshed from that tracing.", !n);
   } catch (e){
     tracingSay("Could not make the 3D model: " + String(e && e.message || e), true);
@@ -5268,7 +5378,7 @@ async function tracingOneGlb(sid, btn){
   }
 }
 /* Every tracing of one cell in one file, the cell see-through. */
-async function tracingCellGlb(g, btn){
+async function tracingCellGlb(g, btn, fmt){
   if (!g || !g.items.length) return;
   var label = btn ? btn.textContent : "";
   try {
@@ -5276,16 +5386,30 @@ async function tracingCellGlb(g, btn){
     if (btn){ btn.disabled = true; btn.textContent = "meshing\u2026"; }
     var parts = tracingGlbParts(got, false);
     if (!parts.length) throw new Error("none of this cell\u2019s tracings could be read");
+    /* THE SEGMENTATION FIRST, so the see-through cell is the outermost thing in the file and the
+       list reads from the outside in. */
+    var missed = [];
+    if (btn) btn.textContent = "fetching the cell\u2026";
+    var segs = await tracingSegParts(g, missed);
+    parts = segs.concat(parts);
+    if (btn) btn.textContent = "meshing\u2026";
     var cell = tracingSafeName(g.coord ? "cell_at_" + g.coord.split(",").join("_")
                  : (g.nuc ? "nucleus_" + g.nuc : (g.root ? "root_" + g.root : "no_cell")));
-    var n = tracingGlbSave(parts, cell + "_um.glb");
+    var title = g.coord ? ("cell at " + g.coord) : (g.nuc ? ("nucleus " + g.nuc)
+                 : (g.root ? ("segment " + g.root) : "traced structures"));
+    var n = (fmt === "py") ? tracingPySave(parts, cell + "_um_blender.py", title)
+                           : tracingGlbSave(parts, cell + "_um.glb");
     var see = parts.filter(function(q){ return q.alpha < 1; }).length;
-    tracingSay("Saved " + cell + "_um.glb \u2014 " + n + " structure" + (n === 1 ? "" : "s")
+    tracingSay("Saved " + cell + (fmt === "py" ? "_um_blender.py" : "_um.glb")
+      + " \u2014 " + n + " structure" + (n === 1 ? "" : "s")
       + " in one file"
       + (see ? ", with the " + parts.filter(function(q){ return q.alpha < 1; })
                  .map(function(q){ return q.name.toLowerCase(); }).join(" and ")
              + " see-through so what is inside shows." : ".")
-      + " Micrometres, centred on itself." + tracingFailedSay(got));
+      + " Micrometres, centred on itself."
+      + ((fmt === "py") ? "" : " " + TRACING_GLTF_HELP)
+      + (missed.length ? " Could not fetch " + missed.join(", ") + "." : "")
+      + tracingFailedSay(got));
   } catch (e){
     tracingSay("Could not make the 3D model: " + String(e && e.message || e), true);
   } finally {

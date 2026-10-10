@@ -1260,7 +1260,106 @@ UJ.traceloft = (function(){
       return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
     });
   }
-  function glb(parts, resNm){
+  /* ── THE SAME SCENE AS A BLENDER SCRIPT ─────────────────  2026-10-10
+     Søren: *"I see now that .glb does not open naturally in Blender"* — his glTF add-on is
+     switched off, which one tick in Preferences fixes. The file was fine. But an export that
+     works only when an add-on happens to be enabled is one that fails this way again, so this is
+     the same parts list as a Python script: Scripting tab, Run, no importer involved.
+
+     It carries two things the GLB cannot — a collection per kind, and transparency set for the
+     VIEWPORT, so the cell is see-through in the solid shading he works in rather than only in a
+     render. Blender renamed that property in 4.2 (EEVEE Next), so both names are set, each in its
+     own try: a script that dies on an AttributeError leaves half a scene behind.
+
+     AXES. The glTF importer maps glTF (x, y, z) to Blender (x, -z, y), and glb() writes
+     glTF-y = -y. So an imported GLB lands at Blender (x, -z, -y) in this data's terms, and this
+     writes exactly that — two downloads of one cell must not disagree about which way is up.
+     See src/a_tracing_you_can_open_in_blender.py. */
+  function blenderPy(parts, resNm, meta){
+    var b = glbParts(parts, resNm);
+    if (!b) return "";
+    var m = meta || {};
+    var n3 = function(v){ return (Math.round(v * 1000) / 1000); };
+    var L = [];
+    L.push("# " + (m.title || "Traced structures") + " — written by the tracing card on "
+           + new Date().toISOString().slice(0, 10) + ".");
+    L.push("# Blender: Scripting tab → Open → Run. No add-on, no File › Import.");
+    L.push("#          or from a terminal:  blender --python " + (m.file || "this_file.py"));
+    L.push("# One Blender unit is one MICROMETRE. The scene is centred on itself; it came from");
+    L.push("# voxel " + b.centreVoxel.join(", ") + " in this tool's frame.");
+    L.push("# Axes are Blender's: X = x, Y = -z, Z = -y, which is where the .glb of the same cell");
+    L.push("# lands after import — cortical depth runs down Z with the pia at the top.");
+    L.push("# This file fetches nothing and runs nothing: it is vertices, faces and materials.");
+    L.push("import bpy");
+    L.push("");
+    L.push("def _mat(name, rgba):");
+    L.push("    m = bpy.data.materials.new(name)");
+    L.push("    m.use_nodes = True");
+    L.push("    bsdf = m.node_tree.nodes.get('Principled BSDF')");
+    L.push("    if bsdf is not None:");
+    L.push("        try: bsdf.inputs['Base Color'].default_value = rgba");
+    L.push("        except Exception: pass");
+    L.push("        try: bsdf.inputs['Alpha'].default_value = rgba[3]");
+    L.push("        except Exception: pass");
+    L.push("    m.diffuse_color = rgba            # the colour the solid viewport uses");
+    L.push("    if rgba[3] < 1.0:");
+    L.push("        # Blender 4.2 renamed this when EEVEE Next landed. Both, each in its own try.");
+    L.push("        try: m.blend_method = 'BLEND'");
+    L.push("        except Exception: pass");
+    L.push("        try: m.surface_render_method = 'BLENDED'");
+    L.push("        except Exception: pass");
+    L.push("        try: m.show_transparent_back = False");
+    L.push("        except Exception: pass");
+    L.push("    return m");
+    L.push("");
+    L.push("def _coll(name):");
+    L.push("    c = bpy.data.collections.get(name)");
+    L.push("    if c is None:");
+    L.push("        c = bpy.data.collections.new(name)");
+    L.push("        bpy.context.scene.collection.children.link(c)");
+    L.push("    return c");
+    L.push("");
+    L.push("def _add(name, group, rgba, verts, faces):");
+    L.push("    me = bpy.data.meshes.new(name)");
+    L.push("    me.from_pydata(verts, [], faces)");
+    L.push("    me.validate()");
+    L.push("    me.update()");
+    L.push("    for p in me.polygons:");
+    L.push("        p.use_smooth = True");
+    L.push("    ob = bpy.data.objects.new(name, me)");
+    L.push("    ob.data.materials.append(_mat(name, rgba))");
+    L.push("    _coll(group).objects.link(ob)");
+    L.push("    return ob");
+    L.push("");
+    b.parts.forEach(function(q){
+      var v = [];
+      for (var i = 0; i < q.xyz.length; i += 3)
+        v.push("(" + n3(q.xyz[i]) + "," + n3(-q.xyz[i + 2]) + "," + n3(-q.xyz[i + 1]) + ")");
+      var f = [];
+      for (var t = 0; t + 2 < q.indices.length; t += 3)
+        f.push("(" + q.indices[t] + "," + q.indices[t + 1] + "," + q.indices[t + 2] + ")");
+      var rgb = q.rgb;
+      L.push("_add(" + pyStr(q.name) + ", " + pyStr(q.group) + ", ("
+             + n3(rgb[0]) + "," + n3(rgb[1]) + "," + n3(rgb[2]) + "," + q.alpha + "), [");
+      L.push(v.join(","));
+      L.push("], [");
+      L.push(f.join(","));
+      L.push("])");
+      L.push("");
+    });
+    L.push("print('" + b.parts.length + " structure(s) added — micrometres, centred on "
+           + b.centreVoxel.join(", ") + "')");
+    return L.join("\n") + "\n";
+  }
+  function pyStr(s){
+    return "'" + String(s == null ? "" : s).replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+      .replace(/[\r\n]+/g, " ") + "'";
+  }
+  /* WHAT BOTH WRITERS AGREE ON: the geometry, the unit, the centre and the colour. Returns
+     {parts:[{name, group, rgb, alpha, xyz, indices}], centreVoxel} with xyz already in
+     micrometres relative to the file's own centre, y NOT yet flipped — each writer applies its
+     own axis convention to the same numbers. 2026-10-10. */
+  function glbParts(parts, resNm){
     var res = (Array.isArray(resNm) && resNm.length === 3) ? resNm : [1, 1, 1];
     var built = [];
     (parts || []).forEach(function(q){
@@ -1270,9 +1369,16 @@ UJ.traceloft = (function(){
         try { g = loft(q.rings || [], res); } catch (_e){ g = null; }
       }
       if (!g || !g.positions || !g.positions.length || !g.indices || !g.indices.length) return;
+      /* NANOMETRES PER UNIT of this part's own numbers. The lofter's output is nanometres, so
+         1 is the default and every existing caller is unchanged; core/mesh.js's is micrometres,
+         so its parts say 1000. Declared per part rather than per file because one file holds
+         both \u2014 three sources, two frames. 2026-10-10. */
+      var sc = Number(q.scaleToNm);
+      if (!(sc > 0)) sc = 1;
       built.push({ name: String(q.name || "structure"), color: q.color,
+                   group: String(q.group || q.kind || "Structures"),
                    alpha: (q.alpha === undefined || q.alpha === null) ? 1 : Number(q.alpha),
-                   positions: g.positions, indices: g.indices });
+                   scale: sc, positions: g.positions, indices: g.indices });
     });
     if (!built.length) return null;
     /* ONE CENTRE FOR THE WHOLE FILE, in nanometres, so the parts stay assembled. */
@@ -1280,13 +1386,31 @@ UJ.traceloft = (function(){
     built.forEach(function(q){
       for (var i = 0; i < q.positions.length; i += 3)
         for (var k = 0; k < 3; k++){
-          var v = q.positions[i + k];
+          var v = q.positions[i + k] * q.scale;
           if (v < lo[k]) lo[k] = v;
           if (v > hi[k]) hi[k] = v;
         }
     });
     var mid = [0, 1, 2].map(function(k){ return (lo[k] + hi[k]) / 2; });
     var NM_PER_UM = 1000;
+    var out = built.map(function(q){
+      var xyz = new Float32Array(q.positions.length);
+      for (var i = 0; i < q.positions.length; i += 3){
+        xyz[i]     = (q.positions[i]     * q.scale - mid[0]) / NM_PER_UM;
+        xyz[i + 1] = (q.positions[i + 1] * q.scale - mid[1]) / NM_PER_UM;
+        xyz[i + 2] = (q.positions[i + 2] * q.scale - mid[2]) / NM_PER_UM;
+      }
+      return { name: q.name, group: q.group, rgb: hexRgb(q.color),
+               alpha: Math.max(0, Math.min(1, q.alpha)),
+               xyz: xyz, indices: q.indices };
+    });
+    return { parts: out, centreNm: mid.map(function(v){ return Math.round(v); }),
+             centreVoxel: [0, 1, 2].map(function(k){
+               return Math.round(mid[k] / (Number(res[k]) || 1)); }) };
+  }
+  function glb(parts, resNm){
+    var prep = glbParts(parts, resNm);
+    if (!prep) return null;
     var chunks = [], accessors = [], bufferViews = [], meshes = [], nodes = [], materials = [];
     var off = 0;
     var push = function(bytes, target){
@@ -1299,15 +1423,14 @@ UJ.traceloft = (function(){
       off += bytes.byteLength;
       return bufferViews.length - 1;
     };
-    built.forEach(function(q, qi){
-      var n = q.positions.length / 3;
-      var pos = new Float32Array(q.positions.length);
+    prep.parts.forEach(function(q, qi){
+      var n = q.xyz.length / 3;
+      var pos = new Float32Array(q.xyz.length);
       var mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
-      for (var i = 0; i < q.positions.length; i += 3){
-        var x = (q.positions[i] - mid[0]) / NM_PER_UM;
-        /* THE FLIP. */
-        var y = -(q.positions[i + 1] - mid[1]) / NM_PER_UM;
-        var z = (q.positions[i + 2] - mid[2]) / NM_PER_UM;
+      for (var i = 0; i < q.xyz.length; i += 3){
+        /* THE FLIP, and only here: glbParts leaves y as the data has it so the Blender writer
+           can apply its own convention to the same numbers. */
+        var x = q.xyz[i], y = -q.xyz[i + 1], z = q.xyz[i + 2];
         pos[i] = x; pos[i + 1] = y; pos[i + 2] = z;
         if (x < mn[0]) mn[0] = x; if (x > mx[0]) mx[0] = x;
         if (y < mn[1]) mn[1] = y; if (y > mx[1]) mx[1] = y;
@@ -1322,11 +1445,11 @@ UJ.traceloft = (function(){
       accessors.push({ bufferView: ivRef, componentType: 5125, count: idx.length, type: "SCALAR" });
       accessors.push({ bufferView: pvRef, componentType: 5126, count: n, type: "VEC3",
                        min: mn, max: mx });
-      var rgb = hexRgb(q.color), a = Math.max(0, Math.min(1, q.alpha));
+      var a = q.alpha;
       materials.push({ name: q.name,
         doubleSided: true,
         alphaMode: a < 1 ? "BLEND" : "OPAQUE",
-        pbrMetallicRoughness: { baseColorFactor: [rgb[0], rgb[1], rgb[2], a],
+        pbrMetallicRoughness: { baseColorFactor: [q.rgb[0], q.rgb[1], q.rgb[2], a],
                                 metallicFactor: 0, roughnessFactor: 0.75 } });
       meshes.push({ name: q.name, primitives: [{ attributes: { POSITION: qi * 2 + 1 },
                                                  indices: qi * 2, material: qi, mode: 4 }] });
@@ -1336,9 +1459,8 @@ UJ.traceloft = (function(){
     var json = {
       asset: { version: "2.0", generator: "grubblab tracing card",
                extras: { units: "micrometres", yFlipped: true,
-                         centreVoxel: [Math.round(mid[0] / res[0]), Math.round(mid[1] / res[1]),
-                                       Math.round(mid[2] / res[2])],
-                         centreNm: mid.map(function(v){ return Math.round(v); }),
+                         centreVoxel: prep.centreVoxel,
+                         centreNm: prep.centreNm,
                          note: "Moved to the origin and scaled to micrometres so it opens inside "
                              + "a default viewport; y is negated for glTF's Y-up. centreVoxel is "
                              + "where it came from, in this tool's voxels." } },
@@ -1369,7 +1491,8 @@ UJ.traceloft = (function(){
     chunks.forEach(function(c){ out.set(c, o); o += c.byteLength; });
     return out;
   }
-  return { loft: loft, volume: volume, shape: shape, shape3d: shape3d, glb: glb,
+  return { loft: loft, volume: volume, shape: shape, shape3d: shape3d,
+           glb: glb, glbParts: glbParts, blenderPy: blenderPy, glb: glb, glb: glb,
            surfacePoints: surfacePoints, minSurfaceDistNm: minSurfaceDistNm,
            interpolate: interpolate, thinSections: thinSections,
            _orient: orient, _resample: resample, _bestOffset: bestOffset,

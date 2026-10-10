@@ -191,6 +191,252 @@ const ok = (c, what, d) => {
      + "and no triangle naming a vertex that is not there",
      v.bad.length ? v.bad.join("; ") : v.tris + " triangles, nothing out of place");
 
+  /* \u2500\u2500 THE SEGMENTATION TRAVELS WITH THE TRACINGS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-10-10
+     S\u00f8ren: *"it would be nice if it opens the 3D model together with the RootID and Nucleus ID
+     also, and that root ID is transparent to show the nucleus and organelles. if community
+     reported Root ID or nucleus ID exists they should also be a part of it as the same structure
+     as the respective ID."* \u2014 and, a moment later: *"That is only for the 3D model for all, not
+     for the individual organelle ones."*
+
+     THE UNITS ARE THE TRAP. core/mesh.js hands back MICROMETRES ("nm -> \u00b5m, this file's usual
+     frame"), core/nucmesh.js hands back the raw legacy fragment vertices, which are NANOMETRES,
+     and the lofter hands back nanometres. Three sources, two frames, one file. A part that
+     declares the wrong one lands 1000\u00d7 away \u2014 which in a viewer is not a visible error, it
+     is an empty scene with something enormous off-screen. So a part says what its numbers are,
+     and this asserts that a published nucleus and a hand-traced one of the SAME object end up on
+     top of each other. */
+  console.log("\nand three sources in two unit frames land in one place");
+  const u = await p.evaluate(() => {
+    const sq = (z, cx, cy, h) => ({ z: z,
+      points: [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]] });
+    /* A traced cube: 500 voxels half-width at 4 nm = 2 µm across, z 400..410 at 40 nm = 0.44 µm.
+       Centre 400000, 230000, 405 voxels = 1,600,000 / 920,000 / 16,200 nm. */
+    const traced = [];
+    for (let z = 400; z <= 410; z++) traced.push(sq(z, 400000, 230000, 500));
+    /* The SAME cube, as core/mesh.js would hand it over: micrometres. */
+    const um = (x, y, z) => [x / 1000, y / 1000, z / 1000];
+    const lo = [1600000 - 2000, 920000 - 2000, 16200 - 220];
+    const hi = [1600000 + 2000, 920000 + 2000, 16200 + 220];
+    const corners = [];
+    for (let i = 0; i < 8; i++)
+      corners.push(um((i & 1) ? hi[0] : lo[0], (i & 2) ? hi[1] : lo[1], (i & 4) ? hi[2] : lo[2]));
+    const pos = new Float32Array([].concat.apply([], corners));
+    const seg = { name: "Cell (segmentation)", color: "#ff3b3b", alpha: 0.15,
+                  scaleToNm: 1000, positions: pos,
+                  indices: new Uint32Array([0,1,2, 1,3,2, 4,6,5, 5,6,7, 0,2,4, 2,6,4,
+                                            1,5,3, 3,5,7, 0,4,1, 1,4,5, 2,3,6, 3,7,6]) };
+    const bytes = UJ.traceloft.glb([
+      seg, { name: "Whole cell", rings: traced, color: "#cddc39", alpha: 0.22 }], [4, 4, 40]);
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const json = JSON.parse(new TextDecoder().decode(
+      bytes.subarray(20, 20 + dv.getUint32(12, true))));
+    const box = json.accessors.filter(a => a.type === "VEC3").map(a => ({ min: a.min, max: a.max }));
+    return { names: json.meshes.map(m => m.name), box: box };
+  });
+  {
+    const a = u.box[0], c = u.box[1];
+    const off = (!a || !c) ? 999 : Math.max.apply(null,
+      [0, 1, 2].map(k => Math.max(Math.abs(a.min[k] - c.min[k]), Math.abs(a.max[k] - c.max[k]))));
+    ok(u.names.length === 2 && off < 0.05,
+       "a published mesh in micrometres and a hand-traced one in nanometres, the same object, "
+       + "land on top of each other \u2014 a part that lies about its unit is 1000\u00d7 away, which "
+       + "looks like an empty scene rather than an error",
+       "worst corner differs by " + off.toFixed(3) + " \u00b5m");
+  }
+
+  console.log("\nand the combined one brings the segmentation with it");
+  const seg = await p.evaluate(async () => {
+    if (typeof tracingCellGlb !== "function") return { noCard: true };
+    const sq = (z, cx, cy, h) => ({ z: z,
+      points: [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]] });
+    const rings = [sq(400, 401000, 230000, 60), sq(401, 401010, 230010, 60)];
+    /* Everything the export reaches for, stubbed, so nothing leaves the harness. */
+    const asked = { roots: null, nucs: [] };
+    window.UJ.mesh = window.UJ.mesh || {};
+    UJ.mesh.fetchCombinedMesh = async function(root, _p, _f, extra){
+      asked.roots = [String(root)].concat(extra || []);
+      return { positions: new Float32Array([0,0,0, 1,0,0, 0,1,0, 0,0,1]),
+               indices: new Uint32Array([0,1,2, 0,1,3, 0,2,3, 1,2,3]), rootIds: asked.roots };
+    };
+    window.UJ.nucmesh = window.UJ.nucmesh || {};
+    UJ.nucmesh.configured = function(){ return true; };
+    UJ.nucmesh.fetchNucleus = async function(id){
+      asked.nucs.push(String(id));
+      return { positions: new Float32Array([0,0,0, 100,0,0, 0,100,0, 0,0,100]),
+               indices: new Uint32Array([0,1,2, 0,1,3, 0,2,3, 1,2,3]) };
+    };
+    window.tracingExtraRootsFor = tracingExtraRootsFor = async function(){ return ["777", "888"]; };
+    window.tracingProposedNucsFor = tracingProposedNucsFor = async function(){ return ["999"]; };
+    window.tracingFetchCell = tracingFetchCell = async function(sids){
+      return sids.map(function(sid){
+        return { sid: sid, t: { color: "#9c27b0", kind: "lysosome" },
+                 st: { name: "Lysosome 1", kind: "lysosome", rings: rings } };
+      });
+    };
+    window.tracingFetchShared = tracingFetchShared = async function(sid){
+      return { t: { color: "#9c27b0", kind: "lysosome" },
+               st: { name: "Lysosome 1", kind: "lysosome", rings: rings } };
+    };
+    let got = null;
+    const real = UJ.traceloft.glb;
+    UJ.traceloft.glb = function(parts, res){ got = parts.map(q => ({
+      name: q.name, alpha: q.alpha, scale: q.scaleToNm || 1 })); return real(parts, res); };
+    window.tracingSaveBlob = tracingSaveBlob = function(){};
+    await tracingCellGlb({ nuc: "405191", root: "864691136051278323",
+                           coord: "234624,228032,17512",
+                           items: [{ t: { structureId: "o1" } }] }, null);
+    const combined = got;
+    got = null;
+    await tracingOneGlb("o1", null);
+    UJ.traceloft.glb = real;
+    return { combined: combined, lone: got, asked: asked };
+  });
+  if (seg.noCard) console.log("  (no tracing card on this page)");
+  else {
+    const names = (seg.combined || []).map(q => q.name);
+    ok(names.indexOf("Cell (segmentation)") >= 0 && names.indexOf("Nucleus (segmentation)") >= 0,
+       "the root ID's mesh and the nucleus ID's mesh are in the combined file beside the tracings",
+       names.join(" | "));
+    const cellSeg = (seg.combined || []).filter(q => q.name === "Cell (segmentation)")[0] || {};
+    const nucSeg = (seg.combined || []).filter(q => q.name === "Nucleus (segmentation)")[0] || {};
+    ok(cellSeg.alpha < 0.2 && nucSeg.alpha > cellSeg.alpha && nucSeg.alpha < 1,
+       "...the root ID most see-through of all, because everything else is inside it, and the "
+       + "nucleus less so because its shape is worth seeing",
+       "cell " + cellSeg.alpha + ", nucleus " + nucSeg.alpha);
+    ok(cellSeg.scale === 1000 && nucSeg.scale === 1,
+       "...each declaring its own unit \u2014 core/mesh.js is micrometres, core/nucmesh.js is "
+       + "nanometres, and the lofter is nanometres",
+       "cell \u00d7" + cellSeg.scale + ", nucleus \u00d7" + nucSeg.scale);
+    ok((seg.asked.roots || []).join(",") === "864691136051278323,777,888",
+       "...and the community's proposed root IDs are folded into the SAME structure, which is "
+       + "what fetchCombinedMesh already does for the viewer and the volume",
+       (seg.asked.roots || []).join(", "));
+    ok(seg.asked.nucs.join(",") === "405191,999",
+       "...with the proposed nucleus IDs likewise part of the one nucleus",
+       seg.asked.nucs.join(", "));
+    ok((seg.lone || []).length === 1 && seg.lone[0].name === "Lysosome 1",
+       "and a lone organelle is still only itself \u2014 S\u00f8ren: \u201cthat is only for the 3D "
+       + "model for all, not for the individual organelle ones\u201d",
+       (seg.lone || []).map(q => q.name).join(" | "));
+  }
+
+  /* \u2500\u2500 AND A FORM THAT NEEDS NO IMPORTER AT ALL \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-10-10
+     S\u00f8ren: *"I see now that .glb does not open naturally in Blender"* \u2014 and, asked which of
+     the three it was: *"dragging did not work and no option in the import"*. That is his glTF
+     add-on switched off, not a fault in the file, and one tick in Preferences fixes it. But an
+     export that depends on an add-on being enabled is an export that fails this way again, so
+     there is a second download that depends on nothing: a Blender Python script. Scripting tab,
+     Run, and the scene is there \u2014 with real materials, viewport transparency (so it looks
+     right without rendering), a collection per kind and every object named. */
+  console.log("\nand a Blender script that needs no add-on");
+  const py = await p.evaluate(() => {
+    if (typeof UJ.traceloft.blenderPy !== "function") return { missing: true };
+    const sq = (z, cx, cy, h) => ({ z: z,
+      points: [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]] });
+    const a = [], c = [];
+    for (let z = 400; z <= 404; z++) a.push(sq(z, 400000, 230000, 250));
+    for (let z = 401; z <= 403; z++) c.push(sq(z, 400000, 230000, 60));
+    const txt = UJ.traceloft.blenderPy([
+      { name: "Whole cell", kind: "cell", rings: a, color: "#cddc39", alpha: 0.22 },
+      { name: "Lysosome 1", kind: "lysosome", rings: c, color: "#9c27b0" }
+    ], [4, 4, 40], { title: "cell at 401085, 230736, 380" });
+    return { txt: txt, len: txt.length };
+  });
+  if (py.missing) ok(false, "UJ.traceloft.blenderPy is not on this page");
+  else {
+    const t = py.txt;
+    ok(/^#/.test(t) && /import bpy/.test(t),
+       "it is a Python file that starts by saying what it is and imports bpy",
+       t.split("\n")[0].slice(0, 80));
+    /* `^_add(` — the calls, not the `def _add(` that defines it. */
+    const calls = (t.match(/^_add\(/gm) || []).length;
+    ok(/from_pydata/.test(t) && calls === 2,
+       "...one object per structure, built from its own vertices and faces", calls + " objects");
+    ok(/'Whole cell'/.test(t) && /'Lysosome 1'/.test(t),
+       "...named as they are named here, so the outliner reads like the list");
+    ok(/0\.22/.test(t) && /alpha/i.test(t),
+       "...the cell see-through, by the same rule the GLB uses");
+    ok(/blend_method|surface_render_method/.test(t) && /try:/.test(t),
+       "...set for the VIEWPORT, both the name Blender used before 4.2 and the one after, each "
+       + "in a try \u2014 a script that dies on an AttributeError leaves half a scene",
+       (t.match(/(blend_method|surface_render_method)/g) || []).join(", "));
+    ok(/bpy\.data\.collections\.new/.test(t),
+       "...and a collection per kind, which is the thing a GLB cannot carry");
+    ok(!/\bexec\b|\beval\b|subprocess|urllib|requests|os\.system/.test(t),
+       "...and it fetches nothing and runs nothing: it is vertices, faces and materials, which "
+       + "is what makes it safe to hand somebody a script at all",
+       "no exec, eval, subprocess or network");
+    /* THE TWO DOWNLOADS OF ONE CELL MUST NOT DISAGREE ABOUT WHICH WAY IS UP. The glTF importer
+       maps glTF (x, y, z) to Blender (x, -z, y), so a GLB written with glTF-y = -y_data lands at
+       Blender (x, -z, -y). The script writes that directly; this measures that they match.
+       Verified once outside the harness too: the emitted file parses with Python's own ast. */
+    const axes = await p.evaluate(() => {
+      const sq = (z, cx, cy, h) => ({ z: z,
+        points: [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]] });
+      const a = [];
+      for (let z = 400; z <= 410; z++) a.push(sq(z, 400000, 230000, 250));
+      const parts = [{ name: "Whole cell", kind: "cell", rings: a, color: "#cddc39", alpha: 0.22 }];
+      const txt = UJ.traceloft.blenderPy(parts, [4, 4, 40], {});
+      const u8 = UJ.traceloft.glb(parts, [4, 4, 40]);
+      const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      const json = JSON.parse(new TextDecoder().decode(
+        u8.subarray(20, 20 + dv.getUint32(12, true))));
+      const g = json.accessors.filter(x => x.type === "VEC3")[0];
+      /* The VERTEX line only: the line after each `_add(` call. The face list below it is
+         tuples of integers and would otherwise be measured as geometry. */
+      const rows = txt.split("\n");
+      const vi = rows.findIndex(l => l.indexOf("_add(") === 0);
+      const v = ((rows[vi + 1] || "").match(/\(-?[\d.]+,-?[\d.]+,-?[\d.]+\)/g) || [])
+        .map(t2 => t2.slice(1, -1).split(",").map(Number));
+      const lo = [0, 1, 2].map(k => Math.min.apply(null, v.map(q => q[k])));
+      const hi = [0, 1, 2].map(k => Math.max.apply(null, v.map(q => q[k])));
+      return { lo: lo, hi: hi, gmin: g.min, gmax: g.max, n: v.length };
+    });
+    const near = (a2, b2) => Math.abs(a2 - b2) < 1e-3;
+    ok(axes.n > 8
+       && near(axes.lo[0], axes.gmin[0]) && near(axes.hi[0], axes.gmax[0])
+       && near(axes.lo[1], -axes.gmax[2]) && near(axes.hi[1], -axes.gmin[2])
+       && near(axes.lo[2], -axes.gmax[1]) && near(axes.hi[2], -axes.gmin[1]),
+       "the script and the GLB of one cell agree about which way is up \u2014 Blender (x, -z, -y) "
+       + "is where the importer puts the GLB, so the two downloads cannot contradict each other",
+       "script " + axes.lo.map(v2 => Math.round(v2 * 100) / 100).join(",") + " \u2192 "
+       + axes.hi.map(v2 => Math.round(v2 * 100) / 100).join(",")
+       + "  vs glTF " + axes.gmin.map(v2 => Math.round(v2 * 100) / 100).join(",") + " \u2192 "
+       + axes.gmax.map(v2 => Math.round(v2 * 100) / 100).join(","));
+    ok(py.len < 400000, "...and it is a text file of a sane size for this fixture",
+       Math.round(py.len / 1024) + " kB");
+  }
+
+  /* \u2500\u2500 AND THE PAGE SAYS THE REMEDY \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-10-10
+     S\u00f8ren: *"if my blender is missing it, then other people are also missing it. it should be
+     plug and play."* It cannot be \u2014 nothing but a .blend opens Blender by double-click \u2014
+     but it can stop being a puzzle. The one tick that fixes it is on the button and in the line
+     after the download, from one string, so a person who hits this never has to diagnose it. */
+  console.log("\nand the page says how to fix a Blender that cannot read it");
+  const help = await p.evaluate(() => {
+    const host = document.getElementById("tracingShared");
+    if (!host) return { noList: true };
+    TRACING_SHARED = [{ structureId: "c1", name: "Whole cell", kind: "cell",
+                        nucleusId: "61360735", rootId: "6198781614",
+                        cellCoord: "401085,230736,380", contours: 172, sections: 156 }];
+    tracingRenderShared();
+    const t = (host.querySelector(".tracingcellglb") || {}).title || "";
+    const o = (host.querySelector(".tracingglb") || {}).title || "";
+    return { cell: t, one: o,
+             one_string: typeof TRACING_GLTF_HELP === "string" && TRACING_GLTF_HELP.length > 40 };
+  });
+  if (help.noList) console.log("  (no dataset list on this page)");
+  else {
+    const says = s2 => /Preferences/.test(s2) && /Add-ons/.test(s2) && /glTF 2\.0 format/.test(s2);
+    ok(says(help.cell) && says(help.one),
+       "both 3D model buttons name the one tick that fixes a Blender with no glTF importer, "
+       + "before the click rather than after the puzzle",
+       says(help.cell) && says(help.one) ? "both say it" : "cell: " + help.cell.slice(-60));
+    ok(help.one_string,
+       "...from one string, so the button and the line afterwards cannot drift apart",
+       String(help.one_string));
+  }
+
   console.log("\nand the buttons are on the list");
   const ui = await p.evaluate(() => {
     const host = document.getElementById("tracingShared");
