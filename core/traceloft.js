@@ -1285,8 +1285,10 @@ UJ.traceloft = (function(){
            + new Date().toISOString().slice(0, 10) + ".");
     L.push("# Blender: Scripting tab → Open → Run. No add-on, no File › Import.");
     L.push("#          or from a terminal:  blender --python " + (m.file || "this_file.py"));
-    L.push("# One Blender unit is one MICROMETRE. The scene is centred on itself; it came from");
-    L.push("# voxel " + b.centreVoxel.join(", ") + " in this tool's frame.");
+    L.push("# One Blender unit is one MICROMETRE. Each object's MESH is local to its own middle");
+    L.push("# and the object is PLACED at voxel " + b.centreVoxel.join(", ") + " of this tool's");
+    L.push("# frame, so several of these run into one scene land in their true relative positions.");
+    L.push("# Home frames everything; Alt+G on an object clears its location to the world origin.");
     L.push("# Axes are Blender's: X = x, Y = -z, Z = -y, which is where the .glb of the same cell");
     L.push("# lands after import — cortical depth runs down Z with the pia at the top.");
     L.push("# This file fetches nothing and runs nothing: it is vertices, faces and materials.");
@@ -1319,7 +1321,7 @@ UJ.traceloft = (function(){
     L.push("        bpy.context.scene.collection.children.link(c)");
     L.push("    return c");
     L.push("");
-    L.push("def _add(name, group, rgba, verts, faces):");
+    L.push("def _add(name, group, rgba, at, verts, faces):");
     L.push("    me = bpy.data.meshes.new(name)");
     L.push("    me.from_pydata(verts, [], faces)");
     L.push("    me.validate()");
@@ -1327,10 +1329,15 @@ UJ.traceloft = (function(){
     L.push("    for p in me.polygons:");
     L.push("        p.use_smooth = True");
     L.push("    ob = bpy.data.objects.new(name, me)");
+    L.push("    ob.location = at                  # the dataset place, in micrometres");
     L.push("    ob.data.materials.append(_mat(name, rgba))");
     L.push("    _coll(group).objects.link(ob)");
     L.push("    return ob");
     L.push("");
+    /* BLENDER'S AXES, the same permutation the vertices get three lines down: X = x,
+       Y = -z, Z = -y. This is where the .glb of the same cell lands after import, so the two
+       downloads of one cell cannot contradict each other about where it is. */
+    var at = "(" + n3(b.offsetUm[0]) + "," + n3(-b.offsetUm[2]) + "," + n3(-b.offsetUm[1]) + ")";
     b.parts.forEach(function(q){
       var v = [];
       for (var i = 0; i < q.xyz.length; i += 3)
@@ -1340,14 +1347,15 @@ UJ.traceloft = (function(){
         f.push("(" + q.indices[t] + "," + q.indices[t + 1] + "," + q.indices[t + 2] + ")");
       var rgb = q.rgb;
       L.push("_add(" + pyStr(q.name) + ", " + pyStr(q.group) + ", ("
-             + n3(rgb[0]) + "," + n3(rgb[1]) + "," + n3(rgb[2]) + "," + q.alpha + "), [");
+             + n3(rgb[0]) + "," + n3(rgb[1]) + "," + n3(rgb[2]) + "," + q.alpha + "), "
+             + at + ", [");
       L.push(v.join(","));
       L.push("], [");
       L.push(f.join(","));
       L.push("])");
       L.push("");
     });
-    L.push("print('" + b.parts.length + " structure(s) added — micrometres, centred on "
+    L.push("print('" + b.parts.length + " structure(s) added — micrometres, placed at voxel "
            + b.centreVoxel.join(", ") + "')");
     return L.join("\n") + "\n";
   }
@@ -1405,6 +1413,12 @@ UJ.traceloft = (function(){
                xyz: xyz, indices: q.indices };
     });
     return { parts: out, centreNm: mid.map(function(v){ return Math.round(v); }),
+             /* WHERE IT SITS, in micrometres, in the same un-flipped frame as xyz above, so each
+                writer turns it into its own axes exactly as it does for the vertices. Søren put
+                three downloads in one Blender scene and they landed on top of each other: the
+                geometry is local, so an object's origin is its own middle; the PLACE is this, and
+                it travels on the node rather than in the vertices. 2026-10-10. */
+             offsetUm: mid.map(function(v){ return v / NM_PER_UM; }),
              centreVoxel: [0, 1, 2].map(function(k){
                return Math.round(mid[k] / (Number(res[k]) || 1)); }) };
   }
@@ -1423,6 +1437,9 @@ UJ.traceloft = (function(){
       off += bytes.byteLength;
       return bufferViews.length - 1;
     };
+    /* THE SAME FLIP THE VERTICES GET. Below, a vertex's y is negated for glTF's Y-up; the
+       place has to be negated with it or the model is mirrored about the wrong plane. */
+    var place = [prep.offsetUm[0], -prep.offsetUm[1], prep.offsetUm[2]];
     prep.parts.forEach(function(q, qi){
       var n = q.xyz.length / 3;
       var pos = new Float32Array(q.xyz.length);
@@ -1453,7 +1470,7 @@ UJ.traceloft = (function(){
                                 metallicFactor: 0, roughnessFactor: 0.75 } });
       meshes.push({ name: q.name, primitives: [{ attributes: { POSITION: qi * 2 + 1 },
                                                  indices: qi * 2, material: qi, mode: 4 }] });
-      nodes.push({ mesh: qi, name: q.name });
+      nodes.push({ mesh: qi, name: q.name, translation: place });
     });
     var binLength = off;
     var json = {
@@ -1461,9 +1478,12 @@ UJ.traceloft = (function(){
                extras: { units: "micrometres", yFlipped: true,
                          centreVoxel: prep.centreVoxel,
                          centreNm: prep.centreNm,
-                         note: "Moved to the origin and scaled to micrometres so it opens inside "
-                             + "a default viewport; y is negated for glTF's Y-up. centreVoxel is "
-                             + "where it came from, in this tool's voxels." } },
+                         placedUm: place,
+                         note: "Scaled to micrometres; y is negated for glTF's Y-up. The vertices "
+                             + "are local to the file's own middle and every node is TRANSLATED "
+                             + "to the dataset place, so several of these downloaded separately "
+                             + "line up correctly in one scene. centreVoxel is where it came "
+                             + "from, in this tool's voxels." } },
       scene: 0, scenes: [{ nodes: nodes.map(function(_, i){ return i; }) }],
       nodes: nodes, meshes: meshes, materials: materials,
       accessors: accessors, bufferViews: bufferViews,
@@ -1492,7 +1512,7 @@ UJ.traceloft = (function(){
     return out;
   }
   return { loft: loft, volume: volume, shape: shape, shape3d: shape3d,
-           glb: glb, glbParts: glbParts, blenderPy: blenderPy, glb: glb, glb: glb,
+           glb: glb, glbParts: glbParts, blenderPy: blenderPy,
            surfacePoints: surfacePoints, minSurfaceDistNm: minSurfaceDistNm,
            interpolate: interpolate, thinSections: thinSections,
            _orient: orient, _resample: resample, _bestOffset: bestOffset,

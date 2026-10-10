@@ -4762,9 +4762,8 @@ function tracingRenderShared(){
             + 'tracing of this cell in the viewer, each in its own colour, with the cell.">Neuroglancer</button>'
           + '<button class="idbtn tracingcellglb" data-g="' + gi + '" ' + TRACING_BTN + ' title="Every '
             + 'tracing of this cell as ONE 3D model (GLB) \u2014 the cell and its nucleus see-through so '
-            + 'the organelles inside them show, each in the colour it was drawn in. Micrometres, centred '
-            + 'on itself, so it opens inside the viewport in Blender, PowerPoint or any glTF viewer. '
-            + escHtml(TRACING_GLTF_HELP) + '">'
+            + 'the organelles inside them show, each in the colour it was drawn in. Micrometres. '
+            + escHtml(TRACING_PLACE_HELP) + ' ' + escHtml(TRACING_GLTF_HELP) + '">'
             + '3D model</button>'
           + '<button class="idbtn tracingcellpy" data-g="' + gi + '" ' + TRACING_BTN + ' title="The '
             + 'same scene as a Blender Python script \u2014 Scripting tab, Open, Run. No add-on and no '
@@ -4804,7 +4803,8 @@ function tracingRenderShared(){
                   + 'its own colour — without taking it onto your pad.">Neuroglancer</button>'
                 + '<button class="idbtn tracingglb" data-sid="' + escHtml(t.structureId) + '" '
                   + TRACING_BTN + ' title="This one tracing as a 3D model (GLB), solid, in its own '
-                  + 'colour. Micrometres, centred on itself. ' + escHtml(TRACING_GLTF_HELP)
+                  + 'colour. Micrometres. ' + escHtml(TRACING_PLACE_HELP) + ' '
+                  + escHtml(TRACING_GLTF_HELP)
                   + '">3D model</button>'
                 + '<button class="idbtn tracingpy" data-sid="' + escHtml(t.structureId) + '" '
                   + TRACING_BTN + ' title="The same one tracing as a Blender Python script \u2014 '
@@ -5236,6 +5236,7 @@ function tracingObjOf(name, rings, res){
    .blend opens Blender by double-click — but it can stop being a puzzle. The remedy is one
    tick, so the page says it rather than leaving each person to work it out: on the button
    before the click, and in the line after it. ONE string, so the two cannot drift. */
+var TRACING_PLACE_HELP = "Placed at its dataset coordinates, so several of these open in one scene in their true relative positions \u2014 press Home in Blender to frame it, or Alt+G to move it to the world origin.";
 var TRACING_GLTF_HELP = "If Blender has no glTF 2.0 under File \u203a Import, tick Import-Export: glTF 2.0 format in Edit \u203a Preferences \u203a Add-ons \u2014 or use Blender script, which needs no add-on.";
 function tracingGlbAlpha(kind, alone){
   var k = String(kind || "").toLowerCase();
@@ -5386,8 +5387,9 @@ async function tracingOneGlb(sid, btn, fmt){
     tracingSay(n ? ((fmt === "py")
                     ? "Saved " + parts[0].name + " as a Blender script \u2014 open it in "
                       + "Blender\u2019s Scripting tab and press Run. Micrometres."
-                    : "Saved " + parts[0].name + " as a 3D model (GLB, micrometres, centred on "
-                      + "itself). Blender: File \u203a Import \u203a glTF 2.0. " + TRACING_GLTF_HELP)
+                    : "Saved " + parts[0].name + " as a 3D model (GLB, micrometres). "
+                      + "Blender: File \u203a Import \u203a glTF 2.0. " + TRACING_PLACE_HELP
+                      + " " + TRACING_GLTF_HELP)
                  : "Nothing could be meshed from that tracing.", !n);
   } catch (e){
     tracingSay("Could not make the 3D model: " + String(e && e.message || e), true);
@@ -5426,7 +5428,7 @@ async function tracingCellGlb(g, btn, fmt){
       + (see ? ", with the " + parts.filter(function(q){ return q.alpha < 1; })
                  .map(function(q){ return q.name.toLowerCase(); }).join(" and ")
              + " see-through so what is inside shows." : ".")
-      + " Micrometres, centred on itself."
+      + " Micrometres. " + TRACING_PLACE_HELP
       + ((fmt === "py") ? "" : " " + TRACING_GLTF_HELP)
       + tracingSegSkipSay(g, have)
       + (missed.length ? " Could not fetch " + missed.join(", ") + "." : "")

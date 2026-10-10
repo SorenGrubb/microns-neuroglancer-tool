@@ -18,8 +18,13 @@
 
      UNITS. Nanometres puts a 15 µm cell 15,000 units across and 1.6 MILLION units from the
         origin, which in Blender's default viewport is an invisible speck beyond the clip plane.
-        Micrometres, centred on the model's own middle, opens as something you can see. The
-        offset that was subtracted travels in the file so the coordinate is not lost.
+        Micrometres opens as something you can see.
+
+     THE PLACE, which is not the unit.  2026-10-10. The above also CENTRED each file on its own
+        middle, and that is right for exactly one file at a time: S\u00f8ren put three in one
+        Blender scene and they landed on top of each other. The geometry is still local \u2014
+        float32 precision, and an object origin at its own middle \u2014 and the dataset place now
+        travels on the glTF node and the Blender object, where Alt+G can still clear it.
 
      THE ORDER OF ALPHA. A transparent cell with solid organelles inside it only reads correctly
         if the cell is the transparent one. Whole cell and nucleus enclose; organelles do not.
@@ -120,7 +125,8 @@ const ok = (c, what, d) => {
      + "because 15,000 units is past Blender's default clip plane",
      span.toFixed(2) + " units across");
   ok(Math.abs(B.min[0]) < span && Math.abs(B.max[0]) < span,
-     "...and it sits at the origin rather than 1.6 million units away",
+     "...and the GEOMETRY is local to the object rather than 1.6 million units of float32 away "
+     + "\u2014 the dataset place is on the node, which is checked further down",
      "x from " + B.min[0] + " to " + B.max[0]);
   ok(r.extras && /400000/.test(JSON.stringify(r.extras.centreVoxel || "")),
      "...with the coordinate it was moved from recorded, so nothing is lost",
@@ -420,6 +426,129 @@ const ok = (c, what, d) => {
        + "intact and this is a narrowing, not a replacement", n(own.neither));
     ok(own.neither.said.indexOf("left out") < 0,
        "...with nothing claimed to be left out, because nothing was", own.neither.said.slice(-90));
+  }
+
+  /* \u2500\u2500 AND THREE DOWNLOADS IN ONE SCENE KEEP THEIR DISTANCE \u2500\u2500\u2500  2026-10-10
+     S\u00f8ren: *"I downloaded 3 models and put them into the same Blender instance, but they are
+     not in the correct place relative to each other, it seems like their centres are in the same
+     place. Please when I load them into Blender they should have the coordinates that they have
+     in the dataset, so their relative locations are correct."*
+
+     Which is what the files said they did, and what the header of THIS file argued for: a cell
+     1.6 million units from the origin is an invisible speck past the clip plane. That argument is
+     about the UNIT and it is still right. Centring came along for the ride and is only right for
+     one file at a time.
+
+     The fix keeps the vertices local \u2014 float32 precision, and an object origin at its own
+     middle \u2014 and puts the dataset place on the glTF node and the Blender object. So this
+     asserts the thing he actually did: two cells 100 \u00b5m apart, downloaded separately, are
+     still 100 \u00b5m apart when both are in one scene.
+
+     WHAT IS ASSERTED:
+       - the geometry is still local and still micrometres, so the clip-plane argument holds
+       - every node carries a translation, and it is the file's own dataset middle
+       - two separate downloads 100 \u00b5m apart differ by 100 \u00b5m, in all three axes
+       - the GLB's translation and the script's ob.location are the SAME point
+       - the place is flipped and permuted the same way the vertices are, or the scene is mirrored */
+  console.log("\nand three downloads in one scene keep their distance");
+  const far = await p.evaluate(() => {
+    const sq = (z, cx, cy, h) => ({ z: z,
+      points: [[cx - h, cy - h], [cx + h, cy - h], [cx + h, cy + h], [cx - h, cy + h]] });
+    const res = [4, 4, 40];                    /* 4 nm in x and y, 40 nm in z */
+    /* Two cells 100 \u00b5m apart in x: 25,000 voxels at 4 nm. And 20 \u00b5m in y, 8 \u00b5m in z,
+       so a dropped or swapped axis cannot hide behind a single-axis test. */
+    const cell = (cx, cy, cz) => {
+      const out = [];
+      for (let z = cz; z <= cz + 8; z++) out.push(sq(z, cx, cy, 250));
+      return out;
+    };
+    const head = (u8) => {
+      const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      return JSON.parse(new TextDecoder().decode(u8.subarray(20, 20 + dv.getUint32(12, true))));
+    };
+    const a = head(UJ.traceloft.glb(
+      [{ name: "Cell A", rings: cell(400000, 230000, 400), color: "#cddc39", alpha: 0.25 }], res));
+    const b2 = head(UJ.traceloft.glb(
+      [{ name: "Cell B", rings: cell(425000, 235000, 600), color: "#5b8def", alpha: 0.25 }], res));
+    /* ...and the same two in ONE file, which is the answer the two separate files must agree
+       with: assembled by glbParts in one go, their separation is not in question. */
+    const one = head(UJ.traceloft.glb([
+      { name: "Cell A", rings: cell(400000, 230000, 400), color: "#cddc39", alpha: 0.25 },
+      { name: "Cell B", rings: cell(425000, 235000, 600), color: "#5b8def", alpha: 0.25 }
+    ], res));
+    const vec = (j) => (j.nodes[0] || {}).translation || null;
+    const mid = (j, i) => {
+      const acc = (j.accessors || []).filter(x => x.type === "VEC3")[i];
+      return acc ? [0, 1, 2].map(k => (acc.min[k] + acc.max[k]) / 2) : null;
+    };
+    /* The script of cell A, for the one place both writers must agree about. */
+    const py = UJ.traceloft.blenderPy(
+      [{ name: "Cell A", rings: cell(400000, 230000, 400), color: "#cddc39", alpha: 0.25 }],
+      res, { title: "Cell A" });
+    const loc = /ob\.location = at/.test(py)
+      ? (py.match(/_add\('Cell A',[^[]*?,\s*\(([-0-9.,]+)\),\s*\[/) || [])[1] : null;
+    return {
+      ta: vec(a), tb: vec(b2),
+      /* Both nodes of the single file, so the within-file assembly is checked too. */
+      inOne: [mid(one, 0), mid(one, 1)],
+      oneT: (one.nodes || []).map(n => (n.translation || []).join(",")),
+      localSpan: (() => { const m = mid(a, 0); return m ? Math.max.apply(null, m.map(Math.abs)) : -1; })(),
+      extras: a.asset && a.asset.extras,
+      loc: loc ? loc.split(",").map(Number) : null,
+      pyHasLoc: /ob\.location = at/.test(py)
+    };
+  });
+  {
+    const TA = far.ta || [], TB = far.tb || [];
+    ok(TA.length === 3 && TB.length === 3,
+       "every node carries a translation \u2014 the place lives on the node, not in the vertices, "
+       + "so float32 keeps sub-nanometre precision and the object origin is its own middle",
+       JSON.stringify(far.ta) + " / " + JSON.stringify(far.tb));
+    ok(far.localSpan >= 0 && far.localSpan < 5,
+       "...while the geometry is still local and still micrometres, so this file\u2019s own "
+       + "clip-plane argument still holds: 1.6 million units is an invisible speck",
+       "vertices centred within " + far.localSpan.toFixed(2) + " µm of the object origin");
+    /* 25,000 voxels \u00d7 4 nm = 100 \u00b5m in x; 5,000 \u00d7 4 = 20 \u00b5m in y; 200 \u00d7 40
+       = 8 \u00b5m in z. glTF y is negated, so the y difference is -20. */
+    const d = (TA.length === 3 && TB.length === 3) ? [0, 1, 2].map(k => TB[k] - TA[k]) : [];
+    ok(d.length === 3 && Math.abs(d[0] - 100) < 0.05 && Math.abs(d[1] + 20) < 0.05
+       && Math.abs(d[2] - 8) < 0.05,
+       "...and two cells 100 \u00b5m, 20 \u00b5m and 8 \u00b5m apart, downloaded SEPARATELY, are "
+       + "still that far apart in one scene \u2014 which is the whole of what he reported",
+       d.map(v => v.toFixed(2)).join(", ") + " µm (want 100, -20, 8; y negated for glTF)");
+    /* THE TWO ROUTES MUST AGREE. One file holding both cells assembles them in glbParts; two
+       files assemble them by their node translations. A scene must not depend on which. */
+    const o = far.inOne || [];
+    const dOne = (o[0] && o[1]) ? [0, 1, 2].map(k => o[1][k] - o[0][k]) : [];
+    ok(dOne.length === 3 && d.length === 3
+       && [0, 1, 2].every(k => Math.abs(dOne[k] - d[k]) < 0.05),
+       "...and the same two in ONE file are the same distance apart, so a scene does not depend "
+       + "on whether they were downloaded together or separately",
+       dOne.map(v => v.toFixed(2)).join(", ") + " vs " + d.map(v => v.toFixed(2)).join(", "));
+    /* NOT MERELY EQUAL: both non-empty. Written as `oneT[0] === oneT[1]` alone this passed
+       against the UNFIXED code, where both were "" — a check that cannot fail. */
+    ok((far.oneT || []).length === 2 && far.oneT[0].split(",").length === 3
+       && far.oneT[0] === far.oneT[1],
+       "...with the parts of one file sharing one translation, because glbParts already assembled "
+       + "them and a second offset would move them apart", (far.oneT || []).join("  |  "));
+    /* THE SCRIPT AND THE GLB. The importer maps glTF (x, y, z) to Blender (x, -z, y), so the
+       script's object location must be (tx, -tz, ty) of the GLB's node translation. The vertex
+       check further down does the same for the geometry; this does it for the place. */
+    ok(far.pyHasLoc, "the Blender script places its objects too, not only the GLB",
+       String(far.pyHasLoc));
+    const L = far.loc || [], want = (TA.length === 3) ? [TA[0], -TA[2], TA[1]] : [];
+    ok(L.length === 3 && want.length === 3
+       && [0, 1, 2].every(k => Math.abs(L[k] - want[k]) < 0.01),
+       "...at the SAME point the GLB lands at \u2014 Blender (x, -z, y) of the glTF translation, "
+       + "the same permutation the vertices get, so the two downloads of one cell cannot "
+       + "contradict each other about where it is",
+       "script " + L.map(v => v.toFixed(1)).join(", ") + " vs glb \u2192 "
+       + want.map(v => v.toFixed(1)).join(", "));
+    ok(far.extras && (far.extras.placedUm || []).length === 3
+       && /TRANSLATED/.test(String(far.extras.note || "")),
+       "...and the file says in its own asset extras that it is placed rather than centred, "
+       + "because the next person to read one will believe the note",
+       JSON.stringify(far.extras && far.extras.placedUm));
   }
 
   /* \u2500\u2500 AND A FORM THAT NEEDS NO IMPORTER AT ALL \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500  2026-10-10
